@@ -62,24 +62,6 @@ describe("hosted Linq observability stores", () => {
     expect(buildCurrentAiUsageNoticeKey(2n)).toBe(replenishedKey);
   });
 
-  it("keeps low and exhausted notices distinct without changing legacy limit keys", () => {
-    const limitKey = buildCurrentAiUsageNoticeKey();
-    const lowKey = buildHostedAiUsageGateNoticeIdempotencyKey({
-      memberId: AI_USAGE_NOTICE_MEMBER_ID,
-      noticeCode: "thread_usage_low",
-      periodStart: AI_USAGE_NOTICE_PERIOD_START,
-      usageCreditLedgerVersion: 0n,
-    });
-
-    expect(lowKey).not.toBe(limitKey);
-    expect(buildHostedAiUsageGateNoticeIdempotencyKey({
-      memberId: AI_USAGE_NOTICE_MEMBER_ID,
-      noticeCode: "thread_usage_limit_reached",
-      periodStart: AI_USAGE_NOTICE_PERIOD_START,
-      usageCreditLedgerVersion: 0n,
-    })).toBe(limitKey);
-  });
-
   it("keeps non-contact observability ids stable when the contact-privacy keyring rotates", () => {
     const restoreV1 = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",

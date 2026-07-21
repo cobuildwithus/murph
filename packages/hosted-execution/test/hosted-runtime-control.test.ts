@@ -699,6 +699,7 @@ describe("hosted runtime control contracts", () => {
       requestId: "mailbox-fetch-1",
     });
     expect(parseHostedMailboxFetchResponse({
+      conversationUsageStatus: "low",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
@@ -707,12 +708,37 @@ describe("hosted runtime control contracts", () => {
       ],
       userId: "member_123",
     })).toEqual({
+      conversationUsageStatus: "low",
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [item],
       maxSeqByLane: [
         { lane: "conversation", maxSeq: "11" },
         { lane: "system", maxSeq: "4" },
       ],
+      userId: "member_123",
+    });
+    expect(parseHostedMailboxFetchResponse({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [],
+      userId: "member_123",
+    })).toEqual({
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [],
+      userId: "member_123",
+    });
+    expect(parseHostedMailboxFetchResponse({
+      conversationUsageStatus: null,
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [],
+      userId: "member_123",
+    })).toEqual({
+      conversationUsageStatus: null,
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [],
       userId: "member_123",
     });
 
@@ -747,6 +773,13 @@ describe("hosted runtime control contracts", () => {
       limitPerLane: 25,
       requestId: "mailbox-fetch-1",
     })).toThrow(/Hosted mailbox fetch request cursorMode/u);
+    expect(() => parseHostedMailboxFetchResponse({
+      conversationUsageStatus: "healthy",
+      fetchedAt: "2026-04-26T00:00:02.000Z",
+      items: [],
+      maxSeqByLane: [],
+      userId: "member_123",
+    })).toThrow(/conversationUsageStatus/u);
     expect(() => parseHostedMailboxFetchResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       items: [],

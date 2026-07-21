@@ -140,8 +140,12 @@ describe('assistant channels runtime seam', () => {
     const groupCapture = createInboxCapture(false)
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(directCapture)).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply(groupCapture)).toContain(
-      'direct chats',
+      'validated hosted group routes',
     )
+    expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.canAutoReply({
+      ...groupCapture,
+      externalThreadRouteAuthorityPresent: true,
+    })).toBeNull()
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.supportsIdempotencyKey).toBe(true)
     expect(ASSISTANT_CHANNEL_ADAPTERS.linq.canAutoReply(groupCapture)).toBe(
       'iMessage auto-reply only runs for direct chats',

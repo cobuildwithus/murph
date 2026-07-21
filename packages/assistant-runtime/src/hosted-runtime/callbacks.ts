@@ -2264,6 +2264,58 @@ async function assertHostedDeliveryCanEnterProvider(input: {
   assertHostedBackgroundDeliveryNotYielded(input);
 }
 
+async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  effectsPort: HostedRuntimeEffectsPort;
+  intent: AssistantOutboxIntent | null;
+  signal: AbortSignal | null;
+  target: string | null;
+  userId: string;
+}): Promise<void> {
+  const payload = input.assistantDeliveryEffect.payload;
+  if (
+    normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
+      !== "telegram"
+    || payload.threadIsDirect !== false
+  ) {
+    return;
+  }
+
+  const authority = input.intent?.externalThreadRouteAuthority ?? null;
+  if (!authority && !input.intent?.automationAuthority) {
+    return;
+  }
+  if (!authority) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      "Hosted group delivery requires live thread route authority before provider work.",
+      { retryable: true },
+    );
+  }
+
+  const target = input.target?.trim() ?? "";
+  if (
+    authority.channel !== "telegram"
+    || authority.containerMemberId !== input.userId
+    || authority.threadId !== target
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
+      "Hosted group delivery route authority no longer matches its provider target.",
+    );
+  }
+
+  const assertAuthority = input.effectsPort.assertExternalThreadRouteAuthority;
+  if (!assertAuthority) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      "Hosted group delivery requires live thread route authority before provider work.",
+      { retryable: true },
+    );
+  }
+  await assertAuthority(authority, { signal: input.signal });
+}
+
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
@@ -2627,6 +2679,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+            assistantDeliveryEffect: input.assistantDeliveryEffect,
+            effectsPort: input.effectsPort,
+            intent: mirrorState.intent,
+            signal: input.signal,
+            target: request.target,
+            userId: input.userId,
+          });
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -2639,6 +2699,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegramImage: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+            assistantDeliveryEffect: input.assistantDeliveryEffect,
+            effectsPort: input.effectsPort,
+            intent: mirrorState.intent,
+            signal: request.signal ?? input.signal,
+            target: request.target,
+            userId: input.userId,
+          });
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -2659,6 +2727,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         setTelegramMessageReaction: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+            assistantDeliveryEffect: input.assistantDeliveryEffect,
+            effectsPort: input.effectsPort,
+            intent: mirrorState.intent,
+            signal: input.signal,
+            target: request.target,
+            userId: input.userId,
+          });
           const dependencies = requireHostedProviderFetchDependencies({
             env: input.telegramEnv,
             fetchImplementation: input.providerFetch,
@@ -2673,7 +2749,20 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           env: input.telegramVoiceMemoEnv,
           fetchImplementation: createHostedProviderFetchBoundary({
             assertLive: () => assertHostedDeliveryLiveNow(input),
-            assertProviderEntryLive: () => assertHostedDeliveryCanEnterProvider(input),
+            assertProviderEntryLive: async () => {
+              await assertHostedDeliveryCanEnterProvider(input);
+              const target = readHostedAssistantDeliveryPayloadTarget(
+                input.assistantDeliveryEffect.payload,
+              ).target;
+              await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+                assistantDeliveryEffect: input.assistantDeliveryEffect,
+                effectsPort: input.effectsPort,
+                intent: mirrorState.intent,
+                signal: input.signal,
+                target,
+                userId: input.userId,
+              });
+            },
             onTelegramVoiceMemoDispatchEntered: () => {
               providerDispatchEntered = true;
             },
@@ -2931,11 +3020,23 @@ async function persistHostedEmailGroupFanoutIntents(input: {
   }
 
   const payload = input.assistantDeliveryEffect.payload;
+  let parentIntent: AssistantOutboxIntent | null;
   let existingIntents: AssistantOutboxIntent[];
   try {
-    existingIntents = await listAssistantOutboxIntents(input.vaultRoot);
+    [parentIntent, existingIntents] = await Promise.all([
+      readAssistantOutboxIntent(
+        input.vaultRoot,
+        input.assistantDeliveryEffect.effectId,
+      ),
+      listAssistantOutboxIntents(input.vaultRoot),
+    ]);
   } catch (error) {
     throw markHostedDeliveryPreProviderRetryable(error);
+  }
+  if (!parentIntent) {
+    throw markHostedDeliveryPreProviderRetryable(
+      new Error("Hosted email group fanout parent intent is unavailable."),
+    );
   }
   for (const memberId of input.fanoutRecipientMemberIds) {
     if (hasNonReplayableHostedNewsletterRecipientIntent({
@@ -2954,6 +3055,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
       await createAssistantOutboxIntent({
         actorId: payload.actorId,
         answeredMailboxItemIds: payload.answeredMailboxItemIds,
+        automationAuthority: parentIntent.automationAuthority ?? null,
         channel: "email",
         dedupeToken: `hosted-email-group-recipient:${input.assistantDeliveryEffect.effectId}:${memberId}`,
         deliveryIdempotencyKey: payload.idempotencyKey,

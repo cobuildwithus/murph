@@ -155,7 +155,9 @@ export function createAssistantHostedToolContext(input: {
   const executionContext = input.executionContext ?? null
   const clinicalRecordsConnectLinkTool =
     executionContext?.clinicalRecordsConnectLinkTool ?? null
-  const newsletterPort = executionContext?.newsletterTool ?? null
+  const newsletterPort = input.messageInput.scheduledAutomationAuthority
+    ? executionContext?.newsletterTool ?? null
+    : null
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
     messageInput: input.messageInput,
     session: input.session,
@@ -174,6 +176,7 @@ export function createAssistantHostedToolContext(input: {
   }
   const newsletterOutboxTool = newsletterPort && input.newsletterOutbox
     ? createAssistantNewsletterOutboxTool({
+        automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         newsletterTool: newsletterPort,
         sessionId: input.session.sessionId,

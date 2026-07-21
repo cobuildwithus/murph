@@ -1,6 +1,7 @@
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { Skeleton } from "@/src/components/ui/skeleton";
 import type {
+  ExperimentRunProjection,
   ExperimentSchedule,
   ExperimentSignal,
   TrendData,
@@ -9,12 +10,18 @@ import { ExperimentScheduleSidebar } from "./experiment-schedule";
 import { TrendChart } from "./trend-chart";
 
 interface ResultsSummaryProps {
+  outcomeConfidence?: ExperimentRunProjection["outcomeConfidence"];
   signals: ExperimentSignal[];
   trends: TrendData[];
   schedule?: ExperimentSchedule;
 }
 
-export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProps) {
+export function ResultsSummary({
+  outcomeConfidence,
+  signals,
+  trends,
+  schedule,
+}: ResultsSummaryProps) {
   if (signals.length === 0 && trends.length === 0) return null;
 
   const trendLabels = new Set(trends.map((trend) => trend.label));
@@ -22,16 +29,23 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
 
   return (
     <section className="flex flex-col gap-5">
-      <div className="flex max-w-2xl flex-col gap-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-          Measured changes
-        </span>
-        <h3 className="font-serif text-xl font-semibold text-foreground sm:text-2xl">
-          Before and during the experiment
-        </h3>
-        <p className="text-sm/6 text-muted-foreground">
-          Daily measurements where available; saved window averages otherwise.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex max-w-2xl flex-col gap-1.5">
+          <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+            Measured changes
+          </span>
+          <h3 className="font-serif text-xl font-semibold text-foreground sm:text-2xl">
+            Before and during the experiment
+          </h3>
+          <p className="text-sm/6 text-muted-foreground">
+            Daily measurements where available; saved window averages otherwise.
+          </p>
+        </div>
+        {outcomeConfidence ? (
+          <span className="w-fit rounded-full border border-border bg-muted/40 px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest text-foreground/70">
+            {outcomeConfidence} confidence
+          </span>
+        ) : null}
       </div>
 
       <div
@@ -43,13 +57,7 @@ export function ResultsSummary({ signals, trends, schedule }: ResultsSummaryProp
       >
         <div className="flex min-w-0 flex-col gap-4">
           {trends.length > 0 ? (
-            <div
-              className={
-                schedule
-                  ? "grid min-w-0 gap-4 xl:grid-cols-2"
-                  : "grid min-w-0 gap-4 md:grid-cols-2"
-              }
-            >
+            <div className="flex min-w-0 flex-col gap-4">
               {trends.map((trend) => (
                 <TrendChart
                   key={trend.label}
@@ -118,7 +126,7 @@ export function ResultsSummarySkeleton() {
         <Skeleton className="h-7 w-72 max-w-full" />
         <Skeleton className="h-4 w-96 max-w-full" />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex flex-col gap-4">
         {Array.from({ length: 4 }, (_, index) => (
           <TrendChartSkeleton key={index} />
         ))}

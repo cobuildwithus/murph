@@ -2469,6 +2469,55 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
   expect(observedHostedToolContexts[2]).toBeNull()
 })
 
+test('sendAssistantNotificationLocal exposes newsletter tools only with scheduled email authority', async () => {
+  const providerResult = createProviderResult({
+    response: '```json\n{"kind":"skip","privateSummary":"No notification required."}\n```',
+  })
+  const newsletterTool = { request: vi.fn() }
+  const observedHostedToolContexts: Array<
+    NotificationTurnProviderInput['hostedToolContext']
+  > = []
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      observedHostedToolContexts.push(providerInput.hostedToolContext)
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    turnId: 'turn-notification-newsletter-scope',
+  })
+  const executionContext = {
+    hosted: {
+      memberId: 'member-notification-newsletter-scope',
+      newsletterTool,
+      userEnvKeys: [],
+    },
+  }
+
+  await sendAssistantNotificationLocal({
+    executionContext,
+    instructions: 'Post a scheduled update in this group chat.',
+    scheduledOccurrenceAt: '2026-07-20T12:00:00.000Z',
+    vault: '/vaults/notification-newsletter-scope',
+  })
+  await sendAssistantNotificationLocal({
+    executionContext,
+    instructions: 'Send the scheduled group email newsletter.',
+    scheduledAutomationAuthority: {
+      automationId: 'automation_newsletter',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+    vault: '/vaults/notification-newsletter-scope',
+  })
+
+  expect(observedHostedToolContexts).toHaveLength(2)
+  expect(observedHostedToolContexts[0]?.newsletterTool ?? null).toBeNull()
+  expect(observedHostedToolContexts[1]?.newsletterTool).not.toBeNull()
+})
+
 test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',

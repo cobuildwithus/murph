@@ -86,6 +86,7 @@ import {
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_USAGE_RECORD_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH,
   HOSTED_RUNTIME_WORKSPACE_PATH,
@@ -302,6 +303,15 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync connect-target connect-link",
     path: "/api/internal/device-sync/connect-targets/google/connect-link",
+  },
+  {
+    body: {
+      channel: "telegram",
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    },
+    name: "hosted external thread route authority",
+    path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   },
   {
     body: {

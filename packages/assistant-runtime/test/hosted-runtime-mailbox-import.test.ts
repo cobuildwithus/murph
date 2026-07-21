@@ -31,6 +31,53 @@ const TEST_NOW = "2026-04-26T00:00:00.000Z";
 const TEST_USER_ID = "member_synthetic_import";
 
 describe("hosted mailbox import loop", () => {
+  test("attaches low usage only to fresh conversation imports, not consumed replay or system work", async () => {
+    const consumedConversation = createMailboxItem({
+      id: "mailbox_item_usage_low_consumed_conversation",
+      laneSeq: "1",
+    });
+    const freshConversation = createMailboxItem({
+      id: "mailbox_item_usage_low_fresh_conversation",
+      laneSeq: "2",
+    });
+    const system = createMailboxItem({
+      id: "mailbox_item_usage_low_system",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const { mailboxPort } = createMailboxPort({
+      conversationUsageStatus: "low",
+      consumedSeqByLane: [
+        { consumedSeq: "1", lane: "conversation" },
+      ],
+      items: [consumedConversation, freshConversation, system],
+    });
+    const imported: Array<{ id: string; usageRunningLow: boolean }> = [];
+
+    await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(item) {
+        imported.push({
+          id: item.item.id,
+          usageRunningLow: item.usageRunningLow === true,
+        });
+        return { status: "imported" };
+      },
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_usage_low_context",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, [
+      { id: system.id, usageRunningLow: false },
+      { id: consumedConversation.id, usageRunningLow: false },
+      { id: freshConversation.id, usageRunningLow: true },
+    ]);
+  });
+
   test("skips legacy vault-share sidecars before payload fetch or import", async () => {
     const items = [
       createMailboxItem({
@@ -2170,6 +2217,7 @@ describe("hosted mailbox import loop", () => {
 });
 
 function createMailboxPort(input: {
+  conversationUsageStatus?: HostedMailboxFetchResponse["conversationUsageStatus"];
   consumedSeqByLane?: HostedMailboxFetchResponse["consumedSeqByLane"];
   items: readonly HostedMailboxItem[];
   payloadResponse?: HostedMailboxPayloadFetchResponse;
@@ -2188,6 +2236,9 @@ function createMailboxPort(input: {
       async fetch(request): Promise<HostedMailboxFetchResponse> {
         fetchRequests.push(request);
         return {
+          ...(input.conversationUsageStatus === undefined
+            ? {}
+            : { conversationUsageStatus: input.conversationUsageStatus }),
           ...(input.consumedSeqByLane === undefined
             ? {}
             : { consumedSeqByLane: input.consumedSeqByLane }),

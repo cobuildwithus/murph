@@ -18,19 +18,13 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
   prisma: PrismaClient;
 }): Promise<string> {
   try {
-    if (
-      input.noticeCode === "thread_usage_low"
-      || input.noticeCode === "thread_usage_limit_reached"
-    ) {
+    if (input.noticeCode === "thread_usage_limit_reached") {
       const status = await readHostedGroupUsageStatus({
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
-      const expectedCapacityState = input.noticeCode === "thread_usage_low"
-        ? "low"
-        : "exhausted";
       if (
-        status?.capacityState !== expectedCapacityState
+        status?.capacityState !== "exhausted"
         || !status.fundingUrl
       ) {
         return input.message;

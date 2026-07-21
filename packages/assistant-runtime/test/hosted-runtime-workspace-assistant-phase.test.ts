@@ -19,8 +19,10 @@ import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import type {
-  AssistantAutomationOperationScope,
+import {
+  buildGroupNewsletterAutomationSaveRequest,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+  type AssistantAutomationOperationScope,
 } from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -822,6 +824,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await expect(scheduledGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       })).resolves.toMatchObject({ status: "ok" });
+      const telegramGroupTools = createScheduledGroupTools({
+        channel: "telegram",
+        target: "telegram_current_group",
+        threadIsDirect: false,
+      });
+      expect(telegramGroupTools).not.toBeNull();
+      if (!telegramGroupTools) {
+        throw new Error("Expected scheduled Telegram group capabilities.");
+      }
+      expect(telegramGroupTools.groupPermissionOfferTool).toBeUndefined();
+      await expect(telegramGroupTools.groupSharedReader.request({
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      })).resolves.toMatchObject({ status: "ok" });
       return {
         assistantAutomationProgressed: false,
         assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -835,8 +850,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         runtimeGroupToolPort: { request },
         vaultRoot,
       }));
-      expect(sequence).toEqual(["assistant_lane", "read_shared"]);
-      expect(request).toHaveBeenCalledTimes(1);
+      expect(sequence).toEqual(["assistant_lane", "read_shared", "read_shared"]);
+      expect(request).toHaveBeenCalledTimes(2);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -907,12 +922,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }
         return tools;
       };
+      const requirePermissionOffer = (tools: ReturnType<typeof createTools>) => {
+        const permissionOffer = tools.groupPermissionOfferTool;
+        if (!permissionOffer) {
+          throw new Error("Expected scheduled Linq permission offer capability.");
+        }
+        return permissionOffer;
+      };
       const stepsOffer = {
         projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
       };
 
       const beforeRead = createTools();
-      await expect(beforeRead.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(beforeRead).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",
@@ -923,7 +945,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await unobserved.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(unobserved.groupPermissionOfferTool.request({
+      await expect(requirePermissionOffer(unobserved).request({
         projectionScopes: [{ projectionKind: "device-sync-status.v0" }],
       })).resolves.toMatchObject({
         result: {
@@ -939,7 +961,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await grantedMissing.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(grantedMissing.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(grantedMissing).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",
@@ -951,11 +973,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await allowed.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
-      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(allowed).request(stepsOffer))
         .resolves.toMatchObject({
           result: { unavailableReason: "synthetic_web_unavailable" },
         });
-      await expect(allowed.groupPermissionOfferTool.request(stepsOffer))
+      await expect(requirePermissionOffer(allowed).request(stepsOffer))
         .resolves.toMatchObject({
           result: {
             unavailableReason: "scheduled_group_permission_offer_unavailable",
@@ -1092,6 +1114,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       homeRouteFallbackAllowed: false,
       target: "chat_saved_group",
       targetKind: "thread",
+    }, { signal });
+  });
+
+  it("resolves scheduled Telegram group authority through the live Web route owner", async () => {
+    const signal = new AbortController().signal;
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const phaseInput = createPhaseInput({});
+    phaseInput.runtime.platform.effectsPort.assertExternalThreadRouteAuthority =
+      assertExternalThreadRouteAuthority;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async ({ executionContext }) => {
+        const resolveScheduledExternalThreadRoute =
+          executionContext.hosted?.resolveScheduledExternalThreadRoute;
+        if (!resolveScheduledExternalThreadRoute) {
+          throw new Error("Expected scheduled external thread route authority.");
+        }
+
+        await expect(resolveScheduledExternalThreadRoute({
+          channel: "telegram",
+          signal,
+          target: "telegram_group_123",
+        })).resolves.toEqual({
+          channel: "telegram",
+          containerMemberId: "member_synthetic_phase",
+          threadId: "telegram_group_123",
+        });
+
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: false,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    await runHostedWorkspaceAssistantPhase(phaseInput);
+
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith({
+      channel: "telegram",
+      containerMemberId: "member_synthetic_phase",
+      threadId: "telegram_group_123",
     }, { signal });
   });
 
@@ -3726,6 +3790,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const vaultRoot = path.join(parentRoot, "vault");
     const emailInputId = "ain_00000000000000000000000000000001";
     const linqInputId = "ain_00000000000000000000000000000002";
+    const telegramInputId = "ain_00000000000000000000000000000003";
     const groupRequestMock = vi.fn(async (request: HostedRuntimeGroupToolRequest) =>
       request.action === "read_shared"
         ? {
@@ -3752,9 +3817,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         createdAt: "2026-04-27T00:00:00.000Z",
         vaultRoot,
       });
-      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) =>
-        inputId === emailInputId
-          ? {
+      mocks.readAssistantInputEvent.mockImplementation(async ({ inputId }) => {
+        if (inputId === emailInputId) {
+          return {
               conversation: {
                 accountId: "email_identity",
                 actorId: null,
@@ -3768,8 +3833,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 messageId: "email_message",
                 threadId: "email_delivery_thread",
               },
-            }
-          : {
+            };
+        }
+        if (inputId === telegramInputId) {
+          return {
+            conversation: {
+              accountId: "telegram_identity",
+              actorId: "telegram_participant",
+              actorIsSelf: false,
+              source: "telegram",
+              threadId: "telegram_group_thread",
+              threadIsDirect: false,
+            },
+            replyTarget: {
+              channel: "telegram",
+              messageId: "telegram_message",
+              threadId: "telegram_group_chat",
+            },
+          };
+        }
+        return {
               conversation: {
                 accountId: "linq_identity",
                 actorId: "linq_participant",
@@ -3792,12 +3875,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 senderHandle: "+15555550123",
                 service: "imessage",
               },
-            }
-      );
+            };
+      });
 
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
-        assistantInputIds: [emailInputId, linqInputId],
-        importedCount: 2,
+        assistantInputIds: [emailInputId, linqInputId, telegramInputId],
+        importedCount: 3,
         runtimeGroupToolPort: { request: groupRequest },
         vaultRoot,
       }));
@@ -3860,6 +3943,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
+          const newsletter = await executionContext.hosted?.automationTool?.request(
+            buildGroupNewsletterAutomationSaveRequest({
+              configuration: {
+                delivery: "current_chat",
+                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
+                newsletterName: "Family weekly health newsletter",
+                tone: "supportive",
+              },
+              schedule: {
+                expression: "0 13 * * 1",
+                kind: "cron",
+              },
+            }),
+          );
+          if (!newsletter || newsletter.action !== "save") {
+            throw new Error("Expected saved group newsletter.");
+          }
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            automationId: newsletter.automationId,
+            instructions: "Replace the group newsletter with free-form instructions.",
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            title: "Family weekly health newsletter",
+          })).rejects.toThrow(
+            "Use murph.automation action=save_newsletter to configure this group newsletter.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            lookup: "group-health-newsletter",
+            schedule: { expression: "0 14 * * 1", kind: "cron" },
+          })).rejects.toThrow(
+            "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+          );
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            lookup: "group-health-newsletter",
+            status: "paused",
+          })).resolves.toEqual(expect.objectContaining({
+            action: "patch",
+            routeBinding: "preserved",
+            status: "paused",
+          }));
           const stale = await executionContext.hosted?.automationTool?.request({
             action: "save",
             instructions: "Archive this stale group check-in.",
@@ -3931,6 +4056,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "active",
       }));
+      const telegramResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [telegramInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request(
+            buildGroupNewsletterAutomationSaveRequest({
+              configuration: {
+                delivery: "current_chat",
+                healthScopes: ["steps-days.v0", "sleep-duration-days.v0"],
+                newsletterName: "Family weekly health newsletter",
+                tone: "supportive",
+              },
+              schedule: {
+                expression: "0 13 * * 1",
+                kind: "cron",
+              },
+            }),
+          ),
+        turnEnvironment: null,
+      });
+      expect(telegramResult).toEqual(expect.objectContaining({
+        action: "save",
+        created: false,
+        lookupId: "group-health-newsletter",
+        routeBinding: "current_conversation",
+        status: "paused",
+      }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
         linqSenderHandles: ["+15555550123"],
@@ -3962,6 +4114,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         tags: expect.arrayContaining([
           "system:support-series:habit:group-check-in",
         ]),
+      }));
+      await expect(showAutomation({
+        slug: "group-health-newsletter",
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        continuityPolicy: "fresh",
+        route: expect.objectContaining({
+          channel: "telegram",
+          deliveryTarget: "telegram_group_chat",
+          threadIsDirect: false,
+        }),
+        tags: expect.arrayContaining([
+          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+        ]),
+        status: "paused",
       }));
       await expect(showAutomation({
         slug: "stale-group-check-in",
@@ -4043,6 +4210,33 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         title: "Existing reminder",
         vaultRoot,
       });
+      const newsletterSave = buildGroupNewsletterAutomationSaveRequest({
+        configuration: {
+          delivery: "current_chat",
+          healthScopes: ["steps-days.v0"],
+          newsletterName: "Existing group newsletter",
+          tone: "supportive",
+        },
+        schedule: { expression: "0 9 * * 0", kind: "cron" },
+      });
+      await upsertAutomation({
+        continuityPolicy: newsletterSave.continuityPolicy,
+        instructions: newsletterSave.instructions,
+        route: {
+          channel: "telegram",
+          deliveryTarget: "telegram_existing_group",
+          identityId: null,
+          participantId: null,
+          threadId: "telegram_existing_group",
+          threadIsDirect: false,
+        },
+        schedule: newsletterSave.schedule,
+        slug: newsletterSave.slug,
+        status: "active",
+        tags: newsletterSave.tags,
+        title: newsletterSave.title,
+        vaultRoot,
+      });
       mocks.readAssistantInputEvent.mockResolvedValue({
         conversation: {
           accountId: "linq_identity_current",
@@ -4082,6 +4276,26 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
             }
+            await expect(automationTool.request(
+              buildGroupNewsletterAutomationSaveRequest({
+                configuration: {
+                  delivery: "current_chat",
+                  healthScopes: ["steps-days.v0"],
+                  newsletterName: "Private thread newsletter",
+                  tone: "supportive",
+                },
+                schedule: { expression: "0 9 * * 0", kind: "cron" },
+              }),
+            )).rejects.toThrow(
+              "Group newsletters can be saved only from the current iMessage or Telegram group conversation.",
+            );
+            await expect(automationTool.request({
+              action: "patch",
+              lookup: "group-health-newsletter",
+              retargetToCurrentConversation: true,
+            })).rejects.toThrow(
+              "Use murph.automation action=save_newsletter for newsletter configuration or route changes; patch may only change status.",
+            );
             return await automationTool.request({
               action: "patch",
               lookup: "existing-reminder",

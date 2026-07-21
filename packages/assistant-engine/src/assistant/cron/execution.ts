@@ -43,6 +43,9 @@ import {
 } from '../managed-automations.js'
 import { readAssistantOnboardingState } from '../onboarding-state.js'
 import {
+  resolveGroupNewsletterAutomationDelivery,
+} from '../group-newsletter-automation.js'
+import {
   runExperimentLifecycleDeliveryAuthorityPrecondition,
   runExperimentLifecycleOutcomePrecondition,
 } from '../experiment-support-automations.js'
@@ -129,7 +132,6 @@ const ASSISTANT_CRON_FOREGROUND_YIELDED_ERROR =
   'Assistant cron yielded to fresh foreground input.'
 const ASSISTANT_CRON_NEWSLETTER_DELIVERY_FAILED_ERROR =
   'Group health newsletter delivery did not complete.'
-const GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG = 'group-health-newsletter'
 const GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS =
   2 * 60 * 60 * 1000
 const ASSISTANT_DEVICE_ACTIVITY_AUTHORITY_STALE_ERROR =
@@ -709,13 +711,17 @@ export async function executeClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
-          const deliveryRoute = maintenanceJob
-            ? resolveAssistantCronNotificationDeliveryRoute(claimedJob.target)
+          const authorizedDelivery = maintenanceJob
+            ? {
+                externalThreadRouteAuthority: null,
+                route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
+              }
             : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                 executionContext: input.executionContext ?? null,
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
+          const deliveryRoute = authorizedDelivery.route
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
@@ -740,12 +746,13 @@ export async function executeClaimedAssistantCronJob(
             })
 
             if (notificationExecutionContext?.hosted?.groupTool) {
-              const currentRoute =
+              const currentAuthorizedDelivery =
                 await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                   executionContext: input.executionContext ?? null,
                   signal: yieldCancellation.signal,
                   target: claimedJob.target,
                 })
+              const currentRoute = currentAuthorizedDelivery.route
               const expectedTarget = normalizeNullableString(
                 deliveryRoute.bindingDelivery?.target
                   ?? deliveryRoute.deliveryTarget,
@@ -823,6 +830,8 @@ export async function executeClaimedAssistantCronJob(
             onTraceEvent: input.onTraceEvent,
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
+            outboxExternalThreadRouteAuthority:
+              authorizedDelivery.externalThreadRouteAuthority,
             participantId: claimedJob.target.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
@@ -1397,20 +1406,20 @@ function resolveAssistantCronScheduledNewsletterAuthority(input: {
     input.job.kind !== 'canonical' ||
     input.job.source.kind !== 'automation' ||
     input.job.source.schedule.kind !== 'cron' ||
-    input.job.source.slug !== GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG
+    resolveGroupNewsletterAutomationDelivery(input.job.source) !== 'group_email'
   ) {
     return null
   }
 
-  const createdAtMs = Date.parse(input.job.source.createdAt)
+  const updatedAtMs = Date.parse(input.job.source.updatedAt)
   const occurrenceAtMs = Date.parse(input.occurrenceAt)
-  if (!Number.isFinite(createdAtMs) || !Number.isFinite(occurrenceAtMs)) {
+  if (!Number.isFinite(updatedAtMs) || !Number.isFinite(occurrenceAtMs)) {
     return null
   }
 
   if (
     occurrenceAtMs <
-      createdAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
+      updatedAtMs + GROUP_HEALTH_NEWSLETTER_FIRST_SEND_MINIMUM_OPT_OUT_WINDOW_MS
   ) {
     return null
   }
@@ -2083,7 +2092,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   if (
     !hosted ||
     input.routeAuthorityVerified !== true ||
-    input.channel !== 'linq' ||
+    (input.channel !== 'linq' && input.channel !== 'telegram') ||
     input.route.threadIsDirect !== false
   ) {
     return input.executionContext
@@ -2112,7 +2121,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   let scheduledGroupTools: ReturnType<typeof createScheduledGroupTools>
   try {
     scheduledGroupTools = createScheduledGroupTools({
-      channel: 'linq',
+      channel: input.channel,
       target,
       threadIsDirect: false,
     })
@@ -2134,13 +2143,59 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
   signal: AbortSignal
   target: AssistantCronJob['target']
-}): Promise<ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>> {
+}): Promise<{
+  externalThreadRouteAuthority:
+    AssistantOutboxIntent['externalThreadRouteAuthority']
+  route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
+}> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
-  if (
-    assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
-    input.target.channel !== 'linq'
-  ) {
-    return route
+  if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
+    return { externalThreadRouteAuthority: null, route }
+  }
+
+  if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
+    const target = normalizeNullableString(
+      route.deliveryTarget ?? route.bindingDelivery?.target,
+    )
+    if (!target) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        'Assistant cron jobs must bind one concrete Telegram destination.',
+      )
+    }
+    const resolveScheduledExternalThreadRoute =
+      input.executionContext?.hosted?.resolveScheduledExternalThreadRoute
+    if (!resolveScheduledExternalThreadRoute) {
+      throw new VaultCliError(
+        'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+        'Hosted group delivery requires live thread route authority before provider work.',
+        { retryable: true },
+      )
+    }
+    const authority = await resolveScheduledExternalThreadRoute({
+      channel: 'telegram',
+      signal: input.signal,
+      target,
+    })
+    if (
+      authority.channel !== 'telegram'
+      || normalizeNullableString(authority.containerMemberId) === null
+      || normalizeNullableString(authority.threadId) !== target
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+        'Hosted group delivery requires exact thread route authority before provider work.',
+        { retryable: true },
+      )
+    }
+    return {
+      externalThreadRouteAuthority: authority,
+      route,
+    }
+  }
+
+  if (input.target.channel !== 'linq') {
+    return { externalThreadRouteAuthority: null, route }
   }
 
   const target = normalizeNullableString(
@@ -2192,9 +2247,12 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
-    bindingDelivery,
-    deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
-    threadIsDirect: authority.threadIsDirect,
+    externalThreadRouteAuthority: null,
+    route: {
+      bindingDelivery,
+      deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
+      threadIsDirect: authority.threadIsDirect,
+    },
   }
 }
 

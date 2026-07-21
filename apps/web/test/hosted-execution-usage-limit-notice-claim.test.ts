@@ -113,37 +113,6 @@ describe("hosted usage-limit notice claim authority", () => {
     });
   });
 
-  it("rechecks low group capacity under the route-authorized claim", async () => {
-    claimMocks.readHostedMemberRoutingState.mockResolvedValue({
-      linqChatId: "linq_chat_current",
-    });
-
-    await expect(startAuthorizedHostedAiUsageLimitNoticeDispatchTx({
-      attemptedAt,
-      memberId: "member_group_runtime",
-      noticeCode: "thread_usage_low",
-      noticeDeliveryTarget: {
-        channel: "linq",
-        replyToMessageId: "linq_message_1",
-        routeAuthority: null,
-        target: "linq_chat_current",
-      },
-      periodStart,
-      prisma: prisma as never,
-      source: "hosted_webhook_side_effect",
-      sourceRef: "usage_event_low_1",
-      targetKind: "thread",
-      usageCreditLedgerVersion: 4n,
-    })).resolves.toMatchObject({ status: "claimed" });
-
-    const rawSql = transaction.$queryRaw.mock.calls
-      .map(([strings]) => Array.from(strings as TemplateStringsArray).join(""))
-      .join("\n");
-    expect(rawSql).toContain("hosted_thread_container");
-    expect(rawSql).toContain('"blocked_at" IS NULL');
-    expect(rawSql).toContain('"limit_usd_micros" + 4');
-  });
-
   it("rejects a stale personal Linq target inside the delivery claim transaction", async () => {
     claimMocks.readHostedMemberRoutingState.mockResolvedValue({
       linqChatId: "linq_chat_new",

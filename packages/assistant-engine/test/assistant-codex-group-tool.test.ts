@@ -2140,6 +2140,8 @@ describe("murph.newsletter dynamic tool", () => {
       "prepare",
       "send",
     ]);
+    expect(MURPH_NEWSLETTER_TOOL.inputSchema.properties).not.toHaveProperty("groupId");
+    expect(MURPH_NEWSLETTER_TOOL.inputSchema.required).toEqual(["action"]);
   });
 
   it("keeps the automation name in scheduled email subjects", () => {
@@ -2163,21 +2165,18 @@ describe("murph.newsletter dynamic tool", () => {
     );
   });
 
-  it("parses read and send requests without accepting model-supplied addresses", () => {
+  it("derives the group from runtime authority and rejects model-supplied targets", () => {
     expect(readMurphDynamicToolRequest(newsletterToolCall({
       action: "prepare",
-      groupId: "group_1",
     }))).toEqual({
       kind: "newsletter",
       request: {
         action: "prepare",
-        groupId: "group_1",
       },
     });
 
     expect(readMurphDynamicToolRequest(newsletterToolCall({
       action: "send",
-      groupId: "group_1",
       html: "<p>Weekly</p>",
       subject: "Weekly note",
       text: "Weekly",
@@ -2185,7 +2184,6 @@ describe("murph.newsletter dynamic tool", () => {
       kind: "newsletter",
       request: {
         action: "send",
-        groupId: "group_1",
         html: "<p>Weekly</p>",
         subject: "Weekly note",
         text: "Weekly",
@@ -2194,10 +2192,14 @@ describe("murph.newsletter dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(newsletterToolCall({
       action: "send",
-      groupId: "group_1",
       html: "<p>Weekly</p>",
       subject: "Weekly note",
       to: ["one@example.test"],
+    }))?.kind).toBe("invalid-newsletter-arguments");
+
+    expect(readMurphDynamicToolRequest(newsletterToolCall({
+      action: "prepare",
+      groupId: "group_1",
     }))?.kind).toBe("invalid-newsletter-arguments");
   });
 
@@ -2207,7 +2209,6 @@ describe("murph.newsletter dynamic tool", () => {
       const hostedToolContext = createNewsletterHostedToolContext();
       const request = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       if (!request || request.kind !== "newsletter") {
         throw new Error("Expected newsletter request.");
@@ -2237,7 +2238,6 @@ describe("murph.newsletter dynamic tool", () => {
       expect(readNewsletterToolPayload(first)).toEqual({
         action: "prepare",
         result: {
-          groupId: "group_1",
           missingEmailParticipants: [],
           members: [],
           participants: [
@@ -2263,7 +2263,7 @@ describe("murph.newsletter dynamic tool", () => {
       action: "prepare",
       result: {
         authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-        groupId: request.groupId,
+        groupId: "group_1",
         missingEmailParticipants: [
           {
             authorizedShares: [],
@@ -2283,7 +2283,6 @@ describe("murph.newsletter dynamic tool", () => {
     }));
     const request = readMurphDynamicToolRequest(newsletterToolCall({
       action: "prepare",
-      groupId: "group_1",
     }));
     if (!request || request.kind !== "newsletter") {
       throw new Error("Expected newsletter request.");
@@ -2306,7 +2305,6 @@ describe("murph.newsletter dynamic tool", () => {
     expect(readNewsletterToolPayload(result)).toEqual({
       action: "prepare",
       result: {
-        groupId: "group_1",
         members: [],
         missingEmailParticipants: [
           { hasEmail: false, memberId: "member_a" },
@@ -2336,7 +2334,6 @@ describe("murph.newsletter dynamic tool", () => {
       const hostedToolContext = createNewsletterHostedToolContext();
       const request = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       if (!request || request.kind !== "newsletter") {
         throw new Error("Expected newsletter request.");
@@ -2356,7 +2353,6 @@ describe("murph.newsletter dynamic tool", () => {
       expect(readNewsletterToolPayload(result)).toEqual({
         action: "prepare",
         result: {
-          groupId: "group_1",
           missingEmailParticipants: [],
           members: [],
           participants: [
@@ -2493,7 +2489,6 @@ describe("murph.newsletter dynamic tool", () => {
       };
       const request = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       if (!request || request.kind !== "newsletter") {
         throw new Error("Expected newsletter request.");
@@ -2516,7 +2511,6 @@ describe("murph.newsletter dynamic tool", () => {
       expect(readNewsletterToolPayload(result)).toEqual({
         action: "prepare",
         result: {
-          groupId: "group_1",
           members: [{
             displayName: "Ada",
             memberId: "member_a",
@@ -2594,7 +2588,6 @@ describe("murph.newsletter dynamic tool", () => {
       }));
       const request = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       if (!request || request.kind !== "newsletter") {
         throw new Error("Expected newsletter request.");
@@ -2640,7 +2633,7 @@ describe("murph.newsletter dynamic tool", () => {
               action: "prepare" as const,
               result: {
                 authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: request.groupId,
+                groupId: "group_1",
                 missingEmailParticipants: [],
                 participants: [{
                   authorizedShares: [{
@@ -2672,11 +2665,9 @@ describe("murph.newsletter dynamic tool", () => {
       });
       const prepareRequest = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       const sendRequest = readMurphDynamicToolRequest(newsletterToolCall({
         action: "send",
-        groupId: "group_1",
         html: "<p>Weekly</p>",
         subject: "Weekly note",
         text: "Weekly",
@@ -2777,7 +2768,6 @@ describe("murph.newsletter dynamic tool", () => {
       );
       const request = readMurphDynamicToolRequest(newsletterToolCall({
         action: "prepare",
-        groupId: "group_1",
       }));
       if (!request || request.kind !== "newsletter") {
         throw new Error("Expected newsletter request.");
@@ -2813,7 +2803,6 @@ describe("murph.newsletter dynamic tool", () => {
     const recordNewsletterSendResult = vi.fn();
     const request = readMurphDynamicToolRequest(newsletterToolCall({
       action: "prepare",
-      groupId: "group_1",
     }));
     if (!request || request.kind !== "newsletter") {
       throw new Error("Expected newsletter request.");
@@ -2867,7 +2856,7 @@ describe("murph.newsletter dynamic tool", () => {
               action: "prepare",
               result: {
                 authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: request.groupId,
+                groupId: "group_1",
                 missingEmailParticipants: [],
                 participants: [
                   {
@@ -2883,7 +2872,6 @@ describe("murph.newsletter dynamic tool", () => {
     });
     const request = readMurphDynamicToolRequest(newsletterToolCall({
       action: "send",
-      groupId: "group_1",
       html: "<p>Weekly</p>",
       subject: "Weekly note",
       text: "Weekly",
@@ -2949,7 +2937,7 @@ function createNewsletterHostedToolContext(input: {
               action: "prepare",
               result: {
                 authorizationProof: NEWSLETTER_AUTHORIZATION_PROOF,
-                groupId: request.groupId,
+                groupId: "group_1",
                 missingEmailParticipants: [],
                 participants: [
                   {

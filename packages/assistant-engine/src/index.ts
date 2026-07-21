@@ -23,6 +23,7 @@ export {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from './assistant/group-shared-read-limits.js'
+export * from './assistant/group-newsletter-automation.js'
 export type {
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,

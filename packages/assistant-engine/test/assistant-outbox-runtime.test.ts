@@ -2958,6 +2958,81 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).not.toHaveBeenCalled()
   })
 
+  it('upgrades a retryable Telegram group dedupe hit with exact immutable route authority', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-telegram-route-authority-',
+    )
+    const routeAuthority = {
+      channel: 'telegram' as const,
+      containerMemberId: 'member_telegram_group',
+      threadId: '-100123456789',
+    }
+    const deliveryInput = {
+      automationAuthority: {
+        automationId: 'automation_telegram_group',
+        expectedUpdatedAt: '2026-04-08T00:00:00.000Z',
+      },
+      bindingDelivery: {
+        kind: 'thread',
+        target: routeAuthority.threadId,
+      },
+      channel: 'telegram',
+      dedupeToken: 'telegram-group-authority',
+      dispatchMode: 'queue-only',
+      message: 'Group update',
+      sessionId: 'session-telegram-group-authority',
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+      turnId: 'turn-telegram-group-authority',
+      vault: vaultRoot,
+    } as const
+
+    const queued = await deliverAssistantOutboxMessage(deliveryInput)
+
+    expect(queued.kind).toBe('queued')
+    expect(queued.intent.externalThreadRouteAuthority).toBeNull()
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...queued.intent,
+      attemptCount: 1,
+      lastAttemptAt: '2026-04-08T01:00:00.000Z',
+      lastError: {
+        code: 'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+        message: 'Route authority was temporarily unavailable.',
+      },
+      nextAttemptAt: '2026-04-08T01:05:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-04-08T01:00:00.000Z',
+    })
+
+    const upgraded = await deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      externalThreadRouteAuthority: routeAuthority,
+    })
+
+    expect(upgraded.kind).toBe('queued')
+    expect(upgraded.intent.intentId).toBe(queued.intent.intentId)
+    expect(upgraded.intent.externalThreadRouteAuthority).toEqual(routeAuthority)
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.toMatchObject({
+      externalThreadRouteAuthority: routeAuthority,
+    })
+    await expect(deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      externalThreadRouteAuthority: {
+        ...routeAuthority,
+        containerMemberId: 'member_other_group',
+      },
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
+    ).resolves.toMatchObject({
+      externalThreadRouteAuthority: routeAuthority,
+    })
+  })
+
   it('preserves caller-provided transport idempotency after a successful dispatch', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-caller-idempotent-dispatch-',

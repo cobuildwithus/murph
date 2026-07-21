@@ -153,6 +153,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
+  outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean
   // Existing App Server per-turn thread option. Never enters session identity
   // or persisted provider config.

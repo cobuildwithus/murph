@@ -8,6 +8,7 @@ import type {
 import {
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
@@ -173,6 +174,32 @@ export function createCloudflareEffectsPort(input: {
     },
     ...(webControlTransport
       ? {
+          async assertExternalThreadRouteAuthority(authority, context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: authority,
+              boundUserId: input.boundUserId,
+              description: "Hosted external thread route authority assertion",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted external thread route authority assertion",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (
+              !payload
+              || typeof payload !== "object"
+              || Array.isArray(payload)
+              || (payload as { authorized?: unknown }).authorized !== true
+            ) {
+              throw new TypeError(
+                "Hosted external thread route authority response is invalid.",
+              );
+            }
+          },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({
               body: request,
