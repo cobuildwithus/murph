@@ -208,8 +208,10 @@ not relevant, or explicitly skipped before answered completion:
 6. **Recent blood tests or lab panels:** whether they exist and can be shared
    now or later. This closer is a short generated voice memo when the tool is
    available and the member has not declined voice; the same question is the
-   immediate text fallback. Do not duplicate the question in text. If the
-   member names Function Health, proactively send
+   immediate text fallback. Do not duplicate the question when audio delivery
+   succeeds. If audio preparation or delivery fails, the existing channel
+   adapter sends the media transcript as text and remains the only delivery
+   owner. If the member names Function Health, proactively send
    https://my.functionhealth.com/documents and ask for the Lab Results of Record
    PDFs. Naming the provider alone does not start a child. Once a PDF or paste
    exists, the root verifies or creates its durable attachment, document, or
@@ -237,7 +239,8 @@ The parent replies without waiting and may say, in natural words, that Murph's
 best people are sorting, saving, and checking what the member shared. That is a
 same-turn start acknowledgement, not a completion claim. The final labs
 question follows in the same response as generated voice when available, with
-no text duplicate.
+no text duplicate unless the channel adapter must deliver the existing
+transcript after audio fails.
 
 A clear `none`, `not relevant`, or explicit category skip resolves that
 checkpoint; a positive fact, connected wearable, supplement inventory,

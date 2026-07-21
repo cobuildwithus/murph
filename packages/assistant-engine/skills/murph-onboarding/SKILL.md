@@ -467,9 +467,12 @@ the supplied facts before replying and leaves optional label details unknown.
    the past year or two?" Do not duplicate that question in text. A same-reply
    text line is allowed only for the truthful delegation acknowledgement above.
    If voice generation is unavailable, fails, or the user prefers text, send
-   that question in text immediately instead. If any other checkpoint is still
-   open, drop the last-question framing and ask the labs question plainly,
-   using voice first under the same availability rule. A clear “no”
+   that question in text immediately instead. Final channel delivery owns the
+   same late fallback: if attached audio cannot be prepared or accepted, it
+   sends the voice memo's existing transcript as text without creating another
+   retry owner. If any other checkpoint is still open, drop the last-question
+   framing and ask the labs question plainly, using voice first under the same
+   availability rule. A clear “no”
    or explicit skip resolves the checkpoint. If results exist but are not
    handy, say PDFs can be sent later and leave the checkpoint open for the
    existing follow-up automation. If the user says their labs are from

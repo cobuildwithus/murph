@@ -871,9 +871,11 @@ describe('channel helper seams', () => {
     })
   })
 
-  it('prepares Telegram voice memo audio before sending accompanying text', async () => {
-    const sendTelegram = vi.fn(async () => {
-      throw new Error('Telegram text should not be sent before audio is prepared.')
+  it('falls back to the voice transcript when Telegram audio preparation fails', async () => {
+    const sendTelegram = vi.fn().mockResolvedValue({
+      providerMessageId: 'telegram-fallback-message',
+      target: 'telegram-chat',
+      targetKind: 'thread',
     })
     const telegramFetch = vi.fn<typeof fetch>(async (input) => {
       const url = String(input)
@@ -883,8 +885,7 @@ describe('channel helper seams', () => {
       throw new Error(`Unexpected request: ${url}`)
     })
 
-    await expect(
-      ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
         {
           actorId: null,
           bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
@@ -893,6 +894,7 @@ describe('channel helper seams', () => {
           identityId: null,
           media: [
             createVoiceMemoMedia({
+              transcript: 'Have you had any recent blood tests?',
               transport: {
                 generation: {
                   kind: 'elevenlabs_speech',
@@ -919,15 +921,116 @@ describe('channel helper seams', () => {
             fetchImplementation: telegramFetch,
           },
         },
-      ),
-    ).rejects.toMatchObject({
-      code: 'ELEVENLABS_API_REQUEST_FAILED',
+      )
+    expect(sendTelegram).toHaveBeenCalledWith({
+      idempotencyKey: null,
+      message:
+        'Text that must not be sent yet.\n\nHave you had any recent blood tests?',
+      replyToMessageId: null,
+      target: 'telegram-chat',
     })
-    expect(sendTelegram).not.toHaveBeenCalled()
+    expect(delivery).toMatchObject({
+      providerMessageId: 'telegram-fallback-message',
+      providerMessageIds: ['telegram-fallback-message'],
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
     expect(telegramFetch).toHaveBeenCalledTimes(1)
     expect(String(telegramFetch.mock.calls[0]?.[0])).toContain(
       'https://api.elevenlabs.io/',
     )
+  })
+
+  it('falls back to the voice transcript after Telegram accepts text but rejects audio', async () => {
+    const sendTelegram = vi.fn()
+      .mockResolvedValueOnce({
+        providerMessageId: 'telegram-text-message',
+        target: 'telegram-chat',
+      })
+      .mockResolvedValueOnce({
+        providerMessageId: 'telegram-fallback-message',
+        target: 'telegram-chat',
+      })
+    const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          headers: { 'content-type': 'audio/mpeg' },
+          status: 200,
+        })
+      }
+      if (url === 'https://telegram.test/botbot-token/sendVoice') {
+        return Response.json(
+          {
+            description: 'Bad Request: voice rejected',
+            error_code: 400,
+            ok: false,
+          },
+          { status: 400 },
+        )
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: 'telegram-voice-fallback',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            transcript: 'Have you had any recent blood tests?',
+            transport: {
+              generation: {
+                kind: 'elevenlabs_speech',
+                modelId: 'eleven_multilingual_v2',
+                outputFormat: 'mp3_44100_128',
+                text: 'Have you had any recent blood tests?',
+                voiceId: 'voice_murph',
+              },
+              kind: 'telegram_generation',
+            },
+          }),
+        ],
+        message: "I've got my best people on it.",
+        replyToMessageId: null,
+      },
+      {
+        sendTelegram,
+        telegramVoiceMemoRuntime: {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: telegramFetch,
+        },
+      },
+    )
+
+    expect(sendTelegram).toHaveBeenNthCalledWith(1, {
+      idempotencyKey: 'telegram-voice-fallback',
+      message: "I've got my best people on it.",
+      replyToMessageId: null,
+      target: 'telegram-chat',
+    })
+    expect(sendTelegram).toHaveBeenNthCalledWith(2, {
+      idempotencyKey: null,
+      message: 'Have you had any recent blood tests?',
+      replyToMessageId: null,
+      target: 'telegram-chat',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'telegram-fallback-message',
+      providerMessageIds: [
+        'telegram-text-message',
+        'telegram-fallback-message',
+      ],
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
   })
 
   it('sends Linq voice memo media through the dedicated endpoint after optional text', async () => {
@@ -945,7 +1048,7 @@ describe('channel helper seams', () => {
       {
         kind: 'voice_memo' as const,
         filename: 'memo.mp3',
-        transcript: null,
+        transcript: 'Have you had any recent blood tests?',
         transport: {
           attachmentId: 'attachment_voice_1',
           kind: 'linq_attachment' as const,
@@ -1009,6 +1112,7 @@ describe('channel helper seams', () => {
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })
+    expect(sendLinq).toHaveBeenCalledTimes(1)
   })
 
   it('allows Linq home-route fallback for direct thread voice-memo-only sends', async () => {
@@ -1244,13 +1348,73 @@ describe('channel helper seams', () => {
     expect(sendLinqVoiceMemo).not.toHaveBeenCalled()
   })
 
-  it('marks Linq text-plus-voice memo failures as partial delivery after accepted text', async () => {
-    const sendLinq = vi.fn().mockResolvedValue({
-      providerMessageId: 'linq-text-message',
+  it('falls back to the voice transcript after Linq accepts text but rejects audio', async () => {
+    const sendLinq = vi.fn()
+      .mockResolvedValueOnce({
+        providerMessageId: 'linq-text-message',
+        providerThreadId: 'thread-linq-voice',
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      })
+      .mockResolvedValueOnce({
+        providerMessageId: 'linq-fallback-message',
+        providerThreadId: 'thread-linq-voice',
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      })
+    const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq voice memo delivery failed.',
+        { retryable: true },
+      ),
+    )
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.linq.send(
+        {
+          actorId: null,
+          bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
+          explicitTarget: null,
+          idempotencyKey: 'idem-partial-voice',
+          identityId: null,
+          media: [
+            createVoiceMemoMedia({
+              transcript: 'Have you had any recent blood tests?',
+            }),
+          ],
+          message: 'Text before memo',
+          replyToMessageId: null,
+        },
+        {
+          sendLinq,
+          sendLinqVoiceMemo,
+        },
+      )
+    expect(sendLinq).toHaveBeenNthCalledWith(2, {
+      idempotencyKey: null,
+      message: 'Have you had any recent blood tests?',
+      replyToMessageId: null,
+      target: 'thread-linq-voice',
+      targetKind: 'thread',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'linq-fallback-message',
+      providerMessageIds: ['linq-text-message', 'linq-fallback-message'],
       providerThreadId: 'thread-linq-voice',
       target: 'thread-linq-voice',
       targetKind: 'thread',
     })
+  })
+
+  it('keeps the existing Linq partial-delivery failure when fallback text also fails', async () => {
+    const sendLinq = vi.fn()
+      .mockResolvedValueOnce({
+        providerMessageId: 'linq-text-message',
+        providerThreadId: 'thread-linq-voice',
+        target: 'thread-linq-voice',
+        targetKind: 'thread',
+      })
+      .mockRejectedValueOnce(new Error('fallback text failed'))
     const sendLinqVoiceMemo = vi.fn().mockRejectedValue(
       new VaultCliError(
         'LINQ_API_REQUEST_FAILED',
@@ -1265,9 +1429,13 @@ describe('channel helper seams', () => {
           actorId: null,
           bindingDelivery: createAssistantBindingDelivery('thread', 'thread-linq-voice'),
           explicitTarget: null,
-          idempotencyKey: 'idem-partial-voice',
+          idempotencyKey: 'idem-failed-fallback',
           identityId: null,
-          media: [createVoiceMemoMedia()],
+          media: [
+            createVoiceMemoMedia({
+              transcript: 'Have you had any recent blood tests?',
+            }),
+          ],
           message: 'Text before memo',
           replyToMessageId: null,
         },
