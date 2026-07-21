@@ -341,11 +341,9 @@ Settings-side display/write projection, not canonical preference truth;
 
 `POST /api/settings/assistant-style` validates the authenticated member's
 values, updates requested columns, and, when at least one requested field
-applies, appends one `member.preferences.updated` event and best-effort signals
-the runtime. While the web rollout gate is off,
-tone/voice events retain the legacy complete tone/voice snapshot required by
-the old coalescing consumer. Once the gate is enabled, events contain only the
-request delta. Personality payloads are strict,
+applies, appends one sparse `member.preferences.updated` request-delta event and
+best-effort signals the runtime. Only sparse request deltas are produced; there
+is no rollout switch. Personality payloads are strict,
 non-empty sparse objects. They reject unknown keys, fractions, out-of-range
 scores, and mixed tone-or-voice plus personality requests before persistence.
 The response returns the full web projection so the Settings row can update
@@ -423,11 +421,6 @@ application even though the mailbox row receives a newer transport sequence;
 Settings wakes continue to use their row sequence. This keeps the display
 projection and canonical vault on the same field-local order without making
 callback time a new intent.
-During the legacy complete-snapshot rollout, additive `requestedFields`
-metadata preserves the caller's exact tone/voice field set for new runtimes;
-the web projection still advances every field visible to an old snapshot
-consumer so either runtime version stays causally consistent.
-
 System-lane completion is acknowledged only with a successful workspace
 checkpoint. The runtime derives the contiguous handled prefix from the imported
 system watermark and the earliest real pending system item; local synthetic
@@ -505,10 +498,14 @@ reset, and confirm no preference item remains rejected or stuck. An already
 open Settings page needs a reload; do not mistake that client snapshot for
 failed server convergence.
 
-After the gate is enabled, set it to `0` and redeploy Web before a runtime
-rollback if unavailable controls must be hidden. Keep Web at or above the
-hard-cut transaction rollback floor while personality watermarks exist; never
-restore a Web build that serves the retired direct-vault resolver.
+Keep Web at or above the hard-cut transaction rollback floor while personality
+watermarks exist, and keep the runtime at or above the first compatible FIFO
+consumer. A below-floor rollback requires a separately proved migration or a
+forward fix; there is no environment toggle that hides controls or disables
+sparse causal writes. Never restore a Web build that serves the retired
+direct-vault resolver. The matching operational proof lives in
+`agent-docs/references/hosted-runtime-protocol.md` and
+`apps/cloudflare/DEPLOY.md`.
 
 ## Preview Clips
 
