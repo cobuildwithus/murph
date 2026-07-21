@@ -74,6 +74,22 @@ function normalizeMetricValueForScope(
       return normalizeMassConcentration(input.value, unit, "mg/dL", 38.67, definition.displayName);
     case "triglycerides":
       return normalizeMassConcentration(input.value, unit, "mg/dL", 88.57, definition.displayName);
+    case "calcium":
+    case "serum-calcium":
+    case "total-calcium":
+      return normalizeMassConcentration(input.value, unit, "mg/dL", 4, definition.displayName);
+    case "cholesterol":
+    case "cholesterol-total":
+    case "total-cholesterol":
+      return normalizeMassConcentration(input.value, unit, "mg/dL", 38.67, definition.displayName);
+    case "serum-uric-acid":
+    case "urate":
+    case "uric-acid":
+      return normalizeMassConcentration(input.value, unit, "mg/dL", 16.812, definition.displayName);
+    case "bilirubin":
+    case "bilirubin-total":
+    case "total-bilirubin":
+      return normalizeMicromolarMassConcentration(input.value, unit, 17.1, definition.displayName);
     case "apob":
       return normalizeApoB(input.value, unit);
     case "hs-crp":
@@ -89,7 +105,7 @@ function normalizeMetricValueForScope(
     case "thyroid-stimulating-hormone":
       return normalizeExactUnit(input.value, unit, "mIU/L", definition.displayName);
     case "white-blood-cell-count":
-      return normalizeExactUnit(input.value, unit, "10^3/uL", definition.displayName);
+      return normalizeCellCount(input.value, unit, definition.displayName);
     case "alkaline-phosphatase":
     case "alt":
     case "ast":
@@ -102,6 +118,10 @@ function normalizeMetricValueForScope(
     case "total-sleep-minutes":
       return normalizeDurationMinutes(input.value, unit, definition.displayName);
     default: {
+      if (definition.canonicalUnit === null) {
+        const commonCustomValue = normalizeCommonCustomValue(input.value, unit);
+        if (commonCustomValue) return commonCustomValue;
+      }
       const canonicalUnit = definition.canonicalUnit && (!unit || unitsEquivalent(unit, definition.canonicalUnit))
         ? definition.canonicalUnit
         : null;
@@ -121,19 +141,44 @@ export function resolveComparableMetricPointValue(
   point: MetricPoint,
   definition: MetricDefinition,
 ): { unit: string | null; value: number } | null {
-  if (
-    definition.canonicalUnit !== null &&
-    point.canonicalUnit === definition.canonicalUnit &&
-    point.canonicalValue !== null &&
-    Number.isFinite(point.canonicalValue)
-  ) {
-    return { unit: point.canonicalUnit, value: point.canonicalValue };
-  }
-
-  if (point.value === null || !Number.isFinite(point.value) || point.unit === null) {
+  if (point.source.kind === "test-result" && point.unit === null) {
     return null;
   }
-  return { unit: point.unit, value: point.value };
+
+  if (definition.canonicalUnit !== null) {
+    const hasCanonicalEvidence = point.canonicalUnit !== null || point.canonicalValue !== null;
+    if (hasCanonicalEvidence) {
+      if (
+        point.canonicalUnit === null
+        || !unitsEquivalent(point.canonicalUnit, definition.canonicalUnit)
+        || point.canonicalValue === null
+        || !Number.isFinite(point.canonicalValue)
+      ) {
+        return null;
+      }
+      return { unit: definition.canonicalUnit, value: point.canonicalValue };
+    }
+
+    if (point.value !== null && Number.isFinite(point.value) && point.unit !== null) {
+      if (unitsEquivalent(point.unit, definition.canonicalUnit)) {
+        return { unit: definition.canonicalUnit, value: point.value };
+      }
+      return point.source.family === "derived"
+        ? { unit: point.unit, value: point.value }
+        : null;
+    }
+
+    // Derived summaries are schema-typed by their producer even when legacy
+    // points predate duplicated canonical fields. Raw evidence is not.
+    if (point.source.family !== "derived") return null;
+  }
+
+  const value = point.canonicalValue ?? point.value;
+  if (value === null || !Number.isFinite(value)) return null;
+  return {
+    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
+    value,
+  };
 }
 
 function inferUnitFromMetricAlias(metricKey: string): string | null {
@@ -143,7 +188,7 @@ function inferUnitFromMetricAlias(metricKey: string): string | null {
 export function normalizeUnit(value: string | null): string | null {
   if (!value) return null;
   const normalized = value.trim();
-  const lower = normalized.toLowerCase();
+  const lower = normalized.toLowerCase().replaceAll("µ", "u").replaceAll("μ", "u");
   const aliases: Record<string, string> = {
     "%": "percent",
     beats_per_minute: "bpm",
@@ -160,10 +205,13 @@ export function normalizeUnit(value: string | null): string | null {
     "degrees c": "degC",
     "degrees celsius": "degC",
     fl: "fL",
+    calc: "ratio",
+    ratio: "ratio",
     g_l: "g/L",
     "g/l": "g/L",
     g_dl: "g/dL",
     "g/dl": "g/dL",
+    "g/dl (calc)": "g/dL",
     kg: "kg",
     h: "hours",
     hr: "hours",
@@ -194,8 +242,10 @@ export function normalizeUnit(value: string | null): string | null {
     "ml/kg/min": "mL/kg/min",
     "ml/min/1.73m2": "mL/min/1.73m^2",
     "ml/min/1.73m^2": "mL/min/1.73m^2",
+    "ml/min/1.73": "mL/min/1.73m^2",
     "ml/min/1.73 m2": "mL/min/1.73m^2",
     "ml/min/1.73 m^2": "mL/min/1.73m^2",
+    "ml/min/1.73sq m": "mL/min/1.73m^2",
     min: "minutes",
     mins: "minutes",
     minute: "minutes",
@@ -218,8 +268,20 @@ export function normalizeUnit(value: string | null): string | null {
     "10^3/ul": "10^3/uL",
     "10*3/ul": "10^3/uL",
     "10^9/l": "10^3/uL",
+    "x10^9/l": "10^3/uL",
+    "x10e3/ul": "10^3/uL",
+    "x10^3/ul": "10^3/uL",
+    "thousand/ul": "10^3/uL",
+    "thousands/ul": "10^3/uL",
     k_ul: "10^3/uL",
     "k/ul": "10^3/uL",
+    "10^6/ul": "10^6/uL",
+    "10*6/ul": "10^6/uL",
+    "10^12/l": "10^6/uL",
+    "x10^12/l": "10^6/uL",
+    "x10e6/ul": "10^6/uL",
+    "x10^6/ul": "10^6/uL",
+    "cells/ul": "cells/uL",
     umol_l: "umol/L",
     "umol/l": "umol/L",
     uiu_ml: "mIU/L",
@@ -267,6 +329,54 @@ function normalizeDurationMinutes(value: number, unit: string | null, label: str
     return { canonicalUnit: "minutes", canonicalValue: Number((value * 60).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "minutes")] };
+}
+
+function normalizeCommonCustomValue(
+  value: number,
+  unit: string | null,
+): MetricValueNormalization | null {
+  if (unitsEquivalent(unit, "g/dL")) {
+    return { canonicalUnit: "g/dL", canonicalValue: value, unit, warnings: [] };
+  }
+  if (unitsEquivalent(unit, "g/L")) {
+    return {
+      canonicalUnit: "g/dL",
+      canonicalValue: Number((value / 10).toFixed(4)),
+      unit,
+      warnings: [],
+    };
+  }
+  if (unitsEquivalent(unit, "10^3/uL")) {
+    return normalizeCellCount(value, unit, "Lab result");
+  }
+  if (unitsEquivalent(unit, "cells/uL")) {
+    return normalizeCellCount(value, unit, "Lab result");
+  }
+  return null;
+}
+
+function normalizeCellCount(
+  value: number,
+  unit: string | null,
+  label: string,
+): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "10^3/uL")) {
+    return {
+      canonicalUnit: "10^3/uL",
+      canonicalValue: value,
+      unit: unit ?? "10^3/uL",
+      warnings: [],
+    };
+  }
+  if (unitsEquivalent(unit, "cells/uL")) {
+    return {
+      canonicalUnit: "10^3/uL",
+      canonicalValue: Number((value / 1_000).toFixed(4)),
+      unit,
+      warnings: [],
+    };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "10^3/uL")] };
 }
 
 function normalizeAlbumin(value: number, unit: string | null): MetricValueNormalization {
@@ -335,6 +445,26 @@ function normalizeMassConcentration(
     return { canonicalUnit, canonicalValue: Number((value * mmolToMgDl).toFixed(4)), unit, warnings: [] };
   }
   return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, canonicalUnit)] };
+}
+
+function normalizeMicromolarMassConcentration(
+  value: number,
+  unit: string | null,
+  micromolesPerMgDl: number,
+  label: string,
+): MetricValueNormalization {
+  if (!unit || unitsEquivalent(unit, "mg/dL")) {
+    return { canonicalUnit: "mg/dL", canonicalValue: value, unit: unit ?? "mg/dL", warnings: [] };
+  }
+  if (unitsEquivalent(unit, "umol/L")) {
+    return {
+      canonicalUnit: "mg/dL",
+      canonicalValue: Number((value / micromolesPerMgDl).toFixed(4)),
+      unit,
+      warnings: [],
+    };
+  }
+  return { canonicalUnit: null, canonicalValue: null, unit, warnings: [unitWarning(label, unit, "mg/dL")] };
 }
 
 function normalizeExactUnit(value: number, unit: string | null, expectedUnit: string, label: string): MetricValueNormalization {

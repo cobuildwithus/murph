@@ -1,5 +1,7 @@
 interface LabResultValueInput {
   comparator: "<" | "<=" | ">" | ">=" | null;
+  normalizedUnit?: string | null;
+  normalizedValue?: number | null;
   textValue: string | null;
   unit: string | null;
   value: number | null;
@@ -7,15 +9,31 @@ interface LabResultValueInput {
 
 interface LabReferenceRangeInput {
   high?: number;
+  highComparator?: "<" | "<=";
   low?: number;
+  lowComparator?: ">" | ">=";
   text?: string;
 }
 
-export function formatLabResultValue(input: LabResultValueInput): string {
-  const unit = labUnitSuffix(input.unit);
+interface LabResultReferenceRangeInput {
+  normalizedReferenceRange?: LabReferenceRangeInput | null;
+  normalizedUnit?: string | null;
+  referenceRange: LabReferenceRangeInput | null;
+  unit: string | null;
+}
 
-  if (input.value !== null && Number.isFinite(input.value)) {
-    return `${input.comparator ?? ""}${formatLabNumber(input.value)}${unit}`;
+export function formatLabResultValue(input: LabResultValueInput): string {
+  const normalized = typeof input.normalizedValue === "number"
+    && Number.isFinite(input.normalizedValue)
+    && typeof input.normalizedUnit === "string"
+    && input.normalizedUnit.trim().length > 0
+    ? { unit: input.normalizedUnit, value: input.normalizedValue }
+    : null;
+  const value = normalized?.value ?? input.value;
+  const unit = labUnitSuffix(normalized?.unit ?? input.unit);
+
+  if (value !== null && Number.isFinite(value)) {
+    return `${input.comparator ?? ""}${formatLabNumber(value)}${unit}`;
   }
 
   const textValue = input.textValue?.trim();
@@ -40,13 +58,29 @@ export function formatLabReferenceRange(
     return `${formatLabNumber(range.low)} to ${formatLabNumber(range.high)}${unitLabel}`;
   }
   if (range.low !== undefined) {
+    if (range.lowComparator) {
+      return `${range.lowComparator}${formatLabNumber(range.low)}${unitLabel}`;
+    }
     return `At least ${formatLabNumber(range.low)}${unitLabel}`;
   }
   if (range.high !== undefined) {
+    if (range.highComparator) {
+      return `${range.highComparator}${formatLabNumber(range.high)}${unitLabel}`;
+    }
     return `Up to ${formatLabNumber(range.high)}${unitLabel}`;
   }
 
   return null;
+}
+
+export function formatLabResultReferenceRange(
+  input: LabResultReferenceRangeInput,
+): string | null {
+  const normalizedRange = input.normalizedReferenceRange;
+  return formatLabReferenceRange(
+    normalizedRange ?? input.referenceRange,
+    normalizedRange ? input.normalizedUnit ?? input.unit : input.unit,
+  );
 }
 
 export function formatLabDate(date: string): string {
