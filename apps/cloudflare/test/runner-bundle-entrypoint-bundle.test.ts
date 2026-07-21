@@ -358,6 +358,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/clinical-records\/dist\/index\.js/,
     ],
     [
+      "unapproved clinical-records leaves",
+      ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/unapproved.js",
+      /node_modules\/@murphai\/clinical-records\/dist\/unapproved\.js/,
+    ],
+    [
       "Junction SDK",
       ".deploy/runner-bundle/node_modules/@junction-api/sdk/index.js",
       /node_modules\/@junction-api\/sdk\/index\.js/,
@@ -388,6 +393,16 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS),
     ).toThrow(expected);
+  });
+
+  it("allows the narrow clinical-records retrieval-limits leaf in the static boot closure", () => {
+    const metafile = staticBootClosureMetafile(
+      ".deploy/runner-bundle/node_modules/@murphai/clinical-records/dist/retrieval-limits.js",
+    );
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(metafile, ROOMY_TEST_BUDGETS)
+    ).not.toThrow();
   });
 
   it("allows provider connector inputs behind dynamic imports", () => {
@@ -520,7 +535,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
       staticClosureBytes: 7_500_000 + 96_000 + 250_000,
-      totalBytes: 9_369_574,
+      totalBytes: 9_388_733,
     });
   });
 

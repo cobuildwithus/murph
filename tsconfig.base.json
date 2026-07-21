@@ -30,6 +30,9 @@
       "@murphai/clinical-records": [
         "./packages/clinical-records/src/index.ts"
       ],
+      "@murphai/clinical-records/retrieval-limits": [
+        "./packages/clinical-records/src/retrieval-limits.ts"
+      ],
       "@murphai/health-commons": [
         "./packages/health-commons/src/index.ts"
       ],

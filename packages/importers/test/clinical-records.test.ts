@@ -63,6 +63,62 @@ afterEach(async () => {
 });
 
 describe("buildClinicalImportPlan", () => {
+  it.each([
+    ["Device", "patient"],
+    ["FamilyMemberHistory", "patient"],
+    ["MedicationDispense", "subject"],
+    ["ServiceRequest", "subject"],
+  ] as const)("admits %s into patient-bound raw evidence", async (resourceType, patientField) => {
+    const relativePath = `${resourceType}/page-1.json`;
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultPatientReference: false,
+      resourceFiles: [{ count: 1, relativePath, resourceType }],
+      pages: {
+        [relativePath]: {
+          id: `${resourceType.toLowerCase()}-1`,
+          [patientField]: { reference: `Patient/${PATIENT_ID}` },
+          resourceType,
+        },
+      },
+    });
+
+    const plan = await buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot });
+
+    expect(reviews(plan)).toEqual([
+      expect.objectContaining({
+        action: "review",
+        reason: "FHIR resource type is raw evidence only in v1",
+        resourceType,
+      }),
+    ]);
+  });
+
+  it.each([
+    ["Device", "patient"],
+    ["FamilyMemberHistory", "patient"],
+    ["MedicationDispense", "subject"],
+    ["ServiceRequest", "subject"],
+  ] as const)("rejects %s raw evidence bound to another patient", async (
+    resourceType,
+    patientField,
+  ) => {
+    const relativePath = `${resourceType}/page-1.json`;
+    const vaultRoot = await writeClinicalFixture({
+      addDefaultPatientReference: false,
+      resourceFiles: [{ count: 1, relativePath, resourceType }],
+      pages: {
+        [relativePath]: {
+          id: `${resourceType.toLowerCase()}-other-patient`,
+          [patientField]: { reference: `Patient/${OTHER_PATIENT_ID}` },
+          resourceType,
+        },
+      },
+    });
+
+    await expect(buildClinicalImportPlan({ manifestPath: MANIFEST_PATH, vaultRoot }))
+      .rejects.toThrow("manifest patient");
+  });
+
   it("plans safe vitals and lab imports while leaving positive conditions raw", async () => {
     const vaultRoot = await writeClinicalFixture({
       resourceFiles: [
@@ -5051,6 +5107,7 @@ async function initializeCanonicalFixtureVault(): Promise<string> {
 }
 
 async function writeClinicalFixture(input: {
+  addDefaultPatientReference?: boolean;
   manifest?: {
     completedResourceTypes?: string[];
     connectionId?: string;
@@ -5093,7 +5150,11 @@ async function writeClinicalFixture(input: {
   const pageTexts = new Map(
     Object.entries(input.pages).map(([relativePath, value]) => [
       relativePath,
-      serializeJson(withClinicalFixtureDefaults(value, patientId)),
+      serializeJson(withClinicalFixtureDefaults(
+        value,
+        patientId,
+        input.addDefaultPatientReference ?? true,
+      )),
     ]),
   );
   const resourceFiles = input.resourceFiles.map((resourceFile) => ({
@@ -5135,9 +5196,15 @@ async function writeClinicalFixture(input: {
   return vaultRoot;
 }
 
-function withClinicalFixtureDefaults(value: unknown, patientId: string): unknown {
+function withClinicalFixtureDefaults(
+  value: unknown,
+  patientId: string,
+  addDefaultPatientReference: boolean,
+): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => withClinicalFixtureDefaults(entry, patientId));
+    return value.map((entry) =>
+      withClinicalFixtureDefaults(entry, patientId, addDefaultPatientReference)
+    );
   }
   if (!isFixtureRecord(value) || typeof value.resourceType !== "string") {
     return value;
@@ -5149,7 +5216,14 @@ function withClinicalFixtureDefaults(value: unknown, patientId: string): unknown
         ? {
             entry: value.entry.map((entry) =>
               isFixtureRecord(entry)
-                ? { ...entry, resource: withClinicalFixtureDefaults(entry.resource, patientId) }
+                ? {
+                    ...entry,
+                    resource: withClinicalFixtureDefaults(
+                      entry.resource,
+                      patientId,
+                      addDefaultPatientReference,
+                    ),
+                  }
                 : entry
             ),
           }
@@ -5164,10 +5238,13 @@ function withClinicalFixtureDefaults(value: unknown, patientId: string): unknown
     resource.meta = { ...resource.meta, lastUpdated: "2026-07-01T12:00:00.000Z" };
   }
 
-  if (resource.resourceType !== "Patient") {
-    const patientField = resource.resourceType === "AllergyIntolerance" || resource.resourceType === "Immunization"
-      ? "patient"
-      : "subject";
+  if (addDefaultPatientReference && resource.resourceType !== "Patient") {
+    const patientField = (
+      resource.resourceType === "AllergyIntolerance"
+      || resource.resourceType === "Device"
+      || resource.resourceType === "FamilyMemberHistory"
+      || resource.resourceType === "Immunization"
+    ) ? "patient" : "subject";
     if (resource[patientField] === undefined) {
       resource[patientField] = { reference: `Patient/${patientId}` };
     }

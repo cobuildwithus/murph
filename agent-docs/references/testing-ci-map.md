@@ -229,13 +229,15 @@ exact admitted group thread.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
   directory v2 and acquisition policy (including exact source hashing,
-  deterministic import, v1 compatibility, disabled query enforcement,
+  deterministic import, v1 compatibility, all-24 query activation, unique SMART
+  permission aggregation, frozen bounded-window parameters,
   Atlanta/Piedmont search, and public-endpoint rejection),
   SMART scope negotiation and bounded streams, callback redaction, runtime
   write fences, two-page raw Bundle pagination, exact-family cursor pinning,
   401/403 behavior, stale-claim and token-rotation CAS races, preemption,
   outcome replay, and account-deletion coverage. Package tests cover the shared
-  runtime contracts and clinical cursor crypto lane. No automated check logs
+  runtime contracts, clinical cursor crypto lane, and patient-bound raw-evidence
+  admission for newly active resource families. No automated check logs
   into a live Epic tenant or asserts that a provider's production patient data
   is complete. Focused recovery tests prove that the Temporal-owned scheduled
   command's shared mailbox handoff sweep selects at most one pending item per

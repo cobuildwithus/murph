@@ -218,12 +218,14 @@ describe("hosted clinical records maintenance", () => {
     });
 
     expect(fetchPage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      queryFingerprint: createHash("sha256").update("observation-labs").digest("hex"),
       queryScopeId: "observation-labs",
       resourceType: "Observation",
       retrievalProtocol: "query-slices-v2",
       sliceId: "whole",
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(fetchPage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      queryFingerprint: createHash("sha256").update("observation-vitals").digest("hex"),
       queryScopeId: "observation-vitals",
       resourceType: "Observation",
     }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
@@ -240,6 +242,13 @@ describe("hosted clinical records maintenance", () => {
       retrievalProtocol: "query-slices-v2",
     }));
     expect(result.counts.fetchedResourceFamilyCount).toBe(1);
+    expect(result.outcome).toMatchObject({
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [
+        { queryScopeId: "observation-labs", sliceId: "whole" },
+        { queryScopeId: "observation-vitals", sliceId: "whole" },
+      ],
+    });
     expect(port.readRun).toHaveBeenCalledTimes(2);
     expect(fetchPage).toHaveBeenCalledTimes(2);
     await expect(readClinicalFhirRetrievalCheckpointForRun({
