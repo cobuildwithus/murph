@@ -224,6 +224,12 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
         { analyte: "Urea Nitrogen", unit: "mmol/L", value: 5 },
         { analyte: "Urea", unit: "mmol/L", value: 5 },
       ]),
+      createLabTest("evt_unitless_aliases_2026", "2026-04-01T08:00:00.000Z", [
+        { analyte: "BUN", value: 7 },
+        { analyte: "TSH", value: 4 },
+        { analyte: "MCH", value: 32 },
+        { analyte: "MCHC", value: 35 },
+      ]),
     ],
     metadata: null,
     vaultRoot: "browser://vault",
@@ -249,20 +255,30 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   const bun = selectBrowserVaultLabBiomarkerDetail(client, "BUN");
   assert.ok(bun);
   assert.equal(bun.displayName, "Blood urea nitrogen");
-  assert.equal(bun.rows.length, 3);
+  assert.equal(bun.rows.length, 4);
   assert.equal(bun.comparableUnit, "mg/dL");
   assert.deepEqual(bun.chartSeries.map((point) => point.value), [14, 16, 14.0056]);
-  const normalizedBun = bun.rows.at(-1);
+  const normalizedBun = bun.rows.find((row) => row.analyte === "Urea Nitrogen");
   assert.ok(normalizedBun);
   assert.equal(normalizedBun.analyte, "Urea Nitrogen");
   assert.equal(normalizedBun.normalizedUnit, "mg/dL");
   assert.equal(normalizedBun.normalizedValue, 14.0056);
   assert.equal(normalizedBun.unit, "mmol/L");
   assert.equal(normalizedBun.value, 5);
+  const unitlessBun = bun.rows.at(-1);
+  assert.ok(unitlessBun);
+  assert.equal(unitlessBun.analyte, "BUN");
+  assert.equal(unitlessBun.normalizedUnit, null);
+  assert.equal(unitlessBun.normalizedValue, null);
+  assert.equal(unitlessBun.unit, null);
+  assert.equal(unitlessBun.value, 7);
+  assert.equal(bun.latestComparable?.analyte, "Urea Nitrogen");
+  assert.equal(bun.previousComparable?.analyte, "Blood Urea Nitrogen");
+  assert.equal(bun.hasIncompatibleHistory, true);
 
   const tsh = selectBrowserVaultLabBiomarkerDetail(client, "TSH");
   assert.ok(tsh);
-  assert.equal(tsh.rows.length, 2);
+  assert.equal(tsh.rows.length, 3);
   assert.equal(tsh.comparableUnit, "mIU/L");
   assert.deepEqual(tsh.chartSeries.map((point) => point.value), [2.5, 3.1]);
   const normalizedTsh = tsh.rows[0];
@@ -271,9 +287,24 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
   assert.equal(normalizedTsh.normalizedValue, 2.5);
   assert.equal(normalizedTsh.unit, "uIU/mL");
   assert.equal(normalizedTsh.value, 2.5);
+  const unitlessTsh = tsh.rows.at(-1);
+  assert.ok(unitlessTsh);
+  assert.equal(unitlessTsh.analyte, "TSH");
+  assert.equal(unitlessTsh.normalizedUnit, null);
+  assert.equal(unitlessTsh.normalizedValue, null);
+  assert.equal(unitlessTsh.unit, null);
+  assert.equal(tsh.latestComparable?.analyte, "Thyroid Stimulating Hormone");
 
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCH")?.rows.length, 2);
-  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "MCHC")?.rows.length, 2);
+  const mch = selectBrowserVaultLabBiomarkerDetail(client, "MCH");
+  assert.ok(mch);
+  assert.equal(mch.rows.length, 3);
+  assert.equal(mch.chartSeries.length, 2);
+  assert.equal(mch.rows.at(-1)?.normalizedValue, null);
+  const mchc = selectBrowserVaultLabBiomarkerDetail(client, "MCHC");
+  assert.ok(mchc);
+  assert.equal(mchc.rows.length, 3);
+  assert.equal(mchc.chartSeries.length, 2);
+  assert.equal(mchc.rows.at(-1)?.normalizedValue, null);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "BUN/Creatinine Ratio")?.rows.length, 1);
   const urea = selectBrowserVaultLabBiomarkerDetail(client, "Urea");
   assert.ok(urea);

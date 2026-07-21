@@ -480,6 +480,87 @@ test("browser-vault metric goal targets honor selectionPolicyOverride from goal 
   assert.notEqual(progress.selectedPointIds[0], metricSelection.pointIds[0]);
 });
 
+test("BUN goal aliases use explicit unit conversion and the lab freshness policy", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-07-20T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_bun_goal_lab", "test", {
+          occurredAt: "2026-01-01T08:00:00.000Z",
+          title: "Kidney panel",
+          attributes: {
+            collectedAt: "2026-01-01T08:00:00.000Z",
+            labName: "Example Lab",
+            results: [{
+              analyte: "Urea Nitrogen",
+              unit: "mmol/L",
+              value: 5,
+            }],
+            source: "import",
+            specimenType: "serum",
+            testCategory: "blood",
+          },
+        }),
+        {
+          attributes: {},
+          body: null,
+          date: "2026-01-01",
+          entityId: "goal_bun",
+          experimentSlug: null,
+          family: "goal",
+          frontmatter: {
+            status: "active",
+            metricTargets: [{
+              biomarkerKey: "biomarker:bun",
+              comparator: "<",
+              evaluation: { kind: "latest-lab" },
+              kind: "metric",
+              metricKey: "BUN",
+              targetId: "bun-under-20",
+              unit: "mg/dL",
+              value: 20,
+            }],
+          },
+          kind: "goal",
+          links: [],
+          lookupIds: ["goal_bun"],
+          occurredAt: "2026-01-01T00:00:00.000Z",
+          path: "history/goals/goal_bun.md",
+          primaryLookupId: "goal_bun",
+          recordClass: "bank",
+          relatedIds: [],
+          status: "active",
+          stream: null,
+          tags: [],
+          title: "BUN goal",
+        } satisfies CanonicalEntity,
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const selection = client.metricSelections.get("BUN");
+  const progress = client.metricGoals.progress({ goalId: "goal_bun" })[0];
+  const labRow = client.labResults.list({ metricKey: "BUN" })[0];
+
+  assert.ok(selection);
+  assert.equal(selection.metricKey, "blood-urea-nitrogen");
+  assert.equal(selection.status, "ready");
+  assert.equal(selection.unit, "mg/dL");
+  assert.equal(Number((selection.value ?? NaN).toFixed(4)), 14.0056);
+  assert.ok(progress);
+  assert.equal(progress.status, "met");
+  assert.equal(Number((progress.currentValue ?? NaN).toFixed(4)), 14.0056);
+  assert.ok(labRow);
+  assert.equal(labRow.unit, "mmol/L");
+  assert.equal(labRow.value, 5);
+  assert.equal(labRow.normalizedUnit, "mg/dL");
+  assert.equal(labRow.normalizedValue, 14.0056);
+});
+
 test("browser-vault metric selections can use old requested points while metric rows stay lookback bounded", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",

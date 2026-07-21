@@ -246,6 +246,13 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:estimated-vo2max")?.key, "estimated-vo2-max");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:egfr")?.key, "egfr");
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:apolipoprotein-b")?.key, "apob");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:bun")?.key, "blood-urea-nitrogen");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:tsh")?.key, "thyroid-stimulating-hormone");
+  assert.equal(resolveMetricDefinitionForBiomarker("biomarker:mch")?.key, "mean-corpuscular-hemoglobin");
+  assert.equal(
+    resolveMetricDefinitionForBiomarker("biomarker:mchc")?.key,
+    "mean-corpuscular-hemoglobin-concentration",
+  );
   assert.equal(resolveMetricDefinitionForBiomarker("biomarker:systolic-blood-pressure")?.key, "systolic-blood-pressure");
   assert.equal(
     resolveMetricDefinitionForBiomarker("biomarker:sleep-quality")?.key,
@@ -381,6 +388,16 @@ test("requires exactly one session capture field for a subjective primary metric
     }).issue,
     "unsupported_primary_biomarker",
   );
+  assert.deepEqual(assessExperimentPrimaryMetricCapture({
+    primaryBiomarkerKey: "biomarker:bun",
+    sessionFields: [],
+  }), {
+    canonicalBiomarkerKey: "biomarker:blood-urea-nitrogen",
+    issue: null,
+    matchingSessionFieldIds: [],
+    metricKey: "blood-urea-nitrogen",
+    requiresSessionField: false,
+  });
 });
 
 test("normalizes supported metric units without hiding unsupported unit mismatches", () => {

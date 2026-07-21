@@ -25,6 +25,11 @@ export const LAB_METRICS = [
   },
   {
     aliases: ["bun", "serum-urea-nitrogen", "urea-nitrogen"],
+    biomarkerAliases: [
+      "biomarker:bun",
+      "biomarker:serum-urea-nitrogen",
+      "biomarker:urea-nitrogen",
+    ],
     biomarkerKey: "biomarker:blood-urea-nitrogen",
     canonicalUnit: "mg/dL",
     category: "lab",
@@ -214,6 +219,7 @@ export const LAB_METRICS = [
   },
   {
     aliases: ["mch"],
+    biomarkerAliases: ["biomarker:mch"],
     biomarkerKey: "biomarker:mean-corpuscular-hemoglobin",
     canonicalUnit: "pg",
     category: "lab",
@@ -225,6 +231,7 @@ export const LAB_METRICS = [
   },
   {
     aliases: ["mchc"],
+    biomarkerAliases: ["biomarker:mchc"],
     biomarkerKey: "biomarker:mean-corpuscular-hemoglobin-concentration",
     canonicalUnit: "g/dL",
     category: "lab",
@@ -269,6 +276,7 @@ export const LAB_METRICS = [
   },
   {
     aliases: ["thyrotropin", "tsh"],
+    biomarkerAliases: ["biomarker:thyrotropin", "biomarker:tsh"],
     biomarkerKey: "biomarker:thyroid-stimulating-hormone",
     canonicalUnit: "mIU/L",
     category: "lab",

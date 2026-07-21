@@ -3314,6 +3314,71 @@ test("treats measurement anchors as browser analysis windows when run windows ar
   assert.equal(result.biomarkers[0]?.deltaAbs, -20);
 });
 
+test("resolves BUN experiment aliases through the shared lab catalog", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-08-02T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_bun_alias",
+          slug: "bun-alias",
+          omitRunPlan: true,
+          analysisPlan: {
+            primaryBiomarkerKey: "biomarker:bun",
+            desiredDirection: "decrease",
+            measurementAnchors: [
+              {
+                role: "baseline",
+                kind: "lab_panel",
+                recordId: "evt_bun_baseline",
+                biomarkerKeys: ["biomarker:bun"],
+              },
+              {
+                role: "followup",
+                kind: "lab_panel",
+                recordId: "evt_bun_followup",
+                biomarkerKeys: ["biomarker:bun"],
+              },
+            ],
+          },
+        }),
+      ],
+      metricRows: [
+        metricRow({
+          biomarkerKey: "biomarker:blood-urea-nitrogen",
+          date: "2026-04-23",
+          metricKey: "blood-urea-nitrogen",
+          recordIds: ["evt_bun_baseline"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 18,
+        }),
+        metricRow({
+          biomarkerKey: "biomarker:blood-urea-nitrogen",
+          date: "2026-08-02",
+          metricKey: "blood-urea-nitrogen",
+          recordIds: ["evt_bun_followup"],
+          sourceKind: "test-result",
+          unit: "mg/dL",
+          value: 14,
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "bun-alias");
+
+  assert.ok(result);
+  assert.deepEqual(result.progress?.analysisReadiness, {
+    status: "ready",
+    blockingReasons: [],
+  });
+  assert.equal(result.biomarkers[0]?.sourceMetric?.metricKey, "blood-urea-nitrogen");
+  assert.equal(result.biomarkers[0]?.baseline.mean, 18);
+  assert.equal(result.biomarkers[0]?.intervention.mean, 14);
+  assert.equal(result.biomarkers[0]?.deltaAbs, -4);
+});
+
 test("keeps completed lab anchor comparisons pending until an outcome is saved", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({
