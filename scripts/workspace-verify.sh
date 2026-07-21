@@ -239,6 +239,11 @@ resolve_typecheck_workspace_concurrency_default() {
     return
   fi
 
+  if [[ "$shared_host_mode" == "1" && "$composed_acceptance_parallel" != "1" ]]; then
+    printf '2\n'
+    return
+  fi
+
   if [[ -n "${CI:-}" ]]; then
     printf '2\n'
     return

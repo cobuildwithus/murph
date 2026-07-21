@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -48,6 +49,31 @@ function runShellHarness(source: string) {
   }
 }
 
+function readSanitizedCrabboxVerificationEnvironment(): Record<string, string> {
+  const runnerUrl = pathToFileURL(
+    path.join(repoRoot, "scripts", "crabbox", "run-verification.mjs"),
+  ).href;
+  const source = `
+    const module = await import(${JSON.stringify(runnerUrl)});
+    const environment = module.buildSanitizedVerificationEnvironment({
+      HOME: "/home/crabbox",
+      PATH: "/usr/bin:/bin",
+    });
+    process.stdout.write(JSON.stringify(environment));
+  `;
+  const result = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", source],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+    },
+  );
+
+  expect(result.status, result.stderr).toBe(0);
+  return JSON.parse(result.stdout) as Record<string, string>;
+}
+
 describe("workspace verification orchestration", () => {
   it("enables composed acceptance parallelism only on capable non-CI hosts", () => {
     const resolveComposedAcceptanceDefault = extractWorkspaceVerifyFunction(
@@ -56,19 +82,28 @@ describe("workspace verification orchestration", () => {
     const result = runShellHarness(`#!/usr/bin/env bash
 set -euo pipefail
 
-detected_cpus=16
+detected_cpus=4
 detect_logical_cpu_count() { printf '%s\\n' "$detected_cpus"; }
 
 ${resolveComposedAcceptanceDefault}
 
 CI=
+shared_host_mode=1
 verification_command=verify:acceptance
 resolve_composed_acceptance_parallel_default
 
-detected_cpus=11
+detected_cpus=8
+resolve_composed_acceptance_parallel_default
+
+detected_cpus=12
 resolve_composed_acceptance_parallel_default
 
 detected_cpus=16
+resolve_composed_acceptance_parallel_default
+
+shared_host_mode=0
+resolve_composed_acceptance_parallel_default
+
 verification_command=test:coverage
 resolve_composed_acceptance_parallel_default
 
@@ -78,7 +113,7 @@ resolve_composed_acceptance_parallel_default
 `);
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toBe("1\n0\n0\n0\n");
+    expect(result.stdout).toBe("0\n0\n1\n1\n1\n0\n0\n");
   });
 
   it("resolves package coverage concurrency to one value in every environment", () => {
@@ -303,6 +338,7 @@ ${resolveVitestDefault}
 
 CI=
 shared_host_mode=1
+composed_acceptance_parallel=0
 verification_command=test:diff
 test_diff_workspace_concurrency=1
 resolve_typecheck_workspace_concurrency_default
@@ -319,6 +355,40 @@ resolve_test_diff_vitest_max_workers_default
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe("1\n1\n8\n4\n2\n50%\n");
+  });
+
+  it("keeps ordinary shared-host typecheck capped while capable acceptance composes", () => {
+    const resolveTypecheckDefault = extractWorkspaceVerifyFunction(
+      "resolve_typecheck_workspace_concurrency_default",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+local_concurrency_default() { printf '8\\n'; }
+
+${resolveTypecheckDefault}
+
+CI=
+shared_host_mode=1
+composed_acceptance_parallel=0
+verification_command=typecheck
+resolve_typecheck_workspace_concurrency_default
+
+verification_command=verify:acceptance
+composed_acceptance_parallel=1
+resolve_typecheck_workspace_concurrency_default
+
+shared_host_mode=0
+composed_acceptance_parallel=0
+verification_command=typecheck
+resolve_typecheck_workspace_concurrency_default
+
+CI=1
+resolve_typecheck_workspace_concurrency_default
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe("2\n8\n8\n2\n");
   });
 
   it("passes the scoped worker budget to every repo-tools diff route", () => {
@@ -495,10 +565,16 @@ run_app_verify_command_with_retry apps/cloudflare 0 0 0
     const runAppVerify = extractWorkspaceVerifyFunction(
       "run_app_verify_command_with_retry",
     );
+    const crabboxEnvironment = readSanitizedCrabboxVerificationEnvironment();
+
+    expect(crabboxEnvironment).not.toHaveProperty("MURPH_VERIFY_STEP_PARALLEL");
     const result = runShellHarness(`#!/usr/bin/env bash
 set -uo pipefail
 
-unset MURPH_APP_VITEST_MAX_WORKERS MURPH_VERIFY_STEP_PARALLEL
+unset MURPH_APP_VITEST_MAX_WORKERS
+${crabboxEnvironment.MURPH_VERIFY_STEP_PARALLEL
+  ? `export MURPH_VERIFY_STEP_PARALLEL=${crabboxEnvironment.MURPH_VERIFY_STEP_PARALLEL}`
+  : "unset MURPH_VERIFY_STEP_PARALLEL"}
 composed_acceptance_parallel=1
 acceptance_app_vitest_max_workers=2
 acceptance_cli_coverage_ready_file=/tmp/murph-cli-ready-test

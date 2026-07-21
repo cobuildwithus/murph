@@ -7444,6 +7444,22 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('bounds fake-time process-kill polling at two virtual seconds', async () => {
+    vi.useFakeTimers()
+    const startedAt = Date.now()
+
+    try {
+      await expect(
+        waitForProcessKillWithFakeTimers(-25_550, 'SIGTERM'),
+      ).rejects.toThrow(
+        'Expected process.kill(-25550, SIGTERM) to be called.',
+      )
+      expect(Date.now() - startedAt).toBe(2_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for the exact failed process teardown before replacement', async () => {
     const workingDirectory = await createTempDir('assistant-codex-teardown-race-work-')
     const codexHome = await createTempDir('assistant-codex-teardown-race-home-')

@@ -62,6 +62,7 @@ describe("Crabbox verification environment", () => {
     expect(environment).not.toHaveProperty("CRABBOX_ENV_ALLOW");
     expect(environment).not.toHaveProperty("CUSTOM_PROVIDER_TOKEN");
     expect(environment).not.toHaveProperty("MURPH_CRABBOX_NO_FORWARD");
+    expect(environment).not.toHaveProperty("MURPH_VERIFY_STEP_PARALLEL");
     expect(environment).not.toHaveProperty("NODE_OPTIONS");
 
     expect(callModuleFailure(
