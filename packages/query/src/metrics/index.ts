@@ -4,12 +4,14 @@ import {
   experimentSessionMetricIsDeclared,
   normalizeMetricKey,
   normalizeMetricValue,
+  resolveLabResultMetricDefinition,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
   type MetricComparator,
   type MetricConfidence,
   type MetricGrain,
+  type MetricDefinition,
   type MetricPoint,
   type MetricPointContext,
   type MetricSourceFamily,
@@ -459,6 +461,9 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     const textValue = readString(record?.textValue);
     const unit = readString(record?.unit);
     if (!metric || (value === null && !textValue)) return [];
+    const metricKey = resolveNonEmptyMetricKey(metric);
+    const definition = resolveLabResultMetricDefinition(metricKey)
+      ?? createCustomMetricDefinition(metricKey, unit);
 
     return [scalarMetricPoint({
       comparator: readComparator(record?.comparator),
@@ -468,6 +473,7 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
         flag: readString(record?.flag) ?? undefined,
         referenceRange: readReferenceRange(record?.referenceRange),
       },
+      definition,
       entity,
       index,
       metric,
@@ -485,6 +491,7 @@ function scalarMetricPoint(input: {
   comparator?: MetricComparator | null;
   confidence: MetricConfidence;
   context: MetricPointContext;
+  definition?: MetricDefinition;
   effectiveDate?: string | null;
   entity: CanonicalEntity;
   grain?: MetricGrain;
@@ -498,8 +505,15 @@ function scalarMetricPoint(input: {
   value: number | null;
 }): MetricPoint {
   const metricKey = resolveNonEmptyMetricKey(input.metric);
-  const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
-  const normalized = normalizeMetricValue({ metricKey: definition.key, unit: input.unit ?? definition.displayUnit, value: input.value });
+  const definition = input.definition
+    ?? resolveMetricDefinition(metricKey)
+    ?? createCustomMetricDefinition(metricKey, input.unit);
+  const normalized = normalizeMetricValue({
+    definition,
+    metricKey: definition.key,
+    unit: input.unit ?? definition.displayUnit,
+    value: input.value,
+  });
   const observedAt = input.observedAt ?? entityObservedAt(input.entity);
   const effectiveDate = input.effectiveDate ?? observedAt.slice(0, 10);
   const labName = readString(input.entity.attributes.labName);

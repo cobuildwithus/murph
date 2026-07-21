@@ -4564,7 +4564,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 17);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 18);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4577,6 +4577,76 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       assert.equal(columnNames.includes("context_json"), false);
     } finally {
       database.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime reads rebuild version-17 lab aliases before serving split histories", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+
+  try {
+    await writeFile(
+      eventLedgerPath,
+      `${(await readFile(eventLedgerPath, "utf8")).trimEnd()}\n${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_projection_lab_aliases",
+        kind: "test",
+        occurredAt: "2026-03-22T08:00:00.000Z",
+        recordedAt: "2026-03-22T18:00:00.000Z",
+        collectedAt: "2026-03-22T08:00:00.000Z",
+        source: "import",
+        title: "Lab panel",
+        results: [
+          { analyte: "BUN", unit: "mg/dL", value: 14 },
+          { analyte: "Blood Urea Nitrogen", unit: "mg/dL", value: 15 },
+        ],
+      })}\n`,
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      staleDatabase.prepare(`
+        UPDATE query_metric_points
+        SET metric_key = 'bun', biomarker_key = NULL
+        WHERE source_record_id = 'evt_projection_lab_aliases'
+          AND source_result_index = 0
+      `).run();
+      staleDatabase.exec("PRAGMA user_version = 17;");
+
+      const storedKeys = staleDatabase.prepare(`
+        SELECT DISTINCT metric_key AS metricKey
+        FROM query_metric_points
+        WHERE source_record_id = 'evt_projection_lab_aliases'
+        ORDER BY metric_key ASC
+      `).all() as Array<{ metricKey: string }>;
+      assert.deepEqual(storedKeys.map((row) => row.metricKey), ["blood-urea-nitrogen", "bun"]);
+    } finally {
+      staleDatabase.close();
+    }
+
+    const statusBefore = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(statusBefore.schemaVersion, "murph.query-projection");
+    assert.equal(statusBefore.fresh, false);
+
+    const points = await listMetricPointsRuntime(vaultRoot, {
+      metricKey: "blood-urea-nitrogen",
+    });
+    assert.equal(points.length, 2);
+    assert.equal(points.every((point) => point.metricKey === "blood-urea-nitrogen"), true);
+
+    const rebuilt = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(rebuilt), 18);
+    } finally {
+      rebuilt.close();
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

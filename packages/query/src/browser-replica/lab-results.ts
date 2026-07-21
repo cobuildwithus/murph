@@ -4,7 +4,7 @@ import {
   normalizeUnit,
   resolveIndexedLabHealthArea,
   resolveLabHealthArea,
-  resolveMetricDefinition,
+  resolveLabResultMetricDefinition,
   type LabHealthArea,
   type MetricPoint,
 } from "@murphai/health-metrics";
@@ -75,7 +75,7 @@ export function toBrowserVaultLabResultRows(input: {
     const test = testsById.get(point.source.recordId) ?? null;
     if (!test) continue;
     const result = readRecord(readArray(test.attributes.results)[resultIndex]);
-    const definition = resolveMetricDefinition(point.metricKey);
+    const definition = resolveLabResultMetricDefinition(point.metricKey);
     const canonicalValue = readFiniteNumber(point.canonicalValue);
     const canUseRawComparableValue = definition === null || definition.canonicalUnit === null;
     const comparableValue = value === null
@@ -205,7 +205,7 @@ function buildLabBiomarkerDetail(
     value: row.normalizedValue,
   }));
   const numericNonComparatorRows = rows.filter((row) => row.value !== null && row.comparator === null);
-  const definition = resolveMetricDefinition(metricKey);
+  const definition = resolveLabResultMetricDefinition(metricKey);
 
   return {
     biomarkerKey: latest.biomarkerKey
@@ -238,7 +238,7 @@ function isComparableNumericRow(
 }
 
 function normalizeMetricFilterKey(metricKey: string): string {
-  return resolveMetricDefinition(metricKey)?.key
+  return resolveLabResultMetricDefinition(metricKey)?.key
     ?? normalizeMetricKey(metricKey);
 }
 

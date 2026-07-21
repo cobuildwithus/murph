@@ -1,6 +1,6 @@
 import type { MetricDefinition } from "../types.ts";
 
-export const LAB_METRICS = [
+export const LAB_RESULT_METRICS = [
   {
     aliases: ["serum-albumin", "serum_albumin"],
     biomarkerKey: "biomarker:albumin",
@@ -43,7 +43,6 @@ export const LAB_METRICS = [
       "egfr",
       "e-gfr",
       "estimated-gfr",
-      "estimated-gfr-ckd-epi",
     ],
     biomarkerKey: "biomarker:egfr",
     canonicalUnit: "mL/min/1.73m^2",
@@ -51,6 +50,17 @@ export const LAB_METRICS = [
     displayName: "eGFR",
     displayUnit: "mL/min/1.73m^2",
     key: "egfr",
+    selectionPolicy: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: 365 },
+    valuePrecision: 0,
+  },
+  {
+    aliases: ["estimated-gfr-ckd-epi"],
+    biomarkerKey: "biomarker:egfr-ckd-epi",
+    canonicalUnit: "mL/min/1.73m^2",
+    category: "lab",
+    displayName: "eGFR (CKD-EPI)",
+    displayUnit: "mL/min/1.73m^2",
+    key: "egfr-ckd-epi",
     selectionPolicy: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: 365 },
     valuePrecision: 0,
   },
@@ -81,8 +91,6 @@ export const LAB_METRICS = [
     aliases: [
       "cholesterol-ldl",
       "ldl",
-      "ldl-calculated",
-      "ldl-chol-calc-nih",
       "ldl_cholesterol",
       "ldl-cholesterol",
       "ldlc",
@@ -351,13 +359,13 @@ export const LAB_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["vldl-cholesterol-cal", "vldl-cholesterol-calculated"],
-    biomarkerKey: "biomarker:vldl-cholesterol",
+    aliases: ["vldl-cholesterol-cal"],
+    biomarkerKey: "biomarker:vldl-cholesterol-calculated",
     canonicalUnit: null,
     category: "lab",
-    displayName: "VLDL cholesterol",
+    displayName: "Calculated VLDL cholesterol",
     displayUnit: null,
-    key: "vldl-cholesterol",
+    key: "vldl-cholesterol-calculated",
     selectionPolicy: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: 365 },
     valuePrecision: 1,
   },
@@ -626,3 +634,65 @@ export const LAB_METRICS = [
     valuePrecision: 1,
   },
 ] satisfies readonly MetricDefinition[];
+
+/**
+ * The general metric catalog intentionally retains its pre-existing lab
+ * surface. The broader result catalog above is resolved only while projecting
+ * test results, so recognizing a lab label cannot revoke manual measurements,
+ * metric samples, goals, or experiment bindings that use the same words.
+ */
+const GLOBAL_LAB_ALIASES_BY_KEY: Readonly<Record<string, readonly string[]>> = {
+  albumin: ["serum-albumin", "serum_albumin"],
+  creatinine: ["serum-creatinine", "serum_creatinine"],
+  egfr: [
+    "estimated-glomerular-filtration-rate",
+    "estimated_glomerular_filtration_rate",
+    "glomerular-filtration-rate",
+    "glomerular_filtration_rate",
+    "egfr",
+    "e-gfr",
+  ],
+  glucose: ["blood-glucose", "blood_glucose", "fasting-glucose", "fasting_glucose"],
+  apob: ["apo-b", "apo_b", "apolipoprotein-b", "apolipoprotein_b", "apolipoprotein b"],
+  "ldl-c": ["ldl", "ldl_cholesterol", "ldl-cholesterol", "ldlc", "ldl_c"],
+  "hdl-c": ["hdl", "hdl_cholesterol", "hdl-cholesterol", "hdlc", "hdl_c"],
+  triglycerides: ["tg", "triglyceride"],
+  hba1c: ["a1c", "hb-a1c", "hba1c", "hemoglobin-a-1c", "hemoglobin-a1c", "hemoglobin_a1c"],
+  alt: ["alanine-aminotransferase", "alanine_aminotransferase"],
+  ast: ["aspartate-aminotransferase", "aspartate_aminotransferase"],
+  ggt: ["gamma-glutamyl-transferase", "gamma_glutamyl_transferase"],
+  "alkaline-phosphatase": ["alk-phos", "alkaline-phos", "alkaline_phosphatase", "alp"],
+  "hs-crp": ["crp", "hscrp", "hs_crp", "high-sensitivity-crp", "high_sensitivity_crp", "c-reactive-protein"],
+  "white-blood-cell-count": [
+    "leukocytes",
+    "white-blood-cell-count-wbc",
+    "white-blood-cells",
+    "white_blood_cells",
+    "wbc",
+    "wbc-count",
+  ],
+  "lymphocyte-percentage": [
+    "lymphocyte",
+    "lymphocyte-percent",
+    "lymphocyte-pct",
+    "lymphocyte_pct",
+    "lymphocyte-percentage",
+    "lymphocytes-percent",
+    "lymphocytes-pct",
+    "lymphocytes",
+  ],
+  "mean-corpuscular-volume": ["mcv", "mean-corpuscular-volume"],
+  "red-cell-distribution-width": [
+    "rdw",
+    "rdw-cv",
+    "red-cell-distribution-width",
+    "red-cell-distribution-width-rdw",
+    "red_cell_distribution_width",
+  ],
+  ferritin: [],
+};
+
+export const LAB_METRICS = LAB_RESULT_METRICS.flatMap((definition) => {
+  const aliases = GLOBAL_LAB_ALIASES_BY_KEY[definition.key];
+  return aliases ? [{ ...definition, aliases }] : [];
+}) satisfies readonly MetricDefinition[];

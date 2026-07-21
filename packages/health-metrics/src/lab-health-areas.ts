@@ -1,7 +1,7 @@
 import {
   normalizeMetricKey,
-  resolveMetricDefinition,
-  resolveMetricDefinitionForBiomarker,
+  resolveLabResultMetricDefinition,
+  resolveLabResultMetricDefinitionForBiomarker,
 } from "./catalog.ts";
 
 export const LAB_HEALTH_AREA_IDS = [
@@ -77,6 +77,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "apolipoprotein-b",
     "ldl-c",
     "ldl-cholesterol",
+    "ldl-calculated",
+    "ldl-chol-calc-nih",
     "hdl-c",
     "hdl-cholesterol",
     "triglycerides",
@@ -84,6 +86,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "cholesterol-total",
     "non-hdl-cholesterol",
     "vldl-cholesterol",
+    "vldl-cholesterol-cal",
+    "vldl-cholesterol-calculated",
     "lipoprotein-a",
     "lpa",
     "apolipoprotein-a1",
@@ -103,6 +107,8 @@ const LAB_HEALTH_AREA_KEYS: Readonly<Record<LabHealthAreaId, readonly string[]>>
     "serum-creatinine",
     "egfr",
     "estimated-glomerular-filtration-rate",
+    "egfr-ckd-epi",
+    "estimated-gfr-ckd-epi",
     "gfr-mdrd-af-amer",
     "gfr-mdrd-non-af-amer",
     "bun",
@@ -350,8 +356,8 @@ export function groupLabItemsByHealthArea<T>(
 
 function resolveLabHealthAreaLookupKey(value: string): string {
   const trimmed = value.trim();
-  const definition = resolveMetricDefinition(trimmed)
-    ?? resolveMetricDefinitionForBiomarker(trimmed);
+  const definition = resolveLabResultMetricDefinition(trimmed)
+    ?? resolveLabResultMetricDefinitionForBiomarker(trimmed);
 
   if (definition?.category === "lab") {
     return definition.key;

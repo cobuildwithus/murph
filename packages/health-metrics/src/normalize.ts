@@ -1,5 +1,5 @@
 import { createCustomMetricDefinition, normalizeMetricKey, resolveMetricDefinition } from "./catalog.ts";
-import type { MetricSelectionWarning, MetricValueNormalization } from "./types.ts";
+import type { MetricDefinition, MetricSelectionWarning, MetricValueNormalization } from "./types.ts";
 
 const HOUR_INTENT_DURATION_ALIASES = new Set([
   "sleep-duration-hours",
@@ -11,11 +11,14 @@ const HOUR_INTENT_DURATION_ALIASES = new Set([
 ].map(normalizeMetricKey));
 
 export function normalizeMetricValue(input: {
+  definition?: MetricDefinition;
   metricKey: string;
   unit: string | null;
   value: number | null;
 }): MetricValueNormalization {
-  const definition = resolveMetricDefinition(input.metricKey) ?? createCustomMetricDefinition(input.metricKey, input.unit);
+  const definition = input.definition
+    ?? resolveMetricDefinition(input.metricKey)
+    ?? createCustomMetricDefinition(input.metricKey, input.unit);
   const unit = normalizeUnit(input.unit) ?? inferUnitFromMetricAlias(input.metricKey);
 
   if (input.value === null || !Number.isFinite(input.value)) {

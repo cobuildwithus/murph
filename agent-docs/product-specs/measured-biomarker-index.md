@@ -20,7 +20,11 @@ member-facing biomarker.
   this navigation surface," not deleted, medically unimportant, or invalid.
 - Merge only explicit aliases that represent the same analyte. Do not use fuzzy
   medical matching. Related but distinct results, including ratios, absolute
-  cell counts, percentages, and nearby indices, keep separate identities.
+  cell counts, percentages, nearby indices, and named calculation methods keep
+  separate identities.
+- Resolve the expanded alias catalog only for test results. A lab label must not
+  change the identity, selection authority, goal behavior, or experiment
+  support of a same-named manual measurement or metric sample.
 - Normalize numeric units only when the conversion is owner-verified. Otherwise
   preserve the original unit and compare only like-for-like histories.
 - Do not infer health meaning, severity, or a reference range from index
@@ -53,9 +57,11 @@ commentary, and unknown custom fields.
 
 - `packages/health-metrics` owns canonical lab identities, explicit aliases,
   verified unit normalization, stable health-area order, and index admission.
+  Its expanded lab-result catalog is separate from the general metric catalog.
 - `packages/query` preserves lab rows and applies admission only in the measured
   index selector. Exact lab-row and detail queries remain read-only views of the
-  preserved projection.
+  preserved projection, and projection-version changes rebuild stored metric
+  identities when alias semantics change.
 - `apps/web` owns device-first ordering and the disclosure/notebook presentation;
   it must not maintain a second classification list.
 
