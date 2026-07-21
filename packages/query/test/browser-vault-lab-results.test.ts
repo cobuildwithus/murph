@@ -81,7 +81,7 @@ test("browser vault projects all live lab history without widening the wearable 
 
   assert.equal(replica.labResultRows.length, 7);
   assert.deepEqual(client.metrics.series({ metricKey: "resting-heart-rate" }), []);
-  assert.deepEqual(client.metrics.series({ metricKey: "hba1c" }).map((row) => row.date), ["2026-06-01"]);
+  assert.deepEqual(client.metrics.series({ metricKey: "hba1c" }), []);
 
   const oldestHba1c = client.labResults.list({ metricKey: "HbA1c" })[0];
   assert.ok(oldestHba1c);

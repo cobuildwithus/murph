@@ -1389,6 +1389,198 @@ test("selects metric points by policy and exposes provenance warnings", () => {
   assert.equal(blankMetricKey.point, null);
 });
 
+test("requires truthful unit evidence before catalog metrics become selections or series", () => {
+  const unitlessLdl = {
+    ...metricPoint({
+      biomarkerKey: "biomarker:ldl-c",
+      effectiveDate: "2026-04-23",
+      id: "metric-point:ldl-c:2026-04-23:lab:0",
+      metricKey: "ldl-c",
+      observedAt: "2026-04-23T08:00:00.000Z",
+      recordId: "lab_ldl_unitless",
+      sourceKind: "test-result",
+      unit: "mg/dL",
+      value: 140,
+    }),
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: null,
+  } satisfies MetricPoint;
+  const unitfulLdl = metricPoint({
+    biomarkerKey: "biomarker:ldl-c",
+    effectiveDate: "2026-08-02",
+    id: "metric-point:ldl-c:2026-08-02:lab:0",
+    metricKey: "ldl-c",
+    observedAt: "2026-08-02T08:00:00.000Z",
+    recordId: "lab_ldl_unitful",
+    sourceKind: "test-result",
+    unit: "mg/dL",
+    value: 120,
+  });
+
+  const unitlessSelection = selectMetricValue({
+    metricKey: "ldl-c",
+    points: [unitlessLdl],
+  });
+  assert.equal(unitlessSelection.status, "no_data");
+  assert.equal(unitlessSelection.point, null);
+  assert.equal(unitlessSelection.value, null);
+  assert.equal(
+    unitlessSelection.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"),
+    true,
+  );
+
+  const unitlessSeries = selectMetricSeries({
+    duplicatePolicy: "keep-all",
+    metricKey: "ldl-c",
+    points: [unitlessLdl],
+  });
+  assert.equal(unitlessSeries.status, "no_data");
+  assert.deepEqual(unitlessSeries.rows, []);
+  assert.equal(
+    unitlessSeries.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"),
+    true,
+  );
+
+  const unitfulSelection = selectMetricValue({
+    metricKey: "ldl-c",
+    points: [unitfulLdl],
+  });
+  assert.equal(unitfulSelection.status, "ready");
+  assert.equal(unitfulSelection.value, 120);
+  assert.equal(unitfulSelection.unit, "mg/dL");
+  assert.deepEqual(
+    selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey: "ldl-c",
+      points: [unitfulLdl],
+    }).rows.map((row) => [row.value, row.unit]),
+    [[120, "mg/dL"]],
+  );
+
+  const explicitRawCanonicalUnit = {
+    ...unitfulLdl,
+    canonicalUnit: null,
+    canonicalValue: null,
+  } satisfies MetricPoint;
+  const explicitRawSelection = selectMetricValue({
+    metricKey: "ldl-c",
+    points: [explicitRawCanonicalUnit],
+  });
+  assert.equal(explicitRawSelection.status, "ready");
+  assert.equal(explicitRawSelection.value, 120);
+  assert.equal(explicitRawSelection.unit, "mg/dL");
+  assert.equal(
+    explicitRawSelection.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"),
+    false,
+  );
+  assert.deepEqual(
+    selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey: "ldl-c",
+      points: [explicitRawCanonicalUnit],
+    }).rows.map((row) => [row.value, row.unit]),
+    [[120, "mg/dL"]],
+  );
+
+  const explicitRawAggregate = selectMetricValue({
+    metricKey: "ldl-c",
+    points: [explicitRawCanonicalUnit],
+    policyOverride: { kind: "daily-aggregate", statistic: "mean" },
+  });
+  assert.equal(explicitRawAggregate.status, "ready");
+  assert.equal(explicitRawAggregate.value, 120);
+  assert.equal(explicitRawAggregate.unit, "mg/dL");
+  assert.equal(
+    explicitRawAggregate.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"),
+    false,
+  );
+
+  const incompatibleRawUnit = {
+    ...unitfulLdl,
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: "mmol/L",
+    value: 3.1,
+  } satisfies MetricPoint;
+  assert.equal(
+    selectMetricValue({ metricKey: "ldl-c", points: [incompatibleRawUnit] }).status,
+    "no_data",
+  );
+  assert.deepEqual(
+    selectMetricSeries({ metricKey: "ldl-c", points: [incompatibleRawUnit] }).rows,
+    [],
+  );
+
+  const legacyDerivedSummary = {
+    ...metricPoint({
+      biomarkerKey: "biomarker:resting-heart-rate",
+      effectiveDate: "2026-08-02",
+      id: "metric-point:resting-heart-rate:2026-08-02:wearable:0",
+      metricKey: "resting-heart-rate",
+      observedAt: "2026-08-02T08:00:00.000Z",
+      recordId: "wearable_rhr_legacy_summary",
+      sourceKind: "wearable-summary",
+      unit: "bpm",
+      value: 52,
+    }),
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: null,
+  } satisfies MetricPoint;
+  const legacyDerivedSelection = selectMetricValue({
+    metricKey: "resting-heart-rate",
+    points: [legacyDerivedSummary],
+    policyOverride: { kind: "latest-valid" },
+  });
+  assert.equal(legacyDerivedSelection.status, "ready");
+  assert.equal(legacyDerivedSelection.value, 52);
+  assert.equal(legacyDerivedSelection.unit, "bpm");
+  assert.deepEqual(
+    selectMetricSeries({
+      duplicatePolicy: "keep-all",
+      metricKey: "resting-heart-rate",
+      points: [legacyDerivedSummary],
+    }).rows.map((row) => [row.value, row.unit]),
+    [[52, "bpm"]],
+  );
+
+  const mismatchedCanonicalUnit = {
+    ...unitfulLdl,
+    canonicalUnit: "mmol/L",
+    canonicalValue: 3.1,
+  } satisfies MetricPoint;
+  assert.equal(
+    selectMetricValue({ metricKey: "ldl-c", points: [mismatchedCanonicalUnit] }).status,
+    "no_data",
+  );
+  assert.deepEqual(
+    selectMetricSeries({ metricKey: "ldl-c", points: [mismatchedCanonicalUnit] }).rows,
+    [],
+  );
+
+  const customUnitless = {
+    ...metricPoint({
+      effectiveDate: "2026-04-23",
+      id: "metric-point:custom-score:2026-04-23:measurement:0",
+      metricKey: "custom-score",
+      observedAt: "2026-04-23T08:00:00.000Z",
+      recordId: "custom_score_unitless",
+      sourceKind: "measurement",
+      unit: "score",
+      value: 7,
+    }),
+    canonicalUnit: null,
+    canonicalValue: null,
+    unit: null,
+  } satisfies MetricPoint;
+  assert.equal(selectMetricValue({ points: [customUnitless] }).value, 7);
+  assert.equal(
+    selectMetricSeries({ duplicatePolicy: "keep-all", points: [customUnitless] }).rows[0]?.value,
+    7,
+  );
+});
+
 test("latest-lab policy does not silently fall back to non-lab event points", () => {
   const manualMeasurement = metricPoint({
     effectiveDate: "2026-04-30",

@@ -7,8 +7,9 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue, formatNumber } from "./format.ts";
+import { unitsEquivalent } from "./normalize.ts";
 import { metricPointRecordIds } from "./record-ids.ts";
-import { selectMetricValue } from "./selectors.ts";
+import { metricPointComparableValue, selectMetricValue } from "./selectors.ts";
 import type {
   ListMetricPointsInput,
   MetricConfidence,
@@ -56,7 +57,14 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
   const resolvedMetricKey = requestedMetricKey || points[0]?.metricKey || "unknown";
   const definition = resolveMetricDefinition(resolvedMetricKey) ?? createCustomMetricDefinition(resolvedMetricKey);
   const minimumPoints = input.minimumPoints ?? 0;
-  const warnings = collectSeriesWarnings({ definition, minimumPoints, points });
+  const comparablePoints = points.filter((point) => metricPointComparableValue(point, definition) !== null);
+  const selectedPoints = input.aggregation === "count" ? points : comparablePoints;
+  const warnings = collectSeriesWarnings({
+    comparablePointCount: selectedPoints.length,
+    definition,
+    minimumPoints,
+    points,
+  });
 
   if (points.length === 0) {
     return {
@@ -69,7 +77,7 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
     };
   }
 
-  if (minimumPoints > 0 && points.length < minimumPoints) {
+  if (minimumPoints > 0 && selectedPoints.length < minimumPoints) {
     return {
       biomarkerKey: input.biomarkerKey ?? definition.biomarkerKey ?? null,
       metricKey: definition.key,
@@ -82,7 +90,7 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
 
   const rows = input.aggregation
     ? aggregateMetricSeriesPoints(points, definition, input.aggregation)
-    : selectMetricSeriesRowsByPolicy(points, definition, input.duplicatePolicy ?? "selection-policy");
+    : selectMetricSeriesRowsByPolicy(selectedPoints, definition, input.duplicatePolicy ?? "selection-policy");
 
   return {
     biomarkerKey: input.biomarkerKey ?? rows[0]?.biomarkerKey ?? definition.biomarkerKey ?? null,
@@ -100,15 +108,19 @@ function selectMetricSeriesRowsByPolicy(
   duplicatePolicy: MetricSeriesDuplicatePolicy,
 ): MetricSeriesPoint[] {
   if (duplicatePolicy === "keep-all") {
-    return points.map((point) => metricPointToSeriesPoint(point, definition));
+    return points.flatMap((point) => {
+      const row = metricPointToSeriesPoint(point, definition);
+      return row ? [row] : [];
+    });
   }
 
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
     const selected = duplicatePolicy === "selection-policy"
       ? selectMetricValue({ metricKey: definition.key, points: datePoints }).point ?? datePoints.at(-1) ?? null
       : datePoints.at(-1) ?? null;
-
-    return selected ? [metricPointToSeriesPoint(selected, definition)] : [];
+    if (!selected) return [];
+    const row = metricPointToSeriesPoint(selected, definition);
+    return row ? [row] : [];
   });
 }
 
@@ -119,12 +131,17 @@ function aggregateMetricSeriesPoints(
 ): MetricSeriesPoint[] {
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
     const useCanonicalValues = aggregation !== "count" && definition.canonicalUnit !== null;
-    if (useCanonicalValues && datePoints.some((point) => point.value !== null && point.canonicalValue === null)) {
+    if (useCanonicalValues && datePoints.some((point) =>
+      point.value !== null && metricPointComparableValue(point, definition) === null
+    )) {
       return [];
     }
 
     const values = datePoints
-      .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
+      .map((point) => useCanonicalValues
+        ? metricPointComparableValue(point, definition)?.value ?? null
+        : pointNumericValue(point)
+      )
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
     if (values.length === 0 && aggregation !== "count") {
@@ -178,7 +195,12 @@ function aggregateMetricSeriesPoints(
   });
 }
 
-function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefinition): MetricSeriesPoint {
+function metricPointToSeriesPoint(
+  point: MetricPoint,
+  definition: MetricDefinition,
+): MetricSeriesPoint | null {
+  const comparable = metricPointComparableValue(point, definition);
+  if (!comparable) return null;
   return {
     biomarkerKey: point.biomarkerKey,
     comparator: point.comparator,
@@ -196,13 +218,14 @@ function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefiniti
     sourceKinds: [point.source.kind],
     sourceLabel: point.provenance.sourceLabel,
     statistic: point.statistic,
-    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
-    value: pointNumericValue(point),
+    unit: comparable.unit,
+    value: comparable.value,
     valueLabel: formatMetricDisplayValue(point, definition),
   };
 }
 
 function collectSeriesWarnings(input: {
+  comparablePointCount: number;
   definition: MetricDefinition;
   minimumPoints: number;
   points: readonly MetricPoint[];
@@ -213,10 +236,14 @@ function collectSeriesWarnings(input: {
     typeof point.context.measurementMethodKey === "string" ? point.context.measurementMethodKey : null
   ));
 
-  if (input.minimumPoints > 0 && input.points.length > 0 && input.points.length < input.minimumPoints) {
+  if (
+    input.minimumPoints > 0
+    && input.points.length > 0
+    && input.comparablePointCount < input.minimumPoints
+  ) {
     warnings.push({
       code: "LOW_SAMPLE_COUNT",
-      message: `Only ${input.points.length} point${input.points.length === 1 ? "" : "s"} were available for ${input.definition.displayName}.`,
+      message: `Only ${input.comparablePointCount} point${input.comparablePointCount === 1 ? "" : "s"} were available for ${input.definition.displayName}.`,
     });
   }
 
@@ -241,9 +268,11 @@ function collectSeriesWarnings(input: {
     });
   }
 
-  if (input.definition.canonicalUnit && input.points.some((point) =>
-    point.value !== null && point.canonicalValue === null && point.canonicalUnit === null
-  )) {
+  if (input.definition.canonicalUnit && input.points.some((point) => {
+    if (point.value === null || !Number.isFinite(point.value)) return false;
+    const comparable = metricPointComparableValue(point, input.definition);
+    return comparable === null || !unitsEquivalent(comparable.unit, input.definition.canonicalUnit);
+  })) {
     warnings.push({
       code: "UNIT_NOT_NORMALIZED",
       message: `${input.definition.displayName} series includes values that could not be normalized to ${input.definition.canonicalUnit}.`,

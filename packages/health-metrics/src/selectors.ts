@@ -67,8 +67,10 @@ export function selectMetricValue(input: {
     ...(policySelection.warnings ?? []),
     ...collectSelectionWarnings({ definition, now: input.now, points, policy, selected }),
   ];
-  const value = selected.canonicalValue ?? selected.value;
-  const unit = selected.canonicalUnit ?? selected.unit ?? definition.displayUnit;
+  const comparable = metricPointComparableValue(selected, definition);
+  if (!comparable) {
+    return emptySelection(definition, requestedBiomarkerKey, "no_data", warnings);
+  }
 
   return {
     biomarkerKey: selected.biomarkerKey ?? requestedBiomarkerKey,
@@ -85,8 +87,8 @@ export function selectMetricValue(input: {
     schemaVersion: METRIC_SELECTION_SCHEMA_VERSION,
     sourceLabel: selected.provenance.sourceLabel,
     status: warnings.some((warning) => warning.code === "SOURCE_STALE") ? "stale" : "ready",
-    unit,
-    value,
+    unit: comparable.unit,
+    value: comparable.value,
     valueLabel: formatMetricDisplayValue(selected, definition),
     warnings,
   };
@@ -131,20 +133,100 @@ function selectPointByPolicy(
   policy: MetricSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const numericPoints = points.filter(hasDisplayableValue);
+  const comparablePoints = points.filter((point) => metricPointComparableValue(point, definition) !== null);
+  let selection: MetricPolicySelectionResult;
   switch (policy.kind) {
     case "qualified-latest":
-      return { point: sortedLatest(numericPoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers))).at(0) ?? null };
+      selection = {
+        point: sortedLatest(
+          comparablePoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers)),
+        ).at(0) ?? null,
+      };
+      break;
     case "daily-aggregate":
-      return selectDailyAggregatePoint(numericPoints, policy, definition);
+      selection = selectDailyAggregatePoint(
+        policy.statistic === "count" ? points : comparablePoints,
+        policy,
+        definition,
+      );
+      break;
     case "latest-lab": {
-      const labPoints = numericPoints.filter((point) => point.source.kind === "test-result");
-      return { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      const labPoints = comparablePoints.filter((point) => point.source.kind === "test-result");
+      selection = { point: sortedLatest(labPoints, { preferFasting: policy.preferFasting }).at(0) ?? null };
+      break;
     }
     case "latest-device-estimate":
     case "latest-valid":
-      return { point: sortedLatest(numericPoints).at(0) ?? null };
+      selection = { point: sortedLatest(comparablePoints).at(0) ?? null };
+      break;
   }
+
+  const unitWarnings = policy.kind === "daily-aggregate" && policy.statistic === "count"
+    ? []
+    : collectIncomparableUnitWarnings(points, definition);
+  return unitWarnings.length === 0
+    ? selection
+    : { ...selection, warnings: [...(selection.warnings ?? []), ...unitWarnings] };
+}
+
+export function metricPointComparableValue(
+  point: MetricPoint,
+  definition: MetricDefinition,
+): { unit: string | null; value: number } | null {
+  if (definition.canonicalUnit !== null) {
+    const hasCanonicalEvidence = point.canonicalUnit !== null || point.canonicalValue !== null;
+    if (hasCanonicalEvidence) {
+      if (
+        point.canonicalUnit === null
+        || !unitsEquivalent(point.canonicalUnit, definition.canonicalUnit)
+        || point.canonicalValue === null
+        || !Number.isFinite(point.canonicalValue)
+      ) {
+        return null;
+      }
+      return { unit: definition.canonicalUnit, value: point.canonicalValue };
+    }
+
+    if (
+      point.value !== null
+      && Number.isFinite(point.value)
+      && point.unit !== null
+      && unitsEquivalent(point.unit, definition.canonicalUnit)
+    ) {
+      return { unit: definition.canonicalUnit, value: point.value };
+    }
+
+    // Derived summaries are schema-typed by their producer even when legacy
+    // points predate duplicated canonical fields. Raw evidence is not.
+    if (point.source.family !== "derived") return null;
+  }
+
+  const value = point.canonicalValue ?? point.value;
+  if (value === null || !Number.isFinite(value)) return null;
+  return {
+    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
+    value,
+  };
+}
+
+function collectIncomparableUnitWarnings(
+  points: readonly MetricPoint[],
+  definition: MetricDefinition,
+): MetricSelectionWarning[] {
+  if (
+    definition.canonicalUnit === null
+    || !points.some((point) =>
+      point.value !== null
+      && Number.isFinite(point.value)
+      && metricPointComparableValue(point, definition) === null
+    )
+  ) {
+    return [];
+  }
+  return [{
+    code: "UNIT_NOT_NORMALIZED",
+    message: `${definition.displayName} excluded values that could not be normalized to ${definition.canonicalUnit}.`,
+  }];
 }
 
 function selectDailyAggregatePoint(
@@ -165,16 +247,13 @@ function selectDailyAggregatePoint(
 
   const useCanonicalValues = policy.statistic !== "count" && definition.canonicalUnit !== null;
   const values = candidates
-    .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
+    .map((point) => useCanonicalValues
+      ? metricPointComparableValue(point, definition)?.value ?? null
+      : pointNumericValue(point)
+    )
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const warnings: MetricSelectionWarning[] = [];
 
-  if (useCanonicalValues && candidates.some((point) => point.value !== null && point.canonicalValue === null)) {
-    warnings.push({
-      code: "UNIT_NOT_NORMALIZED",
-      message: `${definition.displayName} daily aggregate excluded values that could not be normalized to ${definition.canonicalUnit}.`,
-    });
-  }
   if (candidates.some((point) => point.comparator)) {
     warnings.push({
       code: "COMPARATOR_VALUE",
@@ -301,11 +380,6 @@ function fastingRank(point: MetricPoint): number {
   return point.context.fastingStatus === "fasting" ? 1 : 0;
 }
 
-function hasDisplayableValue(point: MetricPoint): boolean {
-  const value = point.canonicalValue ?? point.value;
-  return typeof value === "number" && Number.isFinite(value);
-}
-
 function qualifiersMatch(point: MetricPoint, required: Record<string, string | number | boolean>): boolean {
   const qualifiers = point.context.qualifiers ?? {};
   return Object.entries(required).every(([key, value]) => qualifiers[key] === value);
@@ -368,19 +442,14 @@ function collectSelectionWarnings(input: {
   if (input.selected.comparator) {
     warnings.push({ code: "COMPARATOR_VALUE", message: "Selected value includes a lab comparator." });
   }
-  if (input.definition.canonicalUnit && !input.selected.canonicalUnit) {
-    warnings.push({
-      code: "UNIT_NOT_NORMALIZED",
-      message: `${input.definition.displayName} could not be normalized to ${input.definition.canonicalUnit}.`,
-    });
-  } else if (
+  const comparable = metricPointComparableValue(input.selected, input.definition);
+  if (
     input.definition.canonicalUnit
-    && input.selected.canonicalUnit
-    && !unitsEquivalent(input.selected.canonicalUnit, input.definition.canonicalUnit)
+    && (!comparable || !unitsEquivalent(comparable.unit, input.definition.canonicalUnit))
   ) {
     warnings.push({
       code: "UNIT_NOT_NORMALIZED",
-      message: `${input.definition.displayName} is normalized as ${input.selected.canonicalUnit}; expected ${input.definition.canonicalUnit}.`,
+      message: `${input.definition.displayName} could not be normalized to ${input.definition.canonicalUnit}.`,
     });
   }
 
