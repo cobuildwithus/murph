@@ -287,6 +287,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(2);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -324,6 +325,14 @@ describe("hosted execution coverage gaps", () => {
       freshness: "fresh",
       reason: "current",
       shouldRefresh: false,
+    });
+    expect(assessBrowserVaultReplicaFreshness({
+      now: "2026-05-04T00:03:30.000Z",
+      replicaRef: { ...freshReplica, generation: 1 },
+    })).toMatchObject({
+      freshness: "stale",
+      reason: "generation_mismatch",
+      shouldRefresh: true,
     });
     expect(assessBrowserVaultReplicaFreshness({
       now: "2026-05-04T00:03:30.000Z",
@@ -713,6 +722,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH",
       "HOSTED_RUNTIME_STATUS_PATH",
       "HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH",
+      "HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH",
       "HOSTED_RUNTIME_USAGE_RECORD_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH",
       "HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH",

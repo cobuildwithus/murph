@@ -91,6 +91,7 @@ export async function sendClaimedHostedAiUsageLimitNoticeToLinqChat(input: {
 export async function sendClaimedHostedAiUsageLimitNoticeToTelegramThread(input: {
   memberId: string;
   message: string;
+  noticeCode?: HostedAiUsageLimitNoticeCode;
   periodStart: Date;
   prisma: PrismaClient;
   replyToMessageId: string;

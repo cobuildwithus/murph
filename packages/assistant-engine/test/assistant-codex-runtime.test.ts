@@ -7444,6 +7444,22 @@ describe('assistant codex runtime', () => {
     )
   })
 
+  it('bounds fake-time process-kill polling at two virtual seconds', async () => {
+    vi.useFakeTimers()
+    const startedAt = Date.now()
+
+    try {
+      await expect(
+        waitForProcessKillWithFakeTimers(-25_550, 'SIGTERM'),
+      ).rejects.toThrow(
+        'Expected process.kill(-25550, SIGTERM) to be called.',
+      )
+      expect(Date.now() - startedAt).toBe(2_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('waits for the exact failed process teardown before replacement', async () => {
     const workingDirectory = await createTempDir('assistant-codex-teardown-race-work-')
     const codexHome = await createTempDir('assistant-codex-teardown-race-home-')
@@ -18916,7 +18932,11 @@ async function waitForProcessKillWithFakeTimers(
   pid: number,
   signal: NodeJS.Signals,
 ): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  // A replacement can be queued behind the failed-stop lock's promise cleanup.
+  // Full-workspace coverage load can require more than 200 microtask turns even
+  // though no wall-clock delay is involved, so keep this fake-time wait bounded
+  // to two virtual seconds rather than a scheduler-sensitive iteration count.
+  for (let attempt = 0; attempt < 2_000; attempt += 1) {
     if (
       vi.mocked(process.kill).mock.calls.some(
         (call) => call[0] === pid && call[1] === signal,

@@ -2,14 +2,17 @@ import {
   METRIC_POINT_SCHEMA_VERSION,
   createCustomMetricDefinition,
   experimentSessionMetricIsDeclared,
+  normalizeLabResultMetricValue,
   normalizeMetricKey,
   normalizeMetricValue,
+  resolveLabResultMetricDefinition,
   resolveMetricDefinition,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
   type MetricComparator,
   type MetricConfidence,
   type MetricGrain,
+  type MetricDefinition,
   type MetricPoint,
   type MetricPointContext,
   type MetricSourceFamily,
@@ -462,6 +465,9 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
     const textValue = readString(record?.textValue);
     const unit = readString(record?.unit);
     if (!metric || (value === null && !textValue)) return [];
+    const metricKey = resolveNonEmptyMetricKey(metric);
+    const definition = resolveLabResultMetricDefinition(metricKey)
+      ?? createCustomMetricDefinition(metricKey, unit);
 
     return [scalarMetricPoint({
       comparator: readComparator(record?.comparator),
@@ -471,6 +477,7 @@ function testResultMetricPoints(entity: CanonicalEntity): MetricPoint[] {
         flag: readString(record?.flag) ?? undefined,
         referenceRange: readReferenceRange(record?.referenceRange),
       },
+      definition,
       entity,
       index,
       metric,
@@ -488,6 +495,7 @@ function scalarMetricPoint(input: {
   comparator?: MetricComparator | null;
   confidence: MetricConfidence;
   context: MetricPointContext;
+  definition?: MetricDefinition;
   effectiveDate?: string | null;
   entity: CanonicalEntity;
   grain?: MetricGrain;
@@ -501,10 +509,15 @@ function scalarMetricPoint(input: {
   value: number | null;
 }): MetricPoint {
   const metricKey = resolveNonEmptyMetricKey(input.metric);
-  const definition = resolveMetricDefinition(metricKey) ?? createCustomMetricDefinition(metricKey, input.unit);
+  const definition = input.definition
+    ?? resolveMetricDefinition(metricKey)
+    ?? createCustomMetricDefinition(metricKey, input.unit);
+  const normalizeValue = input.sourceKind === "test-result"
+    ? normalizeLabResultMetricValue
+    : normalizeMetricValue;
   const normalized = input.sourceKind === "test-result" && input.unit === null
     ? null
-    : normalizeMetricValue({
+    : normalizeValue({
         metricKey: definition.key,
         unit: input.unit ?? definition.displayUnit,
         value: input.value,

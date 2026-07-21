@@ -464,7 +464,7 @@ interface HostedUsageCreditModule {
 
 interface HostedThreadRouteForTestModule {
   readHostedThreadRouteByThreadIdentity(input: {
-    channel: "linq";
+    channel: "linq" | "telegram";
     prisma: HostedTestPrismaClient;
     threadId: string;
   }): Promise<{
@@ -473,6 +473,11 @@ interface HostedThreadRouteForTestModule {
       id: string;
     };
   } | null>;
+}
+
+export interface HostedThreadRouteForTest {
+  containerMemberId: string;
+  ownerMemberId: string;
 }
 
 export interface HostedMailboxAppendForTestResponse {
@@ -723,6 +728,27 @@ export async function readHostedLinqWorkspaceIsolationStateForTest(input: {
       },
       thread,
     };
+  });
+}
+
+export async function readHostedThreadRouteForTest(input: {
+  channel: "linq" | "telegram";
+  environment?: NodeJS.ProcessEnv;
+  threadId: string;
+}): Promise<HostedThreadRouteForTest | null> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const threadRouteStore = await loadHostedThreadRouteForTestModule();
+    const route = await threadRouteStore.readHostedThreadRouteByThreadIdentity({
+      channel: input.channel,
+      prisma: deps.prisma,
+      threadId: input.threadId,
+    });
+    return route
+      ? {
+          containerMemberId: route.containerMemberId,
+          ownerMemberId: route.owner.id,
+        }
+      : null;
   });
 }
 

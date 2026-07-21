@@ -1,6 +1,6 @@
 import {
   assistantPersonalitySettingIds,
-  resolveAssistantPersonalityScores,
+  resolveAssistantEffectiveStyle,
   type AssistantPersonalityPreferences,
   type AssistantPersonalityScores,
   type AssistantPersonalitySettingId,
@@ -84,7 +84,7 @@ function buildAssistantPersonalityResult(
   updated: boolean,
 ): AssistantPersonalityResult {
   const personality = preferences.assistant?.personality
-  const effective = resolveAssistantPersonalityScores(personality)
+  const effective = resolveAssistantEffectiveStyle(preferences.assistant).personality
   const settingResult = (setting: AssistantPersonalitySettingId) => ({
     value: effective[setting],
     source: hasPersonalityOverride(personality, setting)

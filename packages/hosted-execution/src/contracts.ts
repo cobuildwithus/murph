@@ -8,6 +8,7 @@ import type {
   HostedExecutionDeviceSyncWakeHint as DeviceSyncHostedExecutionDeviceSyncWakeHint,
 } from "@murphai/device-syncd/hosted-runtime";
 import type {
+  AssistantPersonaId,
   AssistantPersonalitySettingId,
   AssistantTonePreference,
   AssistantVoiceOptionId,
@@ -127,6 +128,11 @@ export type HostedExecutionLinqExternalThreadRouteAuthority =
     channel: "linq";
   };
 
+export type HostedExecutionTelegramExternalThreadRouteAuthority =
+  HostedExecutionExternalThreadRouteAuthority & {
+    channel: "telegram";
+  };
+
 export interface HostedExecutionBaseEvent {
   kind: HostedExecutionEventKind;
   userId: string;
@@ -167,6 +173,7 @@ export type HostedExecutionMemberPersonalityPreferences = {
 };
 
 export interface HostedExecutionMemberPreferences {
+  persona?: AssistantPersonaId;
   personality?: HostedExecutionMemberPersonalityPreferences;
   tone?: AssistantTonePreference;
   voice?: AssistantVoiceOptionId;
@@ -178,7 +185,7 @@ export interface HostedExecutionMemberPreferencesUpdatedEvent
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
-  requestedFields?: Array<"tone" | "voice">;
+  requestedFields?: Array<"persona" | "tone" | "voice">;
 }
 
 export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
@@ -303,6 +310,7 @@ export interface HostedExecutionTelegramMessage {
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
   text?: string | null;
   threadId: string;
+  threadIsDirect?: boolean;
 }
 
 export interface HostedExecutionDeviceSyncWakeEvent extends HostedExecutionBaseEvent {
@@ -497,6 +505,7 @@ export function readHostedLinqConversationMessageAccountLookupKey(
 
 export interface HostedExecutionTelegramConversationMessagePayload {
   channel: "telegram";
+  routeAuthority?: HostedExecutionTelegramExternalThreadRouteAuthority | null;
   telegramMessage: HostedExecutionTelegramMessage;
 }
 
@@ -570,7 +579,7 @@ export interface HostedExecutionMemberPreferencesUpdatedWake
   kind: "member.preferences.updated";
   preferenceCausalSeq?: string;
   preferences: HostedExecutionMemberPreferences;
-  requestedFields?: Array<"tone" | "voice">;
+  requestedFields?: Array<"persona" | "tone" | "voice">;
 }
 
 export interface HostedExecutionVaultShareDeliveryWake extends HostedExecutionBaseWake {

@@ -191,6 +191,7 @@ export interface AssistantNotificationInput
       | 'onTraceEvent'
       | 'operatorAuthority'
       | 'outboxAutomationAuthority'
+      | 'outboxExternalThreadRouteAuthority'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
       | 'scheduledOccurrenceAt'
@@ -1242,6 +1243,8 @@ function buildAssistantNotificationMessageInput(
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
     outboxAutomationAuthority: input.outboxAutomationAuthority ?? null,
+    outboxExternalThreadRouteAuthority:
+      input.outboxExternalThreadRouteAuthority ?? null,
     participantId: input.participantId,
     persistUserPromptOnFailure: false,
     profile: input.profile,
@@ -1318,6 +1321,8 @@ async function deliverAssistantNotificationMessage(input: {
   })
   const outcome = await state.outbox.deliverMessage({
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    externalThreadRouteAuthority:
+      input.input.outboxExternalThreadRouteAuthority ?? null,
     turnId: input.turnId,
     message: input.message,
     dedupeToken: input.dedupeToken,

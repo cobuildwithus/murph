@@ -493,6 +493,72 @@ test("stores sparse personality overrides while preserving every unrelated prefe
   });
 });
 
+test("stores persona sparsely and applies causal order per preference field", async () => {
+  const vaultRoot = await createTempVault();
+
+  await updateAssistantPreferences({
+    vaultRoot,
+    updatedAt: "2026-07-20T10:00:00.000Z",
+    preferences: {
+      tone: "casual",
+      voice: "warm",
+    },
+  });
+  await updateWorkoutUnitPreferences({
+    vaultRoot,
+    updatedAt: "2026-07-20T10:01:00.000Z",
+    preferences: {
+      weight: "kg",
+    },
+  });
+
+  const selected = await updateAssistantPreferences({
+    causalSeq: "2",
+    vaultRoot,
+    updatedAt: "2026-07-20T10:02:00.000Z",
+    preferences: {
+      persona: "navy-seal",
+    },
+  });
+  assert.deepEqual(selected.document.assistant, {
+    persona: "navy-seal",
+    tone: "casual",
+    voice: "warm",
+  });
+  assert.deepEqual(selected.document.workoutUnitPreferences, {
+    weight: "kg",
+  });
+  assert.equal(selected.document.assistant?.personality, undefined);
+
+  const delayedMixedWrite = await updateAssistantPreferences({
+    causalSeq: "1",
+    vaultRoot,
+    updatedAt: "2026-07-20T10:03:00.000Z",
+    preferences: {
+      persona: "classic",
+      personality: {
+        humor: 8,
+      },
+    },
+  });
+  assert.equal(delayedMixedWrite.updated, true);
+  assert.deepEqual(delayedMixedWrite.document.assistant, {
+    persona: "navy-seal",
+    personality: {
+      humor: 8,
+    },
+    tone: "casual",
+    voice: "warm",
+  });
+  assert.deepEqual(
+    (await readAssistantPreferenceMutationState(vaultRoot)).applied,
+    {
+      humor: "1",
+      persona: "2",
+    },
+  );
+});
+
 test("uses mailbox causal order per field across delayed Settings and conversation writes", async () => {
   const vaultRoot = await createTempVault();
   await updateAssistantPreferences({

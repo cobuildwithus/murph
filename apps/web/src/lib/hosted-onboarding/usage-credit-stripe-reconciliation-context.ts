@@ -300,19 +300,22 @@ export async function buildHostedUsageCreditStripePrivateReferences(input: {
   purchase: HostedUsageCreditPurchaseForReconciliation;
   sessionId: string;
 }): Promise<HostedUsageCreditStripePrivateReferences> {
+  const payerMemberId = input.purchase.payerMemberId;
   const encryptPrivateReference = (
     field: HostedUsageCreditPurchaseStripePrivateField,
     value: string | null,
   ) =>
-    runHostedUsageCreditKmsOperation({
-      run: () => encryptHostedUsageCreditPurchaseStripeField({
-        field,
-        payerMemberId: input.purchase.payerMemberId,
-        prisma: input.prisma,
-        signal: takeHostedUsageCreditKmsSignal(input.context),
-        value,
-      }),
-    });
+    payerMemberId === null
+      ? Promise.resolve(null)
+      : runHostedUsageCreditKmsOperation({
+          run: () => encryptHostedUsageCreditPurchaseStripeField({
+            field,
+            payerMemberId,
+            prisma: input.prisma,
+            signal: takeHostedUsageCreditKmsSignal(input.context),
+            value,
+          }),
+        });
   const [
     stripeCheckoutSessionIdEncrypted,
     stripePaymentIntentIdEncrypted,

@@ -598,6 +598,14 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
   const record = requireObject(value, "Hosted mailbox fetch response");
 
   return {
+    ...(record.conversationUsageStatus === undefined
+      ? {}
+      : {
+          conversationUsageStatus:
+            parseHostedMailboxConversationUsageStatus(
+              record.conversationUsageStatus,
+            ),
+        }),
     ...(record.consumedSeqByLane === undefined || record.consumedSeqByLane === null
       ? {}
       : {
@@ -621,6 +629,16 @@ export function parseHostedMailboxFetchResponse(value: unknown): HostedMailboxFe
     )),
     userId: requireString(record.userId, "Hosted mailbox fetch response userId"),
   };
+}
+
+function parseHostedMailboxConversationUsageStatus(value: unknown): "low" | null {
+  if (value === null || value === "low") {
+    return value;
+  }
+
+  throw new TypeError(
+    "Hosted mailbox fetch response conversationUsageStatus must be low or null.",
+  );
 }
 
 export function parseHostedRuntimeDeviceSyncBridgeEnvelope(
@@ -1003,6 +1021,7 @@ export function parseHostedRuntimeGroupToolRequest(
   }
   if (
     action === "read_current"
+    || action === "read_usage"
     || action === "list_memberships"
   ) {
     assertAllowedObjectKeys(
@@ -1864,6 +1883,96 @@ export function parseHostedRuntimeGroupToolResponse(
     }
   }
 
+  if (action === "read_usage") {
+    const result = requireObject(
+      record.result,
+      "Hosted runtime group tool read_usage response result",
+    );
+    const status = requireString(
+      result.status,
+      "Hosted runtime group tool read_usage response status",
+    );
+    if (status === "ok") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "usage"]),
+        "Hosted runtime group tool read_usage ok response result",
+      );
+      const usage = requireObject(
+        result.usage,
+        "Hosted runtime group tool read_usage usage",
+      );
+      assertAllowedObjectKeys(
+        usage,
+        new Set(["capacityState", "fundingUrl", "periodEnd"]),
+        "Hosted runtime group tool read_usage usage",
+      );
+      const capacityState = requireString(
+        usage.capacityState,
+        "Hosted runtime group tool read_usage capacityState",
+      );
+      if (
+        capacityState !== "healthy"
+        && capacityState !== "low"
+        && capacityState !== "exhausted"
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage capacityState is invalid.",
+        );
+      }
+      const periodEnd = requireString(
+        usage.periodEnd,
+        "Hosted runtime group tool read_usage periodEnd",
+      );
+      const periodEndDate = new Date(periodEnd);
+      if (
+        !Number.isFinite(periodEndDate.getTime())
+        || periodEndDate.toISOString() !== periodEnd
+      ) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
+        );
+      }
+      return {
+        action,
+        result: {
+          status,
+          usage: {
+            capacityState,
+            fundingUrl: readNullableString(
+              usage.fundingUrl,
+              "Hosted runtime group tool read_usage fundingUrl",
+            ),
+            periodEnd,
+          },
+        },
+      };
+    }
+    if (status === "unavailable") {
+      assertAllowedObjectKeys(
+        result,
+        new Set(["status", "unavailableReason", "usage"]),
+        "Hosted runtime group tool read_usage unavailable response result",
+      );
+      if (result.usage !== null) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage unavailable usage must be null.",
+        );
+      }
+      return {
+        action,
+        result: {
+          status,
+          unavailableReason: requireString(
+            result.unavailableReason,
+            "Hosted runtime group tool read_usage unavailableReason",
+          ),
+          usage: null,
+        },
+      };
+    }
+  }
+
   if (action === "read_shared") {
     return {
       action,
@@ -2172,10 +2281,13 @@ export function parseHostedRuntimeNewsletterToolRequest(
       new Set(["action", "groupId"]),
       "Hosted runtime newsletter tool prepare request",
     );
-    return {
-      action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
-    };
+    // `groupId` is accepted and ignored only for consumer-first deploy skew.
+    // Current callers rely on the callback-authenticated runtime member, which
+    // maps uniquely to its hosted group.
+    if (record.groupId !== undefined) {
+      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
+    }
+    return { action };
   }
   if (action === "send") {
     assertAllowedObjectKeys(
@@ -2204,9 +2316,11 @@ export function parseHostedRuntimeNewsletterToolRequest(
     if (text !== null && text.length > HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH) {
       throw new TypeError("Hosted runtime newsletter tool text is too long.");
     }
+    if (record.groupId !== undefined) {
+      requireString(record.groupId, "Hosted runtime newsletter tool legacy groupId");
+    }
     return {
       action,
-      groupId: requireString(record.groupId, "Hosted runtime newsletter tool groupId"),
       html,
       subject,
       text,

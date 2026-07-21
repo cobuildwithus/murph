@@ -197,6 +197,7 @@ function dedupeHostedAiUsageLimitNoticeCandidates(
       candidate.memberId,
       candidate.periodStart.toISOString(),
       candidate.usageCreditLedgerVersion.toString(),
+      candidate.userNotice.code,
     ].join("\u0000");
     if (!byCapacityEpoch.has(key)) {
       byCapacityEpoch.set(key, candidate);
@@ -233,6 +234,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
         message: await projectHostedAiUsageLimitNoticeForDelivery({
           memberId: input.candidate.memberId,
           message: input.candidate.userNotice.message,
+          noticeCode: input.candidate.userNotice.code,
           prisma: input.prisma,
         }),
         noticeCode: input.candidate.userNotice.code,
@@ -251,8 +253,10 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
         message: await projectHostedAiUsageLimitNoticeForDelivery({
           memberId: input.candidate.memberId,
           message: input.candidate.userNotice.message,
+          noticeCode: input.candidate.userNotice.code,
           prisma: input.prisma,
         }),
+        noticeCode: input.candidate.userNotice.code,
         periodStart: input.candidate.periodStart,
         prisma: input.prisma,
         replyToMessageId: input.noticeDeliveryTarget.replyToMessageId,
@@ -297,6 +301,7 @@ async function sendHostedAiUsageLimitNoticeCandidate(input: {
       message: await projectHostedAiUsageLimitNoticeForDelivery({
         memberId: input.candidate.memberId,
         message: input.candidate.userNotice.message,
+        noticeCode: input.candidate.userNotice.code,
         prisma: input.prisma,
       }),
       noticeCode: input.candidate.userNotice.code,

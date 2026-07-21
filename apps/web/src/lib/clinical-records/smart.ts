@@ -6,7 +6,7 @@ import { clinicalRecordsError } from "./errors";
 import {
   buildEpicBetaSmartResourceScope,
   readGrantedEpicBetaResourceTypes,
-} from "./epic-beta-policy";
+} from "./epic-policy";
 import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,

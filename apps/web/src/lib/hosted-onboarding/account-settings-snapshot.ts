@@ -149,7 +149,12 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
       id: input.memberId,
     },
   });
-  const assistantPreferences = projectHostedMemberAssistantPreferences(member);
+  const projectedAssistantPreferences = projectHostedMemberAssistantPreferences(member);
+  const assistantPreferences = {
+    personality: projectedAssistantPreferences.personality,
+    tone: projectedAssistantPreferences.tone,
+    voice: projectedAssistantPreferences.voice,
+  };
   const assistantModel = resolveHostedMemberAssistantModel(member);
   const privateSettings = member
     ? await runWithHostedDomainRootUnwrapCache(async () => {

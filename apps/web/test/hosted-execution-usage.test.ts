@@ -190,6 +190,7 @@ describe("recordHostedAiUsageRecords", () => {
       .toHaveBeenCalledExactlyOnceWith({
         memberId: "member_123",
         message: "You hit your monthly Murph AI limit.",
+        noticeCode: "edge_usage_limit_reached",
         prisma,
       });
   });
@@ -471,6 +472,51 @@ describe("recordHostedAiUsageRecords", () => {
         sourceEventId: "turn_123.attempt-1",
       }),
     );
+  });
+
+  it("sends the exhausted notice when prior accounting created no low candidate", async () => {
+    const hostedAiUsageUpsert = vi.fn(
+      async (args: { create: Record<string, unknown> }) => args.create,
+    );
+    const prisma = makeUsagePrisma(hostedAiUsageUpsert);
+    allowanceMocks.accountHostedAiUsageForAllowanceTx
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
+        noticeCode: "thread_usage_limit_reached",
+        noticeMessage: "Murph usage is paused for this chat.",
+        sourceUsageId: "turn_123.request-1.attempt-1",
+      }));
+
+    await recordHostedAiUsageRecordsAndSendLimitNotices({
+      accountAllowance: true,
+      noticeDeliveryTarget: {
+        channel: "linq",
+        replyToMessageId: "linq_message_usage_origin",
+        routeAuthority: {
+          channel: "linq",
+          containerMemberId: "container_member_usage_origin",
+          threadId: "linq_thread_usage_origin",
+        },
+        target: "linq_chat_usage_origin",
+      },
+      prisma: prisma as never,
+      trustedUserId: "member_123",
+      usage: [
+        BASE_USAGE_RECORD,
+        {
+          ...BASE_USAGE_RECORD,
+          providerRequestOrdinal: 1,
+          usageId: "turn_123.request-1.attempt-1",
+        },
+      ],
+    });
+
+    expect(noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat)
+      .toHaveBeenCalledTimes(1);
+    expect(
+      noticeMocks.sendClaimedHostedAiUsageLimitNoticeToLinqChat.mock.calls
+        .map(([input]) => input.noticeCode),
+    ).toEqual(["thread_usage_limit_reached"]);
   });
 
   it("passes Family-sponsored notice codes through the same crossing send path", async () => {

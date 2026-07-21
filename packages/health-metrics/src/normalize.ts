@@ -1,4 +1,9 @@
-import { createCustomMetricDefinition, normalizeMetricKey, resolveMetricDefinition } from "./catalog.ts";
+import {
+  createCustomMetricDefinition,
+  normalizeMetricKey,
+  resolveLabResultMetricDefinition,
+  resolveMetricDefinition,
+} from "./catalog.ts";
 import type {
   MetricDefinition,
   MetricPoint,
@@ -15,12 +20,29 @@ const HOUR_INTENT_DURATION_ALIASES = new Set([
   "total_sleep_hours",
 ].map(normalizeMetricKey));
 
-export function normalizeMetricValue(input: {
+interface MetricValueNormalizationInput {
   metricKey: string;
   unit: string | null;
   value: number | null;
-}): MetricValueNormalization {
-  const definition = resolveMetricDefinition(input.metricKey) ?? createCustomMetricDefinition(input.metricKey, input.unit);
+}
+
+export function normalizeMetricValue(input: MetricValueNormalizationInput): MetricValueNormalization {
+  return normalizeMetricValueForScope(input, false);
+}
+
+/** Applies the expanded lab catalog only to test-result-owned values. */
+export function normalizeLabResultMetricValue(input: MetricValueNormalizationInput): MetricValueNormalization {
+  return normalizeMetricValueForScope(input, true);
+}
+
+function normalizeMetricValueForScope(
+  input: MetricValueNormalizationInput,
+  labResult: boolean,
+): MetricValueNormalization {
+  const definition = (labResult
+    ? resolveLabResultMetricDefinition(input.metricKey)
+    : resolveMetricDefinition(input.metricKey))
+    ?? createCustomMetricDefinition(input.metricKey, input.unit);
   const unit = normalizeUnit(input.unit) ?? inferUnitFromMetricAlias(input.metricKey);
 
   if (input.value === null || !Number.isFinite(input.value)) {

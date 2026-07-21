@@ -702,6 +702,7 @@ export const MURPH_GROUP_TOOL = {
   description:
     'Use action="ask" only from a personal direct conversation when the member wants an answer from one of their joined group Murphs. Supply the bounded natural-language question and, only when useful for choosing among multiple groups, the visible groupLabel the member would recognize. For this action, the runtime resolves membership and every internal target automatically; never supply or ask the member for membership, group, runtime, mailbox, session, callback, or route identifiers. The result is asynchronous, so an accepted request will return to the personal conversation later. ' +
     'Use action="read_shared" only when current group standings or diagnostics need exact consent-aware shared facts. Request one to three exact projectionScopes. The result includes every current member and each requested scope, distinguishing not_granted from granted-but-missing data. Each participantId is scoped to this group membership and carries no account, device, provider, or route identity. On an interactive iMessage turn, currentTurnHandles may identify the exact current prompt Sender on that same row; never infer identity from names, order, data, or a global id. It resolves current authority only after this tool call; never supply sender handles, member, share, runtime, group, or route identifiers. ' +
+    'Use action="read_usage" only when the current connected group asks about its Murph usage or adding more usage. The result reports only a coarse healthy, low, or exhausted state, the current period end, and a first-party funding URL when available. Never infer or disclose internal currency accounting, contributor identity, purchase history, or payment status from this action. ' +
     'Use action="list_memberships" in a personal Murph conversation to list the current member\'s hosted groups, their opaque membershipId, role, each group\'s requested permissions, the member\'s active grants, and the first-party permissionsUrl when the member owns the group and an owner-authorized join link exists. profile-name.v0 means the group is allowed to receive the member\'s preferred name; group-email.v0 means it is allowed to resolve the member\'s verified email for group email; hrv-days.v0 and other health scopes are separate explicit grants. A grant proves control-plane permission only, not that fresh source data is available in the current Web-owned snapshot. In a personal Murph conversation, when the current member explicitly asks to leave one of their hosted groups, call list_memberships first and then call action="leave_membership" with the exact nonempty membershipId returned for the chosen group. Never guess a membershipId, accept one supplied by the user, target a group by name alone, or construct, use, or expose a join URL to leave. Do not use leave_membership in a group conversation or for another person. A successful leave ends that member\'s Murph group membership and future sharing; it does not remove them from the iMessage chat or erase historical messages, provider history, backups, or third-party copies. Owners cannot leave their own group. Use action="read_current" only for membership, group creation, join, and permission-offer operations; its roster or grant fields are not authority to read or score shared records. Request an update to both the current hosted group display name and current iMessage group chat title with action="update_display_name", request an update to the current iMessage group avatar with action="set_chat_avatar", mint the shareable group join link with action="create_join_link", or post a server-owned like-to-consent offer into the current group chat with action="post_join_offer". In a connected group-chat turn, if read_current returns status="none", no hosted group record exists yet. When the group asks to create the group, join, or approve sharing, continue with create_join_link or post_join_offer instead of claiming that an external workspace-linking step is required. When an existing group adds a permission, default to post_join_offer; do not tell members to join again or make the link the primary action. update_display_name sends a provider request for the upstream iMessage group chat title on the current route-authorized group chat and stores the same name in Murph after the provider accepts the request. set_chat_avatar sends a provider request for the upstream iMessage group icon on the current route-authorized group chat after the runtime preflights chat authority and prepares a hosted image URL; generated avatar images are saved as capture media under raw/captures/** when a vault is available. A join link grants membership and shares the joiner\'s memory-backed preferred display name with this group runtime; optional permissions stay individually selected on the join page. For post_join_offer, pass the exact projectionScopes and, only when chosen by the group, displayName. Web owns the full canonical consent copy: the exact scope disclosure, accepted Like-or-heart gestures, and first-party customize link. Never supply offer text. Liking or hearting grants membership when needed and adds only the posted permission snapshot; existing members keep their membership and other grants. When these actions are available for the current connected group-chat turn, use action="read_chat_participants" to see who is in the chat and whether each participant already uses Murph; use action="share_contact_card" to drop your contact card so participants can save you and text you directly. Use action="revoke_own_email_share" only when the current sender asks to stop receiving group newsletter email; the runtime identifies the current sender and revokes only that sender\'s group-email.v0 grant. This tool does not otherwise manage members, grant Family billing access, grant private chat access, grant raw vault access, or grant email sharing except through an explicit group-email.v0 join page or offer.',
   inputSchema: {
     type: 'object',
@@ -713,6 +714,7 @@ export const MURPH_GROUP_TOOL = {
           'ask',
           'read_shared',
           'read_current',
+          'read_usage',
           'list_memberships',
           'leave_membership',
           'update_display_name',
@@ -843,10 +845,6 @@ export const MURPH_NEWSLETTER_TOOL = {
         type: 'string',
         enum: ['prepare', 'send'],
       },
-      groupId: {
-        type: 'string',
-        minLength: 1,
-      },
       subject: {
         type: 'string',
         minLength: 1,
@@ -868,7 +866,7 @@ export const MURPH_NEWSLETTER_TOOL = {
         default: null,
       },
     },
-    required: ['action', 'groupId'],
+    required: ['action'],
   },
 } as const
 
@@ -1340,6 +1338,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
   z
     .object({
+      action: z.literal('read_usage'),
+    })
+    .strict(),
+  z
+    .object({
       action: z.literal('read_shared'),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
@@ -1444,13 +1447,11 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('prepare'),
-      groupId: z.string().trim().min(1),
     })
     .strict(),
   z
     .object({
       action: z.literal('send'),
-      groupId: z.string().trim().min(1),
       html: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH),
       subject: z.string().trim().min(1).max(HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH),
       text: z
@@ -3725,7 +3726,6 @@ async function executeNewsletterTool(input: {
     return toolTextResult(true, safeToolPayloadText({
       action: 'prepare',
       result: {
-        groupId: result.result.groupId,
         missingEmailParticipants: stripNewsletterAuthorizationSnapshot(
           result.result.missingEmailParticipants,
         ),
@@ -4902,6 +4902,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'list_memberships'
+    || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
     || parsed.data.action === 'share_contact_card'
     || parsed.data.action === 'revoke_own_email_share'
@@ -4927,7 +4928,7 @@ function parseNewsletterArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.newsletter.input',
-        schemaRootKeys: ['action', 'groupId'],
+        schemaRootKeys: ['action', 'html', 'subject', 'text'],
         toolName: 'murph.newsletter',
       }),
     }
@@ -4935,10 +4936,7 @@ function parseNewsletterArguments(
   if (parsed.data.action === 'prepare') {
     return {
       ok: true,
-      request: {
-        action: 'prepare',
-        groupId: parsed.data.groupId,
-      },
+      request: { action: 'prepare' },
     }
   }
 
@@ -4946,7 +4944,6 @@ function parseNewsletterArguments(
     ok: true,
     request: {
       action: 'send',
-      groupId: parsed.data.groupId,
       html: parsed.data.html,
       subject: parsed.data.subject,
       ...(parsed.data.text === undefined ? {} : { text: parsed.data.text }),

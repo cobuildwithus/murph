@@ -40,6 +40,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
   HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
@@ -4438,6 +4439,55 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const request = requireFetchRequest(fetchMock.mock.calls[0], "device reconcile request");
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+  });
+
+  it("write-fences exact external thread route authority through direct web-control", async () => {
+    const authority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+      );
+      await expect(request.json()).resolves.toEqual(authority);
+      return new Response(JSON.stringify({ authorized: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    const assertExternalThreadRouteAuthority =
+      platform.effectsPort.assertExternalThreadRouteAuthority;
+    if (!assertExternalThreadRouteAuthority) {
+      throw new Error("Expected external thread route authority effect.");
+    }
+    await expect(
+      assertExternalThreadRouteAuthority(authority),
+    ).resolves.toBeUndefined();
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "direct external thread route authority request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature"))
+      .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
   it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {

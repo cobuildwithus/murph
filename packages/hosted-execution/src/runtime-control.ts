@@ -730,6 +730,9 @@ export interface HostedMailboxLaneConsumed {
 }
 
 export interface HostedMailboxFetchResponse {
+  // Optional for deploy-window compatibility. Web emits this only for an
+  // allowed conversation batch whose current effective capacity is low.
+  conversationUsageStatus?: "low" | null;
   // Optional for deploy-window compatibility: older web responses omit it and
   // the runtime treats every lane as consumed through seq 0.
   consumedSeqByLane?: HostedMailboxLaneConsumed[] | null;
@@ -883,6 +886,7 @@ export type HostedRuntimeGroupToolAction =
   | "ask"
   | "read_shared"
   | "read_current"
+  | "read_usage"
   | "list_memberships"
   | "leave_membership"
   | "update_display_name"
@@ -928,6 +932,17 @@ export interface HostedRuntimeGroupSummary {
   requestedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   status: string;
+}
+
+export type HostedRuntimeGroupUsageCapacityState =
+  | "healthy"
+  | "low"
+  | "exhausted";
+
+export interface HostedRuntimeGroupUsageStatus {
+  capacityState: HostedRuntimeGroupUsageCapacityState;
+  fundingUrl: string | null;
+  periodEnd: string;
 }
 
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
@@ -1065,6 +1080,7 @@ export type HostedRuntimeGroupToolRequest =
       question: string;
     }
   | { action: "read_current" }
+  | { action: "read_usage" }
   | ({
       action: "read_shared";
       /** Current-turn Linq sender evidence injected by the hosted runtime. */
@@ -1116,6 +1132,12 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "ok"; group: HostedRuntimeGroupSummary }
         | { status: "none"; group: null }
         | { status: "unavailable"; unavailableReason: string; group: null };
+    }
+  | {
+      action: "read_usage";
+      result:
+        | { status: "ok"; usage: HostedRuntimeGroupUsageStatus }
+        | { status: "unavailable"; unavailableReason: string; usage: null };
     }
   | {
       action: "read_shared";
@@ -1232,7 +1254,6 @@ export interface HostedRuntimeNewsletterScheduledAuthority {
 }
 
 export interface HostedRuntimeNewsletterToolSendRequest {
-  groupId: string;
   html: string;
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
   subject: string;
@@ -1241,7 +1262,6 @@ export interface HostedRuntimeNewsletterToolSendRequest {
 
 export interface HostedRuntimeNewsletterToolPrepareRequest {
   action: "prepare";
-  groupId: string;
   /** Trusted runtime context; stripped before the web callback request. */
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
 }

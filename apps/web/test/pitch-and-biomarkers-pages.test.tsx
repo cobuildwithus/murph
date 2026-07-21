@@ -114,7 +114,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
   assert.equal(biomarkersMetadata.title, "Your biomarkers — Murph");
   assert.equal(
     biomarkersMetadata.description,
-    "See every biomarker in your lab history and follow how each result changes over time.",
+    "See recognized biomarkers from your devices and saved lab results, organized for private longitudinal review.",
   );
   assert.deepEqual(biomarkersMetadata.twitter?.images, [
     {
@@ -128,8 +128,7 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Health data/);
-  assert.match(markup, /Your biomarkers/);
+  assert.match(markup, />Biomarkers</);
   assert.match(markup, /No lab results yet/);
   assert.doesNotMatch(markup, /Library/);
   assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
@@ -148,6 +147,24 @@ test("BiomarkersPage shows a loading skeleton while the private vault opens", as
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, /Loading your saved biomarker results/);
+  assert.match(markup, /rounded-full/);
+  assert.match(markup, /xl:grid-cols-3/);
+  const responsiveCellClasses = [...markup.matchAll(
+    /<div class="([^"]*\bmin-h-24\b[^"]*)">/gu,
+  )].map((match) => (
+    match[1]?.split(/\s+/u).filter((className) => (
+      className.startsWith("md:") || className.startsWith("xl:")
+    )) ?? []
+  ));
+
+  assert.deepEqual(responsiveCellClasses, [
+    ["md:border-r", "xl:border-r"],
+    ["xl:border-r"],
+    ["md:col-span-2", "xl:col-span-1", "xl:border-r-0"],
+    ["md:border-r", "xl:border-r"],
+    ["xl:border-r"],
+    ["md:col-span-2", "xl:col-span-1", "xl:border-r-0"],
+  ]);
 });
 
 test("BiomarkersPage shows preparation copy while its replica refresh is pending", async () => {

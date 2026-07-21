@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
-Status: Implemented personal v1; group funding remains future scope
-Last verified: 2026-07-16
+Status: Implemented personal and hosted-group funding
+Last verified: 2026-07-20
 
 ## Decision
 
@@ -25,7 +25,9 @@ invoice credit, transferable asset, or promise of cash redemption.
 
 Stripe proves money movement. `apps/web` is authoritative for the payer,
 beneficiary, offer, grant, available usage credit, consumption, and refund and
-dispute adjustments. Group authorization is not implemented in v1.
+dispute adjustments. An authenticated member may also fund an active hosted
+group by presenting that group's existing opaque join code; the group's
+synthetic thread-container member is the beneficiary.
 
 ## Enforced Usage Contract
 
@@ -76,10 +78,11 @@ An eligible paid Pulse or Edge member can:
 8. Continue using that credit after an included-usage reset until the credit is
    consumed.
 
-The persisted payer and beneficiary identifiers leave one narrow composition
-seam for a later group-funded purchase. V1 does not define or implement group
-authorization, funding-intent keys, lifecycle, deletion, refund control, or
-beneficiary-replacement behavior.
+An authenticated member can open `/groups/fund/[joinCode]`, see only the
+group's coarse `healthy`, `low`, or `exhausted` usage state, and buy the same
+fixed packs for that group's synthetic runtime beneficiary. This does not
+require the payer to have an individual paid plan. The browser still submits
+only offer code and request key; Web resolves payer and beneficiary.
 
 ## Individual MVP
 
@@ -99,7 +102,7 @@ The first release permits purchases only when all of these are true:
 
 Pulse Trial keeps **Start Pulse** rather than selling top-ups. Sponsored Family
 owners and members are excluded because their payer/beneficiary policy belongs
-with later group funding. An inactive, unpaid, or suspended group relationship
+with later Family funding. An inactive, unpaid, or suspended group relationship
 does not exclude an otherwise eligible direct paid member. Cancellation,
 past-due, suspension, malformed billing state, and an expired trial fail closed.
 
@@ -228,11 +231,19 @@ Keep the wording factual, conversational, and low-pressure. Use only a full
 first-party Settings URL, never a shortened URL. Do not add recurring nudges,
 marketing language, urgency, or cold re-engagement.
 
-Immediately before both the crossing send and a later denied-gate retry,
-delivery re-reads the current personal usage-status projection. It appends the
-canonical first-party **Add usage** action only when the recommended action is
-currently `add_usage`; a failed projection or any ineligible state sends the
-neutral copy unchanged.
+Low capacity is conversational rather than a notice. An allowed ordinary 1:1
+or group mailbox fetch carries a coarse trusted `low` bit into that accepted
+turn. Murph completes the request first, then may add one casual sentence that
+the conversation may pause soon unless more usage is added. The prompt forbids
+token counts, prices, internal accounting, contributor identity, pressure, and
+repetition when the recent conversation already contains the warning. The bit
+does not schedule or send a separate outbound message.
+
+Immediately before both the exhaustion crossing send and a later denied-gate
+retry, delivery re-reads the current personal usage-status projection. It
+appends the canonical first-party **Add usage** action only when the recommended
+action is currently `add_usage`; a failed projection or any ineligible state
+sends the neutral copy unchanged.
 
 A fulfilled grant invalidates a queued stale exhaustion notice. If credit is
 later exhausted again, at most one new reply-anchored notice is eligible for
@@ -256,6 +267,7 @@ Stripe webhook -> HostedStripeEvent -> verified purchase reconciliation
                                       -> immutable credit grant
 Usage callback -> canonical HostedAiUsage -> included allowance settlement
                                          -> immutable credit debit
+Allowed mailbox fetch -> coarse low-capacity bit -> accepted turn context
 Projection -> Settings / Home / assistant handoff
 ```
 
@@ -285,11 +297,13 @@ notices, allowance exhaustion, and the runtime recheck are derived consumers,
 not new lifecycle owners. The beneficiary row lock is the single serialization
 boundary for grant, debit, adjustment, and projection updates.
 
-The only group-oriented state in this v1 is the separate payer and beneficiary
-identifiers. Do not infer group funding authority from those columns. Group
-membership authorization, checkout-intent identity, payer departure,
-beneficiary or container deletion, refund control, and key rotation are all
-deferred until a concrete group flow defines them together.
+Group funding composes these same owners without adding a group wallet, usage
+account, funding-code lifecycle, scheduler, or queue. The existing opaque
+`HostedGroup.joinCode` locates an active group funding target, and the group's
+synthetic thread-container `HostedMember` remains the beneficiary. The
+authenticated contributor is the payer. Checkout, accounting, allowance,
+refund, dispute, runtime-recheck, and delivery idempotency remain owned by the
+same personal top-up services.
 
 ## Durable Model
 
@@ -302,7 +316,7 @@ One row represents one intentional attempt to purchase one offer.
 | Field | Contract |
 | --- | --- |
 | `id` | Random opaque Murph purchase ID; safe as the only Stripe metadata lookup key. |
-| `payerMemberId` | Authenticated personal member paying. Separate from beneficiary even when equal in v1. |
+| `payerMemberId` | Authenticated member paying. Separate from the beneficiary and nullable only after the payer is deleted from a terminal cross-owner purchase. |
 | `beneficiaryMemberId` | `HostedMember.id` whose usage receives credit. |
 | `offerCode` | Immutable internal catalog code. |
 | `cashCurrency` / `cashAmountMinor` | Expected Checkout subtotal, initially USD cents. |
@@ -326,16 +340,23 @@ or drain `created` purchases that use it.
 
 The initial authenticated transaction authorizes and persists one purchase
 before Stripe I/O. That `created` row is the durable ambiguity fence. Replaying
-the same payer/request-key/offer continues the same purchase with the same
-purchase-derived Stripe idempotency key; using the key for a different offer
-conflicts. Replay must not reinterpret the purchase against the mutable catalog,
-mint a replacement attempt, or require a second browser authorization. Account
-deletion suspends new Checkout creation and resolves or expires every
-outstanding nonterminal purchase before removing its local owner state.
+the same payer/request-key/offer and funding target continues the same purchase
+with the same purchase-derived Stripe idempotency key; using the key for a
+different offer or target conflicts. Replay must not reinterpret the purchase
+against the mutable catalog, mint a replacement attempt, or require a second
+browser authorization. Account deletion suspends new Checkout creation and
+resolves or expires every outstanding nonterminal purchase involving the
+deleted member before removing local owner state.
 
-Financial records do not cascade blindly through the Prisma relations. The
-account deletion owner removes local ledger entries before purchases and the
-member, while Stripe retains payment records under its required retention.
+Financial records do not cascade blindly through the Prisma relations. When a
+beneficiary is deleted, its ledger entries and purchases are removed before the
+member. When only the payer is deleted, terminal credit owned by a surviving
+beneficiary remains: the purchase detaches the payer, advances the existing
+reconciliation-version fence so payer-era preparation must retry, and clears
+encrypted provider references while retaining non-secret lookup keys needed for
+later refund or dispute reconciliation. Stripe retains payment records under
+its required retention.
+
 Browser-vault export omits payment identifiers, Checkout URLs, semantic source
 keys, usage references, and allocation history.
 
@@ -445,23 +466,28 @@ The dedicated usage-credit service sits beside, not inside, subscription
 onboarding checkout. Subscription onboarding creates `mode=subscription`
 Sessions; top-ups are repeatable one-time payments.
 
-The authenticated Settings route performs this sequence:
+The authenticated personal Settings route and group funding route share this
+sequence:
 
 1. Verify same-origin/CSRF protections and the hosted app session.
 2. Parse a strict bounded body containing only offer code and client request
    key.
-3. Derive payer and personal beneficiary from the app session.
+3. Derive the payer from the app session and resolve the beneficiary server
+   side: the payer for personal funding, or the active group's synthetic member
+   for `/groups/fund/[joinCode]`.
 4. Continue an exact existing request-key purchase; reuse with a different
    offer is a conflict.
 5. Under the payer lock, expire an unattached purchase whose frozen window
-   ended, then recover any remaining nonterminal purchase before consulting
-   mutable eligibility or offer configuration. V1 permits only one created,
-   open, or payment-pending purchase at a time.
-6. For a genuinely new purchase, read the single personal eligibility
-   projection and require the requested offer code to be currently authorized.
-7. Decrypt the payer's canonical Stripe Customer and Subscription only after
-   authorization; missing billing state fails closed for repair rather than
-   creating a duplicate Customer.
+   ended, then recover a nonterminal purchase only when its payer and
+   beneficiary match the requested target. A purchase for another target
+   conflicts. Only one created, open, or payment-pending purchase may exist for
+   one payer at a time.
+6. For a genuinely new purchase, require a current server-owned offer. Personal
+   funding also requires the direct-paid eligibility projection; active group
+   funding does not require the payer to hold an individual paid plan.
+7. Resolve the payer's canonical Stripe Customer only after authorization.
+   Existing billing state is reused; otherwise the existing idempotent hosted
+   customer owner creates and binds one for the authenticated payer.
 8. Create the durable purchase for the client request key.
 9. Freeze the offer, Price, Customer, return URLs, 90-minute expiry, and request
    policy in the `created` purchase before provider I/O.
@@ -488,7 +514,7 @@ The Stripe Session uses:
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
 - no adjustable quantity, promotion codes, or caller-selected Price; and
-- server-generated Settings success/cancel URLs.
+- server-generated personal Settings or group-funding success/cancel URLs.
 
 Use a distinct purchase ID for every intentional purchase. A member can buy
 the same pack twice, so member-plus-offer is not an idempotency key.
@@ -583,9 +609,11 @@ can be duplicated and out of order.
 
 ## Refunds And Disputes
 
-V1 has no instant self-service cash-out. A payer may request a support-assisted
-refund; another group participant or beneficiary cannot refund someone else's
-purchase.
+There is no instant self-service cash-out. A payer may request a
+support-assisted refund; another group participant or beneficiary cannot refund
+someone else's purchase. If the payer account is later deleted, terminal
+refund and dispute events remain reconcilable from retained blind lookup keys
+and live Stripe state without restoring payer identity.
 
 For ordinary refunds, return only the unused attributable portion of a
 purchase. Reconciliation re-fetches the relevant Refund when available, its
@@ -620,7 +648,7 @@ expose debt in a group chat, or charge another participant.
 - Raw Stripe references follow the existing encrypted-reference plus blind
   lookup-key pattern and never enter logs, assistant state, or user-visible
   URLs.
-- Checkout status is visible only to its authenticated payer in v1.
+- Checkout status is visible only to its authenticated payer.
 - Webhook signatures and live Stripe re-fetch are both required.
 - Logs and metrics use fixed status/reason codes and counts, not member IDs,
   payer identity, metadata payloads, receipts, or raw webhook bodies.
@@ -630,24 +658,21 @@ expose debt in a group chat, or charge another participant.
 - Payment records and health-sharing permissions remain separate. Buying usage
   never grants access to another person's data.
 
-## Future Group-Container Funding
+## Group-Container Funding
 
-The persisted model leaves only this composition seam for a later group
-feature:
+An authenticated contributor opens `/groups/fund/[joinCode]`. Possession of the
+group's existing opaque join code is the public targeting capability; no second
+funding code or rotation policy exists. Web resolves the active group and its
+synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
+same fixed $5, $10, and $25 packs. The browser never submits payer or
+beneficiary identity.
 
-- `payerMemberId` is the authenticated person entering Checkout;
-- `beneficiaryMemberId` is the group's synthetic thread-container
-  `HostedMember.id`; and
-- Stripe Customer belongs to the payer, never automatically to the group owner
-  or synthetic container.
-
-That seam is not group support. Before enabling it, a separate product change
-must define and implement group membership authorization, the funding-intent
-and idempotency key boundary, route binding, eligible denominations, privacy
-and receipt visibility, refund control, payer departure, beneficiary or group
-deletion, and any key-rotation or retention behavior. V1 contains no generic
-group authorization context or lifecycle to reuse, and personal account
-deletion may rely on payer and beneficiary being the same member.
+The Stripe Customer belongs to the payer, never to the group owner or synthetic
+container. Fulfilled credit belongs to the beneficiary. Payer departure and
+beneficiary deletion therefore follow the separate lifecycle rules above.
+Checkout status remains visible only to its authenticated payer; group state
+does not expose contributors, receipts, cash value, or internal USD-micro
+accounting.
 
 ## Operations And Reconciliation
 
@@ -670,17 +695,34 @@ Stripe and call the same idempotent reconciler by purchase ID.
    disabled for this flow, confirm equal subtotal/total behavior, and verify
    payment settings, webhook event subscriptions, Radar rules, and environment
    mappings in Stripe test mode, then live mode.
-2. Apply the database migration before deploying the web release.
-3. Deploy the Cloudflare/runner bundle that accepts the new `add_usage`
-   plan-usage action, then wait for the tolerant consumer to be current. It owns
-   no billing, Stripe, purchase, or credit state and remains compatible with the
-   old web response.
-4. Deploy the web release containing the enforced gate, ledger, webhook branch,
-   refund/dispute reconciliation, Settings routes, and `add_usage` projection
-   together.
-5. Before widening exposure, smoke a blocked no-credit member, a paid webhook
-   grant, runtime recheck, subsequent usage debit, negative refund/dispute
-   adjustments, and a positive dispute adjustment in Stripe test mode.
+2. Apply the expand-only database migration that makes the payer and its
+   payer-encrypted Price and Customer references nullable. Existing Web remains
+   compatible because no old writer creates detached rows.
+3. Deploy Web first. It contains the group funding route, `read_usage` consumer,
+   optional low-capacity mailbox projection, exhausted-notice projection,
+   target-aware Checkout, and detached-payer reconciliation. Older runtimes
+   ignore the optional low-capacity field and remain compatible during this
+   window.
+4. Deploy the Cloudflare/runner bundle that parses the optional low-capacity
+   field and advertises `read_usage`, then verify the exact runner fingerprint
+   converges. A new runner must not be allowed to send the action to an older
+   Web deployment. The new stable hosted developer guidance deliberately
+   changes the assistant contract fingerprint: every existing direct or group
+   session that would otherwise use native resume starts one new provider
+   thread on its first post-deploy conversation turn. That turn replays the
+   committed transcript fallback, bounded to 24 messages, 4,000 bytes per
+   message, and 12,000 bytes total; later turns resume the new thread. A rollback
+   rotates sessions that already adopted the new fingerprint once more.
+5. After the new Web deployment is current and the prior function window has
+   drained, run the hosted Web contract migration. It installs both
+   detached-payer checks as `NOT VALID` new-write guards and then validates
+   existing rows.
+6. Before widening exposure, smoke one pre-existing healthy hosted session:
+   its first turn must rotate and reply without low context, and its second turn
+   must resume the new provider thread. Also smoke group funding, a paid webhook
+   grant, the runtime recheck and subsequent usage debit, low direct/group
+   next-turn context, the exhausted notice, payer deletion, and later
+   negative/positive refund or dispute adjustments in Stripe test mode.
 
 Rollback disables new Checkout creation and the Add usage actions first. It
 does not delete purchases or grants and must not disable the existing usage
@@ -717,7 +759,13 @@ Current focused unit and component coverage exercises:
 - composed usage blocking, carryover credit, trial and group behavior, and
   current-period block clearing; and
 - the Settings dialog's no-default selection, exact offer post, stable-key
-  retry, redirect, read-only return polling, cancel expiry, and delayed state.
+  retry, redirect, read-only return polling, cancel expiry, and delayed state;
+- group funding target resolution, active-runtime eligibility, fixed-pack
+  checkout without an individual paid plan, target-aware replay/conflicts, and
+  reuse of the same dialog state machine;
+- coarse group usage reads, trusted low-capacity next-turn context, and the
+  route-authorized exhausted-notice funding link; and
+- cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser
 behavior. Release verification therefore still needs the scoped web tests and
@@ -726,10 +774,10 @@ plus webhook smoke.
 
 ## Non-Goals
 
-The individual MVP does not add arbitrary amounts, auto-recharge, saved-card
-off-session charges, discounts, gifting, transfers, cash redemption, public or
-anonymous funding, Family funding, group funding, Stripe Meter reporting, or a
-second usage/accounting service.
+The implementation does not add arbitrary amounts, auto-recharge, saved-card
+off-session charges, discounts, transfers, cash redemption, public or anonymous
+funding, Family funding, a group wallet, Stripe Meter reporting, or a second
+usage/accounting service.
 
 ## Rejected Alternatives
 

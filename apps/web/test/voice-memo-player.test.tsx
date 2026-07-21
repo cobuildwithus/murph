@@ -9,7 +9,9 @@ import { renderClientComponent } from "./render-client-component";
 
 test("VoiceMemoPlayer pauses sibling players in the same exclusive group", async () => {
   const rendered = await renderClientComponent(
-    createElement("div", null,
+    createElement(
+      "div",
+      null,
       createElement(VoiceMemoPlayer, {
         exclusiveGroupId: "voice-roster",
         src: "/audio/first.mp3",
@@ -100,6 +102,46 @@ test("VoiceMemoPlayer disables playback and shows the unavailable label after an
     assert.ok(button instanceof rendered.window.HTMLButtonElement);
     assert.equal(button.disabled, true);
     assert.match(rendered.container.textContent ?? "", /Pending/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("VoiceMemoPlayer falls back once before marking a preview unavailable", async () => {
+  const rendered = await renderClientComponent(
+    createElement(VoiceMemoPlayer, {
+      fallbackSrc: "/audio/murph-voices/warm.mp3",
+      src: "/audio/murph-personas/grandma/warm.mp3",
+      unavailableLabel: "Preview unavailable",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const audio = rendered.container.querySelector("audio");
+    assert.ok(audio);
+    assert.equal(
+      audio.getAttribute("src"),
+      "/audio/murph-personas/grandma/warm.mp3",
+    );
+
+    await act(async () => {
+      audio.dispatchEvent(new rendered.window.Event("error"));
+    });
+    assert.equal(audio.getAttribute("src"), "/audio/murph-voices/warm.mp3");
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Preview unavailable/u,
+    );
+
+    await act(async () => {
+      audio.dispatchEvent(new rendered.window.Event("error"));
+    });
+    assert.match(rendered.container.textContent ?? "", /Preview unavailable/u);
+    assert.equal(
+      rendered.container.querySelector<HTMLButtonElement>("button")?.disabled,
+      true,
+    );
   } finally {
     await rendered.cleanup();
   }

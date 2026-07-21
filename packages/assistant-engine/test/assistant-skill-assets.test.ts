@@ -687,7 +687,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('existing group\'s non-blank\n`displayName`')
     expect(raw).toContain('before inventing a')
     expect(raw).toContain('generic default')
-    expect(raw).toMatch(/pass that same chosen name\s+as `displayName`/)
+    expect(raw).toMatch(/[Pp]ass that same chosen name\s+as `displayName`/)
     expect(raw).toContain('`murph.group action="post_join_offer"`')
     expect(raw).toContain('`murph.group action="create_join_link"`')
     expect(raw).toContain('## Creating a hosted group')
@@ -718,27 +718,34 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )
-    expect(raw).toContain('If the group wants the recurring update in the chat instead of email')
-    expect(raw).toContain(
-      "Create a new newsletter under the developer prompt's shared automation action",
+    expect(raw).toContain('`murph.automation action="save_newsletter"`')
+    expect(raw).toMatch(
+      /`delivery` \(`current_chat` or `group_email`\)/u,
     )
-    expect(raw).toContain(
-      "For changes or stopping, follow the developer prompt's shared automation",
+    expect(raw).toMatch(/Chat delivery must not require or solicit email\s+sharing\./u)
+    expect(raw).toContain('do not include `group-email.v0`')
+    expect(raw).toMatch(
+      /Do not use generic\s+`save` or `patch` to author newsletter configuration/u,
     )
-    expect(raw).not.toContain('the current group channel')
-    expect(raw).toContain('`title`: the group\'s chosen name')
-    expect(raw).toContain('require every email subject to start with that exact name')
-    expect(raw).toContain('Future notification turns may not read this skill')
-    expect(raw).toContain('`slug`: exactly `group-health-newsletter`')
-    expect(raw).toContain('Any other slug will not be able to send')
-    expect(raw).toContain('`schedule`: `{ "kind": "cron", "expression": "0 9 * * 0" }`')
-    expect(raw).toContain('`continuityPolicy`: `fresh`')
+    expect(raw).toMatch(
+      /keeps one stable newsletter automation,\s+binds it to this current group, and selects either ordinary group-chat delivery\s+or consented group email/u,
+    )
+    expect(raw).toMatch(
+      /To change configuration or delivery, call `save_newsletter` again with the\s+complete desired values from the destination group/u,
+    )
+    expect(raw).toContain('To stop or resume it, patch only its `status`')
+    expect(raw).toMatch(
+      /chosen schedule becomes the cron expression; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
+    )
     expect(raw).toMatch(
       /until\s+`murph\.automation` returns success[\s\S]*never\s+turn a failed action into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
     expect(raw).toContain('never call `murph.newsletter` `send` right after')
+    expect(raw).toMatch(
+      /For current-chat delivery, confirm the shared scopes and destination\s+without asking for email access/u,
+    )
     expect(raw).toContain('complete read-compose-send and notification')
     expect(raw).toContain('Do not duplicate or')
     expect(raw).toContain('action="revoke_own_email_share"')
@@ -763,19 +770,19 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
     expect(raw).not.toContain('nudge them in the group')
-    expect(raw).toContain('post a permission offer scoped to')
+    expect(raw).toContain("use the channel's permission\npath above scoped to")
     expect(raw).toContain('the Creating a hosted group core set\ntakes precedence when `read_current` returns `status="none"`')
     expect(raw).toContain('For an existing\ngroup, propose only the newsletter reaction-share scope')
     expect(raw).toContain('`group-email.v0`, `sleep-duration-days.v0`')
     expect(raw).not.toMatch(
-      /post a permission offer scoped to[\s\S]{0,400}`sleep-times\.v0`/u,
+      /path above scoped to[\s\S]{0,400}`sleep-times\.v0`/u,
     )
     expect(raw).toContain('`resting-heart-rate-days.v0`, and `hrv-days.v0`')
     expect(raw).toContain('Pass only the exact newsletter `projectionScopes`')
     expect(raw).toContain('also pass the group\'s chosen name as')
-    expect(raw).toContain('`displayName` on the `post_join_offer` call')
+    expect(raw).toContain('`displayName` on the iMessage/Linq `post_join_offer` call or Telegram')
     expect(raw).toContain('Web owns the complete canonical')
-    expect(raw).toContain('Like-or-heart consent sentence')
+    expect(raw).toContain('Like-to-consent sentence')
     expect(raw).toContain('exact scope disclosure')
     expect(raw).toContain('first-party')
     expect(raw).toContain('customize link')
@@ -784,8 +791,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('{{share_scope}}')
     expect(raw).toContain('newsletter like-to-consent path')
     expect(raw).not.toContain('newsletter react-to-join path')
-    expect(raw).toContain('Liking or hearting the message')
-    expect(raw).toContain('adds the disclosed snapshot')
+    expect(raw).toContain('In iMessage, liking the message adds the')
     expect(raw).toContain('disclosed snapshot')
     expect(raw).toMatch(/For\s+existing participants, call this permission opt-in/)
     expect(raw).toContain('Never silently')
@@ -794,9 +800,13 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('never repeatedly re-offer')
     expect(raw).toContain('## Additive permissions')
     expect(raw).toMatch(/default\s+to `murph\.group action="post_join_offer"`/)
-    expect(raw).toContain('Do not tell existing members to join')
+    expect(raw).toMatch(/Do not tell existing members\s+to join/u)
     expect(raw).toContain('Pass only the exact')
-    expect(raw).toContain('Web owns the full canonical offer copy')
+    expect(raw).toMatch(/Web owns the full canonical offer\s+copy/u)
+    expect(raw).toContain('Telegram has no provider-side `post_join_offer` path')
+    expect(raw).toMatch(/In a Telegram group,\s+call `create_join_link`/u)
+    expect(raw).toContain('include the\nreturned server-owned `joinUrl`')
+    expect(raw).toContain('Never\nclaim that a reaction offer was posted in Telegram')
   })
 
   it('keeps the new-group contact handoff natural and reactive', async () => {
@@ -827,6 +837,8 @@ describe('assistant skill assets', () => {
       'every scheduled group-health-newsletter run',
     )
     const raw = await readSkillFile(newsletterSkill)
+    expect(raw).toContain('`murph.automation action="save_newsletter"`')
+    expect(raw).toContain('(`current_chat` or `group_email`)')
     expect(raw).toContain('## Compose each edition')
     expect(raw).toContain('Usually include 6–12 useful stats')
     expect(raw).toContain('Cross-person comparisons are welcome')
@@ -844,7 +856,9 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group weekly')
     expect(raw).not.toContain('Join the two results by exact `memberId`')
     expect(raw).toMatch(/do not compose or call\s+`send`/u)
-    expect(raw).toContain('After any `send` result')
+    expect(raw).toContain('For `current_chat`, do not call `murph.newsletter`')
+    expect(raw).toContain('`murph.group action="read_shared"` once')
+    expect(raw).toContain('After any email `send` result')
     expect(raw).toContain('do not retry `send` in the same turn')
     expect(raw).toContain('runtime owns delivery, retry, and')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
@@ -852,7 +866,7 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('### Example 1: close race')
     expect(raw).toContain('### Example 2: opted-in roast')
     expect(raw).not.toContain('### Example 3:')
-    expect(raw).toContain('<Exact Group Name> — <specific hook>')
+    expect(raw).toContain('<Exact Newsletter Name> — <specific hook>')
     expect(raw).not.toContain('286 active minutes')
     expect(raw).not.toContain('17 workouts')
     expect(raw).not.toContain('completed the most workouts')

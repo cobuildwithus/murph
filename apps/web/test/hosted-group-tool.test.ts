@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
+  readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   releaseHostedLinqContactCardShareAttempt: vi.fn(),
@@ -116,6 +117,10 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -254,6 +259,11 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
       truncated: false,
     });
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      capacityState: "low",
+      fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+    });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
       kind: "ok",
@@ -303,11 +313,33 @@ describe("handleHostedRuntimeGroupTool", () => {
       preflight_set_chat_avatar: "owner_active",
       read_chat_participants: "participant_aware",
       read_current: "participant_aware",
+      read_usage: "participant_aware",
       read_shared: "participant_aware",
       revoke_own_email_share: "participant_aware",
       set_chat_avatar: "owner_active",
       share_contact_card: "owner_active",
       update_display_name: "owner_active",
+    });
+  });
+
+  it("returns only coarse usage state and the first-party group funding link", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "read_usage" },
+    })).resolves.toEqual({
+      action: "read_usage",
+      result: {
+        status: "ok",
+        usage: {
+          capacityState: "low",
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          periodEnd: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    expect(mocks.readHostedGroupUsageStatus).toHaveBeenCalledWith({
+      runtimeMemberId: "member_group_runtime",
     });
   });
 

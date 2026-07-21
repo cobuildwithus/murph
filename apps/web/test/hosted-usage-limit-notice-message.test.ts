@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  readHostedGroupUsageStatus: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
 }));
 
@@ -10,11 +11,54 @@ vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
   readHostedPersonalAiUsageStatus: mocks.readHostedPersonalAiUsageStatus,
 }));
 
+vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+}));
+
 import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-execution/usage-limit-notice-message";
 
 describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("appends a first-party group funding link while the group is exhausted", async () => {
+    const prisma = { kind: "prisma" } as never;
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      capacityState: "exhausted",
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+    });
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma,
+    })).resolves.toBe(
+      "Murph usage is paused for this chat.\n\n" +
+      "Add group usage: " +
+      "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+    );
+    expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+  });
+
+  it("leaves a stale group notice unchanged after capacity recovers", async () => {
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+      capacityState: "healthy",
+      fundingUrl:
+        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      periodEnd: "2026-08-01T00:00:00.000Z",
+    });
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).resolves.toBe("Murph usage is paused for this chat.");
+    expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   });
 
   it("appends the canonical first-party action only for current add-usage authority", async () => {

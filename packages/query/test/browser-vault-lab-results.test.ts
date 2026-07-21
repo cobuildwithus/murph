@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   createBrowserVaultQueryClient,
   createBrowserVaultReplica,
   createVaultReadModel,
@@ -11,7 +12,7 @@ import {
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
 } from "../src/browser.ts";
-import { buildMetricProjection } from "../src/index.ts";
+import { buildMetricProjection, selectMetricGoalProgress, selectMetricValue } from "../src/index.ts";
 
 type CanonicalEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
@@ -78,6 +79,8 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 2);
+  assert.equal(replica.generation, 2);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   assert.equal(replica.labResultRows.length, 7);
@@ -181,10 +184,7 @@ test("lab result selectors group measured biomarkers and chart only comparable e
   assert.equal(detail.hasIncompatibleHistory, true);
   assert.deepEqual(detail.chartSeries.map((point) => point.value), [5.4, 5.6]);
 
-  const custom = measured.find((entry) => entry.metricKey === "novel-marker");
-  assert.ok(custom);
-  assert.equal(custom.displayName, "Novel Marker");
-  assert.equal(custom.healthArea.id, "other");
+  assert.equal(measured.some((entry) => entry.metricKey === "novel-marker"), false);
   assert.deepEqual(
     selectBrowserVaultLabBiomarkerDetail(client, "novel-marker")?.chartSeries.map((point) => point.value),
     [1, 2],
@@ -268,7 +268,6 @@ test("lab aliases project into one comparable longitudinal biomarker", async () 
     "mean-corpuscular-hemoglobin",
     "mean-corpuscular-hemoglobin-concentration",
     "thyroid-stimulating-hormone",
-    "urea",
   ]);
   for (const [metricKey, value, unit, series] of [
     ["BUN", 14.0056, "mg/dL", [14, 16, 14.0056]],
@@ -666,6 +665,227 @@ test("lab detail preserves qualitative and incompatible ranges without false con
   ]);
 });
 
+test("calculation methods remain separate longitudinal identities", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_methods_2024", "2024-03-01T08:00:00.000Z", [
+        { analyte: "Estimated GFR", unit: "mL/min/1.73m^2", value: 92 },
+        { analyte: "Estimated GFR CKD-EPI", unit: "mL/min/1.73m^2", value: 91 },
+        { analyte: "LDL Cholesterol", unit: "mg/dL", value: 88 },
+        { analyte: "LDL Calculated", unit: "mg/dL", value: 86 },
+        { analyte: "LDL CHOL CALC (NIH)", unit: "mg/dL", value: 84 },
+        { analyte: "VLDL Cholesterol", unit: "mg/dL", value: 12 },
+        { analyte: "VLDL Cholesterol Cal", unit: "mg/dL", value: 11 },
+      ]),
+      createLabTest("evt_methods_2025", "2025-03-01T08:00:00.000Z", [
+        { analyte: "Estimated GFR CKD-EPI", unit: "mL/min/1.73m^2", value: 89 },
+        { analyte: "Cholesterol LDL", unit: "mg/dL", value: 90 },
+        { analyte: "VLDL Cholesterol Calculated", unit: "mg/dL", value: 13 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "9".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const measured = selectBrowserVaultMeasuredBiomarkers(client);
+
+  assert.deepEqual(measured.map((entry) => entry.metricKey).sort(), [
+    "egfr",
+    "egfr-ckd-epi",
+    "ldl-c",
+    "ldl-calculated",
+    "ldl-chol-calc-nih",
+    "vldl-cholesterol",
+    "vldl-cholesterol-calculated",
+  ]);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR")?.rows.length, 1);
+  const ckdEpi = selectBrowserVaultLabBiomarkerDetail(client, "Estimated GFR CKD-EPI");
+  assert.equal(ckdEpi?.rows.length, 2);
+  assert.equal(ckdEpi?.chartSeries.length, 2);
+  assert.equal(ckdEpi?.latestComparable?.normalizedValue, 89);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Cholesterol")?.rows.length, 2);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL Calculated")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "LDL CHOL CALC (NIH)")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol")?.rows.length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "VLDL Cholesterol Cal")?.rows.length, 2);
+});
+
+test("lab-only aliases preserve manual metric selection and goal authority", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createEvent("evt_manual_testosterone", "measurement", "2026-02-01T08:00:00.000Z", {
+        measurements: [{ metric: "testosterone", unit: "ng/dL", value: 500 }],
+        source: "manual",
+      }),
+      createMetricSample("smp_manual_testosterone", "2026-02-02T08:00:00.000Z", {
+        dayKey: "2026-02-02",
+        metric: "testosterone",
+        quality: "raw",
+        recordedAt: "2026-02-02T08:00:00.000Z",
+        source: "manual",
+        unit: "ng/dL",
+        value: 525,
+      }),
+      createLabTest("evt_testosterone_2024", "2024-03-01T08:00:00.000Z", [
+        { analyte: "Testosterone", unit: "ng/dL", value: 480 },
+      ]),
+      createLabTest("evt_testosterone_2025", "2025-03-01T08:00:00.000Z", [
+        { analyte: "Testosterone total", unit: "ng/dL", value: 510 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints;
+  const manualPoints = points.filter((point) => point.metricKey === "testosterone");
+  const labPoints = points.filter((point) => point.metricKey === "total-testosterone");
+
+  assert.deepEqual(manualPoints.map((point) => point.source.kind).sort(), ["measurement", "metric-sample"]);
+  assert.equal(labPoints.length, 2);
+  assert.equal(labPoints.every((point) => point.source.kind === "test-result"), true);
+
+  const selection = selectMetricValue({
+    metricKey: "testosterone",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+  });
+  assert.equal(selection.status, "ready");
+  assert.equal(selection.value, 525);
+  assert.equal(selection.point?.source.kind, "metric-sample");
+
+  const goal = selectMetricGoalProgress({
+    goalId: "goal_testosterone",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+    target: {
+      comparator: ">=",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "testosterone",
+      targetId: "target_testosterone",
+      unit: "ng/dL",
+      value: 500,
+    },
+  });
+  assert.equal(goal.status, "met");
+  assert.equal(goal.currentValue, 525);
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-02-03T00:00:00.000Z",
+    metricPoints: points,
+    sourceBundleHash: "a".repeat(64),
+    vault,
+  });
+  assert.equal(replica.generation, 2);
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const indexed = selectBrowserVaultMeasuredBiomarkers(client)
+    .find((entry) => entry.metricKey === "total-testosterone");
+  assert.ok(indexed);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, indexed.metricKey)?.rows.length, 2);
+});
+
+test("expanded lab definitions stay at the test-result boundary", () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_egfr_lab", "2025-03-01T08:00:00.000Z", [
+        { analyte: "Estimated GFR CKD-EPI", unit: "mL/min/1.73m^2", value: 89 },
+      ]),
+      createEvent("evt_egfr_manual", "measurement", "2026-02-01T08:00:00.000Z", {
+        measurements: [{ metric: "egfr-ckd-epi", unit: "mL/min/1.73m^2", value: 80 }],
+        source: "manual",
+      }),
+      createMetricSample("smp_egfr_manual", "2026-02-02T08:00:00.000Z", {
+        dayKey: "2026-02-02",
+        metric: "egfr-ckd-epi",
+        quality: "raw",
+        recordedAt: "2026-02-02T08:00:00.000Z",
+        source: "manual",
+        unit: "mL/min/1.73m^2",
+        value: 82,
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const points = buildMetricProjection(vault).metricPoints
+    .filter((point) => point.metricKey === "egfr-ckd-epi");
+  const labPoint = points.find((point) => point.source.kind === "test-result");
+  const manualPoints = points.filter((point) =>
+    point.source.kind === "measurement" || point.source.kind === "metric-sample"
+  );
+
+  assert.equal(labPoint?.canonicalUnit, "mL/min/1.73m^2");
+  assert.equal(labPoint?.canonicalValue, 89);
+  assert.equal(manualPoints.length, 2);
+  assert.equal(manualPoints.every((point) => point.canonicalUnit === null), true);
+  assert.equal(manualPoints.every((point) => point.canonicalValue === null), true);
+
+  const selection = selectMetricValue({
+    metricKey: "egfr-ckd-epi",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+  });
+  assert.equal(selection.status, "ready");
+  assert.equal(selection.value, 82);
+  assert.equal(selection.unit, "mL/min/1.73m^2");
+  assert.equal(selection.point?.source.kind, "metric-sample");
+
+  const goal = selectMetricGoalProgress({
+    goalId: "goal_egfr_manual",
+    now: "2026-02-03T00:00:00.000Z",
+    points,
+    target: {
+      comparator: ">=",
+      evaluation: { kind: "selected-value" },
+      kind: "metric",
+      metricKey: "egfr-ckd-epi",
+      targetId: "target_egfr_manual",
+      unit: "mL/min/1.73m^2",
+      value: 81,
+    },
+  });
+  assert.equal(goal.status, "met");
+  assert.equal(goal.currentValue, 82);
+});
+
+test("the measured index excludes unclassified lab-record fields without deleting their rows", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_mixed_record", "2026-03-01T08:00:00.000Z", [
+        { analyte: "Hemoglobin", unit: "g/dL", value: 15 },
+        { analyte: "ECG axis", unit: "degrees", value: 70 },
+        { analyte: "Urine color", textValue: "Clear" },
+        { analyte: "Screening result", textValue: "Negative" },
+        { analyte: "Report sequence", value: 12345 },
+      ]),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-16T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "8".repeat(64),
+    vault,
+  });
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+
+  assert.equal(replica.labResultRows.length, 5);
+  assert.deepEqual(
+    selectBrowserVaultMeasuredBiomarkers(client).map((entry) => entry.metricKey),
+    ["hemoglobin"],
+  );
+  assert.equal(client.labResults.list({ metricKey: "ecg-axis" }).length, 1);
+  assert.equal(client.labResults.list({ metricKey: "urine-color" }).length, 1);
+  assert.equal(selectBrowserVaultLabBiomarkerDetail(client, "report-sequence")?.rows.length, 1);
+});
+
 test("lab projection ignores test-result points whose collapsed live event is absent", async () => {
   const liveTest = createLabTest("evt_live", "2026-01-01T08:00:00.000Z", [{
     analyte: "Hemoglobin A1c",
@@ -827,8 +1047,7 @@ test("custom analytes with no normalized characters keep a deterministic private
   assert.equal(second.labResultRows[0]?.metricKey, metricKey);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(first));
   const measured = selectBrowserVaultMeasuredBiomarkers(client);
-  assert.equal(measured[0]?.displayName, "β?!");
-  assert.equal(measured[0]?.healthArea.id, "other");
+  assert.deepEqual(measured, []);
   assert.equal(selectBrowserVaultLabBiomarkerDetail(client, metricKey)?.rows.length, 1);
   // The hashed fallback is one identity across every scalar source: an
   // observation with the same non-normalizable name lands on the same key.
@@ -1011,6 +1230,34 @@ function createEvent(
     stream: null,
     tags: [],
     title: kind === "test" ? "Blood panel" : "Observation",
+  } satisfies CanonicalEntity;
+}
+
+function createMetricSample(
+  entityId: string,
+  recordedAt: string,
+  attributes: Record<string, unknown>,
+): CanonicalEntity {
+  return {
+    attributes,
+    body: null,
+    date: recordedAt.slice(0, 10),
+    entityId,
+    experimentSlug: null,
+    family: "sample",
+    frontmatter: null,
+    kind: "metric_sample",
+    links: [],
+    lookupIds: [entityId],
+    occurredAt: recordedAt,
+    path: `ledger/metric-samples/${String(attributes.metric ?? "metric")}/2026/2026-02.jsonl`,
+    primaryLookupId: entityId,
+    recordClass: "sample",
+    relatedIds: [],
+    status: typeof attributes.quality === "string" ? attributes.quality : null,
+    stream: typeof attributes.metric === "string" ? attributes.metric : null,
+    tags: [],
+    title: "Metric sample",
   } satisfies CanonicalEntity;
 }
 

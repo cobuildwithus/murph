@@ -28,6 +28,10 @@ const browserVaultMock = vi.hoisted(() => ({
   },
 }));
 
+const linkPropsMock = vi.hoisted(() => ({
+  value: [] as Array<{ href: string; prefetch: boolean | undefined }>,
+}));
+
 vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault() {
     return browserVaultMock.value;
@@ -44,11 +48,13 @@ vi.mock("@/src/components/ui/auth-button", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default({ children, href, ...props }: {
+  default({ children, href, prefetch, ...props }: {
     children: ReactNode;
     href: string;
+    prefetch?: boolean;
     [key: string]: unknown;
   }) {
+    linkPropsMock.value.push({ href, prefetch });
     return createElement("a", { ...props, href }, children);
   },
 }));
@@ -57,6 +63,7 @@ import { BiomarkersPageClient } from "../app/(dashboard)/biomarkers/biomarkers-p
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
 
 beforeEach(() => {
+  linkPropsMock.value = [];
   browserVaultMock.value = {
     client: null,
     error: null,
@@ -71,6 +78,18 @@ test("measured biomarkers are grouped by health area and link to private histori
   browserVaultMock.value.client = clientWithRows([
     labRow({ date: "2019-02-10", id: "hba1c-2019", value: 5.2 }),
     labRow({ date: "2026-02-10", flag: "high", id: "hba1c-2026", value: 5.8 }),
+    labRow({
+      analyte: "Glucose",
+      biomarkerKey: "biomarker:blood-glucose",
+      date: "2026-01-12",
+      flag: "normal",
+      id: "glucose-2026",
+      metricKey: "glucose",
+      normalizedUnit: "mg/dL",
+      normalizedValue: 92,
+      unit: "mg/dL",
+      value: 92,
+    }),
     labRow({
       analyte: "Apolipoprotein B",
       biomarkerKey: "biomarker:apob",
@@ -104,69 +123,221 @@ test("measured biomarkers are grouped by health area and link to private histori
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("Your biomarkers");
-    expect(text).toContain("3 biomarkers");
+    expect(text).toContain("Biomarkers");
+    expect(rendered.container.querySelector('input[placeholder="Search biomarkers"]')).not.toBeNull();
     expect(text).toContain("Blood sugar");
     expect(text).toContain("Heart & lipids");
-    expect(text).toContain("Other");
-    expect(text).toContain("2019 to 2026");
-    expect(text).toContain("Detected");
-    expect(text).toContain("Novel Marker With A Deliberately Long Custom Display Name");
-    expect(text).toContain("High");
+    expect(text).toContain("Above range");
+    expect(text).toContain("In range");
+    expect(text).toContain("Reported");
     expect(text).not.toContain("No lab flag");
+    expect(text).not.toContain("2 results");
+    expect(text).not.toContain("2019 to 2026");
     expect(text.indexOf("Blood sugar")).toBeLessThan(text.indexOf("Heart & lipids"));
-    expect(text.indexOf("Heart & lipids")).toBeLessThan(text.indexOf("Other"));
     const labGroups = [...rendered.container.querySelectorAll("details")];
-    expect(labGroups).toHaveLength(3);
-    expect(labGroups.every((group) => !group.hasAttribute("open"))).toBe(true);
+    expect(labGroups).toHaveLength(2);
+    expect(labGroups.every((group) => group.hasAttribute("open"))).toBe(true);
     const firstSummary = labGroups[0]?.querySelector("summary");
     expect(firstSummary?.textContent).toContain("Blood sugar");
+    const firstGrid = firstSummary?.nextElementSibling;
+    expect(firstGrid?.className).not.toMatch(/(?:^|\s)grid-cols-/u);
+    expect(firstGrid?.className).toContain("md:grid-cols-2");
+    expect(firstGrid?.className).toContain("xl:grid-cols-3");
     const hba1cLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/hba1c"]',
     );
     expect(hba1cLink).not.toBeNull();
     expect(hba1cLink?.getAttribute("aria-label")).toBeNull();
     expect(hba1cLink?.textContent).toContain("HbA1c");
-    expect(hba1cLink?.textContent).toContain("2 results");
     expect(hba1cLink?.textContent).toContain("5.8%");
-    const latestDate = hba1cLink?.querySelector("time");
-    expect(latestDate?.getAttribute("dateTime")).toBe("2026-02-10");
-    expect(latestDate?.textContent).toContain("2026");
-    expect(hba1cLink?.textContent).toContain("High");
-    expect(hba1cLink?.closest("li")?.parentElement?.tagName).toBe("UL");
-    expect(
-      rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]'),
-    ).not.toBeNull();
-    const customHeading = [...rendered.container.querySelectorAll("h3")]
-      .find((heading) => heading.textContent?.includes("Deliberately Long"));
-    expect(customHeading?.className).toContain("break-words");
-    expect(customHeading?.className).not.toContain("truncate");
+    expect(hba1cLink?.textContent).toContain("Above range");
+    expect(hba1cLink?.getAttribute("role")).toBeNull();
+    expect(hba1cLink?.parentElement).toBe(firstGrid);
+    expect(hba1cLink?.className).toContain("cursor-pointer");
+    const resultLinkProps = linkPropsMock.value.filter(({ href }) =>
+      href.startsWith("/biomarkers/results/")
+    );
+    expect(resultLinkProps).toHaveLength(3);
+    expect(resultLinkProps.every(({ prefetch }) => prefetch === false)).toBe(true);
+    const glucoseLink = rendered.container.querySelector(
+      'a[href="/biomarkers/results/glucose"]',
+    );
+    expect(glucoseLink?.textContent).toContain("In range");
+    expect((firstGrid?.textContent ?? "").indexOf("HbA1c")).toBeLessThan(
+      (firstGrid?.textContent ?? "").indexOf("Glucose"),
+    );
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/novel-marker"]')).toBeNull();
+    expect(text).not.toContain("Novel Marker With A Deliberately Long Custom Display Name");
     expect(text).not.toContain("Library");
+
+    const reviewFilter = rendered.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Review, 1"]',
+    );
+    expect(reviewFilter).not.toBeNull();
+    await act(async () => {
+      reviewFilter?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/hba1c"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/glucose"]')).toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/apob"]')).toBeNull();
+
+    const allFilter = rendered.container.querySelector<HTMLButtonElement>(
+      'button[aria-label="All, 3"]',
+    );
+    await act(async () => {
+      allFilter?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      await Promise.resolve();
+    });
+    const search = rendered.container.querySelector<HTMLInputElement>(
+      'input[placeholder="Search biomarkers"]',
+    );
+    expect(search).not.toBeNull();
+    await act(async () => {
+      if (search) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          rendered.window.HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (valueSetter) {
+          valueSetter.call(search, "apo");
+        } else {
+          search.value = "apo";
+        }
+        search.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+        search.dispatchEvent(new rendered.window.Event("change", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/apob"]')).not.toBeNull();
+    expect(rendered.container.querySelector('a[href="/biomarkers/results/hba1c"]')).toBeNull();
+
+    await act(async () => {
+      if (search) {
+        const valueSetter = Object.getOwnPropertyDescriptor(
+          rendered.window.HTMLInputElement.prototype,
+          "value",
+        )?.set;
+        if (valueSetter) {
+          valueSetter.call(search, "not present");
+        } else {
+          search.value = "not present";
+        }
+        search.dispatchEvent(new rendered.window.Event("input", { bubbles: true }));
+        search.dispatchEvent(new rendered.window.Event("change", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    expect(rendered.container.textContent).toContain("No matching biomarkers");
+    expect(rendered.container.textContent).toContain("Try another name or status.");
+    expect(rendered.container.querySelector('[href^="/biomarkers/results/"]')).toBeNull();
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("the measured list keeps stale data visible and never exposes raw load errors", async () => {
+test("unclassified saved lab rows stay out of the index without pretending the record is empty", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).toContain("saved lab records remain available");
+    expect(text).not.toContain("Report sequence");
+    expect(text).not.toContain("Other");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("stale unclassified lab rows stay available without a refresh banner", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Report sequence",
+      biomarkerKey: null,
+      id: "report-sequence",
+      metricKey: "report-sequence",
+      normalizedUnit: null,
+      normalizedValue: null,
+      textValue: null,
+      unit: null,
+      value: 12345,
+    }),
+  ]);
+  browserVaultMock.value.freshness = "stale";
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("Your lab history may be out of date");
+    expect(text).not.toContain("Refresh to check for newer data");
+    expect(text).not.toContain("No lab results are available in this saved view");
+    expect(text).not.toContain("Report sequence");
+    expect(rendered.container.querySelector('[aria-live="polite"]')).toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("the measured list keeps stale data visible without a refresh banner and never exposes raw load errors", async () => {
   browserVaultMock.value.client = clientWithRows([labRow()]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
-  const refresh = browserVaultMock.value.refresh;
 
   const stale = await renderClientComponent(
     <BiomarkersPageClient authenticated />,
     { requireButton: false },
   );
   try {
-    expect(stale.container.textContent).toContain("Your lab history may be out of date");
     expect(stale.container.textContent).toContain("HbA1c");
-    await clickButton(stale.container, stale.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(stale.container.textContent).not.toContain("Your lab history may be out of date");
+    expect(stale.container.textContent).not.toContain("Refreshing your lab history");
+    expect(stale.container.textContent).not.toContain("Refresh");
+    expect(stale.container.querySelector('[aria-live="polite"]')).toBeNull();
   } finally {
     await stale.cleanup();
   }
 
+  browserVaultMock.value.refreshPending = true;
+  const refreshing = await renderClientComponent(
+    <BiomarkersPageClient authenticated />,
+    { requireButton: false },
+  );
+  try {
+    expect(refreshing.container.textContent).toContain("HbA1c");
+    expect(refreshing.container.textContent).not.toContain("Refreshing your lab history");
+    expect(refreshing.container.textContent).not.toContain("Refresh");
+    expect(refreshing.container.querySelector('[aria-live="polite"]')).toBeNull();
+  } finally {
+    await refreshing.cleanup();
+  }
+
   browserVaultMock.value.client = null;
+  browserVaultMock.value.refreshPending = false;
   browserVaultMock.value.error = "private transport detail that must not render";
   browserVaultMock.value.status = "error";
   const failed = await renderClientComponent(
@@ -625,7 +796,7 @@ test("a pending refresh keeps ready empty replicas in the preparing state", asyn
   }
 });
 
-test("stale empty list and detail states offer a refresh action", async () => {
+test("stale empty list stays quiet while detail states retain a refresh action", async () => {
   browserVaultMock.value.client = clientWithRows([]);
   browserVaultMock.value.freshness = "stale";
   browserVaultMock.value.status = "ready";
@@ -636,17 +807,14 @@ test("stale empty list and detail states offer a refresh action", async () => {
     { requireButton: false },
   );
   try {
-    expect(list.container.textContent).toContain("Your lab history may be out of date");
-    expect(list.container.textContent).toContain(
-      "No lab results are available in this saved view. Refresh to check for newer data.",
-    );
     expect(list.container.textContent).toContain("No saved lab results in this view");
     expect(list.container.textContent).toContain(
-      "Refresh to check for newer data, or send Murph a lab report.",
+      "Murph checks for newer data in the background. You can also send Murph a lab report.",
     );
     expect(list.container.textContent).not.toContain("No lab results yet");
-    await clickButton(list.container, list.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(list.container.textContent).not.toContain("Your lab history may be out of date");
+    expect(list.container.textContent).not.toContain("Refresh");
+    expect(refresh).not.toHaveBeenCalled();
   } finally {
     await list.cleanup();
   }
@@ -661,7 +829,7 @@ test("stale empty list and detail states offer a refresh action", async () => {
       "This saved view may not include newer lab data. Refresh to check again.",
     );
     await clickButton(detail.container, detail.window, "Refresh");
-    expect(refresh).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
   } finally {
     await detail.cleanup();
   }
