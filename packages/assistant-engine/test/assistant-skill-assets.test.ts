@@ -826,6 +826,19 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
+  it('keeps scheduled member asks in one ordinary bounded turn', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
+    expect(groupChatSkill).toBeTruthy()
+    if (!groupChatSkill) return
+
+    const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('run the ordinary shell command `sleep 60` once')
+    expect(raw).toContain('repeat each exact same\n`ask_member` call once')
+    expect(raw).toContain('`status="completed"` contains the\nanswer for this turn')
+    expect(raw).toContain('Do not add more\npolling, another automation, or a follow-up turn')
+    expect(raw).not.toContain('resumes that same current\nautomation')
+  })
+
   it('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',

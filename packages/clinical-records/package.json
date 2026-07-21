@@ -15,6 +15,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./retrieval-limits": {
+      "types": "./dist/retrieval-limits.d.ts",
+      "import": "./dist/retrieval-limits.js",
+      "default": "./dist/retrieval-limits.js"
     }
   },
   "files": [

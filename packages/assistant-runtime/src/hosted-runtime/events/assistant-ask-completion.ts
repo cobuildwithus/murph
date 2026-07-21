@@ -2,16 +2,20 @@ import { createHash } from "node:crypto";
 
 import {
   conversationRefFromAssistantInputConversation,
+  isAssistantSessionNotFoundError,
   readAssistantAskOriginSession,
   readAssistantInputEvent,
   sendAssistantAskContinuation,
+  sendAssistantNotification,
   type AssistantExecutionContext,
   type AssistantInputEventRecord,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import type { AssistantSession } from "@murphai/operator-config/assistant-cli-contracts";
-import type {
-  HostedExecutionAssistantAskCompletedWake,
+import {
+  createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+  type HostedExecutionAssistantAskCompletedWake,
 } from "@murphai/hosted-execution";
 
 import {
@@ -24,6 +28,11 @@ import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./mailbox-outcome.ts";
+
+export const HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
+  HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
+const HOSTED_ASSISTANT_ASK_REVIEWED_EXACT_INSTRUCTIONS =
+  "Queue the already-reviewed exact response for the bound group conversation.";
 
 export async function executeHostedAssistantAskCompletedWake(input: {
   executionContext: AssistantExecutionContext;
@@ -49,8 +58,24 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     return createOutcome();
   }
 
+  if (isHostedAssistantAskAutomationCompletedWake(input.wake)) {
+    // Scheduled turns read their result by repeating the same ask_member call.
+    // A late completion is bounded mailbox data, not authority to start a new
+    // provider turn or deliver a later group message.
+    return createOutcome();
+  }
+
+  // Only the reviewed (accepted-input) and legacy joined-group completions
+  // reach this delivery path; the scheduled completion returned above.
+  // Both remaining shapes expose the same origin input/session pair.
+  const originRef = resolveHostedAssistantAskCompletionOriginRef(input.wake.ask);
+  if (!originRef) {
+    return createOutcome();
+  }
+  const originAssistantInputId = originRef.originAssistantInputId;
+  const originSessionId = originRef.originSessionId;
   const origin = await readAssistantInputEvent({
-    inputId: input.wake.ask.originAssistantInputId,
+    inputId: originAssistantInputId,
     vault: input.vaultRoot,
   });
   if (!origin) {
@@ -62,13 +87,15 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     replyTarget: origin.replyTarget,
   });
   const session = await readAssistantAskOriginSession({
-    sessionId: input.wake.ask.originSessionId,
+    sessionId: originSessionId,
     vault: input.vaultRoot,
   });
+  const reviewedExact = "origin" in input.wake.ask;
   if (
     !route
     || !session
     || !isAuthorizedHostedAssistantAskCompletionOrigin({
+      expectedThreadIsDirect: !reviewedExact,
       origin,
       route,
       session,
@@ -85,41 +112,90 @@ export async function executeHostedAssistantAskCompletedWake(input: {
     shouldYield,
     timeoutMs: null,
   });
-  try {
-    await sendAssistantAskContinuation({
-      abortSignal: cancellation.signal ?? undefined,
-      actorId: route.participantId,
-      bindingDeliveryTarget: route.deliveryTarget,
-      canCommit,
-      channel: route.channel,
-      conversation: conversationRefFromAssistantInputConversation(
-        origin.conversation!,
+  const deliveryKey = buildHostedAssistantAskCompletionDeliveryKey({
+    deliveryMode: reviewedExact ? "reviewed_exact" : "legacy",
+    eventId: input.wake.eventId,
+  });
+  const deliveryInput = {
+    abortSignal: cancellation.signal ?? undefined,
+    bindingDeliveryTarget: route.deliveryTarget,
+    channel: route.channel,
+    deliveryIdempotencyKey: deliveryKey,
+    deliveryReplyToMessageId:
+      normalizeHostedAssistantAskCompletionRouteValue(
+        origin.replyTarget?.messageId,
       ),
-      deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
-        eventId: input.wake.eventId,
-      }),
-      deliveryReplyToMessageId:
-        normalizeHostedAssistantAskCompletionRouteValue(
-          origin.replyTarget?.messageId,
+    deliveryTarget: route.deliveryTarget,
+    executionContext: input.executionContext,
+    identityId: route.identityId,
+    sessionId: session.sessionId,
+    threadId: route.threadId,
+    threadIsDirect: route.threadIsDirect,
+    turnEnvironment: input.turnEnvironment ?? null,
+    vault: input.vaultRoot,
+  };
+  const expiredBeforeCommit = new Error(
+    "Assistant ask completion expired before delivery commit.",
+  );
+  try {
+    if (reviewedExact) {
+      await sendAssistantNotification({
+        ...deliveryInput,
+        approvalPolicy: "never",
+        answeredMailboxItemIds: [
+          input.sourceMailboxItemId ?? input.wake.eventId,
+        ],
+        beforeCommit: () => {
+          if (canCommit()) {
+            return;
+          }
+          if (shouldYield?.() === true) {
+            throw new HostedAssistantAskCompletionPreemptedError();
+          }
+          throw expiredBeforeCommit;
+        },
+        deferCommitUntilDeliveryAccepted: true,
+        deliveryDedupeToken: deliveryKey,
+        deliveryDispatchMode: "queue-only",
+        instructions: HOSTED_ASSISTANT_ASK_REVIEWED_EXACT_INSTRUCTIONS,
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: resolveHostedAssistantAskReviewedExactResponse(
+            input.wake.ask.result,
+          ),
+        },
+        reviewedAssistantAskCompletionExpiresAt: input.wake.ask.expiresAt,
+        sandbox: "read-only",
+        turnTrigger: "automation-auto-reply",
+      });
+    } else {
+      await sendAssistantAskContinuation({
+        ...deliveryInput,
+        actorId: route.participantId,
+        canCommit,
+        conversation: conversationRefFromAssistantInputConversation(
+          origin.conversation!,
         ),
-      deliveryTarget: route.deliveryTarget,
-      executionContext: input.executionContext,
-      identityId: route.identityId,
-      instructions: buildHostedAssistantAskContinuationInstructions({
-        question: input.wake.ask.question,
-        result: input.wake.ask.result,
-        targetLabel: input.wake.ask.targetLabel,
-      }),
-      originAssistantInputId: input.wake.ask.originAssistantInputId,
-      participantId: route.participantId,
-      requestId: input.wake.ask.requestId,
-      sessionId: session.sessionId,
-      threadId: route.threadId,
-      threadIsDirect: true,
-      turnEnvironment: input.turnEnvironment ?? null,
-      vault: input.vaultRoot,
-    });
+        instructions: buildHostedAssistantAskContinuationInstructions({
+          question: input.wake.ask.question,
+          result: input.wake.ask.result,
+          targetLabel: input.wake.ask.targetLabel,
+        }),
+        originAssistantInputId,
+        participantId: route.participantId,
+        requestId: input.wake.ask.requestId,
+      });
+    }
   } catch (error) {
+    if (error === expiredBeforeCommit) {
+      return createOutcome();
+    }
+    if (reviewedExact && isAssistantSessionNotFoundError(error)) {
+      return createOutcome();
+    }
+    if (error instanceof HostedAssistantAskCompletionPreemptedError) {
+      throw error;
+    }
     if (shouldYield?.() === true) {
       throw new HostedAssistantAskCompletionPreemptedError({ cause: error });
     }
@@ -127,7 +203,7 @@ export async function executeHostedAssistantAskCompletedWake(input: {
   } finally {
     cancellation.dispose();
   }
-  if (shouldYield?.() === true) {
+  if (!reviewedExact && shouldYield?.() === true) {
     throw new HostedAssistantAskCompletionPreemptedError();
   }
 
@@ -154,35 +230,75 @@ export function buildHostedAssistantAskContinuationInstructions(input: {
   ].join("\n");
 }
 
+export function resolveHostedAssistantAskReviewedExactResponse(
+  result: HostedExecutionAssistantAskCompletedWake["ask"]["result"],
+): string {
+  return result.outcome === "answered"
+    ? result.answer
+    : HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
+}
+
 export function isAuthorizedHostedAssistantAskCompletionOrigin(input: {
+  expectedThreadIsDirect?: boolean;
   origin: AssistantInputEventRecord;
   route: NonNullable<ReturnType<typeof readHostedAssistantInputCurrentDeliveryRoute>>;
   session: AssistantSession;
 }): boolean {
   const conversation = input.origin.conversation;
+  const expectedThreadIsDirect = input.expectedThreadIsDirect ?? true;
   if (
     input.origin.sourceRef.kind !== "hosted-mailbox"
     || input.origin.sourceRef.lane !== "conversation"
     || !conversation
     || conversation.actorIsSelf
-    || conversation.threadIsDirect !== true
-    || input.route.threadIsDirect !== true
+    || conversation.threadIsDirect !== expectedThreadIsDirect
+    || input.route.threadIsDirect !== expectedThreadIsDirect
   ) {
     return false;
   }
 
   const binding = input.session.binding;
-  return binding.threadIsDirect === true
+  return binding.threadIsDirect === expectedThreadIsDirect
     && normalizeHostedAssistantAskCompletionRouteValue(binding.channel)
       === input.route.channel
     && normalizeHostedAssistantAskCompletionRouteValue(binding.identityId)
       === input.route.identityId
-    && normalizeHostedAssistantAskCompletionRouteValue(binding.actorId)
-      === input.route.participantId
+    && (
+      !expectedThreadIsDirect
+      || normalizeHostedAssistantAskCompletionRouteValue(binding.actorId)
+        === input.route.participantId
+    )
     && normalizeHostedAssistantAskCompletionRouteValue(binding.threadId)
       === input.route.threadId
     && normalizeHostedAssistantAskCompletionRouteValue(binding.delivery?.target)
       === input.route.deliveryTarget;
+}
+
+function resolveHostedAssistantAskCompletionOriginRef(
+  ask: HostedExecutionAssistantAskCompletedWake["ask"],
+): { originAssistantInputId: string; originSessionId: string } | null {
+  if (!("origin" in ask)) {
+    return {
+      originAssistantInputId: ask.originAssistantInputId,
+      originSessionId: ask.originSessionId,
+    };
+  }
+  if (ask.origin.kind === "accepted_input") {
+    return {
+      originAssistantInputId: ask.origin.assistantInputId,
+      originSessionId: ask.origin.sessionId,
+    };
+  }
+  // Automation-occurrence completions use the current canonical automation
+  // route instead of a historical input/session pair.
+  return null;
+}
+
+export function isHostedAssistantAskAutomationCompletedWake(
+  wake: HostedExecutionAssistantAskCompletedWake,
+): boolean {
+  return "origin" in wake.ask
+    && wake.ask.origin.kind === "automation_occurrence";
 }
 
 export function isHostedAssistantAskCompletionExpired(
@@ -194,8 +310,14 @@ export function isHostedAssistantAskCompletionExpired(
 }
 
 export function buildHostedAssistantAskCompletionDeliveryKey(input: {
+  deliveryMode?: "legacy" | "reviewed_exact";
   eventId: string;
 }): string {
+  if (input.deliveryMode === "reviewed_exact") {
+    return createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
+      input.eventId,
+    );
+  }
   const digest = createHash("sha256")
     .update(input.eventId)
     .digest("hex")

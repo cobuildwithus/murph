@@ -554,6 +554,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupDisclosurePermissionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260716120000_hosted_group_disclosure_permission/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedGrowthDailySnapshotMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/20260706130000_hosted_growth_daily_snapshot/migration.sql",
@@ -866,6 +873,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260715150000_hosted_family_pending_member_plan",
       "20260715190000_hosted_assistant_personality_projection_watermarks",
       "20260715230000_hosted_mailbox_subscription_action_claim",
+      "20260716120000_hosted_group_disclosure_permission",
       "20260716160000_hosted_usage_credits",
       "20260716190000_linq_signup_welcome_reservation",
       "20260716220000_hosted_growth_snapshot_message_counts",
@@ -873,6 +881,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260720150000_clinical_retrieval_plan",
       "20260720173000_hosted_assistant_persona",
       "20260720230000_hosted_group_usage_funding",
+      "20260721160000_clinical_retrieval_wire_identity",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
@@ -1106,6 +1115,20 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
+    );
+    for (const sql of [
+      'CREATE TABLE "hosted_group_disclosure_permission"',
+      '"permission_text_encrypted" TEXT NOT NULL',
+      'CREATE TABLE "hosted_group_disclosure_grant"',
+      'WHERE "revoked_at" IS NULL',
+      'REFERENCES "hosted_group"("id") ON DELETE CASCADE',
+      'REFERENCES "hosted_group_member"("id") ON DELETE CASCADE',
+    ]) expect(hostedGroupDisclosurePermissionMigrationSql).toContain(sql);
+    expect(hostedGroupDisclosurePermissionMigrationSql).not.toContain(
+      '"permission_text" TEXT',
+    );
+    expect(hostedGroupDisclosurePermissionMigrationSql).not.toMatch(
+      /"(?:question|answer|candidate|response|vault)[^"]*"/iu,
     );
     expect(hostedGrowthDailySnapshotMigrationSql).toContain(
       'CREATE TABLE "hosted_growth_daily_snapshot"',

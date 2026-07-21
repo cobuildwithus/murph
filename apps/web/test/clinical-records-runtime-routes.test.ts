@@ -172,6 +172,62 @@ describe("Clinical Records internal runtime routes", () => {
     });
   });
 
+  it("accepts complete query-aware page and outcome identities and rejects partial identity", async () => {
+    const headers = runtimeWriteFenceHeaders();
+    const page = {
+      cursor: null,
+      generation: 1,
+      queryFingerprint: "a".repeat(64),
+      queryScopeId: "laboratory-observations",
+      requestId: "request_1",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      runId: "run_1",
+      sliceId: "whole",
+    };
+    const outcome = {
+      counts: emptyOutcomeCounts(),
+      generation: 1,
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }],
+      runId: "run_1",
+      status: "completed",
+    };
+
+    const [pageResponse, outcomeResponse, invalidOutcomeResponse] = await Promise.all([
+      fetchPageRoute.POST(jsonRequest(
+        "/api/internal/clinical-records/runtime/fetch-page",
+        page,
+        headers,
+      )),
+      recordOutcomeRoute.POST(jsonRequest(
+        "/api/internal/clinical-records/runtime/record-outcome",
+        outcome,
+        headers,
+      )),
+      recordOutcomeRoute.POST(jsonRequest(
+        "/api/internal/clinical-records/runtime/record-outcome",
+        { ...outcome, retrievalSlices: undefined },
+        headers,
+      )),
+    ]);
+
+    expect(pageResponse.status).toBe(200);
+    expect(outcomeResponse.status).toBe(200);
+    expect(invalidOutcomeResponse.status).toBe(400);
+    expect(mocks.fetchClinicalRetrievalPage).toHaveBeenCalledWith({
+      memberId: "member_clinical_1",
+      request: page,
+    });
+    expect(mocks.recordClinicalRetrievalOutcome).toHaveBeenCalledWith({
+      memberId: "member_clinical_1",
+      request: outcome,
+    });
+  });
+
   it("rejects inactive members before any Clinical Records read, egress, or outcome mutation", async () => {
     mocks.requireHostedRuntimeActiveAccess.mockRejectedValue(hostedOnboardingError({
       code: "CLINICAL_RECORD_RUNTIME_MEMBER_INACTIVE",

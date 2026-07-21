@@ -177,6 +177,8 @@ export interface AssistantNotificationInput
     Pick<
       AssistantMessageInput,
       | 'abortSignal'
+      | 'answeredMailboxItemIds'
+      | 'beforeProviderAcceptedInputs'
       | 'codexCommand'
       | 'deliveryDispatchMode'
       | 'deliveryIdempotencyKey'
@@ -190,10 +192,12 @@ export interface AssistantNotificationInput
       | 'onProviderRequestStarted'
       | 'onTraceEvent'
       | 'operatorAuthority'
+      | 'reviewedAssistantAskCompletionExpiresAt'
       | 'outboxAutomationAuthority'
       | 'outboxExternalThreadRouteAuthority'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
+      | 'scheduledInvocationAuthority'
       | 'scheduledOccurrenceAt'
       | 'serviceTier'
       | 'showThinkingTraces'
@@ -202,6 +206,7 @@ export interface AssistantNotificationInput
       | 'workingDirectory'
     > {
   deliveryDedupeToken?: string | null
+  beforeToolExecution?: (() => Promise<void> | void) | null
   beforeDelivery?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   beforeCommit?: ((context: AssistantNotificationCommitContext) => Promise<void> | void) | null
   deferCommitUntilDeliveryAccepted?: boolean | null
@@ -342,6 +347,11 @@ export async function sendAssistantNotificationLocal(
           : null
       const hostedToolContext = hostedExecutionContext
         ? createAssistantHostedToolContext({
+            beforeToolExecution: input.beforeToolExecution
+              ? async () => {
+                  await input.beforeToolExecution?.()
+                }
+              : undefined,
             computerToolsAvailable:
               typeof hostedExecutionContext.providerFetch === 'function',
             executionContext: hostedExecutionContext,
@@ -394,6 +404,11 @@ export async function sendAssistantNotificationLocal(
                   providerRequestOrdinal: event.providerRequestOrdinal ?? 0,
                   startedAt: event.startedAt,
                 })
+            : undefined,
+          onProviderRequestPlanned: messageInput.beforeProviderAcceptedInputs
+            ? async () => await messageInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [],
+              })
             : undefined,
           plan: sharedPlan,
           progressDelivery,
@@ -888,7 +903,6 @@ async function sendAssistantExactTextNotificationLocal(input: {
     if (deliveryOutcome.kind === 'failed') {
       throw deliveryOutcome.error
     }
-
     savedSession = await persistAssistantExactTextNotificationSession({
       responseText,
       session: deliveryOutcome.session,
@@ -1216,6 +1230,7 @@ function buildAssistantNotificationMessageInput(
     actorId: input.actorId,
     alias: input.alias,
     allowBindingRebind: input.allowBindingRebind,
+    answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     approvalPolicy: scheduledOccurrence ? input.approvalPolicy : 'never',
     bindingDeliveryTarget: input.bindingDeliveryTarget,
     channel: input.channel,
@@ -1226,6 +1241,8 @@ function buildAssistantNotificationMessageInput(
     deliveryDispatchMode: input.deliveryDispatchMode,
     deliveryKind: input.deliveryKind,
     deliveryIdempotencyKey: input.deliveryIdempotencyKey ?? null,
+    reviewedAssistantAskCompletionExpiresAt:
+      input.reviewedAssistantAskCompletionExpiresAt ?? null,
     deliveryReplyToMessageId: input.deliveryReplyToMessageId ?? null,
     deliverySource: input.deliverySource ?? null,
     deliverySubject: input.deliverySubject ?? null,
@@ -1239,6 +1256,7 @@ function buildAssistantNotificationMessageInput(
     modelProvider: input.modelProvider,
     oss: input.oss,
     onProviderEvent: input.onProviderEvent ?? null,
+    beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
@@ -1262,6 +1280,7 @@ function buildAssistantNotificationMessageInput(
         ? input.sandbox
         : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
+    scheduledInvocationAuthority: input.scheduledInvocationAuthority ?? null,
     scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
     serviceTier: input.serviceTier ?? null,
     sessionId: input.sessionId,
@@ -1320,6 +1339,9 @@ async function deliverAssistantNotificationMessage(input: {
     media: requestedMedia,
   })
   const outcome = await state.outbox.deliverMessage({
+    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+    reviewedAssistantAskCompletionExpiresAt:
+      input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
@@ -1453,7 +1475,6 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
-
   return isAssistantNotificationScheduledOccurrence(input)
     ? null
     : ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE

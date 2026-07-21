@@ -775,11 +775,13 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
       kind: 'require_send_exact_text',
       text: 'Fixed welcome text',
     },
+    reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
     vault: '/vaults/exact',
   })
 
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(mocks.resolveAssistantTurnRoute).not.toHaveBeenCalled()
+  expect(mocks.resolveAssistantSessionForMessage).toHaveBeenCalledOnce()
   expect(mocks.recordAssistantUsageEvent).not.toHaveBeenCalled()
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   expect(order).toEqual([
@@ -806,6 +808,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
       deliveryIdempotencyKey: 'signup-welcome:member_exact',
       dispatchMode: undefined,
       message: 'Fixed welcome text',
+      reviewedAssistantAskCompletionExpiresAt: '2026-04-08T00:15:00.000Z',
       turnId: 'turn-exact',
     }),
   )
@@ -1020,6 +1023,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   mocks.markAssistantFirstContactSeen.mockClear()
 
   const result = await sendAssistantNotificationLocal({
+    answeredMailboxItemIds: ['aask_done_exact'],
     deliveryDedupeToken: 'signup-welcome:member_exact',
     deliveryDispatchMode: 'queue-only',
     deliveryIdempotencyKey: 'signup-welcome:member_exact',
@@ -1037,6 +1041,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
   expect(mocks.executeCodexTurnWithRecovery).not.toHaveBeenCalled()
   expect(deliverMessage).toHaveBeenCalledWith(
     expect.objectContaining({
+      answeredMailboxItemIds: ['aask_done_exact'],
       dispatchMode: 'queue-only',
       message: 'Fixed welcome text',
     }),
@@ -2430,7 +2435,6 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
       userEnvKeys: [],
     },
   }
-
   await sendAssistantNotificationLocal({
     executionContext,
     instructions: 'Format an untrusted one-shot notification.',
@@ -2452,7 +2456,6 @@ test('sendAssistantNotificationLocal gives hosted capabilities only to real sche
     },
     vault: '/vaults/notification-device-scope',
   })
-
   expect(observedHostedToolContexts).toHaveLength(3)
   expect(observedHostedToolContexts[0]).toBeNull()
   expect(observedHostedToolContexts[1]?.automationTool).toBe(automationTool)

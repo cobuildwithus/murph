@@ -3,6 +3,7 @@ import type {
   HostedClinicalRecordsFetchPageRequest,
   HostedClinicalRecordsFetchPageResponse,
   HostedClinicalRecordsRecordOutcomeRequest,
+  HostedClinicalRecordsReadRunRequest,
   HostedClinicalRecordsReadRunResponse,
 } from "@murphai/hosted-execution/clinical-records";
 import type {
@@ -268,6 +269,8 @@ export interface HostedRuntimeLinqSendResponse {
 
 export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   answeredMailboxItemIds?: readonly string[] | null;
+  assistantAskCompletionExpiresAt?: string | null;
+  assistantAskFallback?: boolean | null;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
   fromPhoneNumber?: string | null;
@@ -285,6 +288,7 @@ export interface HostedRuntimeLinqTargetOverride {
 }
 
 export interface HostedRuntimeLinqRecentInboundEngagementResult {
+  assistantAskFallbackRequired?: boolean | null;
   providerDispatchClaimed?: boolean | null;
   targetOverride?: HostedRuntimeLinqTargetOverride | null;
   threadIsDirect?: boolean | null;
@@ -401,10 +405,10 @@ export interface HostedRuntimeClinicalRecordsPort {
     request: HostedClinicalRecordsFetchPageRequest,
     options?: { signal?: AbortSignal | null },
   ): Promise<HostedClinicalRecordsFetchPageResponse>;
-  readRun(request: {
-    generation: number;
-    runId: string;
-  }, options?: { signal?: AbortSignal | null }): Promise<HostedClinicalRecordsReadRunResponse>;
+  readRun(
+    request: HostedClinicalRecordsReadRunRequest,
+    options?: { signal?: AbortSignal | null },
+  ): Promise<HostedClinicalRecordsReadRunResponse>;
   recordOutcome(
     request: HostedClinicalRecordsRecordOutcomeRequest,
     options?: { signal?: AbortSignal | null },

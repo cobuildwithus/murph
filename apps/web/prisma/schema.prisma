@@ -341,6 +341,7 @@ model ClinicalRecordRetrievalRun {
   status               String                           @default("queued")
   resourceTypesJson    Json                             @map("resource_types_json")
   retrievalPlanJson    Json?                            @map("retrieval_plan_json")
+  retrievalProtocol    String?                          @map("retrieval_protocol")
   grantedScopesJson    Json                             @map("granted_scopes_json")
   pageCount            Int                              @default(0) @map("page_count")
   fetchedBytes         Int                              @default(0) @map("fetched_bytes")
@@ -370,6 +371,8 @@ model ClinicalRecordRetrievalRequest {
   runId              String                     @map("run_id")
   generation         Int
   requestFingerprint String                     @map("request_fingerprint")
+  queryScopeId       String?                    @map("query_scope_id")
+  sliceId            String?                    @map("slice_id")
   reservedBytes      Int                        @default(0) @map("reserved_bytes")
   responseBytes      Int?                       @map("response_bytes")
   claimVersion       Int                        @default(1) @map("claim_version")
@@ -1368,6 +1371,7 @@ model HostedGroup {
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
+  disclosurePermissions HostedGroupDisclosurePermission[]
 
   @@index([ownerMemberId])
   @@index([kind])
@@ -1400,11 +1404,40 @@ model HostedGroupMember {
   updatedAt DateTime     @updatedAt @map("updated_at")
   group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
   member    HostedMember @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+  disclosureGrants HostedGroupDisclosureGrant[]
 
   @@unique([groupId, memberId])
   @@index([memberId])
   @@index([groupId])
   @@map("hosted_group_member")
+}
+
+model HostedGroupDisclosurePermission {
+  id                      String                           @id
+  groupId                 String                           @map("group_id")
+  permissionTextEncrypted String                           @map("permission_text_encrypted")
+  permissionDigest        String                           @map("permission_digest")
+  messageLookupKey        String                           @unique @map("message_lookup_key")
+  postedAt                DateTime                         @map("posted_at")
+  group                   HostedGroup                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  grants                  HostedGroupDisclosureGrant[]
+
+  @@index([groupId])
+  @@map("hosted_group_disclosure_permission")
+}
+
+model HostedGroupDisclosureGrant {
+  id           String                          @id
+  permissionId String                          @map("permission_id")
+  membershipId String                          @map("membership_id")
+  grantedAt    DateTime                        @map("granted_at")
+  revokedAt    DateTime?                       @map("revoked_at")
+  permission   HostedGroupDisclosurePermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  membership   HostedGroupMember               @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@index([membershipId, revokedAt, grantedAt])
+  @@index([permissionId])
+  @@map("hosted_group_disclosure_grant")
 }
 
 model HostedVaultShare {

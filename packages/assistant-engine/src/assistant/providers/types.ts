@@ -137,6 +137,7 @@ export interface AssistantProviderTurn {
   providerRequestOrdinal?: number | null
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
+  providerThreadEphemeral?: boolean | null
   processLifetime?: 'one-shot' | null
   publicInternetFetch?: typeof fetch | null
   requireGeneratedImageUploader?: boolean | null

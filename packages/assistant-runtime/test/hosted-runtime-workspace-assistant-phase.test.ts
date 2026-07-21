@@ -824,6 +824,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!scheduledGroupTools) {
         throw new Error("Expected scheduled group capabilities.");
       }
+      expect(scheduledGroupTools.groupTool).toEqual({ request });
       expect(request).not.toHaveBeenCalled();
       await expect(scheduledGroupTools.groupSharedReader.request({
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
@@ -4149,6 +4150,39 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
+  });
+
+  it("scopes the group port through the scheduled group tool factory", async () => {
+    const groupRequest = vi.fn(async () => {
+      throw new Error("The scheduled scope boundary test must not call the port.");
+    });
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      runtimeGroupToolPort: { request: groupRequest },
+    }));
+
+    const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+    const createScheduledGroupTools =
+      laneInput?.executionContext.hosted?.createScheduledGroupTools;
+    if (!createScheduledGroupTools) {
+      throw new Error("Expected hosted scheduled group tools.");
+    }
+
+    expect(createScheduledGroupTools({
+      channel: "linq",
+      target: "chat_current_group",
+      threadIsDirect: false,
+    })?.groupTool).toEqual({ request: groupRequest });
+    expect(createScheduledGroupTools({
+      channel: "linq",
+      target: "chat_direct",
+      threadIsDirect: true,
+    })).toBeNull();
+    expect(createScheduledGroupTools({
+      channel: "telegram",
+      target: "chat_other",
+      threadIsDirect: null,
+    })).toBeNull();
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("preserves an automation route unless the accepted current conversation explicitly retargets it", async () => {

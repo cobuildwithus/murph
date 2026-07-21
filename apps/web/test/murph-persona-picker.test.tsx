@@ -43,8 +43,12 @@ vi.mock("@/src/components/ui/dialog", () => ({
           children,
         )
       : null,
-  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", { className, "data-dialog-content": "true" }, children),
+  DialogContent: ({ children, className, style }: HTMLAttributes<HTMLDivElement>) =>
+    createElement(
+      "div",
+      { className, "data-dialog-content": "true", style },
+      children,
+    ),
   DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
     createElement("p", props),
   DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
@@ -332,6 +336,37 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
     assert.match(toneFieldset?.textContent ?? "", /Formal/u);
     assert.match(toneFieldset?.textContent ?? "", /Casual/u);
     assert.doesNotMatch(toneFieldset?.textContent ?? "", /Standard sentence case/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker constrains its desktop dialog before interaction", async () => {
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      onOpenChange: vi.fn(),
+      open: true,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const dialog = rendered.container.querySelector<HTMLElement>(
+      "[data-dialog-content='true']",
+    );
+    const step = rendered.container.querySelector<HTMLElement>(
+      "[data-persona-picker-step='main']",
+    );
+    assert.ok(dialog);
+    assert.ok(step);
+    assert.equal(dialog.style.width, "52rem");
+    assert.equal(dialog.style.maxWidth, "calc(100vw - 2rem)");
+    assert.match(dialog.className, /min-w-0/u);
+    assert.match(step.className, /min-w-0/u);
+    assert.match(step.className, /overflow-x-hidden/u);
   } finally {
     await rendered.cleanup();
   }

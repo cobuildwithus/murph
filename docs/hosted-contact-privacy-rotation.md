@@ -1,6 +1,6 @@
 # Hosted Contact-Privacy Rotation
 
-Last verified: 2026-05-13
+Last verified: 2026-07-16
 
 ## Goal
 
@@ -46,6 +46,8 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - `HostedMemberRouting.telegramUserLookupKey`
 - `HostedMemberBillingRef.stripeCustomerLookupKey`
 - `HostedMemberBillingRef.stripeSubscriptionLookupKey`
+- `HostedGroupDisclosurePermission.permissionDigest`, re-derived from the
+  group-owned encrypted permission text and owning group id
 
 ## Current Guidance
 
@@ -54,4 +56,11 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
 - Serialize Telegram, Linq, reply-alias, and Stripe rebinds with a transaction-scoped advisory lock whose conflict token stays stable across current-version flips for the same raw external identity; candidate scans alone are not sufficient to prevent mixed-version write races.
 - If multi-version reads ever find more than one member for the same Telegram, Linq, reply-alias, or Stripe raw identifier, fail closed and repair the duplicate binding instead of ordering or `findFirst` heuristics.
 - Do not add parallel lookup columns, permanent dual-write logic, or deploy-history backfill commands just to keep the option open.
+- Keep every version referenced by a stored group-disclosure permission digest
+  in the read keyring. Before retiring one, first preserve the old version
+  through the ten-minute in-flight Assistant Ask drain, then run a targeted
+  re-derivation from the group-owned encrypted permission text and verify that
+  no stored digests still reference the old version. Missing old versions fail
+  disclosure authority closed; request ids and provider idempotency keys do not
+  depend on the rotating digest.
 - If a real deployed rotation is needed later, design a targeted procedure against the then-current runtime behavior, queue semantics, and stored data shape instead of reviving the removed prelaunch campaign tooling unchanged.

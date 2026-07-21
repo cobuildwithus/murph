@@ -140,7 +140,6 @@ describe("hosted member assistant preferences", () => {
     });
 
     await expect(upsertHostedMemberAssistantPreferencesTx({
-      mailboxPayloadMode: "sparse_delta",
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: { tone: "formal" },

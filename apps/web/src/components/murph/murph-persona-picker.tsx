@@ -179,7 +179,7 @@ export function MurphPersonaPicker({
 
   const mainPersonaContent = (
     <div
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
+      className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
       data-persona-picker-step="main"
     >
       <fieldset>
@@ -202,7 +202,7 @@ export function MurphPersonaPicker({
 
   const supportingPersonaContent = (
     <div
-      className="grid min-h-0 flex-1 gap-5 overflow-y-auto overscroll-contain px-4 pb-2 md:grid-cols-[minmax(15rem,0.9fr)_minmax(19rem,1.1fr)] md:px-0 md:pr-1"
+      className="grid min-h-0 min-w-0 flex-1 gap-5 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-2 md:grid-cols-[minmax(15rem,0.9fr)_minmax(19rem,1.1fr)] md:px-0 md:pr-1"
       data-persona-picker-step="supporting"
     >
       <section
@@ -286,7 +286,7 @@ export function MurphPersonaPicker({
 
   const voicesContent = (
     <div
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
+      className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
       data-persona-picker-step="voices"
     >
       <fieldset>
@@ -333,7 +333,7 @@ export function MurphPersonaPicker({
 
   const toneContent = (
     <div
-      className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 md:px-0"
+      className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-2 md:px-0"
       data-persona-picker-step="tone"
     >
       <fieldset disabled={saving}>
@@ -500,24 +500,23 @@ export function MurphPersonaPicker({
             step === "main" || step === "supporting" || step === "voices"
               ? "min(44rem, calc(100dvh - 2rem))"
               : undefined,
-          maxWidth:
-            step === "tone" ? "44rem" : "52rem",
-          width: "calc(100% - 2rem)",
+          maxWidth: "calc(100vw - 2rem)",
+          width: "52rem",
         }}
-        className="flex max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
+        className="flex min-w-0 max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
       >
-        <DialogHeader className="gap-2 text-left">
+        <DialogHeader className="min-w-0 gap-2 text-left">
           <StepProgress step={stepNumber} />
           <div
             ref={stepTitleRef}
             aria-labelledby={stepTitleId}
-            className="outline-none"
+            className="min-w-0 outline-none"
             data-persona-picker-step-title
             tabIndex={-1}
           >
             <DialogTitle
               id={stepTitleId}
-              className="font-serif text-[2.5rem] leading-[2.75rem] font-semibold tracking-[-0.025em]"
+              className="break-words font-serif text-[2.5rem] leading-[2.75rem] font-semibold tracking-[-0.025em] text-balance"
             >
               {title}
             </DialogTitle>

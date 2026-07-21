@@ -6,6 +6,7 @@ import {
 } from "@murphai/clinical-records";
 import {
   HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
+  HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
   hostedClinicalRecordsFetchPageRequestSchema,
   hostedClinicalRecordsRetrievalScopeSchema,
@@ -181,6 +182,7 @@ describe("clinical records hosted execution contracts", () => {
     expect(hostedClinicalRecordsFetchPageRequestSchema.parse({
       cursor: null,
       generation: 1,
+      queryFingerprint: "2".repeat(64),
       queryScopeId: "observation-vitals",
       requestId: "request_1",
       resourceType: "Observation",
@@ -188,6 +190,19 @@ describe("clinical records hosted execution contracts", () => {
       runId: "clinical_run_1",
       sliceId: "whole",
     })).toMatchObject({ queryScopeId: "observation-vitals" });
+    expect(hostedClinicalRecordsFetchPageRequestSchema.parse({
+      cursor: null,
+      generation: 1,
+      queryScopeId: "observation-vitals",
+      requestId: "request_from_prior_runner",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      runId: "clinical_run_1",
+      sliceId: "whole",
+    })).toMatchObject({
+      queryScopeId: "observation-vitals",
+      sliceId: "whole",
+    });
     expect(() => hostedClinicalRecordsFetchPageRequestSchema.parse({
       cursor: null,
       generation: 1,
@@ -315,5 +330,52 @@ describe("clinical records hosted execution contracts", () => {
         rawFileCount: 1_000_001,
       },
     })).toThrow("count is invalid");
+
+    expect(parseHostedClinicalRecordsRecordOutcomeRequest({
+      ...request,
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }],
+    })).toMatchObject({
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }],
+    });
+    expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
+      ...request,
+      retrievalProtocol: "query-slices-v2",
+    })).toThrow("retrieval identity is invalid");
+    expect(() => parseHostedClinicalRecordsRecordOutcomeRequest({
+      ...request,
+      retrievalSlices: [{
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }],
+    })).toThrow("retrieval identity is invalid");
+
+    const maximumQueryOutcome = {
+      ...request,
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: Array.from({ length: 80 }, (_, index) => ({
+        queryScopeId: `q${String(index).padStart(2, "0")}_${"a".repeat(116)}`,
+        sliceId: `s${String(index).padStart(2, "0")}_${"b".repeat(116)}`,
+      })),
+    };
+    const maximumQueryOutcomeBytes = Buffer.byteLength(
+      JSON.stringify(maximumQueryOutcome),
+      "utf8",
+    );
+    expect(maximumQueryOutcomeBytes).toBeGreaterThan(8 * 1_024);
+    expect(maximumQueryOutcomeBytes).toBeLessThan(
+      HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
+    );
+    expect(
+      parseHostedClinicalRecordsRecordOutcomeRequest(maximumQueryOutcome)
+        .retrievalSlices,
+    ).toHaveLength(80);
   });
 });

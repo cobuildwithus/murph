@@ -20,12 +20,14 @@ import type {
   HostedAssistantReasoningEffortOverride,
 } from "./assistant-model.ts";
 import type {
+  HostedExecutionAssistantAskOrigin,
   HostedExecutionAssistantAskResult,
   HostedBrowserVaultReplicaCursorRef,
   HostedBrowserVaultReplicaRef,
   HostedExecutionLinqExternalThreadRouteAuthority,
 } from "./contracts.ts";
 import {
+  HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 } from "./contracts.ts";
 
@@ -865,9 +867,14 @@ export type HostedRuntimeAssistantAskTerminalReason =
   | "expired"
   | "unavailable";
 
+export interface HostedRuntimeAssistantAskDisclosureContext {
+  permissionText: string;
+}
+
 export type HostedRuntimeAssistantAskControlResponse =
   | {
       action: "prepare";
+      disclosure?: HostedRuntimeAssistantAskDisclosureContext;
       question: string;
       status: "ready";
       targetLabel: string | null;
@@ -882,21 +889,7 @@ export type HostedRuntimeAssistantAskControlResponse =
       status: "completed" | "already_completed";
     };
 
-export type HostedRuntimeGroupToolAction =
-  | "ask"
-  | "read_shared"
-  | "read_current"
-  | "read_usage"
-  | "list_memberships"
-  | "leave_membership"
-  | "update_display_name"
-  | "create_join_link"
-  | "post_join_offer"
-  | "preflight_set_chat_avatar"
-  | "read_chat_participants"
-  | "set_chat_avatar"
-  | "share_contact_card"
-  | "revoke_own_email_share";
+export type HostedRuntimeGroupToolAction = HostedRuntimeGroupToolRequest["action"];
 
 export const HOSTED_RUNTIME_GROUP_KINDS = [
   "couple",
@@ -912,10 +905,25 @@ export type HostedRuntimeGroupKind = (typeof HOSTED_RUNTIME_GROUP_KINDS)[number]
 export const HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH = 120;
 export const HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH = 2000;
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH = 1000;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS =
+  HOSTED_EXECUTION_ASSISTANT_ASK_PERMISSION_TEXT_MAX_CODE_POINTS;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX = 25;
+export const HOSTED_RUNTIME_GROUP_DISCLOSURE_HISTORY_MAX = 25;
+
+export interface HostedRuntimeGroupDisclosureGrantSummary {
+  grantId: string;
+  permissionText: string;
+}
+
+export interface HostedRuntimeGroupDisclosureGrantListEntry
+  extends HostedRuntimeGroupDisclosureGrantSummary {
+  groupLabel: string | null;
+}
 export const HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE =
   "Like or heart this message to share {{share_scope}} with this group. To choose different permissions, use {{join_url}}.";
 
 export interface HostedRuntimeGroupMemberSummary {
+  disclosureGrants?: HostedRuntimeGroupDisclosureGrantSummary[];
   grantedVaultShareProjectionKinds: HostedVaultShareProjectionKind[];
   grantedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   handle: string | null;
@@ -1079,6 +1087,19 @@ export type HostedRuntimeGroupToolRequest =
       originSessionId: string;
       question: string;
     }
+  | {
+      action: "ask_member";
+      grantId: string;
+      origin: HostedExecutionAssistantAskOrigin;
+      question: string;
+    }
+  | {
+      action: "post_disclosure_request";
+      linqThread?: HostedRuntimeGroupToolLinqThreadContext | null;
+      originAssistantInputId: string;
+      permissionText: string;
+    }
+  | { action: "revoke_disclosure_grant"; grantId: string }
   | { action: "read_current" }
   | { action: "read_usage" }
   | ({
@@ -1121,10 +1142,29 @@ export type HostedRuntimeGroupAskResult =
   | { status: "no_groups" }
   | { status: "unavailable"; unavailableReason: string };
 
+export type HostedRuntimeGroupMemberAskResult =
+  | { status: "accepted" }
+  | ({ status: "completed" } & HostedExecutionAssistantAskResult)
+  | Extract<HostedRuntimeGroupAskResult, { status: "unavailable" }>;
+
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
       result: HostedRuntimeGroupAskResult;
+    }
+  | { action: "ask_member"; result: HostedRuntimeGroupMemberAskResult }
+  | {
+      action: "post_disclosure_request";
+      result:
+        | { status: "sent" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "revoke_disclosure_grant";
+      result:
+        | { status: "revoked" }
+        | { status: "already_revoked" }
+        | { status: "unavailable"; unavailableReason: string };
     }
   | {
       action: "read_current";
@@ -1148,6 +1188,7 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | {
             status: "ok";
+            disclosureGrants: HostedRuntimeGroupDisclosureGrantListEntry[];
             memberships: HostedRuntimeGroupMembershipSummary[];
             truncated: boolean;
           }
@@ -1248,10 +1289,13 @@ export interface HostedRuntimeNewsletterParticipantSummary {
   memberId: string;
 }
 
-export interface HostedRuntimeNewsletterScheduledAuthority {
+export interface HostedRuntimeScheduledAutomationAuthority {
   automationId: string;
   occurrenceAt: string;
 }
+
+export type HostedRuntimeNewsletterScheduledAuthority =
+  HostedRuntimeScheduledAutomationAuthority;
 
 export interface HostedRuntimeNewsletterToolSendRequest {
   html: string;

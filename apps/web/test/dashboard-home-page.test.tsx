@@ -65,24 +65,25 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
     createElement("button", { type: "button" }, "Sync"),
 }));
 
-vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
-  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
-}));
-
-vi.mock("../app/(dashboard)/home/initial-visit-dialog-client", () => ({
-  HomeInitialVisitDialogClient(props: {
-    contactAction: { href: string } | null;
+vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
+  HomeInitialVisitPersonaPickerClient({
+    showContactCard,
+  }: {
+    showContactCard: boolean;
   }) {
     return createElement(
       "section",
-      { "data-home-initial-visit-dialog": "shown" },
-      "Initial visit dialog",
-      props.contactAction
-        ? createElement("a", { href: props.contactAction.href }, "Text Murph")
-        : null,
-      createElement("button", { type: "button" }, "Start exploring"),
+      {
+        "data-show-contact-card": showContactCard ? "true" : "false",
+        "data-home-initial-visit-persona-picker": "shown",
+      },
+      "Persona onboarding",
     );
   },
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
 }));
 
 vi.mock("@/src/components/ui/auth-button", () => ({
@@ -159,9 +160,11 @@ beforeEach(() => {
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
-    href: "sms:+15550100001?body=Hey%20Murph%2C%20do%20your%20thing",
+    href: "sms:+15555550123",
     kind: "text",
-    label: "Messages",
+    label: "Text Murph",
+    rel: undefined,
+    target: undefined,
   });
   mocks.resolveHostedAiUsageGate.mockResolvedValue({
     allowed: true,
@@ -198,7 +201,6 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
   assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
-  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
   assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
 });
 
@@ -538,7 +540,7 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.doesNotMatch(markup, /Resets in/u);
 });
 
-test("HomePage opens the welcome dialog for initial visits", async () => {
+test("HomePage opens persona onboarding for initial visits", async () => {
   const { default: HomePage } = await import("../app/(dashboard)/home/page");
   const markup = renderToStaticMarkup(
     await HomePage({
@@ -549,19 +551,46 @@ test("HomePage opens the welcome dialog for initial visits", async () => {
   );
 
   assert.match(markup, /Welcome to Murph/);
-  assert.match(markup, /data-home-initial-visit-dialog="shown"/);
-  assert.match(markup, /href="sms:\+15550100001\?body=Hey%20Murph%2C%20do%20your%20thing"/);
-  assert.doesNotMatch(markup, /Let%27s|Let(?:&#x27;|')s/u);
-  assert.doesNotMatch(markup, /Get(?:%20| )started(?:%20| )with(?:%20| )Murph/u);
-  assert.match(markup, />Text Murph</);
-  assert.match(markup, />Start exploring</);
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-show-contact-card="true"/);
+  assert.match(markup, /Persona onboarding/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
-  assert.equal(
-    mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.body,
-    "Hey Murph, do your thing",
+  assert.doesNotMatch(markup, /data-home-initial-visit-dialog/);
+});
+
+test("HomePage skips the contact-card picker for Telegram-only members", async () => {
+  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+    href: "https://t.me/withmurph_bot",
+    kind: "telegram",
+    label: "Message Murph on Telegram",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "true",
+      }),
+    }),
   );
-  assert.equal(
-    mocks.resolveHostedMurphContactOption.mock.calls[0]?.[0]?.message?.subject,
-    "Hey Murph, do your thing",
+
+  assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
+  assert.match(markup, /data-show-contact-card="false"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+});
+
+test("HomePage keeps persona onboarding gated behind the exact initial-visit marker", async () => {
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "false",
+      }),
+    }),
   );
+
+  assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
 });

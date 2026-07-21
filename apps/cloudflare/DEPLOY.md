@@ -120,6 +120,42 @@ closed. Smoke one private-to-group ask while the group runtime is idle and one
 while its foreground Murph is replying; neither may create group-visible
 activity or delay the foreground reply.
 
+## Consented Group Disclosure Rollout
+
+The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
+secret, Durable Object state, scheduler, workflow, or second container. Its
+producer gate is distinct from the original private-to-group Ask gate.
+
+1. Deploy Web with `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` so
+   the storage, consent-reaction, admission, prepare, completion, and exact
+   scheduled replay result are present before a new runner can request them.
+   The deployment must remain able to
+   consume both old Assistant Ask payloads and the additive new shapes.
+2. Deploy Cloudflare/runner consumers for the `consented_member` request target,
+   trusted accepted-input and scheduled-automation origins, disclosure-context
+   preparation, the private candidate plus fresh outgoing reviewer, reviewed
+   exact accepted-input group delivery, and one same-turn scheduled sleep/replay with
+   `container_rollout=immediate`. Keep the Web producer gate off.
+3. Require managed-container smoke to report the new runner-bundle fingerprint
+   and preserve the existing `murph-group-read` confinement proof. Verify the
+   outgoing reviewer starts with an empty runtime root and no personal
+   workspace, application tools, delivery route, inherited secrets, or network.
+4. Confirm the deployed Web build enforces the synchronous 25-per-group
+   permission-history cap and 25-per-group/per-member grant-generation caps.
+   After Web and the immediate runner fleet converge, set the gate to exact `1`
+   and redeploy Web. Smoke one exact
+   permission-message Like by a current member, one allowed ask whose bytes
+   reach the originating group unchanged, one out-of-permission denial, and one
+   revoke followed by a rejected ask.
+
+To roll back, set the Web gate to `0` and redeploy Web first. Do not delete
+permission or grant rows: they remain member-managed product truth and cannot
+erase already shared answers. Keep compatible Web and runner consumers until
+every consented request and accepted-input or automation completion has drained or expired
+from Web mailboxes, imported local pending items, and committed workspace
+snapshots. Wait at least the full ten-minute request lifetime and prefer a
+forward fix if any imported item remains.
+
 ## Linq Participant-Context Rollout
 
 The participant-addition hint uses an additive database column, an additive

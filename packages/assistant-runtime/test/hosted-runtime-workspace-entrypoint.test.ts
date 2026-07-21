@@ -27,6 +27,9 @@ import {
   readAssistantContextSnapshotState,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import type {
+  AssistantProviderUsageDraft,
+} from "@murphai/assistant-engine/assistant-ask";
 import {
   readAssistantInputEvent,
   updateAssistantInputAttachmentEvidence,
@@ -822,6 +825,12 @@ describe("hosted workspace runtime entrypoint", () => {
 
     mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
       events.push("ask.started");
+      askInput.onProviderUsage?.({
+        stage: "answer",
+        usage: createAssistantProviderUsageDraft({
+          providerRequestOutcome: "aborted",
+        }),
+      });
       askStarted.resolve();
       return await new Promise((_resolve, reject) => {
         const abort = async () => {
@@ -879,29 +888,37 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             });
           },
-          platform: createPlatform({
-            assistantAskPort: {
-              async request(request) {
-                if (request.action === "complete") {
-                  events.push("ask.completed");
-                  return { action: "complete", status: "completed" };
-                }
-                events.push("ask.prepared");
-                return {
-                  action: "prepare",
-                  question: "What is today's group workout?",
-                  status: "ready",
-                  targetLabel: "100 Club",
-                };
+          platform: {
+            ...createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  if (request.action === "complete") {
+                    events.push("ask.completed");
+                    return { action: "complete", status: "completed" };
+                  }
+                  events.push("ask.prepared");
+                  return {
+                    action: "prepare",
+                    question: "What is today's group workout?",
+                    status: "ready",
+                    targetLabel: "100 Club",
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            usageRecordPort: {
+              async recordUsage(record) {
+                events.push("usage.record");
+                return { recorded: true, usageId: record.usageId };
               },
             },
-            mailboxPort: createMailboxPort({ events, items: [askItem] }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
+          },
           async runAssistantPhase() {
             events.push("foreground.started");
             foregroundStarted.resolve();
@@ -934,6 +951,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         requireEventIndex(events, "ask.exited")
           < requireEventIndex(events, "snapshot.started"),
+      );
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "usage.record"),
       );
       assert.equal(result.status, "scheduled");
       assert.deepEqual(
@@ -25613,6 +25634,37 @@ function createAssistantUsageRecord(
     usageExtractionSourcePath: null,
     usageExtractionVersion: "codex-usage-v1",
     usageId: "turn_entrypoint_usage.attempt-1",
+    ...overrides,
+  };
+}
+
+function createAssistantProviderUsageDraft(
+  overrides: Partial<AssistantProviderUsageDraft> = {},
+): AssistantProviderUsageDraft {
+  return {
+    provider: "codex-cli",
+    providerRequestOrdinal: 0,
+    providerRequestOutcome: "succeeded",
+    usage: {
+      apiKeyEnv: null,
+      baseUrl: null,
+      cacheWriteTokens: null,
+      cachedInputTokens: null,
+      inputTokens: 10,
+      outputTokens: 5,
+      providerMetadataJson: null,
+      providerName: "OpenAI",
+      providerRequestId: null,
+      rawUsageJson: null,
+      reasoningTokens: null,
+      requestedModel: "gpt-synthetic",
+      servedModel: "gpt-synthetic",
+      tokenPricingBasis: "standard",
+      totalTokens: 15,
+      turnProfileJson: null,
+      usageExtractionSourcePath: "test.detached-assistant-ask",
+      usageExtractionVersion: "test-v1",
+    },
     ...overrides,
   };
 }

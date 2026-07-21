@@ -57,6 +57,13 @@ The onboarding picker preserves the current four-step design:
 3. choose a voice using the main personality's preview set and recommendations
 4. choose tone and save the canonical combination ID, voice, and tone atomically
 
+`/home?initialVisit=true` consumes the query marker as a one-shot browser
+handoff. Members with a resolved text contact see the contact-card picker first;
+adding the card, skipping, or dismissing it advances to the personality picker.
+Members without a text contact start directly at the personality picker. There
+is no trailing welcome dialog on this route. Skipping or dismissing the
+personality picker closes it without writing preferences.
+
 ## Existing members and legacy reads
 
 No backfill or schema migration is required. Legacy stored IDs normalize at persisted read boundaries to a sensible canonical main-only ID, while public choices and new writes accept only the 36 canonical IDs:

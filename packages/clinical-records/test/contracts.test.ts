@@ -1,4 +1,5 @@
 import {
+  CLINICAL_FHIR_RESOURCE_TYPES,
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
   CLINICAL_RAW_MANIFEST_MAX_TOTAL_RESOURCES,
   clinicalFacetSlug,
@@ -51,6 +52,15 @@ const planSource = {
 } as const;
 
 describe("clinical records contracts", () => {
+  it("admits every active Epic primary resource family", () => {
+    expect(CLINICAL_FHIR_RESOURCE_TYPES).toEqual(expect.arrayContaining([
+      "Device",
+      "FamilyMemberHistory",
+      "MedicationDispense",
+      "ServiceRequest",
+    ]));
+  });
+
   it("keys retrieval by query and deterministic slice instead of resource type", () => {
     const plan = clinicalFhirRetrievalPlanSchema.parse({
       schemaVersion: "murph.clinical-retrieval-plan.v1",

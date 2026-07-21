@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Decision
 
@@ -406,6 +406,87 @@ runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
 
+The reverse `consented_member` adapter uses the same mailbox lifecycle but a
+different admission and delivery policy. An authenticated group turn first
+posts a server-authored permission request through
+`murph.group(action="post_disclosure_request")`. Web stores its exact
+canonical natural-language permission and digest. It derives a stable request
+id and provider idempotency key from the exact group, trusted accepted-input id,
+and permission digest. Replay succeeds only when the stored group,
+provider-message lookup, text, and digest still match. Only an already-current
+member's verified added Like reaction to that exact message creates a new
+append-only grant generation for that membership; the reaction does not create
+membership. Each verified provider reaction event derives one grant id, so
+duplicate delivery cannot recreate a revoked grant. `read_current` exposes an active opaque `grantId` with that member
+and exact permission. The model cannot supply or recover any hidden target id.
+In a private runtime, the existing `list_memberships` response also exposes
+that member's active grants as a top-level additive `disclosureGrants` array;
+older Web responses without the field normalize to an empty array. Revocation
+may select only an exact id from that private read.
+
+For `murph.group(action="ask_member")`, trusted runtime code injects one origin:
+either the current accepted non-direct group input and signed route or one
+claimed canonical scheduled-automation occurrence for that group runtime. Web
+resolves the supplied current grant selector, binds the group runtime, personal
+runtime, exact membership and grant generations, permission digest, injected
+origin, and ten-minute expiry, then appends a `consented_member`
+`assistant.ask.requested` item to the personal mailbox. Email, direct,
+unverified, stale, foreign, or model-selected invocation data fails closed. The
+group action targets one grant and one question; it never performs implicit
+roster fan-out. The group runtime, exact grant, and trusted invocation derive
+the request identity. Exact retries reuse that mailbox item, a changed question
+for the same grant conflicts, and another current grant in the same invocation
+is independent.
+
+Prepare revalidates the same authority immediately before private context is
+read and returns the exact immutable permission to the runtime. The personal
+read-only child proposes one candidate under that permission. There is no
+incoming model reviewer. One separate fresh one-shot outgoing reviewer has no
+personal workspace, history, application tools, network, or delivery route and
+receives only the permission, question, and candidate. It returns only `allow`
+or `deny`; it cannot rewrite or redact. Invalid output, refusal, timeout, provider
+failure, or ambiguity fails closed, and denied candidate bytes do not enter a
+Murph mailbox, vault, assistant state, operational log, or error.
+
+On an allow, the completion control path revalidates the group, personal
+runtime, membership generation, grant generation, permission digest, origin,
+expiry, and active fences again. It appends one deterministic
+`assistant.ask.completed` item to the bound group runtime. The trusted `origin`
+discriminant owns what happens next. `accepted_input` bypasses a provider
+continuation and delivers the reviewed answer byte-for-byte on the revalidated
+original group route through the existing outbox. `automation_occurrence` does
+not wake the group runtime or create a delivery. The live scheduled Codex turn
+starts every selected ask, uses one ordinary `sleep 60`, then repeats each exact
+`ask_member` call once. Web returns a flat completed result only after
+the ordinary cron owner revalidates the current canonical automation and
+non-direct Linq route immediately before the tool call, and Web revalidates the
+same request, completion, member, grant, permission, target runtime, origin,
+expiry, and runtime fences. An accepted or unavailable replay ends the turn without an
+answer; later completion is ignored. Cannot-answer uses the fixed non-disclosing
+result. The original private-to-group continuation retains its
+legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
+produce new generations, so old work cannot cross either lifecycle boundary.
+For accepted-input delivery, if live authority disappears after an exact answer
+is queued, its existing outbox intent retains the completion id, deterministic
+delivery key, and authority expiry through terminal disposition. The runner
+rewrites that intent's text and media to the fixed text-only cannot-answer copy
+before provider entry. At expiry it uses the outbox-owned deadline even if
+mailbox retention has already
+removed the request and completion rows; before expiry Web still owns live
+revocation revalidation. The final egress claim permits only the structurally
+bound fixed fallback without reviving the private grant. Scheduled-origin
+completion has no outbox obligation and remains readable only by the one exact
+same-turn replay while its live authority remains current.
+
+Web caps retained permission history at 25 rows per group and retained grant
+generations at 25 per group and 25 per member. Counts run under the canonical
+group/member locks after deterministic request/reaction replay checks. Thus an
+exact replay still succeeds at the cap while only a fresh append receives the
+typed limit disposition. Only `read_current` decrypts and returns active
+disclosure grants. Mutation summaries from `create_join_link`, `post_join_offer`,
+and `update_display_name` do not open unrelated permission text or depend on
+that secure-box operation.
+
 An unfinished child leaves the request pending. Before invocation return,
 checkpoint, shutdown, fence loss, or workspace replacement, the runtime
 interrupts the exact child, waits a bounded grace period, terminates only that
@@ -419,6 +500,18 @@ Ask request or completion can remain in a mailbox or restored workspace. Roll
 below that floor only after the full ten-minute request lifetime has elapsed
 and pending work has drained or expired; prefer a forward fix when imported
 items may remain.
+
+The consented reverse adapter has a distinct producer gate. First deploy
+consumers that tolerate the `consented_member` target, trusted invocation
+origins, reviewed exact accepted-input completion, and isolated internal
+automation completion while
+`HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
+immediate runner fleet converge and confinement/fingerprint smoke passes,
+the synchronous 25-row permission and per-group/per-member grant-generation
+caps satisfy the cardinality prerequisite. Enable exact `1` only after that
+convergence proof. Rollback turns that gate
+off first and keeps compatible consumers until new requests and completions
+have drained or expired from both Web mailboxes and imported runtime state.
 
 ### Deploy Compatibility Rule
 
@@ -1504,7 +1597,10 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - anonymized assistant-runtime issue sink
 - Assistant Ask target resolution, membership-generation and origin binding,
   deterministic request/completion identity, expiry checks, and private return
-  route authority; encrypted mailbox rows remain the only durable ask state
+  route authority; immutable consented-disclosure permissions, per-membership
+  grant generations, exact-reaction consent, group return authority, and
+  completion revalidation; encrypted mailbox rows remain the only durable ask
+  operation state
 
 The runtime may attach one bounded usage-notice delivery target to an assistant
 usage record only when every accepted input for that provider request resolves
@@ -1524,8 +1620,9 @@ routing.
 - runtime timers, assistant next wake projection, and inbox media retention wake
   projection
 - checkpoint timing
-- the invocation-local one-child Assistant Ask controller, sealed group context
-  builder, and exact-child abort/await lifecycle; none is durable queue state
+- the invocation-local one-child Assistant Ask controller, sealed target
+  context builder, consented personal candidate pass, fresh outgoing reviewer,
+  and exact-child abort/await lifecycle; none is durable queue state
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)
