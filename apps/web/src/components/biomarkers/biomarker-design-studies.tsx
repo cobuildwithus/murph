@@ -323,14 +323,9 @@ function BiomarkerStudyDisclosure({
         />
       </summary>
 
-      <div className="grid md:grid-cols-2">
-        {group.results.map((result, index) => (
+      <div className="flex flex-col">
+        {group.results.map((result) => (
           <BiomarkerStudyRow
-            className={cn(
-              "min-w-0 border-t border-border/70 bg-card",
-              group.results.length % 2 === 1 && "last:md:col-span-2",
-              index % 2 === 0 && index + 1 < group.results.length && "md:border-r",
-            )}
             key={result.id}
             result={result}
           />
@@ -341,27 +336,22 @@ function BiomarkerStudyDisclosure({
 }
 
 function BiomarkerStudyRow({
-  className,
   result,
 }: {
-  className?: string;
   result: BiomarkerStudyResult;
 }) {
   const needsAttention = result.status === "attention";
 
   return (
     <Link
-      className={cn(
-        "flex min-h-24 w-full cursor-pointer flex-col justify-center px-5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-7",
-        className,
-      )}
+      className="flex min-h-20 w-full cursor-pointer flex-col justify-center gap-1 border-t border-border/70 bg-card px-5 py-3 text-left transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-24 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-7"
       href={`/biomarkers/results/${encodeURIComponent(result.metricKey)}`}
       prefetch={false}
     >
-      <span className="block break-words text-lg font-medium tracking-tight text-foreground">
+      <span className="block min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
         {result.name}
       </span>
-      <span className="mt-1 block text-sm">
+      <span className="block min-w-0 break-words text-sm sm:ml-auto sm:max-w-[50%] sm:text-right">
         <strong className={needsAttention ? "text-destructive" : "text-primary"}>
           {result.statusLabel}
         </strong>

@@ -199,13 +199,28 @@ native `<details>` disclosures, expanded by default, with a Fraunces area name
 and one rotating chevron in the summary. Search and `All` / `Review` / `In
 range` filters apply only to saved lab biomarkers. The opened contents are one
 partitioned notebook surface rather than a stack of nested cards: one column on
-narrow screens, two from `md`, and three from `xl`, with warm one-pixel seams
-between cells. Each cell is one full-size link showing only the biomarker name,
-source status, and latest value; flagged results sort before in-range and
-unflagged results within their health area. Render `normal` in sage, source
-flags that need review in sienna, and missing flags neutrally as `Reported`.
+every viewport, with one full-width biomarker row between warm one-pixel seams.
+On phones the name and result stack; from `sm` the name sits left and the
+status/value sits right. Each row is one full-size link showing only the
+biomarker name, source status, and latest value; flagged results sort before
+in-range and unflagged results within their health area. Render `normal` in
+sage, source flags that need review in sienna, and missing flags neutrally as
+`Reported`.
 Use explicit health-area classification; never show an `Other` dump, infer that
 an unflagged result is in range, or turn a source flag into a diagnosis.
+
+### Measured Biomarker Result Detail
+On `/biomarkers/results/[metricKey]`, use a sparse reading order: biomarker name
+and saved-history span, latest source status, value, collection date, then the
+numeric history chart. Do not repeat the latest value in comparison, reference,
+or count tiles above the chart. Use sage for a source-reported normal result,
+sienna for flags that need review, and slate for an unflagged reported result.
+Keep the complete result ledger below the chart, including the date, exact
+reported value, source reference range, and lab/source label. Comparator,
+qualitative, and incompatible-unit context stays explicit near the chart or in
+the ledger; simplifying the hierarchy must not imply that excluded values were
+plotted. The loading skeleton mirrors the same latest-result, chart, and ledger
+structure rather than substituting a generic card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature

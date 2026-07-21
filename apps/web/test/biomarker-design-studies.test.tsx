@@ -112,6 +112,9 @@ test("biomarker index study keeps status filters and native area disclosures exp
   expect(markup).not.toContain("Jan 1, 2026");
   expect(markup).toContain('href="/biomarkers/results/hemoglobin"');
   expect(markup).toContain('href="/biomarkers/results/mean-corpuscular-hemoglobin"');
+  expect(markup).toContain("sm:flex-row");
+  expect(markup).toContain("sm:max-w-[50%]");
+  expect(markup).not.toContain("md:grid-cols-2");
   expect(markup.indexOf("Hemoglobin")).toBeLessThan(markup.indexOf("Mean corpuscular hemoglobin"));
   expect(markup.match(/<details/g)).toHaveLength(3);
   expect(markup.match(/<details[^>]*open=""/g) ?? []).toHaveLength(3);

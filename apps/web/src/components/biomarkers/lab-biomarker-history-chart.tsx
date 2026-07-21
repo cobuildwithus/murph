@@ -82,6 +82,7 @@ export function LabBiomarkerHistoryChart({
       aria-label={`${displayName} results over time`}
       className="h-72 w-full sm:h-80"
       config={chartConfig}
+      data-reference-range={range ? "present" : "absent"}
       initialDimension={{ height: 320, width: 760 }}
       role="img"
     >
