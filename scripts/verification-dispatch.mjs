@@ -188,22 +188,19 @@ export function findSensitiveBlacksmithSyncPaths(paths) {
   return paths.filter(isSensitiveBlacksmithSyncPath);
 }
 
-function assertSafeBlacksmithSync(repoRoot) {
-  const result = spawnSync(
-    "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    {
-      cwd: repoRoot,
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-    },
+export function assertSafeBlacksmithSync(repoRoot) {
+  const untrackedPaths = listGitPaths(
+    repoRoot,
+    ["ls-files", "--others", "--exclude-standard", "-z"],
   );
-  if (result.status !== 0) {
-    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git ls-files.");
+  if (untrackedPaths.length > 0) {
+    throw new Error(
+      `Blacksmith Testbox sync refused ${untrackedPaths.length} untracked non-ignored path${untrackedPaths.length === 1 ? "" : "s"}. Stage intended source files or ignore local-only files before remote verification.`,
+    );
   }
 
-  const paths = result.stdout.split("\0").filter(Boolean);
-  const sensitivePaths = findSensitiveBlacksmithSyncPaths(paths);
+  const cachedPaths = listGitPaths(repoRoot, ["ls-files", "--cached", "-z"]);
+  const sensitivePaths = findSensitiveBlacksmithSyncPaths(cachedPaths);
   if (sensitivePaths.length > 0) {
     const renderedPaths = sensitivePaths
       .slice(0, 10)
@@ -216,6 +213,18 @@ function assertSafeBlacksmithSync(repoRoot) {
       `Blacksmith Testbox sync refused sensitive managed paths: ${renderedPaths}${remainder}. Ignore or remove them before remote verification.`,
     );
   }
+}
+
+function listGitPaths(repoRoot, args) {
+  const result = spawnSync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    throw new Error("Unable to inspect the Blacksmith Testbox sync set with git ls-files.");
+  }
+  return result.stdout.split("\0").filter(Boolean);
 }
 
 function isSensitiveBlacksmithSyncPath(filePath) {

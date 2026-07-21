@@ -120,6 +120,7 @@ describe("verification dispatcher", () => {
       ].join("\n"),
     );
     writeExecutable(fakeBlacksmithPath, "#!/bin/sh\nexit 0");
+    writeExecutable(path.join(binDir, "git"), "#!/bin/sh\nexit 0");
 
     const result = spawnSync(
       process.execPath,
@@ -216,7 +217,7 @@ describe("verification dispatcher", () => {
     ]);
   });
 
-  it("refuses a sensitive Git-managed sync set before Crabbox delegation", () => {
+  it("refuses any untracked non-ignored path before Crabbox delegation", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const delegationMarkerPath = path.join(tempRoot, "delegated");
@@ -232,7 +233,58 @@ describe("verification dispatcher", () => {
     writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
     writeExecutable(
       path.join(binDir, "git"),
-      "#!/bin/sh\nprintf '%b' '.env.production\\000scripts/verification-dispatch.mjs\\000'",
+      [
+        "#!/bin/sh",
+        "case \"$*\" in",
+        "  *\"--others\"*) printf '%b' 'notes.txt\\000' ;;",
+        "  *\"--cached\"*) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
+        "esac",
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [dispatcherPath, "verify:acceptance"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...withoutVerificationRoutingEnvironment(process.env),
+          MURPH_VERIFY_EXECUTOR: "crabbox",
+          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("sync refused 1 untracked non-ignored path");
+    expect(result.stderr).not.toContain("notes.txt");
+    expect(existsSync(delegationMarkerPath)).toBe(false);
+  });
+
+  it("refuses a sensitive cached path before Crabbox delegation", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const delegationMarkerPath = path.join(tempRoot, "delegated");
+
+    writeExecutable(
+      path.join(binDir, "crabbox"),
+      [
+        "#!/bin/sh",
+        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        `: > ${shellQuote(delegationMarkerPath)}`,
+      ].join("\n"),
+    );
+    writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
+    writeExecutable(
+      path.join(binDir, "git"),
+      [
+        "#!/bin/sh",
+        "case \"$*\" in",
+        "  *\"--others\"*) exit 0 ;;",
+        "  *\"--cached\"*) printf '%b' '.env.production\\000scripts/verification-dispatch.mjs\\000' ;;",
+        "esac",
+      ].join("\n"),
     );
 
     const result = spawnSync(
@@ -254,6 +306,35 @@ describe("verification dispatcher", () => {
     expect(result.stderr).toContain(".env.production");
     expect(existsSync(delegationMarkerPath)).toBe(false);
   });
+
+  it("allows ignored files, staged source, and modified tracked source", () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    mkdirSync(repoDir, { recursive: true });
+    runGit(repoDir, ["init", "--quiet"]);
+    writeFileSync(path.join(repoDir, ".gitignore"), "ignored-private.txt\n", "utf8");
+    writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 1;\n", "utf8");
+    runGit(repoDir, ["add", ".gitignore", "tracked.ts"]);
+
+    for (const fileName of ["notes.txt", "credentials.json", ".netrc", "private.key"]) {
+      writeFileSync(path.join(repoDir, fileName), "private\n", "utf8");
+      expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+        .toContain("untracked non-ignored path");
+      rmSync(path.join(repoDir, fileName));
+    }
+
+    writeFileSync(path.join(repoDir, "ignored-private.txt"), "private\n", "utf8");
+    writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = true;\n", "utf8");
+    runGit(repoDir, ["add", "staged.ts"]);
+    writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 2;\n", "utf8");
+
+    expect(callDispatcherVoidExport("assertSafeBlacksmithSync", repoDir)).toBe("ok");
+
+    writeFileSync(path.join(repoDir, ".env.production"), "synthetic-test-value\n", "utf8");
+    runGit(repoDir, ["add", "--force", ".env.production"]);
+    expect(callDispatcherExportFailure("assertSafeBlacksmithSync", repoDir))
+      .toContain("sync refused sensitive managed paths");
+  });
 });
 
 function callDispatcherExport<T>(exportName: string, argument: unknown): T {
@@ -274,6 +355,45 @@ function callDispatcherExport<T>(exportName: string, argument: unknown): T {
   });
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as T;
+}
+
+function callDispatcherVoidExport(exportName: string, argument: unknown): string {
+  const result = runDispatcherVoidExport(exportName, argument);
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout;
+}
+
+function callDispatcherExportFailure(exportName: string, argument: unknown): string {
+  const result = runDispatcherVoidExport(exportName, argument);
+  expect(result.status).toBe(2);
+  return result.stderr;
+}
+
+function runDispatcherVoidExport(
+  exportName: string,
+  argument: unknown,
+): ReturnType<typeof spawnSync> & { stderr: string; stdout: string } {
+  const moduleUrl = pathToFileURL(dispatcherPath).href;
+  const source = `
+    const module = await import(${JSON.stringify(moduleUrl)});
+    try {
+      module[process.env.MURPH_TEST_EXPORT](
+        JSON.parse(process.env.MURPH_TEST_ARGUMENT_JSON),
+      );
+      process.stdout.write("ok");
+    } catch (error) {
+      process.stderr.write(error instanceof Error ? error.message : String(error));
+      process.exitCode = 2;
+    }
+  `;
+  return spawnSync(process.execPath, ["--input-type=module", "-e", source], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MURPH_TEST_ARGUMENT_JSON: JSON.stringify(argument),
+      MURPH_TEST_EXPORT: exportName,
+    },
+  }) as ReturnType<typeof spawnSync> & { stderr: string; stdout: string };
 }
 
 function resolveExecutor(
@@ -352,4 +472,9 @@ function withoutVerificationRoutingEnvironment(
   delete sanitized.MURPH_VERIFY_EXECUTOR;
   delete sanitized.MURPH_VERIFY_REQUIRES_VERCEL_ENV;
   return sanitized;
+}
+
+function runGit(repoDir: string, args: string[]): void {
+  const result = spawnSync("git", args, { cwd: repoDir, encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
 }
