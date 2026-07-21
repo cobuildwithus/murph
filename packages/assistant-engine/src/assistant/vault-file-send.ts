@@ -4,11 +4,13 @@ import { lstat, open, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type {
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
 import {
   buildHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalCycleOwnerKey,
 } from '@murphai/hosted-execution/action-approval'
 import {
   assistantOutboxIntentSchema,
@@ -52,6 +54,7 @@ export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
 
 export interface AssistantActionApprovalPort {
+  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalObservation>
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
@@ -95,7 +98,8 @@ export async function requestAssistantVaultFileSend(input: {
   const mediaRef = generatedDelivery?.ownedRef ?? normalizedRef
   if (
     generatedDelivery !== null
-    && hasActivePriorTurnGeneratedVaultFileSendForTarget({
+    && await hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      actionApprovalPort: input.actionApprovalPort,
       candidateRef: mediaRef,
       intents: await listExistingAssistantOutboxIntents(input.vault),
       targetFingerprint,
@@ -446,12 +450,13 @@ export function resolveAssistantVaultFileSendTargetFingerprint(input: {
   )
 }
 
-export function hasActivePriorTurnGeneratedVaultFileSendForTarget(input: {
+export async function hasActivePriorTurnGeneratedVaultFileSendForTarget(input: {
+  actionApprovalPort: AssistantActionApprovalPort
   candidateRef: string
   intents: readonly AssistantOutboxIntent[]
   targetFingerprint: string
   turnId: string
-}): boolean {
+}): Promise<boolean> {
   const targetFingerprint = normalizeNullableString(input.targetFingerprint)
   if (!targetFingerprint) {
     return false
@@ -459,7 +464,7 @@ export function hasActivePriorTurnGeneratedVaultFileSendForTarget(input: {
   if (!isAssistantGeneratedDeliveryRef(input.candidateRef)) {
     return false
   }
-  return input.intents.some((intent) => {
+  const matchingIntents = input.intents.filter((intent) => {
     const vaultFiles = intent.media
       .filter((media) => media.kind === 'vault_file')
       .filter((media) => isAssistantGeneratedDeliveryRef(media.ref))
@@ -474,6 +479,28 @@ export function hasActivePriorTurnGeneratedVaultFileSendForTarget(input: {
       && resolveAssistantVaultFileSendTargetFingerprint(intent)
         === targetFingerprint
   })
+  for (const intent of matchingIntents) {
+    if (intent.status !== 'awaiting_approval') {
+      return true
+    }
+    const expectedCycle = parseHostedActionApprovalCycleOwnerKey(
+      intent.deliveryIdempotencyKey,
+    )
+    if (!expectedCycle) {
+      continue
+    }
+    const approval = await input.actionApprovalPort.read(
+      buildAssistantVaultFileSendApprovalRequest(intent),
+    )
+    if (
+      approval.status === 'approved'
+      && approval.approvalId === expectedCycle.approvalId
+      && approval.cycleOwnerKey === expectedCycle.ownerKey
+    ) {
+      return true
+    }
+  }
+  return false
 }
 
 async function listExistingAssistantOutboxIntents(

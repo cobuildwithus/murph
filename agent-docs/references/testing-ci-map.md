@@ -200,8 +200,9 @@ needs the documented test-mode Checkout, webhook, and browser smoke.
   `exports/assistant-deliveries/**` files remain ordinary vault data. Archive
   exclusions stay global rather than granting that generic path ownership.
   Assistant-engine coverage also proves that a later turn cannot replace an
-  active same-target generated vault-file ref or request a second approval,
-  while exact-ref retries and distinct same-turn sends remain available. The
+  approved same-target generated vault-file ref or request a second approval
+  during the approval-observation gap, while a distinct pre-decision request,
+  exact-ref retry, and distinct same-turn send remain available. The
   hosted approval-resume E2E creates and requests the runtime file in one provider
   turn, checkpoints it, destroys the container, approves, restores, and proves
   one attachment delivery with no duplicate or mailbox lag. The phase-one
