@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-16
+Last verified: 2026-07-20
 
 ## Accepted-Message Targeting
 
@@ -196,7 +196,11 @@ The initial lane permits one retrieval
 generation per unique member/provider connection; later retry, reconnect, or
 refresh requires a bounded raw-evidence retention lifecycle. The Epic beta
 requests only Patient read, laboratory Observation search, and DiagnosticReport
-search, with no offline-access scope. The hosted runner receives only a
+search, with no offline-access scope. Each retrieval run also freezes the exact
+adapter-owned query plan in additive operational JSON. Stable `queryScopeId`
+and deterministic `sliceId` values distinguish repeated resource-type queries
+and bounded history windows, but they are acquisition identity only and never
+participate in canonical FHIR identity. The hosted runner receives only a
 credential-free descriptor and bounded raw FHIR pages through the three signed
 retrieval operations; Cloudflare proves and forwards the active attempt, lease
 generation, and workspace version before web revalidates the fence shape and
@@ -437,7 +441,12 @@ which bounds immutable raw-evidence directories until a future retention owner
 can preserve canonical raw references across refreshes.
 `apps/cloudflare` supplies only the typed signed-web-control transport adapter.
 `packages/assistant-runtime` performs finite preemptible background iteration,
-resuming from the vault-owned operational checkpoint after preemption. Then
+resuming from the vault-owned operational checkpoint after preemption. The
+versioned runtime contract accepts either the current resource-family descriptor
+or explicit query slices; query-aware raw pages and completion state remain
+grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
+manifests and v1 checkpoints remain readable. Web continues to emit the current
+descriptor until the compatible runner deployment is complete. Then
 `@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
 immediately before atomically committing immutable raw pages and the retrieval
 manifest, and again before lazily invoking
@@ -499,7 +508,7 @@ application code.
 - Storage-policy hard line: if a datum is user-facing, queryable, or something future product features will build on, it belongs in canonical vault records or explicit derived materializations, not in assistant runtime. `vault/.runtime/operations/assistant/**` is for execution residue, replay/continuity artifacts, and operator diagnostics only.
 - The hosted gateway plane is a derived operational model over inbox captures, assistant bindings, sent outbox deliveries, and approval state. Hosted Durable Objects may materialize hot gateway projections and short-retained event logs for transport-facing reads, but those projections are never canonical health truth and must remain rebuildable from canonical vault evidence plus non-canonical runtime state. There is no local gateway projection/control surface; assistantd stays focused on local assistant control.
 - Hosted execution state for `apps/cloudflare` stores encrypted hosted workspace checkpoint refs plus legacy encrypted artifact objects, runner-secret blobs, and per-user coordination metadata. The live v2 snapshot ref is a direct R2 presigned PUT, single-object encrypted `tar.zst`; the Worker only handles JSON start/complete metadata and never receives the snapshot body. Legacy full/base workspace bundles and legacy layered `{base, hot}` or working `{base, delta}` refs remain restoreable during migration, but production foreground execution no longer creates layered or working checkpoint refs and v2 snapshot production does not create artifact sidecars. The v2 direct-R2 workspace snapshot includes canonical `vault/**`, durable operational runtime continuity under `vault/.runtime/operations/**` except explicit unsafe/process-local exclusions, the hosted operator-home directory marker, and only the Codex rollout JSONL files under `.codex-hosted/sessions/YYYY/MM/DD/` that are explicitly referenced by live assistant session resume state with no separate continuity manifest. They do not persist the operator config file; hosted assistant defaults are recreated from trusted platform runtime env after restore so executable assistant selectors cannot be carried forward by workspace snapshots. Hosted Codex config may enable Codex-native memories for operator context during maintenance/root sessions, but generated Codex memory artifacts are not product truth and remain outside the broad checkpoint surface unless an explicit allowlist/inventory is added. Foreground assistant turns do not publish a separate Codex continuity artifact or snapshot pointer; provider-native continuity is durable only through the normal idle workspace snapshot path. Live correctness barriers, including `system_mailbox_receipt`, `assistant_runtime_commit`, `provider_cleanup`, outbox, mailbox import, and active-turn checkpoints, stage local runtime state and terminal evidence without publishing hosted workspace snapshots. `canonical_runtime_commit` uploads exact hosted canonical write receipts to supervisor-owned artifacts and publishes a bounded receipt-log ref through a status-only workspace checkpoint that retains the prior snapshot ref. Restore replays those receipts over the prior snapshot and marks affected context domains dirty; the next idle snapshot becomes authoritative and omits the receipt-log status. `packages/core` `WriteBatch` is the canonical mutation contract for vault writes and emits the exact hosted canonical write receipts. `idle_shutdown` is the only live hosted workspace snapshot producer, and the v2 snapshot path checks the runtime write fence before direct R2 upload so stale invocations abort before upload. Excluded local runtime state includes assistant JSONL event logs, device-sync control/token stores, parser executable-selector config, rebuildable local projections under `vault/.runtime/projections/**`, ephemeral cache/tmp state, secrets, quarantine/repair payloads, locks, pid/socket files, operator config, arbitrary Codex auth/credential/cache/tmp/log/history/key/cert/socket/lock files, Codex prompt-history files, Codex SQLite metadata, unreferenced Codex sessions, archived Codex sessions, and local incur CLI defaults. Hosted snapshots keep assistant diagnostics snapshots, status snapshots, runtime budgets, and pending anonymized issue records for continuity while leaving append-only event logs local; routine diagnostic info events are not mirrored into runtime events, and warning/error diagnostics stay in the small recent diagnostics snapshot tail. Hosted Codex continuity diagnostics are derived from assistant session resume state and may expose only counts, byte totals, and keyed hashed rollout-relative names when the hosted log fingerprint secret is configured; they must not expose raw Codex home paths, filenames, prompts, or credentials. Restore sanitizes native Codex resume metadata when the referenced rollout file is absent, does not match the saved Codex thread id, or is not a regular file under `.codex-hosted`, then prunes restored `.codex-hosted` contents back to surviving session-referenced rollout files. Large raw files under `vault/raw/**` are inside the encrypted v2 tar.zst instead of separate artifact refs. Browser-vault snapshots are a separate encrypted hosted sidecar for dashboard use only and now contain a typed dashboard projection bundle rather than a hosted clone of canonical vault entities or a generic read-model payload; workspace checkpoints do not write browser-vault replica refs. Web-owned Postgres stores signed wrapped hosted domain-root envelopes in `hosted_user_crypto_envelope` plus append-only `hosted_user_crypto_audit` rows; plaintext root keys are never stored, web wraps use GCP KMS AAD, authority signatures are verified before use, and the signed worker crypto-context callback returns only ingress/runtime envelopes for Cloudflare's P-256 recipient unwrap. The worker-facing HTTP surface is intentionally narrow: signed Temporal `POST /internal/users/:userId/runtime/ensure-processing`, Vercel OIDC-authenticated browser-vault session, user-data deletion, status, and web-owned Telegram usage-limit notice routes, plus the signed deploy-smoke callback and public `GET /` / `GET /health`. The per-user Durable Object keeps only execution coordination and other opaque runtime metadata in SQLite rather than a canonical queue-history model; the web-owned hosted workspace pointer is the latest checkpoint fence and any Cloudflare bundle cache stays process-memory only. There is no staged dispatch-payload control plane or CRUD seam anymore. Execution-time web callbacks are narrow and signed: the runtime may fetch mailbox rows, fetch signed ingress/runtime crypto context, read/checkpoint hosted workspace state, write redacted runtime logs/status, start a device connect-link, fetch/apply/ack hosted device-sync runtime authority including dirty-pending and dirty-ack state, record bounded hosted product feedback, record hosted Codex auth state, or record hosted usage directly into web-owned Postgres. Temporal owns accepted message-webhook, Cloudflare Email ingress, due-reconcile device-sync scheduled wakes, billing/manual, and browser-vault execution wake orchestration by pointer-only signal after the owning web mutation commits; Vercel Workflow may retry Stripe webhook reconciliation by Stripe event id after local signature verification and receipt recording, but it is not the hosted runtime wake scheduler. Device-sync webhook freshness is dirty-state owned: web persists trace/audit plus per-connection dirty state, appends one bounded `device-sync.wake` mailbox handoff on clean-to-dirty transitions, and completes trace acceptance in the same transaction. The runner pulls and acks dirty rows through signed callbacks. Temporal owns the global device-sync due-reconcile cadence by starting a short-lived reconciler workflow that calls a signed web scheduled wake sweep; that web command reads canonical due-reconcile facts, records due-reconcile wake markers, appends bounded `device-sync.wake` mailbox handoffs, and returns count-only summaries to Temporal. Dirty/stuck rows may be included only when they are due-reconcile candidates; dirty state remains the durable work source, not a separate scheduler queue. Temporal signal failures after post-commit clean-to-dirty webhook handoff are logged instead of failing provider ingress; there is no Vercel mailbox-lag cron or dirty-sweeper backstop, and a DB-backed pending handoff table remains future hardening for exact workflow-start failure journaling. Missing managed crypto now fails closed outside the explicit activation-time provisioning path, and ciphertext envelopes still decrypt by envelope `keyId` through the configured keyring.
-- Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. Cloudflare stays a thin runner. The assistant runtime builds the replica from the restored `vaultRoot`, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Browser-vault replica writes remain capped at 50 MiB; oversized or wake-interrupted refreshes degrade without blocking foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms.
+- Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, generation-mismatched, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. The shared browser-replica contract owns one current projection generation carried by both the encrypted payload and its published ref. Missing or mismatched generations remain readable for deploy compatibility but are always stale; any projection-shape or interpretation change that makes old sidecars incomplete must bump the shared generation instead of adding route-specific checks. Cloudflare stays a thin runner. The assistant runtime builds the replica from the restored `vaultRoot`, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Browser-vault replica writes remain capped at 50 MiB; oversized or wake-interrupted refreshes degrade without blocking foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms. Web and Worker/runner skew stays fail-soft by serving readable stale replicas, while generation-bump deploys converge Worker and warm containers immediately so retries publish the current marker.
 - Any inbox-to-canonical promotion idempotency must be stored in or derivable from canonical vault evidence, not `.runtime/` alone.
 - General assistant/session state belongs under `vault/.runtime/operations/assistant/**`, including local transcript files, per-turn decision receipts, replay-safe outbound intent journals, pending anonymized assistant-runtime issue records, bounded local diagnostics/runtime event logs, diagnostics snapshot counters and recent warnings, persisted assistant status snapshots, and runtime automation execution state plus run history. Hosted assistant provider usage, including the requested and served model reported by Codex App Server, is recorded directly through the hosted runtime platform into the web-owned usage ledger instead of becoming assistant runtime state. Durable user-facing memory belongs canonically in `bank/memory.md`, typed preferences such as workout unit defaults and desired wearable providers belong canonically in `bank/preferences.json`, and durable scheduled prompt configuration belongs canonically in `bank/automations/*.md`; capture-scoped rebuildable audit artifacts stay under `derived/inbox/**`, while durable compiled knowledge dossiers live under `derived/knowledge/**`.
 - Assistant tone, voice, and personality values remain canonical in the active runtime's `bank/preferences.json`: a person vault configures that private Murph, while a synthetic thread-container vault configures the room Murph. Nullable `HostedMember` assistant-style columns are the authenticated web mutation projection; only person-member rows feed personal Settings. Web emits strict sparse `member.preferences.updated` deltas, and the hosted system mailbox applies every delta in mailbox order; preference events are never latest-wins snapshots, and an older retry blocks newer deltas so sibling settings cannot be lost. The scheduled preference-handoff backstop selects active people and active synthetic rooms through the same owner-or-current-participant access derivation before its bounded limit, then rechecks canonical runtime access before signaling.
@@ -516,29 +525,27 @@ app-server anchored there would hold a dead cwd inode and fail its next
 thread-start config load. Threads receive the current workspace through the
 explicit per-thread `cwd` param instead.
 
-Detached MultiAgent V2 work is a bounded optional-enrichment path, not a second
-durable work owner. Before the root reply, the parent persists the smallest
-truthful canonical fact or durable raw source and retains its exact record ids
-or source references. The child may update only that durable base idempotently;
-work Murph promises to finish remains in the root turn unless a separate durable
-owner already exists. A child terminal event is only an advisory lifecycle
-receipt, so a canonical read confirms the enrichment before Murph reports it as
-finished.
+Detached MultiAgent V2 work is a bounded path, not a process-memory queue.
+Before the root reply, Murph retains a durable accepted input, canonical fact,
+or raw source and gives each child its exact source words, ids, or refs. A
+loaded skill may assign one independent canonical record family per child; all
+writes remain idempotently attributable to that source. Work that needs a
+user-facing result in the current reply remains in the root turn. A child
+terminal event is only an advisory lifecycle receipt, so canonical readback
+confirms a write before Murph reports it as finished.
 
-Each root session may admit at most one detached child under Codex's native
-root-plus-one residency cap. Children from independent roots can overlap in the
-same App Server process. Each child is a one-shot leaf: no interaction with the
-root or another child, reuse, nested spawn, or background terminal is allowed.
-Root completion and later ordinary turns leave valid optional enrichment alone.
-Before publishing a workspace snapshot, the runtime waits for every exact
-resident child and checks every touched root and resident child for background
-terminals.
-Codex admission of a per-session successor is the native fence that its
-completed predecessor was flushed and unloaded, leaving the successor as that
-root's resident child. A routine checkpoint wake only interrupts that boundary
-wait and leaves the App Server plus all resident evidence warm. A timeout or
-unsupported lifecycle stops the exact process and fails the boundary closed.
-Explicit workspace invocation abort/preemption also interrupts the wait and
+Hosted configuration admits one root plus at most three concurrent children
+per session. Each child is a one-shot leaf with one bounded family: no
+interaction with the root or another child, reuse, nested spawn, or background
+terminal is allowed. Root completion and later ordinary turns leave valid
+detached work alone. Before publishing a workspace snapshot, the runtime waits
+for every exact resident child and checks every touched root and child for
+background terminals. The lifecycle owner retains the full child set for each
+root until that boundary clears, so one sibling's completion cannot evict
+another. A routine checkpoint wake only interrupts that boundary wait and
+leaves the App Server plus all resident evidence warm. A timeout or unsupported
+lifecycle stops the exact process and fails the boundary closed. Explicit
+workspace invocation abort/preemption also interrupts the wait and
 synchronously stops the exact process before workspace or job-slot ownership
 can be reused.
 
@@ -566,9 +573,17 @@ purchase-derived idempotency key, permits identical creation retries for a
 derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. The financial movements described above use only signed
 `refund_adjustment` and `dispute_adjustment` ledger entries; there are no
-separate reversal or restoration kinds. Separate payer and beneficiary
-identifiers are only a composition seam: group authorization, lifecycle,
-deletion, and key semantics remain unimplemented.
+separate reversal or restoration kinds. Personal and hosted-group funding use
+the same purchase lifecycle. Group funding resolves the existing opaque join
+code to the group's synthetic `HostedMember`, which remains the beneficiary;
+it adds no group wallet, usage account, or separate funding code. The
+authenticated contributor remains the payer. A deleted payer can detach only
+from a terminal cross-owner purchase after the existing reconciliation-version
+fence advances and encrypted provider references are cleared. That advance
+makes payer-era preparation retry against the detached row, while retained
+blind lookup keys keep later refund and dispute reconciliation possible.
+Beneficiary deletion still removes its credit and purchase history in ownership
+order.
 
 Hosted app-session cookies use a strict v2 session-id plus bearer format. The existing token-hash field stores a dedicated web-key HMAC over the session id, bearer, member id, Privy identity, and expiry, so Postgres write access alone cannot mint or retarget browser authority; legacy unsigned cookies are rejected.
 

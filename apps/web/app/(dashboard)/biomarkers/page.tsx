@@ -18,7 +18,7 @@ import {
 export const metadata: Metadata = createMurphPageMetadata({
   title: "Your biomarkers — Murph",
   description:
-    "See every biomarker in your lab history and follow how each result changes over time.",
+    "See recognized biomarkers from your devices and saved lab results, organized for private longitudinal review.",
 });
 
 function listDeviceTrackedBiomarkers(): DeviceTrackedBiomarker[] {

@@ -6,7 +6,7 @@ import {
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
 } from "./experiment-session-metrics.ts";
-import { LAB_METRICS } from "./definitions/labs.ts";
+import { LAB_METRICS, LAB_RESULT_METRICS } from "./definitions/labs.ts";
 import { PROXY_METRICS } from "./definitions/proxy.ts";
 import { RECOVERY_METRICS } from "./definitions/recovery.ts";
 import { SLEEP_METRICS } from "./definitions/sleep.ts";
@@ -32,6 +32,11 @@ const METRIC_DEFINITIONS: readonly MetricDefinition[] = [
 const DEFINITIONS_BY_KEY = new Map(METRIC_DEFINITIONS.map((definition) => [definition.key, definition]));
 const DEFINITIONS_BY_ALIAS = new Map<string, MetricDefinition>();
 const PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>();
+const LAB_RESULT_DEFINITIONS_BY_KEY = new Map(
+  LAB_RESULT_METRICS.map((definition) => [definition.key, definition]),
+);
+const LAB_RESULT_DEFINITIONS_BY_ALIAS = new Map<string, MetricDefinition>();
+const LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER = new Map<string, MetricDefinition>();
 
 for (const definition of METRIC_DEFINITIONS) {
   for (const alias of [definition.key, ...definition.aliases]) {
@@ -44,6 +49,18 @@ for (const definition of METRIC_DEFINITIONS) {
     if (!PRIMARY_METRIC_BY_BIOMARKER.has(biomarkerAlias)) {
       PRIMARY_METRIC_BY_BIOMARKER.set(biomarkerAlias, definition);
     }
+  }
+}
+
+for (const definition of LAB_RESULT_METRICS) {
+  for (const alias of [definition.key, ...definition.aliases]) {
+    LAB_RESULT_DEFINITIONS_BY_ALIAS.set(normalizeMetricKey(alias), definition);
+  }
+  if (definition.biomarkerKey) {
+    LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.set(definition.biomarkerKey, definition);
+  }
+  for (const biomarkerAlias of definition.biomarkerAliases ?? []) {
+    LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.set(biomarkerAlias, definition);
   }
 }
 
@@ -67,12 +84,48 @@ export function resolveMetricDefinition(value: string): MetricDefinition | null 
   return DEFINITIONS_BY_KEY.get(key) ?? DEFINITIONS_BY_ALIAS.get(key) ?? null;
 }
 
+/** Resolves the broader identity catalog only at test-result-owned boundaries. */
+export function resolveLabResultMetricDefinition(value: string): MetricDefinition | null {
+  const key = normalizeMetricKey(value);
+  return LAB_RESULT_DEFINITIONS_BY_KEY.get(key)
+    ?? LAB_RESULT_DEFINITIONS_BY_ALIAS.get(key)
+    ?? null;
+}
+
+export function resolveLabResultMetricDefinitionForBiomarker(
+  biomarkerKey: string,
+): MetricDefinition | null {
+  return LAB_RESULT_PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
+}
+
 export function resolveMetricInputKey(value: string): string {
   return resolveMetricDefinition(value)?.key ?? normalizeMetricKey(value);
 }
 
 export function resolveMetricDefinitionForBiomarker(biomarkerKey: string): MetricDefinition | null {
   return PRIMARY_METRIC_BY_BIOMARKER.get(biomarkerKey) ?? null;
+}
+
+function resolveBiomarkerMetricInput(value: string): {
+  candidateBiomarkerKey: string;
+  definition: MetricDefinition | null;
+} {
+  const normalized = value.trim().toLowerCase();
+  const slug = normalized.split(":").at(-1) ?? normalized;
+  const candidateBiomarkerKey = normalized.startsWith("biomarker:")
+    ? normalized
+    : `biomarker:${slug}`;
+  return {
+    candidateBiomarkerKey,
+    definition:
+      resolveMetricDefinitionForBiomarker(candidateBiomarkerKey) ??
+      resolveMetricDefinition(slug),
+  };
+}
+
+export function resolveCanonicalBiomarkerKey(value: string): string {
+  const { candidateBiomarkerKey, definition } = resolveBiomarkerMetricInput(value);
+  return definition?.biomarkerKey ?? candidateBiomarkerKey;
 }
 
 export type ExperimentPrimaryMetricCaptureIssue =
@@ -109,13 +162,7 @@ export function assessExperimentPrimaryMetricCapture(input: {
     };
   }
 
-  const slug = normalizedBiomarkerKey.split(":").at(-1) ?? normalizedBiomarkerKey;
-  const candidateBiomarkerKey = normalizedBiomarkerKey.startsWith("biomarker:")
-    ? normalizedBiomarkerKey
-    : `biomarker:${slug}`;
-  const definition =
-    resolveMetricDefinitionForBiomarker(candidateBiomarkerKey) ??
-    resolveMetricDefinition(slug);
+  const { candidateBiomarkerKey, definition } = resolveBiomarkerMetricInput(normalizedBiomarkerKey);
   if (!definition) {
     return {
       canonicalBiomarkerKey: candidateBiomarkerKey,

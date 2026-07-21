@@ -4,11 +4,13 @@ import { lstat, open, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import type {
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
 import {
   buildHostedActionApprovalCycleOwnerKey,
+  parseHostedActionApprovalCycleOwnerKey,
 } from '@murphai/hosted-execution/action-approval'
 import {
   assistantOutboxIntentSchema,
@@ -29,13 +31,15 @@ import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vau
 
 import {
   createAssistantOutboxIntent,
+  listAssistantOutboxIntents,
 } from './outbox.js'
 import {
   buildAssistantOutboxPersistedTarget,
   buildAssistantOutboxRawTargetIdentity,
   hashAssistantOutboxTargetFingerprint,
 } from './outbox/intents.js'
-import { normalizeNullableString } from './shared.js'
+import { isMissingFileError, normalizeNullableString } from './shared.js'
+import { resolveAssistantStatePaths } from './store.js'
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
@@ -50,6 +54,7 @@ export const ASSISTANT_VAULT_FILE_SEND_ACTION_KIND = 'vault.file.send.v1'
 const ASSISTANT_VAULT_FILE_APPROVAL_FALLBACK_LEAD_MS = 10 * 60 * 1_000
 
 export interface AssistantActionApprovalPort {
+  read(input: HostedActionApprovalRequest): Promise<HostedActionApprovalObservation>
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
@@ -82,21 +87,42 @@ export async function requestAssistantVaultFileSend(input: {
 }): Promise<AssistantVaultFileSendRequestResult> {
   const targetFingerprint = requireAssistantVaultFileSendTargetFingerprint(input)
   const normalizedRef = normalizeVaultFileRef(input.ref)
-  let mediaRef = normalizedRef
-  let displayFilename: string | undefined
-  if (isAssistantGeneratedDeliveryRef(normalizedRef)) {
-    const consumed = await consumeAssistantGeneratedDeliveryStagingRef({
-      ref: normalizedRef,
-      sessionId: input.sessionId,
-      toolCallId: normalizeNullableString(input.toolCallId),
+  const generatedDelivery = isAssistantGeneratedDeliveryRef(normalizedRef)
+    ? buildAssistantGeneratedDeliveryIdentity({
+        ref: normalizedRef,
+        sessionId: input.sessionId,
+        toolCallId: normalizeNullableString(input.toolCallId),
+        turnId: input.turnId,
+      })
+    : null
+  const mediaRef = generatedDelivery?.ownedRef ?? normalizedRef
+  if (
+    generatedDelivery !== null
+    && await hasActivePriorTurnGeneratedVaultFileSendForTarget({
+      actionApprovalPort: input.actionApprovalPort,
+      candidateRef: mediaRef,
+      intents: await listExistingAssistantOutboxIntents(input.vault),
+      targetFingerprint,
       turnId: input.turnId,
+    })
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE',
+      'A vault-file delivery for this conversation is already active. Let the '
+        + 'runtime finish that exact send before preparing another one.',
+    )
+  }
+  if (generatedDelivery !== null) {
+    await consumeAssistantGeneratedDeliveryStagingRef({
+      ...generatedDelivery,
+      ref: normalizedRef,
       vaultRoot: input.vault,
     })
-    mediaRef = consumed.ownedRef
-    displayFilename = consumed.displayFilename
   }
   const file = await resolveAssistantVaultFileResponseMedia({
-    ...(displayFilename === undefined ? {} : { displayFilename }),
+    ...(generatedDelivery === null
+      ? {}
+      : { displayFilename: generatedDelivery.displayFilename }),
     ref: mediaRef,
     vaultRoot: input.vault,
   })
@@ -202,13 +228,12 @@ export async function resolveAssistantVaultFileResponseMedia(input: {
 // recover the earlier owned file, which is then pruned as unclaimed. The
 // exposed bytes are a regenerable one-time artifact only; the persisted-outbox
 // retry path is unaffected.
-async function consumeAssistantGeneratedDeliveryStagingRef(input: {
+function buildAssistantGeneratedDeliveryIdentity(input: {
   ref: string
   sessionId: string
   toolCallId: string | null
   turnId: string
-  vaultRoot: string
-}): Promise<{ displayFilename: string; ownedRef: string }> {
+}): { displayFilename: string; ownedRef: string } {
   const displayFilename = path.posix.basename(input.ref)
   resolveAssistantVaultFileContentType(displayFilename)
   if (input.toolCallId === null) {
@@ -225,6 +250,15 @@ async function consumeAssistantGeneratedDeliveryStagingRef(input: {
     toolCallId: input.toolCallId,
     turnId: input.turnId,
   })
+  return { displayFilename, ownedRef }
+}
+
+async function consumeAssistantGeneratedDeliveryStagingRef(input: {
+  displayFilename: string
+  ownedRef: string
+  ref: string
+  vaultRoot: string
+}): Promise<void> {
   const sourcePath = await resolveAssistantVaultPath(
     input.vaultRoot,
     input.ref,
@@ -232,14 +266,13 @@ async function consumeAssistantGeneratedDeliveryStagingRef(input: {
   )
   const targetPath = await resolveAssistantVaultPath(
     input.vaultRoot,
-    ownedRef,
+    input.ownedRef,
     'file path',
   )
   await adoptAssistantGeneratedDeliveryIntoStableName({
     sourcePath,
     targetPath,
   })
-  return { displayFilename, ownedRef }
 }
 
 async function adoptAssistantGeneratedDeliveryIntoStableName(input: {
@@ -415,6 +448,76 @@ export function resolveAssistantVaultFileSendTargetFingerprint(input: {
       threadId: null,
     }),
   )
+}
+
+export async function hasActivePriorTurnGeneratedVaultFileSendForTarget(input: {
+  actionApprovalPort: AssistantActionApprovalPort
+  candidateRef: string
+  intents: readonly AssistantOutboxIntent[]
+  targetFingerprint: string
+  turnId: string
+}): Promise<boolean> {
+  const targetFingerprint = normalizeNullableString(input.targetFingerprint)
+  if (!targetFingerprint) {
+    return false
+  }
+  if (!isAssistantGeneratedDeliveryRef(input.candidateRef)) {
+    return false
+  }
+  const matchingIntents = input.intents.filter((intent) => {
+    const vaultFiles = intent.media
+      .filter((media) => media.kind === 'vault_file')
+      .filter((media) => isAssistantGeneratedDeliveryRef(media.ref))
+    const isExactRefRetry = vaultFiles.length === 1
+      && vaultFiles[0]?.ref === input.candidateRef
+    return intent.status !== 'sent'
+      && intent.status !== 'failed'
+      && intent.status !== 'abandoned'
+      && intent.turnId !== input.turnId
+      && vaultFiles.length > 0
+      && !isExactRefRetry
+      && resolveAssistantVaultFileSendTargetFingerprint(intent)
+        === targetFingerprint
+  })
+  for (const intent of matchingIntents) {
+    if (intent.status !== 'awaiting_approval') {
+      return true
+    }
+    const expectedCycle = parseHostedActionApprovalCycleOwnerKey(
+      intent.deliveryIdempotencyKey,
+    )
+    if (!expectedCycle) {
+      continue
+    }
+    const approval = await input.actionApprovalPort.read(
+      buildAssistantVaultFileSendApprovalRequest(intent),
+    )
+    if (
+      approval.status === 'approved'
+      && approval.approvalId === expectedCycle.approvalId
+      && approval.cycleOwnerKey === expectedCycle.ownerKey
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+async function listExistingAssistantOutboxIntents(
+  vault: string,
+): Promise<AssistantOutboxIntent[]> {
+  const { outboxDirectory } = resolveAssistantStatePaths(vault)
+  try {
+    if (!(await lstat(outboxDirectory)).isDirectory()) {
+      return []
+    }
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return []
+    }
+    throw error
+  }
+  return listAssistantOutboxIntents(vault)
 }
 
 function requireAssistantVaultFileSendTargetFingerprint(input: Parameters<

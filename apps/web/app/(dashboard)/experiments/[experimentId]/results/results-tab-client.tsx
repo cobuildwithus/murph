@@ -38,6 +38,7 @@ export function ResultsTabClient({
       sessionContext: privateRun?.sessionContext,
       privateRun: privateRun ?? undefined,
       nextStep: privateRun?.nextStep,
+      outcomeConfidence: privateRun?.outcomeConfidence,
       summary: privateRun?.summary,
       summaryDetail: privateRun?.summaryDetail,
       conclusions: privateRun?.conclusions,

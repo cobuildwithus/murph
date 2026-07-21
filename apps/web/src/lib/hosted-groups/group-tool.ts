@@ -65,6 +65,7 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import { readHostedGroupUsageStatus } from "./group-usage-funding";
 import { requestHostedGroupAssistantAsk } from "./group-assistant-ask";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
@@ -132,6 +133,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  read_usage: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
   set_chat_avatar: "owner_active",
@@ -253,6 +255,22 @@ export async function handleHostedRuntimeGroupTool(input: {
         },
       };
     }
+  }
+
+  if (input.request.action === "read_usage") {
+    const usage = await readHostedGroupUsageStatus({
+      runtimeMemberId: input.memberId,
+    });
+    return {
+      action: "read_usage",
+      result: usage
+        ? { status: "ok", usage }
+        : {
+            status: "unavailable",
+            unavailableReason: "group_usage_unavailable",
+            usage: null,
+          },
+    };
   }
 
   if (!await hasHostedRuntimeActiveAccess(input.memberId)) {

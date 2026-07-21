@@ -84,6 +84,7 @@ export function BiomarkersPageClient({
     [deviceBiomarkers],
   );
   const deviceMetrics = useBrowserVaultSelector(selectDeviceMetrics) ?? [];
+  const savedLabResultCount = useBrowserVaultSelector(countSavedLabResults) ?? 0;
   const groups = groupMeasuredBiomarkers(biomarkers);
   const authRequired = !authenticated
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
@@ -94,9 +95,9 @@ export function BiomarkersPageClient({
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <PageHeader
-          eyebrow="Lab history"
+          eyebrow="Health data"
           title="Your biomarkers"
-          description="Every biomarker in your saved lab results, grouped by health area."
+          description="Recognized biomarkers from your devices and saved lab results, organized by health area."
         />
         {authenticated && totalCount > 0 ? (
           <p className="text-sm tabular-nums text-muted-foreground">
@@ -121,40 +122,17 @@ export function BiomarkersPageClient({
         </Alert>
       ) : null}
 
-      {authenticated && !authRequired && freshness === "stale"
-        && status !== "loading" && status !== "error"
-        && (biomarkers.length > 0 || !refreshPending) ? (
-        <Alert aria-live="polite">
-          <AlertTitle>
-            {refreshPending ? "Refreshing your lab history" : "Your lab history may be out of date"}
-          </AlertTitle>
-          <AlertDescription>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <span>
-                {refreshPending
-                  ? biomarkers.length > 0
-                    ? "Your saved results remain available while Murph checks for newer data."
-                    : "Murph is checking for newer saved lab results."
-                  : biomarkers.length > 0
-                    ? "These are the last saved results. Refresh to check for newer data."
-                    : "No lab results are available in this saved view. Refresh to check for newer data."}
-              </span>
-              <Button
-                disabled={refreshPending}
-                onClick={() => void refresh()}
-                size="sm"
-                variant="outline"
-              >
-                {refreshPending ? "Refreshing…" : "Refresh"}
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
+      {authenticated && !authRequired && deviceMetrics.length > 0 ? (
+        <DeviceMetricsSection items={deviceMetrics} />
       ) : null}
 
-      {(authRequired || status === "empty" || status === "ready") && (!authenticated || biomarkers.length === 0) ? (
+      {(authRequired || status === "empty" || status === "ready")
+        && (!authenticated
+          || totalCount === 0
+          || (biomarkers.length === 0 && savedLabResultCount > 0)) ? (
         <EmptyBiomarkersState
           authRequired={authRequired}
+          hasSavedLabResults={savedLabResultCount > 0}
           preparing={authenticated && preparing}
           stale={freshness === "stale"}
           uploadLabsAction={uploadLabsAction}
@@ -162,15 +140,11 @@ export function BiomarkersPageClient({
       ) : null}
 
       {authenticated && groups.length > 0 ? (
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-6">
           {groups.map((group) => (
             <MeasuredBiomarkerSection key={group.id} group={group} />
           ))}
         </div>
-      ) : null}
-
-      {authenticated && !authRequired && deviceMetrics.length > 0 ? (
-        <DeviceMetricsSection items={deviceMetrics} />
       ) : null}
     </div>
   );
@@ -199,6 +173,10 @@ function selectDeviceMetricItems(
 
     return [{ entry, summary } satisfies DeviceMetricListItem];
   });
+}
+
+function countSavedLabResults(client: BrowserVaultQueryClient): number {
+  return client.labResults.list().length;
 }
 
 function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
@@ -233,10 +211,6 @@ function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
   return (
     <BiomarkerDeviceReadingCard
       category={entry.category}
-      date={summary.latest.date}
-      dateLabel={formatLabDate(summary.latest.date)}
-      historyLabel={formatDeviceSpan(summary)}
-      readingCount={summary.readingCount}
       routeId={entry.routeId}
       stale={summary.stale}
       summary={entry.summary}
@@ -246,40 +220,42 @@ function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
   );
 }
 
-function formatDeviceSpan(summary: BrowserVaultDeviceMetricSummary): string {
-  const firstYear = summary.firstDate.slice(0, 4);
-  const lastYear = summary.latest.date.slice(0, 4);
-  return firstYear === lastYear ? firstYear : `${firstYear} to ${lastYear}`;
-}
-
 function MeasuredBiomarkerSection({ group }: { group: MeasuredBiomarkerGroup }) {
   const headingId = `biomarker-area-${group.id}`;
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between gap-4">
+    <details
+      aria-labelledby={headingId}
+      className="group overflow-hidden rounded-xl border border-border/70 bg-card/70"
+    >
+      <summary className="flex min-h-16 cursor-pointer list-none items-center gap-4 px-4 py-3 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5 [&::-webkit-details-marker]:hidden">
         <h2
-          className="font-serif text-xl font-semibold tracking-tight text-foreground"
+          className="min-w-0 flex-1 font-serif text-xl font-semibold tracking-tight text-foreground"
           id={headingId}
         >
           {group.label}
         </h2>
-        <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
           {group.items.length} {group.items.length === 1 ? "biomarker" : "biomarkers"}
         </span>
-      </div>
+        <ChevronRight
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-90"
+          strokeWidth={1.75}
+        />
+      </summary>
 
-      <ul className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
+      <ul className="grid gap-px border-t border-border/70 bg-border/70 md:grid-cols-2">
         {group.items.map((biomarker) => (
           <li
-            className="border-b border-border/60 last:border-b-0"
+            className="min-w-0 bg-card"
             key={biomarker.metricKey}
           >
             <MeasuredBiomarkerRow biomarker={biomarker} />
           </li>
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 
@@ -293,7 +269,7 @@ function MeasuredBiomarkerRow({
 
   return (
     <Link
-      className="group flex min-h-24 items-center gap-3 px-4 py-4 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 sm:px-5"
+      className="group flex min-h-20 items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/35 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 sm:px-5"
       href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
     >
       <div className="min-w-0 flex-1">
@@ -337,11 +313,13 @@ function MeasuredBiomarkerRow({
 
 function EmptyBiomarkersState({
   authRequired,
+  hasSavedLabResults,
   preparing,
   stale,
   uploadLabsAction,
 }: {
   authRequired: boolean;
+  hasSavedLabResults: boolean;
   preparing: boolean;
   stale: boolean;
   uploadLabsAction: ReactNode;
@@ -354,6 +332,8 @@ function EmptyBiomarkersState({
             ? "Preparing your lab history"
             : authRequired
               ? "Sign in to see your biomarkers"
+              : hasSavedLabResults
+                ? "No recognized lab biomarkers yet"
               : stale
                 ? "No saved lab results in this view"
                 : "No lab results yet"}
@@ -363,8 +343,10 @@ function EmptyBiomarkersState({
             ? "Murph is preparing your saved lab results."
             : authRequired
               ? "Your biomarker history is private and only appears after you sign in."
+              : hasSavedLabResults
+                ? "Your saved lab records remain available, but none are classified for this index yet."
               : stale
-                ? "Refresh to check for newer data, or send Murph a lab report."
+                ? "Murph checks for newer data in the background. You can also send Murph a lab report."
                 : "Send Murph a lab report to start building your history."}
         </CardDescription>
       </CardHeader>
@@ -392,27 +374,15 @@ function EmptyBiomarkersState({
 
 function BiomarkerListSkeleton() {
   return (
-    <div aria-label="Loading biomarkers" className="flex flex-col gap-8" role="status">
+    <div aria-label="Loading biomarkers" className="flex flex-col gap-3" role="status">
       {[0, 1].map((group) => (
-        <div className="flex flex-col gap-3" key={group}>
-          <Skeleton className="h-6 w-36 motion-reduce:animate-none" />
-          <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
-            {[0, 1, 2].map((row) => (
-              <div
-                className="grid min-h-24 grid-cols-[minmax(0,1fr)_8rem] items-center gap-4 border-b border-border/60 px-4 py-4 last:border-b-0 sm:px-5"
-                key={row}
-              >
-                <div className="flex flex-col gap-2">
-                  <Skeleton className="h-5 w-40 motion-reduce:animate-none" />
-                  <Skeleton className="h-3 w-28 motion-reduce:animate-none" />
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <Skeleton className="h-6 w-24 motion-reduce:animate-none" />
-                  <Skeleton className="h-3 w-16 motion-reduce:animate-none" />
-                </div>
-              </div>
-            ))}
-          </div>
+        <div
+          className="flex min-h-16 items-center gap-4 rounded-xl border border-border/70 bg-card/70 px-4 py-3 sm:px-5"
+          key={group}
+        >
+          <Skeleton className="h-6 min-w-0 flex-1 motion-reduce:animate-none" />
+          <Skeleton className="h-3 w-16 shrink-0 motion-reduce:animate-none" />
+          <Skeleton className="size-4 shrink-0 motion-reduce:animate-none" />
         </div>
       ))}
       <span className="sr-only">Loading your saved biomarker results.</span>

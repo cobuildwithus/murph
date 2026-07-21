@@ -264,6 +264,48 @@ test("opens from the settings deep link without preselecting a top-up", async ()
   }
 });
 
+test("reuses the dialog state machine for a server-scoped group checkout", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_group_checkout",
+    status: "checkout_open",
+    url: "https://checkout.stripe.test/group-session",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      initialOpen: true,
+      offers: usageCreditOffers(),
+      scope: "group",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Add group usage/);
+    await clickRadio(rendered.container, rendered.window, "usage_500");
+    await clickButton(
+      rendered.container,
+      rendered.window,
+      "Continue to checkout · $5",
+    );
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_500",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("opens an honest unavailable state when a deep link has no current offers", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
@@ -1291,6 +1333,83 @@ test("lets the member choose a different amount with a fresh request key", async
     ]);
     assert.equal(buttonByText(rendered.container, "Resume checkout").disabled, false);
     expect(rendered.assign).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers target-neutral recovery for an active checkout on another destination", async () => {
+  mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
+    method: string;
+    url: string;
+  }) => {
+    if (request.method === "POST" && request.url.endsWith("/expire")) {
+      return {
+        purchaseId: "hucp_other_target",
+        status: "expired",
+      };
+    }
+    if (request.method === "GET") {
+      return {
+        purchaseId: "hucp_other_target",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/other-target",
+      };
+    }
+    return {
+      purchaseId: "hucp_other_target",
+      recovered: true,
+      status: "checkout_open",
+      targetConflict: true,
+      url: "https://checkout.stripe.test/other-target",
+    };
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      initialOpen: true,
+      offers: usageCreditOffers(),
+      scope: "group",
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_500");
+    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Another checkout is already open/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /other usage destination/,
+    );
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Choose a different amount",
+      ),
+      false,
+    );
+
+    await clickButton(rendered.container, rendered.window, "Cancel checkout");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        url: "/api/settings/billing/usage-credit/purchases/hucp_other_target/expire",
+      }),
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Other checkout canceled/,
+    );
   } finally {
     await rendered.cleanup();
   }

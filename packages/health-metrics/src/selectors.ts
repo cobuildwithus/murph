@@ -8,7 +8,7 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue } from "./format.ts";
-import { unitsEquivalent } from "./normalize.ts";
+import { resolveComparableMetricPointValue, unitsEquivalent } from "./normalize.ts";
 import { metricPointRecordIds } from "./record-ids.ts";
 import type {
   MetricConfidence,
@@ -67,8 +67,10 @@ export function selectMetricValue(input: {
     ...(policySelection.warnings ?? []),
     ...collectSelectionWarnings({ definition, now: input.now, points, policy, selected }),
   ];
-  const value = selected.canonicalValue ?? selected.value;
-  const unit = selected.canonicalUnit ?? selected.unit ?? definition.displayUnit;
+  const comparable = resolveComparableMetricPointValue(selected, definition);
+  if (!comparable) {
+    return emptySelection(definition, requestedBiomarkerKey, "no_data", policySelection.warnings);
+  }
 
   return {
     biomarkerKey: selected.biomarkerKey ?? requestedBiomarkerKey,
@@ -85,8 +87,8 @@ export function selectMetricValue(input: {
     schemaVersion: METRIC_SELECTION_SCHEMA_VERSION,
     sourceLabel: selected.provenance.sourceLabel,
     status: warnings.some((warning) => warning.code === "SOURCE_STALE") ? "stale" : "ready",
-    unit,
-    value,
+    unit: comparable.unit,
+    value: comparable.value,
     valueLabel: formatMetricDisplayValue(selected, definition),
     warnings,
   };
@@ -131,7 +133,7 @@ function selectPointByPolicy(
   policy: MetricSelectionPolicy,
   definition: MetricDefinition,
 ): MetricPolicySelectionResult {
-  const numericPoints = points.filter(hasDisplayableValue);
+  const numericPoints = points.filter((point) => hasDisplayableValue(point, definition));
   switch (policy.kind) {
     case "qualified-latest":
       return { point: sortedLatest(numericPoints.filter((point) => qualifiersMatch(point, policy.requiredQualifiers))).at(0) ?? null };
@@ -165,7 +167,9 @@ function selectDailyAggregatePoint(
 
   const useCanonicalValues = policy.statistic !== "count" && definition.canonicalUnit !== null;
   const values = candidates
-    .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
+    .map((point) => useCanonicalValues
+      ? point.canonicalValue
+      : resolveComparableMetricPointValue(point, definition)?.value ?? null)
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
   const warnings: MetricSelectionWarning[] = [];
 
@@ -301,18 +305,13 @@ function fastingRank(point: MetricPoint): number {
   return point.context.fastingStatus === "fasting" ? 1 : 0;
 }
 
-function hasDisplayableValue(point: MetricPoint): boolean {
-  const value = point.canonicalValue ?? point.value;
-  return typeof value === "number" && Number.isFinite(value);
+function hasDisplayableValue(point: MetricPoint, definition: MetricDefinition): boolean {
+  return resolveComparableMetricPointValue(point, definition) !== null;
 }
 
 function qualifiersMatch(point: MetricPoint, required: Record<string, string | number | boolean>): boolean {
   const qualifiers = point.context.qualifiers ?? {};
   return Object.entries(required).every(([key, value]) => qualifiers[key] === value);
-}
-
-function pointNumericValue(point: MetricPoint): number | null {
-  return point.canonicalValue ?? point.value;
 }
 
 function aggregateMetricValues(values: readonly number[], statistic: DailyAggregateSelectionPolicy["statistic"]): number {

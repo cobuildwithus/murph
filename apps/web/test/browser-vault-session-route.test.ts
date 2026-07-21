@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 import {
   HOSTED_EXECUTION_LAYERED_SNAPSHOT_REF_SCHEMA,
@@ -978,6 +979,56 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("serves a generation-1 replica as stale and schedules the existing refresh path", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef({ generation: 1 });
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "3",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      userId: "member_123",
+    });
+    await vi.waitFor(() => {
+      expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+        userId: "member_123",
+      });
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      freshness: "stale",
+      refreshPending: true,
+      state: "ready",
+    });
+  });
+
   it("returns fresh not_modified when the checkpoint is newer than the current known ref", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-10T00:00:01.000Z"));
@@ -1321,11 +1372,15 @@ describe("browser vault session route", () => {
 
 function createReplicaRef(input: {
   generatedAt?: string;
+  generation?: number | null;
 } = {}) {
   return {
     byteLength: 128,
     dataVersion: "d".repeat(64),
     generatedAt: input.generatedAt ?? "2999-04-20T08:00:00.000Z",
+    ...(input.generation === null
+      ? {}
+      : { generation: input.generation ?? BROWSER_VAULT_REPLICA_CURRENT_GENERATION }),
     keyId: "browser-vault-replica:d",
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     replicaSchema: "murph.browser-vault-replica" as const,

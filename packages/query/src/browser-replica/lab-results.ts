@@ -2,8 +2,9 @@ import {
   groupLabItemsByHealthArea,
   normalizeMetricKey,
   normalizeUnit,
+  resolveIndexedLabHealthArea,
   resolveLabHealthArea,
-  resolveMetricDefinition,
+  resolveLabResultMetricDefinition,
   type LabHealthArea,
   type MetricPoint,
 } from "@murphai/health-metrics";
@@ -74,7 +75,7 @@ export function toBrowserVaultLabResultRows(input: {
     const test = testsById.get(point.source.recordId) ?? null;
     if (!test) continue;
     const result = readRecord(readArray(test.attributes.results)[resultIndex]);
-    const definition = resolveMetricDefinition(point.metricKey);
+    const definition = resolveLabResultMetricDefinition(point.metricKey);
     const canonicalValue = readFiniteNumber(point.canonicalValue);
     const canUseRawComparableValue = definition === null || definition.canonicalUnit === null;
     const comparableValue = value === null
@@ -147,13 +148,15 @@ export function selectBrowserVaultMeasuredBiomarkers(
   }
 
   const biomarkers = [...rowsByMetricKey.entries()].flatMap(([metricKey, rows]) => {
+    const healthArea = resolveIndexedLabHealthArea(metricKey);
+    if (!healthArea) return [];
     const detail = buildLabBiomarkerDetail(metricKey, rows);
     if (!detail) return [];
     return [{
       biomarkerKey: detail.biomarkerKey,
       displayName: detail.displayName,
       firstDate: detail.rows[0]?.date ?? detail.latest.date,
-      healthArea: detail.healthArea,
+      healthArea,
       lastDate: detail.latest.date,
       latest: detail.latest,
       metricKey: detail.metricKey,
@@ -202,7 +205,7 @@ function buildLabBiomarkerDetail(
     value: row.normalizedValue,
   }));
   const numericNonComparatorRows = rows.filter((row) => row.value !== null && row.comparator === null);
-  const definition = resolveMetricDefinition(metricKey);
+  const definition = resolveLabResultMetricDefinition(metricKey);
 
   return {
     biomarkerKey: latest.biomarkerKey
@@ -235,7 +238,7 @@ function isComparableNumericRow(
 }
 
 function normalizeMetricFilterKey(metricKey: string): string {
-  return resolveMetricDefinition(metricKey)?.key
+  return resolveLabResultMetricDefinition(metricKey)?.key
     ?? normalizeMetricKey(metricKey);
 }
 

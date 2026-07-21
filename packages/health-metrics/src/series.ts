@@ -7,6 +7,7 @@ import {
   uniqueStrings,
 } from "./catalog.ts";
 import { formatMetricDisplayValue, formatNumber } from "./format.ts";
+import { resolveComparableMetricPointValue } from "./normalize.ts";
 import { metricPointRecordIds } from "./record-ids.ts";
 import { selectMetricValue } from "./selectors.ts";
 import type {
@@ -56,7 +57,16 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
   const resolvedMetricKey = requestedMetricKey || points[0]?.metricKey || "unknown";
   const definition = resolveMetricDefinition(resolvedMetricKey) ?? createCustomMetricDefinition(resolvedMetricKey);
   const minimumPoints = input.minimumPoints ?? 0;
-  const warnings = collectSeriesWarnings({ definition, minimumPoints, points });
+  const comparablePoints = points.filter((point) =>
+    resolveComparableMetricPointValue(point, definition) !== null
+  );
+  const selectedPoints = input.aggregation === "count" ? points : comparablePoints;
+  const warnings = collectSeriesWarnings({
+    availablePointCount: selectedPoints.length,
+    definition,
+    minimumPoints,
+    points,
+  });
 
   if (points.length === 0) {
     return {
@@ -69,7 +79,7 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
     };
   }
 
-  if (minimumPoints > 0 && points.length < minimumPoints) {
+  if (minimumPoints > 0 && selectedPoints.length < minimumPoints) {
     return {
       biomarkerKey: input.biomarkerKey ?? definition.biomarkerKey ?? null,
       metricKey: definition.key,
@@ -81,8 +91,8 @@ export function selectMetricSeries(input: SelectMetricSeriesInput): MetricSeries
   }
 
   const rows = input.aggregation
-    ? aggregateMetricSeriesPoints(points, definition, input.aggregation)
-    : selectMetricSeriesRowsByPolicy(points, definition, input.duplicatePolicy ?? "selection-policy");
+    ? aggregateMetricSeriesPoints(selectedPoints, definition, input.aggregation)
+    : selectMetricSeriesRowsByPolicy(selectedPoints, definition, input.duplicatePolicy ?? "selection-policy");
 
   return {
     biomarkerKey: input.biomarkerKey ?? rows[0]?.biomarkerKey ?? definition.biomarkerKey ?? null,
@@ -100,7 +110,10 @@ function selectMetricSeriesRowsByPolicy(
   duplicatePolicy: MetricSeriesDuplicatePolicy,
 ): MetricSeriesPoint[] {
   if (duplicatePolicy === "keep-all") {
-    return points.map((point) => metricPointToSeriesPoint(point, definition));
+    return points.flatMap((point) => {
+      const row = metricPointToSeriesPoint(point, definition);
+      return row ? [row] : [];
+    });
   }
 
   return groupMetricPointsByDate(points).flatMap((datePoints) => {
@@ -108,7 +121,8 @@ function selectMetricSeriesRowsByPolicy(
       ? selectMetricValue({ metricKey: definition.key, points: datePoints }).point ?? datePoints.at(-1) ?? null
       : datePoints.at(-1) ?? null;
 
-    return selected ? [metricPointToSeriesPoint(selected, definition)] : [];
+    const row = selected ? metricPointToSeriesPoint(selected, definition) : null;
+    return row ? [row] : [];
   });
 }
 
@@ -124,7 +138,7 @@ function aggregateMetricSeriesPoints(
     }
 
     const values = datePoints
-      .map((point) => useCanonicalValues ? point.canonicalValue : pointNumericValue(point))
+      .map((point) => resolveComparableMetricPointValue(point, definition)?.value ?? null)
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
     if (values.length === 0 && aggregation !== "count") {
@@ -178,7 +192,10 @@ function aggregateMetricSeriesPoints(
   });
 }
 
-function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefinition): MetricSeriesPoint {
+function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefinition): MetricSeriesPoint | null {
+  const comparable = resolveComparableMetricPointValue(point, definition);
+  if (!comparable) return null;
+
   return {
     biomarkerKey: point.biomarkerKey,
     comparator: point.comparator,
@@ -196,13 +213,14 @@ function metricPointToSeriesPoint(point: MetricPoint, definition: MetricDefiniti
     sourceKinds: [point.source.kind],
     sourceLabel: point.provenance.sourceLabel,
     statistic: point.statistic,
-    unit: point.canonicalUnit ?? point.unit ?? definition.displayUnit,
-    value: pointNumericValue(point),
+    unit: comparable.unit,
+    value: comparable.value,
     valueLabel: formatMetricDisplayValue(point, definition),
   };
 }
 
 function collectSeriesWarnings(input: {
+  availablePointCount: number;
   definition: MetricDefinition;
   minimumPoints: number;
   points: readonly MetricPoint[];
@@ -213,10 +231,14 @@ function collectSeriesWarnings(input: {
     typeof point.context.measurementMethodKey === "string" ? point.context.measurementMethodKey : null
   ));
 
-  if (input.minimumPoints > 0 && input.points.length > 0 && input.points.length < input.minimumPoints) {
+  if (
+    input.minimumPoints > 0 &&
+    input.points.length > 0 &&
+    input.availablePointCount < input.minimumPoints
+  ) {
     warnings.push({
       code: "LOW_SAMPLE_COUNT",
-      message: `Only ${input.points.length} point${input.points.length === 1 ? "" : "s"} were available for ${input.definition.displayName}.`,
+      message: `Only ${input.availablePointCount} point${input.availablePointCount === 1 ? "" : "s"} were available for ${input.definition.displayName}.`,
     });
   }
 
@@ -264,10 +286,6 @@ function groupMetricPointsByDate(points: readonly MetricPoint[]): MetricPoint[][
   return [...groups.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([, datePoints]) => datePoints.sort(compareMetricPointsAsc));
-}
-
-function pointNumericValue(point: MetricPoint): number | null {
-  return point.canonicalValue ?? point.value;
 }
 
 function aggregateMetricValues(values: readonly number[], aggregation: MetricSeriesAggregation): number {

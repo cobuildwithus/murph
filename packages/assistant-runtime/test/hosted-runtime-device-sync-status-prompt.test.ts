@@ -188,6 +188,40 @@ describe("hosted device sync status prompt", () => {
     expect(prompt).toContain("verify it with `vault-cli wearables sources list --format json`");
   });
 
+  it("keeps disabled Junction Strava status visible without offering a reconnect command", () => {
+    const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
+      reconnectTargets: [
+        {
+          connectionAvailable: false,
+          connectTarget: "strava",
+          connectTargetCommandSafe: false,
+          label: "Strava",
+          provider: "junction",
+          sourceProviderSlug: "strava",
+        },
+      ],
+      snapshot: buildSnapshot({
+        sources: [
+          {
+            displayName: null,
+            firstSeenAt: "2026-06-01T00:00:00.000Z",
+            lastErrorCode: "TOKEN_REFRESH_FAILED",
+            lastErrorMessage: "refresh failed",
+            lastSeenAt: "2026-06-29T00:00:00.000Z",
+            resourceCount: 0,
+            sourceProviderSlug: "strava",
+            status: "error",
+          },
+        ],
+      }),
+    });
+
+    expect(prompt).toContain("Strava currently needs reconnect");
+    expect(prompt).toContain("source `strava`");
+    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).not.toContain("vault-cli device connect strava --format json");
+  });
+
   it("guides Garmin historical recovery through the confirmed connection reset", () => {
     const prompt = buildHostedDeviceSyncStatusPromptFromSnapshot({
       reconnectTargets: [

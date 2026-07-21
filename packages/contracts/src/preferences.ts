@@ -16,6 +16,26 @@ export function assistantPersonalityCausalWritesEnabled(
   return env[MURPH_ASSISTANT_PERSONALITY_CAUSAL_WRITES_ENABLED_ENV]?.trim() === "1";
 }
 
+export const assistantPersonaIdValues = [
+  "classic",
+  "navy-seal",
+  "stoic-philosopher",
+  "wise-elder",
+  "medical-detective",
+  "longevity-scientist",
+  "hype-coach",
+  "zen-monk",
+  "best-friend",
+  "championship-coach",
+  "science-professor",
+  "mountain-guide",
+  "grandma",
+  "biohacker",
+  "drill-sergeant",
+] as const;
+export const assistantPersonaIdSchema = z.enum(assistantPersonaIdValues);
+export type AssistantPersonaId = z.infer<typeof assistantPersonaIdSchema>;
+
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
 export const defaultAssistantTonePreference = "formal" satisfies
@@ -44,6 +64,7 @@ export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalit
 export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
 
 export const assistantPreferenceFieldIds = [
+  "persona",
   "tone",
   "voice",
   ...assistantPersonalitySettingIds,
@@ -57,6 +78,7 @@ export const assistantPreferenceMutationStateSchema = z
   .object({
     applied: z
       .object({
+        persona: assistantPreferenceCausalSeqSchema.optional(),
         tone: assistantPreferenceCausalSeqSchema.optional(),
         voice: assistantPreferenceCausalSeqSchema.optional(),
         humor: assistantPreferenceCausalSeqSchema.optional(),
@@ -330,6 +352,7 @@ export const wearablePreferencesSchema = z
 
 export const assistantPreferencesSchema = z
   .object({
+    persona: assistantPersonaIdSchema.optional(),
     tone: assistantTonePreferenceSchema.optional(),
     voice: z.string().min(1).optional(),
     personality: assistantPersonalityPreferencesSchema.optional(),
@@ -361,6 +384,13 @@ export type PreferencesDocument = z.infer<typeof preferencesDocumentSchema>;
 
 export function isWearablePreferenceProvider(value: unknown): value is WearablePreferenceProvider {
   return typeof value === "string" && wearablePreferenceProviderOrder.has(value as WearablePreferenceProvider);
+}
+
+export function isAssistantPersonaId(value: unknown): value is AssistantPersonaId {
+  return (
+    typeof value === "string"
+    && assistantPersonaIdValues.includes(value as AssistantPersonaId)
+  );
 }
 
 export function isAssistantTonePreference(value: unknown): value is AssistantTonePreference {

@@ -42,6 +42,10 @@ import {
   appendClinicalRetrievalWakeTx,
   signalClinicalRetrievalWake,
 } from "./retrieval";
+import {
+  buildEpicBetaRetrievalPlan,
+  EPIC_BETA_FHIR_PAGE_COUNT,
+} from "./epic-policy";
 
 const OAUTH_SESSION_TTL_MS = 10 * 60 * 1_000;
 const CLINICAL_CONNECTION_ID_PREFIX = "crc_";
@@ -342,6 +346,10 @@ async function persistClinicalConnection(input: {
           id: retrievalRunId,
           memberId: input.memberId,
           grantedScopesJson: toClinicalJsonArray(input.token.grantedScopes),
+          retrievalPlanJson: buildEpicBetaRetrievalPlan({
+            pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+            resourceTypes: input.resourceTypes,
+          }),
           resourceTypesJson: toClinicalJsonArray(input.resourceTypes),
           status: "queued",
         },

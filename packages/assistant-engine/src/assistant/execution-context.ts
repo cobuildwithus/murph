@@ -24,6 +24,7 @@ import type {
   HostedRuntimeAssistantPersonalizationToolResponse,
 } from '@murphai/hosted-execution/assistant-personalization'
 import type {
+  HostedActionApprovalObservation,
   HostedActionApprovalRequest,
   HostedActionApprovalResult,
 } from '@murphai/hosted-execution/action-approval'
@@ -218,6 +219,9 @@ export interface AssistantUsageRecorder {
 }
 
 export interface AssistantHostedActionApprovalPort {
+  read(
+    input: HostedActionApprovalRequest,
+  ): Promise<HostedActionApprovalObservation>
   request(input: HostedActionApprovalRequest): Promise<HostedActionApprovalResult>
 }
 
@@ -560,11 +564,16 @@ function normalizeAssistantDynamicContextPrompts(
 function normalizeAssistantActionApprovalPort(
   input: AssistantHostedExecutionContext['actionApprovalPort'] | undefined,
 ): AssistantHostedActionApprovalPort | undefined {
-  if (!input || typeof input.request !== 'function') {
+  if (
+    !input
+    || typeof input.read !== 'function'
+    || typeof input.request !== 'function'
+  ) {
     return undefined
   }
 
   return {
+    read: input.read.bind(input),
     request: input.request.bind(input),
   }
 }

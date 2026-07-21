@@ -273,6 +273,7 @@ describe("hosted account settings snapshot", () => {
       select: expect.any(Object),
       where: { id: "member_123" },
     });
+    expect(query.select).not.toHaveProperty("assistantPersona");
     expect(query.select.identity.select).toEqual({
       memberId: true,
       phoneNumberEncrypted: true,

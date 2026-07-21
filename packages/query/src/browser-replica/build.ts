@@ -17,12 +17,14 @@ import {
   listMetricDefinitions,
   normalizeMetricKey,
   parseGoalMetricTargets,
+  resolveCanonicalBiomarkerKey,
   selectMetricGoalProgress,
   type GoalMetricTarget,
   type MetricPoint,
 } from "../metrics/index.ts";
 import {
   BODY_PREVIEW_CHARS,
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
   EXCLUDED_FAMILIES,
@@ -100,6 +102,7 @@ export async function createBrowserVaultReplica(
       experimentOutcomeSchema.parse(outcome)
     ),
     generatedAt,
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     labResultRows,
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
@@ -253,7 +256,7 @@ function collectExperimentMeasurementAnchorRecords(
       if (recordId && biomarkerKeys.length > 0) {
         const existing = records.get(recordId) ?? new Set<string>();
         for (const biomarkerKey of biomarkerKeys) {
-          existing.add(biomarkerKey);
+          existing.add(resolveCanonicalBiomarkerKey(biomarkerKey));
         }
         records.set(recordId, existing);
       }

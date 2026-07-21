@@ -224,16 +224,6 @@ describe("hosted assistant personalization contract", () => {
       {
         action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
         result: {
-          outcomes: { humor: "superseded" },
-          settings: {
-            ...settings,
-            humor: { source: "default", value: 8 },
-          },
-        },
-      },
-      {
-        action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
-        result: {
           outcomes: { humor: "saved" },
           settings,
           updated: true,
@@ -243,6 +233,23 @@ describe("hosted assistant personalization contract", () => {
       expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse(response))
         .toThrow();
     }
+
+    expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
+      action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
+      result: {
+        outcomes: { humor: "unchanged" },
+        settings: {
+          ...settings,
+          humor: { source: "default", value: 8 },
+        },
+      },
+    })).toMatchObject({
+      result: {
+        settings: {
+          humor: { source: "default", value: 8 },
+        },
+      },
+    });
   });
 
   it("rejects impossible model, rejection, and duplicate update states", () => {

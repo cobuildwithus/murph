@@ -669,6 +669,7 @@ export async function deleteHostedAccountData(input: {
     });
     await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
       memberIds: transactionDeletionMemberIds,
+      now: deletionStartedAt,
       prisma: tx,
     });
     await assertHostedPhoneCallsReadyForAccountDeletionTx({
@@ -914,7 +915,6 @@ function buildHostedUsageCreditEntryDeletionWhere(
     OR: [
       { beneficiaryMemberId: memberIdFilter },
       { purchase: { beneficiaryMemberId: memberIdFilter } },
-      { purchase: { payerMemberId: memberIdFilter } },
     ],
   };
 }
@@ -922,12 +922,7 @@ function buildHostedUsageCreditEntryDeletionWhere(
 function buildHostedUsageCreditPurchaseDeletionWhere(
   memberIdFilter: string | { in: string[] },
 ): Prisma.HostedUsageCreditPurchaseWhereInput {
-  return {
-    OR: [
-      { beneficiaryMemberId: memberIdFilter },
-      { payerMemberId: memberIdFilter },
-    ],
-  };
+  return { beneficiaryMemberId: memberIdFilter };
 }
 
 function buildHostedLinqInviteSignupDeliveryWhere(

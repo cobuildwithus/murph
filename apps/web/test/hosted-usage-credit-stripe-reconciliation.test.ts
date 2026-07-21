@@ -93,6 +93,14 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-stripe", () => ({
     paymentIntentId: "hosted_usage_credit_purchase.stripe_payment_intent_id",
     priceId: "hosted_usage_credit_purchase.stripe_price_id",
   },
+  requireHostedUsageCreditPurchasePayerMemberId: (purchase: {
+    payerMemberId: string | null;
+  }) => {
+    if (!purchase.payerMemberId) {
+      throw new Error("payer detached");
+    }
+    return purchase.payerMemberId;
+  },
 }));
 
 import {
@@ -654,6 +662,71 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       mocks.decryptStripeField.mock.calls.length +
         mocks.encryptStripeField.mock.calls.length,
     ).toBe(HOSTED_USAGE_CREDIT_STRIPE_PREPARATION_BUDGET.kmsMaxOperations);
+  });
+
+  it("reconciles a terminal refund after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey:
+        "stripe-checkout-session:cs_usage_123",
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 250 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund()]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent(),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.reconcileRefundNetReversal).toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
+  });
+
+  it("reconciles a terminal dispute after the payer account was detached", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCheckoutSessionLookupKey:
+        "stripe-checkout-session:cs_usage_123",
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.disputes.list.mockResolvedValue(
+      makeDisputeList([makeDispute({ withdrawnAmount: 250 })]),
+    );
+    mockExistingUsageCreditGrant();
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeDisputeEvent("charge.dispute.funds_withdrawn"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      beneficiaryMemberId: "member_beneficiary",
+      handled: true,
+      purchaseId: "hucp_purchase_123",
+    });
+
+    expect(mocks.reconcileDisputeNetReversal).toHaveBeenCalled();
+    expect(mocks.decryptStripeField).not.toHaveBeenCalled();
+    expect(mocks.encryptStripeField).not.toHaveBeenCalled();
+    expect(harness.purchase.payerMemberId).toBeNull();
   });
 
   it("atomically grants then reverses when a refund beats Checkout fulfillment", async () => {
@@ -1334,11 +1407,13 @@ function createUsageCreditStripePrismaHarness(
 
 function makeUsageCreditPurchase(
   overrides?: Partial<{
+    payerMemberId: string | null;
     status: HostedUsageCreditPurchaseStatus;
     stripeChargeLookupKey: string | null;
     stripeCheckoutSessionIdEncrypted: string | null;
     stripeCheckoutSessionLookupKey: string | null;
     stripePaymentIntentLookupKey: string | null;
+    terminalAt: Date | null;
   }>,
 ) {
   return {
@@ -1353,7 +1428,9 @@ function makeUsageCreditPurchase(
     grantUsdMicros: 5_000_000n,
     id: "hucp_purchase_123",
     lastReconciledAt: null as Date | null,
-    payerMemberId: "member_payer",
+    payerMemberId: overrides?.payerMemberId === undefined
+      ? "member_payer"
+      : overrides.payerMemberId,
     reconciliationVersion: 0n,
     status: overrides?.status ?? HostedUsageCreditPurchaseStatus.checkout_open,
     stripeChargeIdEncrypted: null as string | null,
@@ -1371,7 +1448,7 @@ function makeUsageCreditPurchase(
     stripePaymentIntentLookupKey:
       overrides?.stripePaymentIntentLookupKey ?? null,
     stripePriceLookupKey: "stripe-price:price_usage_5",
-    terminalAt: null as Date | null,
+    terminalAt: overrides?.terminalAt ?? null,
   };
 }
 

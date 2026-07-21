@@ -1,6 +1,6 @@
 import "server-only";
 
-import directoryArtifact from "./provider-directory.v1.json";
+import directoryArtifact from "./provider-directory.v2.json";
 import {
   normalizeClinicalProviderDirectoryEntryId,
   parseClinicalProviderDirectory,

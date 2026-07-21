@@ -2108,6 +2108,46 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
+  it("parses coarse group usage responses without accepting accounting fields", () => {
+    const response = {
+      action: "read_usage" as const,
+      result: {
+        status: "ok" as const,
+        usage: {
+          capacityState: "low" as const,
+          fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+          periodEnd: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    };
+    expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          remainingUsdMicros: "900000",
+        },
+      },
+    })).toThrow(/not allowed/u);
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "read_usage",
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_usage_unavailable",
+        usage: null,
+      },
+    })).toEqual({
+      action: "read_usage",
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_usage_unavailable",
+        usage: null,
+      },
+    });
+  });
+
   it("parses share_contact_card responses", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "share_contact_card",

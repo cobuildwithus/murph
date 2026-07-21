@@ -3393,6 +3393,7 @@ describe("assistant execution context normalization", () => {
   });
 
   it("normalizes hosted context and preserves callable helpers only", () => {
+    const actionApprovalPort = { read: vi.fn(), request: vi.fn() };
     const deviceTool = { request: vi.fn() };
     const groupPermissionOfferTool = { request: vi.fn() };
     const groupSharedReader = { request: vi.fn() };
@@ -3407,6 +3408,7 @@ describe("assistant execution context normalization", () => {
     expect(
       normalizeAssistantExecutionContext({
         hosted: {
+          actionApprovalPort,
           createScheduledGroupTools,
           defaultTarget,
           deviceConnectProviders: [
@@ -3424,6 +3426,10 @@ describe("assistant execution context normalization", () => {
       })
     ).toEqual({
       hosted: {
+        actionApprovalPort: {
+          read: expect.any(Function),
+          request: expect.any(Function),
+        },
         createScheduledGroupTools,
         defaultTarget,
         deviceConnectProviders: [

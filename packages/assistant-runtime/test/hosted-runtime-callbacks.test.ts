@@ -10,6 +10,9 @@ import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
+  getAssistantChannelAdapter,
+} from "@murphai/assistant-engine/assistant-channel-adapters";
+import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
@@ -8112,6 +8115,139 @@ describe("hosted runtime callbacks", () => {
 
     expect(assertRecentInbound).toHaveBeenCalledTimes(1);
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("carries distinct stable identities through hosted Linq voice transcript fallback", async () => {
+    const answeredMailboxItemIds = ["mailbox_item_answered_1"];
+    const effect = createEffect({
+      answeredMailboxItemIds,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "linq_chat_123",
+      channel: "linq",
+      media: [createHostedVoiceMemoMedia({
+        transcript: "Have you had any recent blood tests?",
+      })],
+      message: "",
+      replyToMessageId: "linq_message_answered_1",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async (request) =>
+      buildClaimedLinqEngagementResult(request));
+    let releaseAcceptedFallbackOutcome: () => void = () => {};
+    const acceptedFallbackOutcomeReleased = new Promise<void>((resolve) => {
+      releaseAcceptedFallbackOutcome = resolve;
+    });
+    let markAcceptedFallbackOutcomeStarted: () => void = () => {};
+    const acceptedFallbackOutcomeStarted = new Promise<void>((resolve) => {
+      markAcceptedFallbackOutcomeStarted = resolve;
+    });
+    const recordDeliveryOutcome = vi.fn<
+      NonNullable<ReturnType<typeof createHostedRuntimeEffectsPortStub>["recordLinqDeliveryOutcome"]>
+    >(async (request) => {
+      if (
+        request.acceptedAt
+        && request.idempotencyKey
+          === "linq-voice-memo-transcript:assistant-outbox:intent_123"
+      ) {
+        markAcceptedFallbackOutcomeStarted();
+        await acceptedFallbackOutcomeReleased;
+      }
+    });
+    mocks.sendLinqMessage
+      .mockResolvedValueOnce({
+        providerMessageId: "linq_transcript_fallback",
+        providerThreadId: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread" as const,
+      });
+    mocks.sendLinqVoiceMemoMessage.mockRejectedValueOnce(new VaultCliError(
+      "LINQ_API_REQUEST_FAILED",
+      "Linq rejected the voice memo.",
+      {
+        failureStage: "http",
+        operation: "send_voice_memo",
+        retryable: true,
+        status: 503,
+      },
+    ));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const adapter = getAssistantChannelAdapter("linq");
+      assert.ok(adapter);
+      const delivery = await adapter.send({
+        actorId: "actor_123",
+        answeredMailboxItemIds,
+        bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+        explicitTarget: null,
+        idempotencyKey: "assistant-outbox:intent_123",
+        identityId: "identity_123",
+        media: [createHostedVoiceMemoMedia({
+          transcript: "Have you had any recent blood tests?",
+        })],
+        message: "",
+        replyToMessageId: "linq_message_answered_1",
+        threadIsDirect: true,
+      }, dependencies);
+      return createDispatchResult({
+        delivery,
+        status: "sent",
+      });
+    });
+
+    let deliverySettled = false;
+    const deliveryPromise = drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    }).finally(() => {
+      deliverySettled = true;
+    });
+
+    await acceptedFallbackOutcomeStarted;
+    expect(deliverySettled).toBe(false);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.stringMatching(/Z$/u),
+        answeredMailboxItemIds,
+        idempotencyKey:
+          "linq-voice-memo-transcript:assistant-outbox:intent_123",
+      }),
+      { signal: expect.any(AbortSignal) },
+    );
+    releaseAcceptedFallbackOutcome();
+
+    await expect(deliveryPromise).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(assertRecentInbound.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.authorityCheckOnly === false)
+      .map((request) => request.idempotencyKey)).toEqual([
+      "linq-voice-memo:intent_123",
+      "linq-voice-memo-transcript:assistant-outbox:intent_123",
+    ]);
+    expect(assertRecentInbound.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.authorityCheckOnly === true)
+      .map((request) => request.idempotencyKey)).toEqual([]);
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        answeredMailboxItemIds,
+        idempotencyKey:
+          "linq-voice-memo-transcript:assistant-outbox:intent_123",
+        replyToMessageId: "linq_message_answered_1",
+      }),
+      { signal: null },
+    );
+    expect(mocks.sendLinqMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.sendLinqVoiceMemoMessage).toHaveBeenCalledTimes(1);
   });
 
   it("safely re-enters idempotent Linq text delivery after an existing provider claim", async () => {

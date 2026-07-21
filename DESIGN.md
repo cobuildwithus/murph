@@ -193,6 +193,17 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### Measured Biomarker Index
+On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
+native `<details>` disclosures, closed by default, with a Fraunces area name, a
+small DM Mono biomarker count, and one rotating chevron in the summary. The
+opened contents are one partitioned notebook surface rather than a stack of
+nested cards: one column on narrow screens, two columns from `md`, with warm
+one-pixel seams between rows. Each compact row keeps the biomarker identity and
+history on the left, latest value and date on the right, and one navigation
+chevron. Use explicit health-area classification; never show an `Other` dump or
+invent interpretation for an unclassified lab field.
+
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
 results pages. Use three columns at wide desktop widths, two at small desktop
@@ -237,6 +248,8 @@ Two distinct chart types live in the system:
 
 **Experiment trend (dual-phase).** SVG sparklines. **Baseline phase:** dashed line in sand (`#d4c4a8`) with a shaded baseline region underneath. **Active phase:** solid line in sage (`#7a8c6e`). Two phases on one chart. No filled-area gradients, no axes busy work, no tooltips that explain what HRV means.
 
+**Saved outcome comparison.** A completed outcome can retain trustworthy baseline and intervention window averages without retaining raw daily points. Never drop the chart or invent a time series in that state. Render a two-point slope chart labeled `WINDOW AVERAGES`, show `Baseline average` and `Experiment average`, and disclose measured-day coverage for both windows. Use the ordinary dual-phase trend only when observed daily points are actually present.
+
 **Biomarker trend + tile pair (single-phase).** Used on the biomarker overview tab. Recharts AreaChart paired with two stacked stat tiles in a `md:grid-cols-[minmax(0,1fr)_300px] md:items-stretch` grid (chart fills, tiles each `flex-1`, heights match). Anchor the visible Y-domain on the typical band, not the data — `extraPad = bandSpan × 0.5` above and below, so the user sees headroom. Hide the Y-axis (`<YAxis hide />`) — the dashed `Typical {min}` / `Typical {max}` reference lines (sage at 50% opacity, 4-4 dash, mono labels via `insideBottomLeft` / `insideTopLeft`) carry the context. Range band is an Area at `fillOpacity={0.14}`. Series fill gradient runs `0.32 → 0.04` opacity; stroke is solid sage `2.5px`. First/last date footer in `text-[10px] text-muted-foreground` below the chart. Timeframe selector (30D / 90D / 1Y) sits top-right as a rounded pill group, active = primary fill. The two tiles: **Average tile** (mono uppercase label that adapts to timeframe — `30-DAY AVERAGE` / `90-DAY AVERAGE` / `1-YEAR AVERAGE` — Fraunces value, sans unit, sentence sub-line that reads as a finding: `"Down 4 bpm from where you started the past month."`, primary color when direction matches `goodDirection`) and **Range tile** (`55–75 bpm` Fraunces + `healthy adults` sub + right-aligned `In range` / `Out of range` pill with bg-primary/15 or bg-destructive/15 — never with an explanatory tooltip).
 
 ### Conclusions Block (Finished State Only)
@@ -245,6 +258,8 @@ Four stacked cards, vertical:
 2. **What Didn't Change** — neutral card, no accent.
 3. **Key Insights** — bullet points, Body text.
 4. **Recommendations** — sage-green 3px left accent, each item prefixed with `→`.
+
+On sparse saved outcomes, use one flat report hierarchy instead of repeating the same conclusion across cards: saved headline and plain-language read, confidence chip, measured-change charts, one limitations list, then the experiment log. Keep the report centered at a readable desktop width and let warm dividers establish sections.
 
 ### Research / Evidence Section
 Summary stats row (studies count · participants · years · evidence level rendered as "5/5"). Below: study cards, each with a round badge — `OBS` / `RCT` / `MA` — using DM Mono in a sand-filled circle.

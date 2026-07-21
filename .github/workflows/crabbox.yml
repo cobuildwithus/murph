@@ -1,0 +1,53 @@
+name: Crabbox Blacksmith Testbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      testbox_id:
+        description: Blacksmith Testbox session ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  hydrate:
+    name: Hydrate Murph verification
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 120
+    steps:
+      - name: Begin Testbox
+        uses: useblacksmith/begin-testbox@233448af4bfdc6fca509a7f0974411ac6d8a8043
+        with:
+          testbox_id: ${{ inputs.testbox_id }}
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pinned pnpm and workspace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Expose the pinned toolchain to Testbox commands
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_bin="$(dirname "$(node -p 'process.execPath')")"
+          for executable in node npm npx corepack; do
+            sudo ln -sf "$node_bin/$executable" "/usr/local/bin/$executable"
+          done
+          sudo ln -sf "$(command -v pnpm)" /usr/local/bin/pnpm
+
+      - name: Keep Testbox available for delegated commands
+        if: success()
+        uses: useblacksmith/run-testbox@3f60ff9ceb2c10c3feefa87dc0c6490cffae059d

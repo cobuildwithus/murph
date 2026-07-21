@@ -221,6 +221,16 @@ describe('assistant Codex turn planning', () => {
           prompt: '<untrusted_group_answer>quoted data</untrusted_group_answer>',
           vault,
         },
+        preferenceContext: {
+          assistantPersona: 'navy-seal',
+          assistantPersonality: {
+            detail: 10,
+            humor: 10,
+            push: 10,
+          },
+          assistantTone: 'casual',
+          assistantVoice: 'drill-sergeant',
+        },
         profile: {
           promptProfile: 'assistant-ask-continuation',
           threadScope: 'isolated-thread',
@@ -247,6 +257,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).not.toContain('CLI bootstrap')
       expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
+      expect(plan.systemPrompt).not.toContain('Assistant persona: Navy SEAL')
+      expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
+      expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
     } finally {
@@ -302,6 +315,16 @@ describe('assistant Codex turn planning', () => {
           turnTrigger: 'manual-deliver',
           vault,
         },
+        preferenceContext: {
+          assistantPersona: 'navy-seal',
+          assistantPersonality: {
+            detail: 10,
+            humor: 10,
+            push: 10,
+          },
+          assistantTone: 'casual',
+          assistantVoice: 'drill-sergeant',
+        },
         profile: {
           promptProfile: 'system-notification',
           threadScope: 'isolated-thread',
@@ -335,6 +358,9 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
+      expect(plan.systemPrompt).not.toContain('Assistant persona: Navy SEAL')
+      expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
+      expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
       expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     } finally {
@@ -362,12 +388,13 @@ describe('assistant Codex turn planning', () => {
       },
     }
     const preferenceContext = {
+      assistantPersona: 'navy-seal' as const,
       assistantPersonality: {
         detail: 10,
         humor: 10,
         push: 10,
       },
-      assistantTone: null,
+      assistantTone: 'casual' as const,
       assistantVoice: null,
     }
 
@@ -402,6 +429,12 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
+    expect(maintenancePlan.systemPrompt).not.toContain(
+      'Assistant persona: Navy SEAL',
+    )
+    expect(maintenancePlan.systemPrompt).not.toContain(
+      'Assistant tone preference:',
+    )
     // Binding context becomes identity/actor/thread/delivery prompt lines at
     // the provider boundary; maintenance turns must never carry it.
     expect(maintenancePlan.sessionContext).toBeUndefined()
@@ -434,6 +467,8 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
+    expect(ordinaryPlan.systemPrompt).toContain('Assistant persona: Navy SEAL')
+    expect(ordinaryPlan.systemPrompt).toContain('Assistant tone preference:')
     expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
     })
@@ -469,8 +504,81 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
       'Delivery adapter contract:',
     )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
+      'Assistant tone preference:',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
+      'Assistant persona: Navy SEAL',
+    )
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
+    expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
+    expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId(null),
+    )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames,
+    )
+
+    const scheduledWithoutPersonaPlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      },
+      preferenceContext: {
+        ...preferenceContext,
+        assistantPersona: null,
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledNewsletterPlan.developerInstructions).toBe(
+      scheduledWithoutPersonaPlan.developerInstructions,
+    )
+    expect(scheduledNewsletterPlan.assistantContractFingerprint).toBe(
+      scheduledWithoutPersonaPlan.assistantContractFingerprint,
+    )
+
+    const scheduledSavedVoicePlan = await resolveAssistantRouteTurnPlan({
+      executionContext,
+      input: {
+        ...createMessageInput(),
+        scheduledAutomationAuthority: {
+          automationId: 'automation_newsletter',
+          occurrenceAt: '2026-07-12T13:00:00.000Z',
+        },
+        scheduledOccurrenceAt: '2026-07-12T13:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      },
+      preferenceContext: {
+        ...preferenceContext,
+        assistantVoice: 'warm',
+      },
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext,
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+    expect(scheduledSavedVoicePlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
     )
 
     const conversationNotificationPlan = await resolveAssistantRouteTurnPlan({
@@ -739,6 +847,108 @@ describe('assistant Codex turn planning', () => {
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
+  })
+
+  it('keeps the absent-persona contract stable and rotates for explicit persona defaults', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const route = createRoute()
+    const common = {
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-20',
+        currentTimeZone: 'America/New_York',
+      },
+      route,
+      sharedPlan: createPrivateSharedPlan(),
+    } as const
+
+    const baseline = await resolveAssistantRouteTurnPlan({
+      ...common,
+      session: createSession(),
+    })
+    const explicitAbsence = await resolveAssistantRouteTurnPlan({
+      ...common,
+      preferenceContext: {
+        assistantPersona: null,
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      },
+      session: createSession(),
+    })
+
+    expect(explicitAbsence.developerInstructions).toBe(
+      baseline.developerInstructions,
+    )
+    expect(explicitAbsence.assistantContractFingerprint).toBe(
+      baseline.assistantContractFingerprint,
+    )
+    expect(explicitAbsence.assistantPreferredElevenLabsVoiceId).toBe(
+      baseline.assistantPreferredElevenLabsVoiceId,
+    )
+    expect(baseline.developerInstructions).not.toContain('Assistant persona:')
+    expect(baseline.developerInstructions).not.toContain(
+      'Assistant personality preferences',
+    )
+
+    const personaPlan = await resolveAssistantRouteTurnPlan({
+      ...common,
+      preferenceContext: {
+        assistantPersona: 'navy-seal',
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      },
+      session: createSession({
+        resumeState: {
+          assistantContractFingerprint:
+            baseline.assistantContractFingerprint,
+          routeFingerprint: route.routeFingerprint ?? route.routeId,
+          threadId: 'thread-before-persona-change',
+        },
+      }),
+    })
+
+    expect(personaPlan.resume).toBeNull()
+    expect(personaPlan.assistantContractFingerprint).not.toBe(
+      baseline.assistantContractFingerprint,
+    )
+    expect(personaPlan.developerInstructions).toContain(
+      'Assistant persona: Navy SEAL',
+    )
+    expect(personaPlan.developerInstructions).toContain('Humor 1/10')
+    expect(personaPlan.developerInstructions).toContain('Push 10/10')
+    expect(personaPlan.developerInstructions).toContain('Detail 2/10')
+    expect(personaPlan.developerInstructions).toContain(
+      'Assistant tone preference:',
+    )
+    expect(personaPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
+    )
+
+    const staleVoicePlan = await resolveAssistantRouteTurnPlan({
+      ...common,
+      preferenceContext: {
+        assistantPersona: 'navy-seal',
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: 'stale-roster-id',
+      },
+      session: createSession(),
+    })
+    expect(staleVoicePlan.assistantPreferredElevenLabsVoiceId).toBeNull()
   })
 
   it('reads sparse personality preferences and rotates the interactive thread contract', async () => {

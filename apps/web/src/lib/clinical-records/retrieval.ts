@@ -4,10 +4,12 @@ import { createHash, randomBytes } from "node:crypto";
 
 import {
   CLINICAL_FHIR_RESOURCE_TYPES,
+  clinicalFhirRetrievalPlanSchema,
   clinicalSourceSystemSchema,
   hashClinicalFhirPageUrl,
   hashClinicalFhirPatientId,
   type ClinicalSourceSystem,
+  type ClinicalFhirRetrievalPlan,
 } from "@murphai/clinical-records";
 import {
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
@@ -21,6 +23,7 @@ import {
   type HostedClinicalRecordsReadRunResponse,
   type HostedClinicalRecordsRecordOutcomeRequest,
   type HostedClinicalRecordsRetrievalScope,
+  type HostedClinicalRecordsRunDescriptor,
 } from "@murphai/hosted-execution/clinical-records";
 import type { Prisma } from "@prisma/client";
 
@@ -43,8 +46,9 @@ import {
 } from "./errors";
 import {
   buildEpicBetaInitialFhirPageUrl,
-  buildEpicBetaRetrievalQueryFingerprintInput,
-} from "./epic-beta-policy";
+  buildEpicBetaRetrievalPlan,
+  EPIC_BETA_FHIR_PAGE_COUNT,
+} from "./epic-policy";
 import {
   ClinicalResponseBodyLimitError,
   decodeClinicalResponseUtf8,
@@ -52,7 +56,6 @@ import {
 } from "./response-bytes";
 
 const FHIR_REQUEST_TIMEOUT_MS = 20_000;
-const FHIR_PAGE_COUNT = "100";
 const FHIR_NEXT_URL_MAX_CHARS = 1_024;
 const PAGE_REQUEST_CLAIM_STALE_MS = 30_000;
 const PAGE_EGRESS_RESERVATION_BYTES = HOSTED_CLINICAL_RECORDS_MAX_PAGE_BODY_CHARS;
@@ -102,6 +105,7 @@ interface RunnableClinicalRun {
   memberId: string;
   pageCount: number;
   providerRequestCount: number;
+  retrievalPlan: ClinicalFhirRetrievalPlan;
   resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
   status: string;
 }
@@ -115,7 +119,10 @@ export async function readClinicalRetrievalRun(input: {
   generation: number;
   memberId: string;
   runId: string;
-}): Promise<HostedClinicalRecordsReadRunResponse> {
+}): Promise<
+  | { run: HostedClinicalRecordsRunDescriptor; status: "ready" }
+  | Extract<HostedClinicalRecordsReadRunResponse, { status: "unavailable" }>
+> {
   const loaded = await loadRunnableClinicalRun(input);
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
   const run = loaded.run;
@@ -146,7 +153,7 @@ export async function readClinicalRetrievalRun(input: {
       providerDirectoryEntryId: run.connection.providerDirectoryEntryId,
       requestedScopes,
       retrievalJobId: run.id,
-      retrievalScopes: buildRetrievalScopes(run.resourceTypes),
+      retrievalScopes: buildRetrievalScopes(run.retrievalPlan),
       runId: run.id,
       sourceSystem: run.connection.sourceSystem,
     },
@@ -165,6 +172,9 @@ export async function fetchClinicalRetrievalPage(input: {
     runId: input.request.runId,
   });
   if ("unavailable" in loaded) return unavailable(loaded.unavailable, loaded.retryable);
+  if ("retrievalProtocol" in input.request) {
+    return unavailable("retrieval-protocol-not-enabled", false);
+  }
   const run = loaded.run;
   if (!run.resourceTypes.includes(input.request.resourceType)) {
     return unavailable("resource-family-not-requested", false);
@@ -511,18 +521,12 @@ export async function signalClinicalRetrievalWake(
 }
 
 function buildRetrievalScopes(
-  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][],
+  retrievalPlan: ClinicalFhirRetrievalPlan,
 ): HostedClinicalRecordsRetrievalScope[] {
-  return resourceTypes.map((resourceType) => ({
-    coverage: "whole-family",
-    queryFingerprint: sha256Hex(
-      buildEpicBetaRetrievalQueryFingerprintInput({
-        pageCount: FHIR_PAGE_COUNT,
-        resourceType,
-      }),
-    ),
-    resourceType,
-  }));
+  return retrievalPlan.slices.map((slice) => {
+    const { queryScopeId: _queryScopeId, sliceId: _sliceId, ...scope } = slice;
+    return scope;
+  });
 }
 
 async function loadRunnableClinicalRun(input: {
@@ -560,6 +564,7 @@ async function loadRunnableClinicalRun(input: {
       memberId: true,
       pageCount: true,
       providerRequestCount: true,
+      retrievalPlanJson: true,
       resourceTypesJson: true,
       status: true,
     },
@@ -595,9 +600,11 @@ async function loadRunnableClinicalRun(input: {
     return { retryable: false, unavailable: "credentials-unavailable" };
   }
   let resourceTypes: HostedClinicalRecordsFetchPageRequest["resourceType"][];
+  let retrievalPlan: ClinicalFhirRetrievalPlan;
   let sourceSystem: ClinicalSourceSystem;
   try {
     resourceTypes = parseStoredResourceTypes(record.resourceTypesJson);
+    retrievalPlan = parseStoredRetrievalPlan(record.retrievalPlanJson, resourceTypes);
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
   } catch {
     return { retryable: false, unavailable: "run-configuration-invalid" };
@@ -614,6 +621,7 @@ async function loadRunnableClinicalRun(input: {
       memberId: record.memberId,
       pageCount: record.pageCount,
       providerRequestCount: record.providerRequestCount,
+      retrievalPlan,
       resourceTypes,
       status: record.status,
     },
@@ -627,7 +635,7 @@ function buildInitialFhirPageUrl(input: {
 }): URL {
   return buildEpicBetaInitialFhirPageUrl({
     fhirBaseUrl: input.fhirBaseUrl,
-    pageCount: FHIR_PAGE_COUNT,
+    pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
     patientId: input.patientId,
     resourceType: input.resourceType,
   });
@@ -1097,6 +1105,25 @@ function parseStoredResourceTypes(
     throw new TypeError("Stored Clinical Records resource types are invalid.");
   }
   return resourceTypes;
+}
+
+function parseStoredRetrievalPlan(
+  value: Prisma.JsonValue | null,
+  resourceTypes: readonly HostedClinicalRecordsFetchPageRequest["resourceType"][],
+): ClinicalFhirRetrievalPlan {
+  const expectedPlan = buildEpicBetaRetrievalPlan({
+    pageCount: EPIC_BETA_FHIR_PAGE_COUNT,
+    resourceTypes,
+  });
+  const plan = value === null
+    ? expectedPlan
+    : clinicalFhirRetrievalPlanSchema.parse(value);
+  if (
+    JSON.stringify(plan.slices) !== JSON.stringify(expectedPlan.slices)
+  ) {
+    throw new TypeError("Stored Clinical Records retrieval plan is unsupported by its legacy reader.");
+  }
+  return plan;
 }
 
 function isClinicalFhirResourceType(
