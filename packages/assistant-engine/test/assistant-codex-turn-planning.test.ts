@@ -257,7 +257,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).toContain('output-only turn')
       expect(plan.systemPrompt).not.toContain('CLI bootstrap')
       expect(plan.systemPrompt).not.toContain('Hosted tool guidance')
-      expect(plan.systemPrompt).not.toContain('Assistant persona: Navy SEAL')
+      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(plan.turnContextPrompt).toContain('current mobility prescription')
@@ -358,7 +358,7 @@ describe('assistant Codex turn planning', () => {
       expect(plan.systemPrompt).not.toContain('PRIVATE_CONTEXT_SNAPSHOT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_HOSTED_CONTEXT')
       expect(plan.systemPrompt).not.toContain('PRIVATE_COMMITTED_HISTORY')
-      expect(plan.systemPrompt).not.toContain('Assistant persona: Navy SEAL')
+      expect(plan.systemPrompt).not.toContain('Be direct, disciplined, and accountable.')
       expect(plan.systemPrompt).not.toContain('Assistant personality preferences')
       expect(plan.systemPrompt).not.toContain('Assistant tone preference:')
       expect(planningMocks.readAssistantCliSurfaceBootstrapContext).not.toHaveBeenCalled()
@@ -430,7 +430,7 @@ describe('assistant Codex turn planning', () => {
     )
     expect(maintenancePlan.systemPrompt).not.toContain('Humor 10/10')
     expect(maintenancePlan.systemPrompt).not.toContain(
-      'Assistant persona: Navy SEAL',
+      'Be direct, disciplined, and accountable.',
     )
     expect(maintenancePlan.systemPrompt).not.toContain(
       'Assistant tone preference:',
@@ -467,7 +467,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant personality preferences',
     )
     expect(ordinaryPlan.systemPrompt).toContain('Humor 10/10')
-    expect(ordinaryPlan.systemPrompt).toContain('Assistant persona: Navy SEAL')
+    expect(ordinaryPlan.systemPrompt).toContain('Be direct, disciplined, and accountable.')
     expect(ordinaryPlan.systemPrompt).toContain('Assistant tone preference:')
     expect(ordinaryPlan.sessionContext).toEqual({
       binding: expect.anything(),
@@ -508,7 +508,7 @@ describe('assistant Codex turn planning', () => {
       'Assistant tone preference:',
     )
     expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
-      'Assistant persona: Navy SEAL',
+      'Be direct, disciplined, and accountable.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
@@ -898,7 +898,7 @@ describe('assistant Codex turn planning', () => {
     expect(explicitAbsence.assistantPreferredElevenLabsVoiceId).toBe(
       baseline.assistantPreferredElevenLabsVoiceId,
     )
-    expect(baseline.developerInstructions).not.toContain('Assistant persona:')
+    expect(baseline.developerInstructions).not.toContain('relationship and delivery style')
     expect(baseline.developerInstructions).not.toContain(
       'Assistant personality preferences',
     )
@@ -926,7 +926,7 @@ describe('assistant Codex turn planning', () => {
       baseline.assistantContractFingerprint,
     )
     expect(personaPlan.developerInstructions).toContain(
-      'Assistant persona: Navy SEAL',
+      'Be direct, disciplined, and accountable.',
     )
     expect(personaPlan.developerInstructions).toContain('Humor 1/10')
     expect(personaPlan.developerInstructions).toContain('Push 10/10')

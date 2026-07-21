@@ -160,6 +160,7 @@ function installGlobals(
     unobserve() {}
     disconnect() {}
   }
+  class PointerEventMock extends window.Event {}
 
   vi.stubGlobal("window", window);
   vi.stubGlobal("document", document);
@@ -168,6 +169,7 @@ function installGlobals(
   vi.stubGlobal("Node", window.Node);
   vi.stubGlobal("Event", window.Event);
   vi.stubGlobal("MouseEvent", window.MouseEvent);
+  vi.stubGlobal("PointerEvent", PointerEventMock);
   vi.stubGlobal("MutationObserver", window.MutationObserver);
   vi.stubGlobal("ResizeObserver", ResizeObserverMock);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

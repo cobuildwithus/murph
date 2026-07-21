@@ -95,13 +95,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("MurphPersonaPicker saves persona, writing style, and voice atomically", async () => {
+test("MurphPersonaPicker saves the selected persona, voice, and tone atomically", async () => {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
     ok: true,
     json: async () => ({
-      assistantPersona: "navy-seal",
+      assistantPersona: "navy-seal-with-stoic-philosopher",
       assistantTone: "casual",
-      assistantVoice: "drill-sergeant",
+      assistantVoice: "husky",
     }),
     init,
   }));
@@ -121,29 +121,52 @@ test("MurphPersonaPicker saves persona, writing style, and voice atomically", as
   );
 
   try {
+    const stepTitle = rendered.container.querySelector(
+      "[data-persona-picker-step-title]",
+    );
+    assert.ok(stepTitle instanceof rendered.window.HTMLElement);
+    const focusStepTitle = vi.fn();
+    Object.defineProperty(stepTitle, "focus", {
+      configurable: true,
+      value: focusStepTitle,
+    });
+
     await clickControlContaining(rendered, "Navy SEAL");
-    await clickControlContaining(rendered, "Lowercase");
+    await clickControlContaining(rendered, "Continue");
+    assert.deepEqual(focusStepTitle.mock.calls[0], [{ preventScroll: true }]);
+    await clickControlContaining(rendered, "Stoic Philosopher");
+    await clickControlContaining(rendered, "Continue");
 
     const preview = rendered.container.querySelector(
-      "[data-voice-preview='/audio/murph-personas/navy-seal/drill-sergeant.mp3']",
+      "[data-voice-preview='/audio/murph-personas/navy-seal/husky.mp3']",
     );
     assert.ok(preview);
     assert.equal(
       preview.getAttribute("data-fallback-preview"),
-      "/audio/murph-voices/drill-sergeant.mp3",
+      "/audio/murph-voices/husky.mp3",
     );
     assert.equal(preview.getAttribute("data-preload"), "metadata");
 
+    await act(async () => {
+      (preview as HTMLElement).click();
+    });
+    await clickControlContaining(rendered, "Continue");
+    assert.match(rendered.container.textContent ?? "", /Pick Murph’s tone/u);
+    await clickControlContaining(rendered, "Casual");
     await clickControlContaining(rendered, "Continue");
 
     assert.equal(fetchMock.mock.calls.length, 1);
     assert.equal(fetchMock.mock.calls[0]?.[0], "/api/settings/assistant-style");
     assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
-      persona: "navy-seal",
+      persona: "navy-seal-with-stoic-philosopher",
       tone: "casual",
-      voice: "drill-sergeant",
+      voice: "husky",
     });
-    assert.equal(onComplete.mock.calls.length, 1);
+    assert.deepEqual(onComplete.mock.calls[0], [{
+      persona: "navy-seal-with-stoic-philosopher",
+      tone: "casual",
+      voice: "husky",
+    }]);
     assert.deepEqual(onOpenChange.mock.calls[0], [false]);
   } finally {
     await rendered.cleanup();
@@ -177,7 +200,7 @@ test("MurphPersonaPicker skips without writing preferences", async () => {
   }
 });
 
-test("MurphPersonaPicker exposes independent native radio groups", async () => {
+test("MurphPersonaPicker chooses a main personality and an optional supporting personality", async () => {
   const { MurphPersonaPicker } = await import(
     "@/src/components/murph/murph-persona-picker"
   );
@@ -190,24 +213,161 @@ test("MurphPersonaPicker exposes independent native radio groups", async () => {
   );
 
   try {
-    const fieldsets = Array.from(rendered.container.querySelectorAll("fieldset"));
-    assert.deepEqual(
-      fieldsets.map((fieldset) =>
-        fieldset.querySelector("legend")?.textContent?.trim()
-      ),
-      ["Murph persona", "Text style", "Voice"],
+    const mainFieldset = rendered.container.querySelector("fieldset");
+    assert.equal(
+      mainFieldset?.querySelector("legend")?.textContent?.trim(),
+      "Main Murph personality",
+    );
+    const mainRadios = Array.from(
+      mainFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']")
+        ?? [],
+    );
+    assert.equal(mainRadios.length, 6);
+    assert.equal(mainRadios.filter((radio) => radio.checked).length, 1);
+    assert.equal(new Set(mainRadios.map((radio) => radio.name)).size, 1);
+    assert.match(rendered.container.textContent ?? "", /Classic/u);
+    assert.match(rendered.container.textContent ?? "", /Navy SEAL/u);
+    assert.match(rendered.container.textContent ?? "", /Stoic Philosopher/u);
+    assert.match(rendered.container.textContent ?? "", /Scientist/u);
+    assert.match(rendered.container.textContent ?? "", /Hype Coach/u);
+    assert.match(rendered.container.textContent ?? "", /Straight-Talking Friend/u);
+    assert.equal(
+      rendered.container.querySelectorAll("[data-persona-glyph]").length,
+      6,
+    );
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Text style|Voice/u);
+
+    await clickControlContaining(rendered, "Navy SEAL");
+    await clickControlContaining(rendered, "Continue");
+
+    const supportFieldset = rendered.container.querySelector("fieldset");
+    assert.equal(
+      supportFieldset?.querySelector("legend")?.textContent?.trim(),
+      "Supporting Murph personality",
+    );
+    const supportRadios = Array.from(
+      supportFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']")
+        ?? [],
+    );
+    assert.equal(supportRadios.length, 6);
+    assert.equal(supportRadios.filter((radio) => radio.checked).length, 1);
+    assert.equal(new Set(supportRadios.map((radio) => radio.name)).size, 1);
+    assert.notEqual(mainRadios[0]?.name, supportRadios[0]?.name);
+    assert.match(rendered.container.textContent ?? "", /Navy SEAL leads/u);
+    assert.match(rendered.container.textContent ?? "", /No supporting personality/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Drill Sergeant/u);
+    assert.equal(
+      rendered.container.querySelector("[data-voice-preview]"),
+      null,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Normal capitalization|Relaxed, lowercase/u,
     );
 
-    const names = fieldsets.map((fieldset) => {
-      const radios = Array.from(
-        fieldset.querySelectorAll<HTMLInputElement>("input[type='radio']"),
-      );
-      assert.equal(radios.filter((radio) => radio.checked).length, 1);
-      assert.ok(radios.length > 1);
-      assert.equal(new Set(radios.map((radio) => radio.name)).size, 1);
-      return radios[0]?.name;
-    });
-    assert.equal(new Set(names).size, 3);
+    await clickControlContaining(rendered, "Stoic Philosopher");
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Supported by Stoic Philosopher/u,
+    );
+
+    await clickControlContaining(rendered, "Continue");
+    const voiceFieldset = rendered.container.querySelector("fieldset");
+    assert.equal(
+      voiceFieldset?.querySelector("legend")?.textContent?.trim(),
+      "Murph voice",
+    );
+    assert.match(
+      voiceFieldset?.textContent ?? "",
+      /Recommended for Navy SEAL/u,
+    );
+    assert.match(voiceFieldset?.textContent ?? "", /Other voices/u);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Choose how .* should sound/u,
+    );
+    const voiceRadios = Array.from(
+      voiceFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']") ?? [],
+    );
+    assert.equal(voiceRadios.length, 22);
+    assert.equal(voiceRadios.filter((radio) => radio.checked).length, 1);
+    assert.equal(
+      voiceRadios.find((radio) => radio.checked)?.value,
+      "drill-sergeant",
+    );
+    assert.notEqual(supportRadios[0]?.name, voiceRadios[0]?.name);
+
+    await clickControlContaining(rendered, "Radio host");
+    await clickControlContaining(rendered, "Radio host");
+    assert.match(rendered.container.textContent ?? "", /Other voices/u);
+    const radioHost = voiceRadios.find((radio) => radio.value === "radio-host");
+    assert.ok(radioHost);
+    const radioHostLabel = radioHost.ownerDocument.querySelector(
+      `label[for='${radioHost.id}']`,
+    );
+    assert.match(radioHostLabel?.className ?? "", /absolute inset-0/u);
+
+    await clickControlContaining(rendered, "Continue");
+    const toneFieldset = rendered.container.querySelector("fieldset");
+    assert.equal(
+      toneFieldset?.querySelector("legend")?.textContent?.trim(),
+      "Murph tone",
+    );
+    assert.equal(
+      toneFieldset?.querySelectorAll("input[type='radio']").length,
+      2,
+    );
+    assert.equal(
+      Array.from(
+        toneFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']")
+          ?? [],
+      ).find((radio) => radio.checked)?.value,
+      "formal",
+    );
+    assert.match(toneFieldset?.textContent ?? "", /Formal/u);
+    assert.match(toneFieldset?.textContent ?? "", /Casual/u);
+    assert.doesNotMatch(toneFieldset?.textContent ?? "", /Standard sentence case/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker restores a saved combination into main and support choices", async () => {
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      initialPersona: "scientist-with-classic",
+      onOpenChange: vi.fn(),
+      open: true,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const mainFieldset = rendered.container.querySelector("fieldset");
+    const selectedMain = Array.from(
+      mainFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']") ?? [],
+    ).find((radio) => radio.checked);
+    assert.equal(selectedMain?.value, "scientist");
+
+    await clickControlContaining(rendered, "Continue");
+    const supportFieldset = rendered.container.querySelector("fieldset");
+    const selectedSupport = Array.from(
+      supportFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']") ?? [],
+    ).find((radio) => radio.checked);
+    assert.equal(selectedSupport?.value, "classic");
+    assert.match(rendered.container.textContent ?? "", /Scientist leads/u);
+    assert.match(rendered.container.textContent ?? "", /Supported by Classic/u);
+
+    await clickControlContaining(rendered, "Continue");
+    assert.match(rendered.container.textContent ?? "", /Recommended for Scientist/u);
+    assert.ok(
+      rendered.container.querySelector(
+        "[data-voice-preview='/audio/murph-personas/scientist/radio-host.mp3']",
+      ),
+    );
   } finally {
     await rendered.cleanup();
   }
@@ -245,15 +405,25 @@ test("MurphPersonaPicker disables dismissal and controls while saving", async ()
 
   try {
     await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
     assert.equal(savePreference.mock.calls.length, 1);
     assert.ok(
-      Array.from(rendered.container.querySelectorAll("input[type='radio']"))
-        .every((radio) => (radio as HTMLInputElement).disabled),
+      Array.from(
+        rendered.container.querySelectorAll(
+          "input[type='radio'], [role='radio']",
+        ),
+      ).every(
+        (control) =>
+          control.hasAttribute("disabled")
+          || control.getAttribute("aria-disabled") === "true",
+      ),
     );
-    const skipButton = Array.from(rendered.container.querySelectorAll("button"))
-      .find((candidate) => candidate.textContent?.includes("Skip"));
-    assert.ok(skipButton, "Missing Skip button");
-    assert.equal(skipButton.hasAttribute("disabled"), true);
+    const backButton = Array.from(rendered.container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.includes("Back"));
+    assert.ok(backButton, "Missing Back button");
+    assert.equal(backButton.hasAttribute("disabled"), true);
     const savingButton = rendered.container
       .querySelector("[data-icon='inline-start']")
       ?.closest("button");
@@ -281,7 +451,7 @@ test("MurphPersonaPicker disables dismissal and controls while saving", async ()
 test("MurphPersonaPicker retains choices after an error and retries them", async () => {
   const saved = {
     persona: "navy-seal" as const,
-    tone: "casual" as const,
+    tone: "formal" as const,
     voice: "drill-sergeant" as const,
   };
   const savePreference = vi.fn()
@@ -304,7 +474,9 @@ test("MurphPersonaPicker retains choices after an error and retries them", async
 
   try {
     await clickControlContaining(rendered, "Navy SEAL");
-    await clickControlContaining(rendered, "Lowercase");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Continue");
     await clickControlContaining(rendered, "Continue");
 
     assert.match(
@@ -331,10 +503,20 @@ async function clickControlContaining(
   ).find((candidate) => candidate.textContent?.includes(text));
   assert.ok(control, `Missing control containing ${text}`);
   await act(async () => {
-    const input = control.querySelector("input[type='radio']");
+    const radioButton = control.querySelector("[role='radio']");
+    if (radioButton) {
+      (radioButton as HTMLElement).click();
+      return;
+    }
+    const associatedInput =
+      control instanceof rendered.window.HTMLLabelElement && control.htmlFor
+        ? control.ownerDocument.getElementById(control.htmlFor)
+        : null;
+    const input =
+      control.querySelector("input[type='radio'], input[type='checkbox']")
+      ?? associatedInput;
     if (input instanceof rendered.window.HTMLInputElement) {
-      input.checked = true;
-      input.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+      input.click();
       return;
     }
     (control as HTMLElement).click();

@@ -126,7 +126,7 @@ describe("assistant style settings route", () => {
 
   it("persists persona, writing style, and voice in one preference write", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
-      assistantPersona: "navy-seal",
+      assistantPersona: "navy-seal-with-classic",
       assistantPersonality: { detail: 2, humor: 1, push: 10 },
       assistantTone: "formal",
       assistantVoice: "drill-sergeant",
@@ -135,14 +135,14 @@ describe("assistant style settings route", () => {
     });
 
     const response = await route.POST(jsonRequest({
-      persona: "navy-seal",
+      persona: "navy-seal-with-classic",
       tone: "formal",
       voice: "drill-sergeant",
     }));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      assistantPersona: "navy-seal",
+      assistantPersona: "navy-seal-with-classic",
       assistantTone: "formal",
       assistantVoice: "drill-sergeant",
       ok: true,
@@ -154,7 +154,7 @@ describe("assistant style settings route", () => {
       memberId: "member_123",
       occurredAt: "2026-07-08T12:00:00.000Z",
       preferences: {
-        persona: "navy-seal",
+        persona: "navy-seal-with-classic",
         tone: "formal",
         voice: "drill-sergeant",
       },
@@ -318,8 +318,8 @@ describe("assistant style settings route", () => {
     });
   });
 
-  it("rejects invalid personas before opening the persistence transaction", async () => {
-    const response = await route.POST(jsonRequest({ persona: "celebrity-guru" }));
+  it("rejects invalid and legacy personas before opening the persistence transaction", async () => {
+    const response = await route.POST(jsonRequest({ persona: "wise-elder" }));
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: {

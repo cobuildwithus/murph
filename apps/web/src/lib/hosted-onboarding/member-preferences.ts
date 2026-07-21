@@ -6,10 +6,10 @@ import {
 } from "@murphai/hosted-execution";
 import {
   assistantPersonalitySettingIds,
-  isAssistantPersonaId,
   isAssistantPersonalityScore,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  normalizeStoredAssistantPersonaId,
   type AssistantPersonaId,
   type AssistantPreferenceFieldId,
   type AssistantPersonalitySettingId,
@@ -495,7 +495,7 @@ function buildHostedMemberAssistantPreferencesSnapshot(input: {
 function normalizeStoredAssistantPersona(
   value: string | null | undefined,
 ): AssistantPersonaId | null {
-  return isAssistantPersonaId(value) ? value : null;
+  return normalizeStoredAssistantPersonaId(value);
 }
 
 function normalizeStoredAssistantPersonality(
