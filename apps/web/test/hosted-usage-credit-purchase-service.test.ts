@@ -282,16 +282,19 @@ describe("createHostedUsageCreditCheckout", () => {
       code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
       httpStatus: 403,
     });
-    const [[queryParts, joinCode, runtimeMemberId]] =
-      fake.prisma.$queryRaw.mock.calls;
-    const queryText = Array.from(queryParts).join("");
+    expect(fake.groupFundingQueryCalls).toHaveLength(1);
+    const queryCall = fake.groupFundingQueryCalls[0];
+    if (!queryCall) {
+      throw new Error("Expected the group funding target query to run");
+    }
+    const queryText = Array.from(queryCall.queryParts).join("");
     expect(queryText).toContain('INNER JOIN "hosted_thread_container" AS "container"');
     expect(queryText).toContain(
       '"container"."member_id" = "group"."runtime_member_id"',
     );
     expect(queryText).toContain('"group"."join_code" = ');
     expect(queryText).toContain('"group"."runtime_member_id" = ');
-    expect([joinCode, runtimeMemberId]).toEqual([
+    expect(queryCall.values).toEqual([
       "group_join_code_1234",
       "member_group_runtime",
     ]);
@@ -1774,6 +1777,10 @@ function createFakePrisma(input: {
   groupFundingTargetLocked?: boolean;
   memberOverride?: Record<string, unknown>;
 } = {}) {
+  const groupFundingQueryCalls: Array<{
+    queryParts: TemplateStringsArray;
+    values: unknown[];
+  }> = [];
   const purchases = new Map<string, Record<string, unknown>>();
   const hostedUsageCreditPurchase = {
     create: vi.fn(async (query: { data: Record<string, unknown> }) => {
@@ -1865,16 +1872,22 @@ function createFakePrisma(input: {
       findUnique: vi.fn(async () => ({ runtimeMemberId: "member_group_runtime" })),
     },
     hostedUsageCreditPurchase,
-    $queryRaw: vi.fn(async () =>
-      input.groupFundingTargetLocked === false ? [] : [{ id: "hgrp_123" }]
-    ),
+    $queryRaw: vi.fn(async (
+      queryParts: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      groupFundingQueryCalls.push({ queryParts, values });
+      return input.groupFundingTargetLocked === false
+        ? []
+        : [{ id: "hgrp_123" }];
+    }),
     $transaction: vi.fn(),
   };
   prisma.$transaction.mockImplementation(async (
     callback: (tx: typeof prisma) => Promise<unknown>,
   ) => callback(prisma));
 
-  return { member, prisma, purchases };
+  return { groupFundingQueryCalls, member, prisma, purchases };
 }
 
 interface PurchaseQuery {
