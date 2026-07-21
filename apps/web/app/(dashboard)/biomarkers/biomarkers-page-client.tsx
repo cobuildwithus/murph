@@ -419,6 +419,7 @@ function MeasuredBiomarkerRow({
         className,
       )}
       href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
+      prefetch={false}
     >
       <h3 className="break-words text-lg font-medium tracking-tight text-foreground">
         {biomarker.displayName}

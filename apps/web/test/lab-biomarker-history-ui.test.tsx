@@ -28,6 +28,10 @@ const browserVaultMock = vi.hoisted(() => ({
   },
 }));
 
+const linkPropsMock = vi.hoisted(() => ({
+  value: [] as Array<{ href: string; prefetch: boolean | undefined }>,
+}));
+
 vi.mock("@/src/lib/browser-vault/context", () => ({
   useBrowserVault() {
     return browserVaultMock.value;
@@ -44,11 +48,13 @@ vi.mock("@/src/components/ui/auth-button", () => ({
 }));
 
 vi.mock("next/link", () => ({
-  default({ children, href, ...props }: {
+  default({ children, href, prefetch, ...props }: {
     children: ReactNode;
     href: string;
+    prefetch?: boolean;
     [key: string]: unknown;
   }) {
+    linkPropsMock.value.push({ href, prefetch });
     return createElement("a", { ...props, href }, children);
   },
 }));
@@ -57,6 +63,7 @@ import { BiomarkersPageClient } from "../app/(dashboard)/biomarkers/biomarkers-p
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
 
 beforeEach(() => {
+  linkPropsMock.value = [];
   browserVaultMock.value = {
     client: null,
     error: null,
@@ -147,6 +154,11 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(hba1cLink?.getAttribute("role")).toBeNull();
     expect(hba1cLink?.parentElement).toBe(firstGrid);
     expect(hba1cLink?.className).toContain("cursor-pointer");
+    const resultLinkProps = linkPropsMock.value.filter(({ href }) =>
+      href.startsWith("/biomarkers/results/")
+    );
+    expect(resultLinkProps).toHaveLength(3);
+    expect(resultLinkProps.every(({ prefetch }) => prefetch === false)).toBe(true);
     const glucoseLink = rendered.container.querySelector(
       'a[href="/biomarkers/results/glucose"]',
     );
