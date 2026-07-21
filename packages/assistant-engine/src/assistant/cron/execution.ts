@@ -702,13 +702,17 @@ export async function executeClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
-          const deliveryRoute = maintenanceJob
-            ? resolveAssistantCronNotificationDeliveryRoute(claimedJob.target)
+          const authorizedDelivery = maintenanceJob
+            ? {
+                externalThreadRouteAuthority: null,
+                route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
+              }
             : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                 executionContext: input.executionContext ?? null,
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
               })
+          const deliveryRoute = authorizedDelivery.route
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
               channel: claimedJob.target.channel,
@@ -797,6 +801,8 @@ export async function executeClaimedAssistantCronJob(
             onTraceEvent: input.onTraceEvent,
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
+            outboxExternalThreadRouteAuthority:
+              authorizedDelivery.externalThreadRouteAuthority,
             participantId: claimedJob.target.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
@@ -2087,13 +2093,59 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   executionContext: AssistantExecutionContext | null
   signal: AbortSignal
   target: AssistantCronJob['target']
-}): Promise<ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>> {
+}): Promise<{
+  externalThreadRouteAuthority:
+    AssistantOutboxIntent['externalThreadRouteAuthority']
+  route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
+}> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
-  if (
-    assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted' ||
-    input.target.channel !== 'linq'
-  ) {
-    return route
+  if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
+    return { externalThreadRouteAuthority: null, route }
+  }
+
+  if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
+    const target = normalizeNullableString(
+      route.deliveryTarget ?? route.bindingDelivery?.target,
+    )
+    if (!target) {
+      throw new VaultCliError(
+        'ASSISTANT_CRON_DELIVERY_REQUIRED',
+        'Assistant cron jobs must bind one concrete Telegram destination.',
+      )
+    }
+    const resolveScheduledExternalThreadRoute =
+      input.executionContext?.hosted?.resolveScheduledExternalThreadRoute
+    if (!resolveScheduledExternalThreadRoute) {
+      throw new VaultCliError(
+        'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+        'Hosted group delivery requires live thread route authority before provider work.',
+        { retryable: true },
+      )
+    }
+    const authority = await resolveScheduledExternalThreadRoute({
+      channel: 'telegram',
+      signal: input.signal,
+      target,
+    })
+    if (
+      authority.channel !== 'telegram'
+      || normalizeNullableString(authority.containerMemberId) === null
+      || normalizeNullableString(authority.threadId) !== target
+    ) {
+      throw new VaultCliError(
+        'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
+        'Hosted group delivery requires exact thread route authority before provider work.',
+        { retryable: true },
+      )
+    }
+    return {
+      externalThreadRouteAuthority: authority,
+      route,
+    }
+  }
+
+  if (input.target.channel !== 'linq') {
+    return { externalThreadRouteAuthority: null, route }
   }
 
   const target = normalizeNullableString(
@@ -2145,9 +2197,12 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     : null
 
   return {
-    bindingDelivery,
-    deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
-    threadIsDirect: authority.threadIsDirect,
+    externalThreadRouteAuthority: null,
+    route: {
+      bindingDelivery,
+      deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
+      threadIsDirect: authority.threadIsDirect,
+    },
   }
 }
 

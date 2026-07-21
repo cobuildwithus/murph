@@ -1116,6 +1116,48 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }, { signal });
   });
 
+  it("resolves scheduled Telegram group authority through the live Web route owner", async () => {
+    const signal = new AbortController().signal;
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const phaseInput = createPhaseInput({});
+    phaseInput.runtime.platform.effectsPort.assertExternalThreadRouteAuthority =
+      assertExternalThreadRouteAuthority;
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async ({ executionContext }) => {
+        const resolveScheduledExternalThreadRoute =
+          executionContext.hosted?.resolveScheduledExternalThreadRoute;
+        if (!resolveScheduledExternalThreadRoute) {
+          throw new Error("Expected scheduled external thread route authority.");
+        }
+
+        await expect(resolveScheduledExternalThreadRoute({
+          channel: "telegram",
+          signal,
+          target: "telegram_group_123",
+        })).resolves.toEqual({
+          channel: "telegram",
+          containerMemberId: "member_synthetic_phase",
+          threadId: "telegram_group_123",
+        });
+
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: false,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+
+    await runHostedWorkspaceAssistantPhase(phaseInput);
+
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith({
+      channel: "telegram",
+      containerMemberId: "member_synthetic_phase",
+      threadId: "telegram_group_123",
+    }, { signal });
+  });
+
   it("passes the hosted assistant configuration port into assistant execution", async () => {
     const assistantConfigurationToolPort: RuntimeAssistantConfigurationToolPort = {
       request: vi.fn(),

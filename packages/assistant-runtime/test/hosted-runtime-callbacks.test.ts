@@ -7692,6 +7692,183 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("fails a route-scoped Telegram group delivery before provider entry when live authority is unavailable", async () => {
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      });
+      throw new Error("unreachable without live route authority");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      context: expect.objectContaining({ retryable: true }),
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("revalidates the exact Telegram group route immediately before provider entry", async () => {
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "provider_123",
+      target: routeAuthority.threadId,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+    const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith(
+      routeAuthority,
+      { signal: null },
+    );
+    expect(
+      assertExternalThreadRouteAuthority.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.sendTelegramMessage.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("blocks Telegram provider entry when the live route owner revokes the composed target", async () => {
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: "telegram_group_123",
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: routeAuthority.threadId,
+      threadId: routeAuthority.threadId,
+      threadIsDirect: false,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    const routeRevoked = Object.assign(new Error("route revoked"), {
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+    const assertExternalThreadRouteAuthority = vi.fn()
+      .mockRejectedValueOnce(routeRevoked);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendTelegram({
+        idempotencyKey: "assistant-outbox:intent_123",
+        message: "hello from hosted",
+        replyToMessageId: null,
+        target: routeAuthority.threadId,
+      });
+      throw new Error("unreachable after route revocation");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertExternalThreadRouteAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    });
+
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
   it("routes persisted Telegram reaction intents without payload operations", async () => {
     const effect = createEffect({
       message: "",

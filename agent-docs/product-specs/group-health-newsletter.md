@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 Status: Implemented
 
 ## Current State
@@ -17,7 +17,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 
 - It is one **cron automation living in the group runtime's own vault**, authored the same way reminders are.
 - It uses the existing conversation outbox for iMessage and Telegram. Email delivery **reuses** the Cloudflare outbound email path. It does not introduce a parallel sender.
-- Linked Telegram group ingress resolves the existing Web-owned thread-container route, appends the message to that container's mailbox with the signed route identity, and lets the ordinary Telegram reply/outbox path deliver current-chat editions. The admitted message also self-heals the container's managed Telegram reply channel if activation is still being processed. It adds no Telegram-specific newsletter state owner.
+- Linked Telegram group ingress resolves the existing Web-owned thread-container route, appends the message to that container's mailbox with the signed route identity, and lets the ordinary Telegram reply/outbox path deliver current-chat editions. The admitted message also self-heals the container's managed Telegram reply channel if activation is still being processed. A scheduled current-chat edition treats its stored Telegram target only as a hint: Web must bind that exact thread to the synthetic group container before shared reads or model work and again before provider entry. It adds no Telegram-specific newsletter state owner.
 - It sends **one shared email to the whole group** (a thread everyone is on), not a personalized email per member. Members reply-all; Murph participates in the thread.
 - It **reads only health data that members explicitly share** through the disclosed reaction offer or the join page. Newsletter `prepare` performs the consent-aware Web read after the model invokes the tool; no shared snapshot or destination-local share store is written into the group vault. It does not infer newsletter health access from private 1:1 Murph data.
 - Email addresses are **shared with the group by explicit grant** and are visible to co-members in the thread's `To` line — that visibility is the point of a shared reply-all thread and is exactly what the grant authorizes. Addresses are **not persisted in the group vault**; they are resolved web-side at send time and placed only in the outbound email headers.
@@ -121,6 +121,14 @@ instruction, not a provenance guarantee: conversation or tool context can still
 be visible to the model. The hard boundary is the late authorization proof,
 which constrains current preparation and recipients but does not prove that
 every model-authored sentence came only from the latest preparation.
+
+For a scheduled Telegram group current-chat run, the saved target cannot open
+that shared-read boundary by itself. Before exposing `read_shared` or starting
+the model, the runtime obtains an exact `{ channel, containerMemberId, threadId
+}` assertion from the signed Web route owner. It carries that assertion on the
+ordinary outbox intent and rechecks the same owner immediately before Telegram
+provider entry. Missing ownership is retryable and changed ownership blocks the
+send, so composition from one group cannot be redirected to another thread.
 
 Each scheduled turn owns a one-shot capability: exactly one preparation
 attempt and at most one send attempt. Any failure or send closes it, so a model
@@ -271,6 +279,11 @@ Individual and self-service. A member says "take me off the newsletter" **in the
   finds no email-eligible participant, trusted runtime code records the
   terminal `no_recipients` result and closes send authority while the model
   returns the documented group settings reminder.
+- **Current-chat route coupling.** Scheduled Telegram group composition cannot
+  read shared facts until Web proves that the stored thread still belongs to
+  the executing synthetic group container. The same exact authority must reach
+  the ordinary outbox and pass a live Web recheck at provider entry. Route-owner
+  unavailability or reassignment fails without sending to a replacement chat.
 
 ## The Skill
 

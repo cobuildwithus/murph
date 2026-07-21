@@ -1315,6 +1315,28 @@ export async function runHostedWorkspaceAssistantPhase(
           }),
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
+        resolveScheduledExternalThreadRoute: async ({
+          channel,
+          signal,
+          target,
+        }) => {
+          const assertAuthority =
+            input.runtime.platform.effectsPort.assertExternalThreadRouteAuthority;
+          if (!assertAuthority) {
+            throw new VaultCliError(
+              "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+              "Hosted group delivery requires live thread route authority before provider work.",
+              { retryable: true },
+            );
+          }
+          const authority = {
+            channel,
+            containerMemberId: input.request.userId,
+            threadId: target,
+          } as const;
+          await assertAuthority(authority, { signal });
+          return authority;
+        },
         resolveScheduledLinqRoute: async ({
           homeRouteFallbackAllowed,
           signal,

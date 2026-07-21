@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-19
+Last verified: 2026-07-21
 
 ## Current Repo Checks
 
@@ -62,6 +62,18 @@ real-PostgreSQL suite proves grant replay, beneficiary-first lock ordering,
 grant/debit serialization, and deletion-first cleanup. Stripe remains mocked,
 and component tests do not replace a deployed browser flow, so launch still
 needs the documented test-mode Checkout, webhook, and browser smoke.
+
+Scheduled Telegram group route-authority coverage is owner-split. Hosted Web
+tests bind the signed callback member to the exact current thread-container
+route and reject a foreign container. Cloudflare tests lock the new signed
+effect path, write fence, and outbound allowlist. Assistant-engine tests prove
+the exact route is resolved before group tools/model work and persisted through
+the ordinary outbox; assistant-runtime tests prove provider-entry ordering and
+revocation blocking, while the shared gate covers Telegram text, image,
+reaction, and voice provider paths. The hosted-local Telegram
+scheduled-reminder scenario adds the production-path proof: a real group
+newsletter invokes `read_shared`, wakes from its alarm, and sends only to the
+exact admitted group thread.
 
 ## Current CI Workflows
 
