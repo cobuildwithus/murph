@@ -42,11 +42,12 @@ No backfill is required. Missing persona adds no persona or dial overlay to the 
 ## Preview delivery
 
 The picker asks for a persona-specific clip first at
-`/audio/murph-personas/<persona-id>/<voice-id>.mp3`. Until generated clips are
-published, the shared voice sample at `/audio/murph-voices/<voice-id>.mp3` is
-the deterministic fallback. Both paths use the same canonical voice id; a
-missing preview never blocks selection or saving. The generator writes only the
-persona-specific assets and requires the existing ElevenLabs credentials.
+`/audio/murph-personas/<persona-id>/<voice-id>.mp3`. All 75 catalog combinations
+ship as generated MP3 assets. The shared voice sample at
+`/audio/murph-voices/<voice-id>.mp3` remains the deterministic fallback if a
+persona-specific clip cannot load. Both paths use the same canonical voice id;
+a missing preview never blocks selection or saving. The generator writes only
+the persona-specific assets and requires the existing ElevenLabs credentials.
 
 ## Deployment
 
