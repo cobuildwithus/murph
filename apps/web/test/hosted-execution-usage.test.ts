@@ -474,17 +474,13 @@ describe("recordHostedAiUsageRecords", () => {
     );
   });
 
-  it("suppresses a standalone low warning while preserving the exhausted notice", async () => {
+  it("sends the exhausted notice when prior accounting created no low candidate", async () => {
     const hostedAiUsageUpsert = vi.fn(
       async (args: { create: Record<string, unknown> }) => args.create,
     );
     const prisma = makeUsagePrisma(hostedAiUsageUpsert);
     allowanceMocks.accountHostedAiUsageForAllowanceTx
-      .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
-        noticeCode: "thread_usage_low",
-        noticeMessage: "This chat is running low on Murph usage.",
-        sourceUsageId: "turn_123.attempt-1",
-      }))
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(buildUsageLimitNoticeCandidate({
         noticeCode: "thread_usage_limit_reached",
         noticeMessage: "Murph usage is paused for this chat.",

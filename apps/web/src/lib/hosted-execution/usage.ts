@@ -110,9 +110,6 @@ export async function recordHostedAiUsageRecordsAndSendLimitNotices(input: {
   for (const candidate of dedupeHostedAiUsageLimitNoticeCandidates(
     result.limitNoticeCandidates,
   )) {
-    if (candidate.userNotice.code === "thread_usage_low") {
-      continue;
-    }
     await sendHostedAiUsageLimitNoticeCandidate({
       candidate,
       ...(input.noticeDeliveryTarget === undefined

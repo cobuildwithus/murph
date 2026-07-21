@@ -706,16 +706,23 @@ Stripe and call the same idempotent reconciler by purchase ID.
 4. Deploy the Cloudflare/runner bundle that parses the optional low-capacity
    field and advertises `read_usage`, then verify the exact runner fingerprint
    converges. A new runner must not be allowed to send the action to an older
-   Web deployment.
+   Web deployment. The new stable hosted developer guidance deliberately
+   changes the assistant contract fingerprint: every existing direct or group
+   session that would otherwise use native resume starts one new provider
+   thread on its first post-deploy conversation turn. That turn replays the
+   committed transcript fallback, bounded to 24 messages, 4,000 bytes per
+   message, and 12,000 bytes total; later turns resume the new thread. A rollback
+   rotates sessions that already adopted the new fingerprint once more.
 5. After the new Web deployment is current and the prior function window has
    drained, run the hosted Web contract migration. It installs both
    detached-payer checks as `NOT VALID` new-write guards and then validates
    existing rows.
-6. Before widening exposure, smoke group funding, a paid webhook grant, the
-   runtime recheck and subsequent usage debit, low next-turn context and the
-   exhausted notice, payer
-   deletion, and later negative/positive refund or dispute adjustments in
-   Stripe test mode.
+6. Before widening exposure, smoke one pre-existing healthy hosted session:
+   its first turn must rotate and reply without low context, and its second turn
+   must resume the new provider thread. Also smoke group funding, a paid webhook
+   grant, the runtime recheck and subsequent usage debit, low direct/group
+   next-turn context, the exhausted notice, payer deletion, and later
+   negative/positive refund or dispute adjustments in Stripe test mode.
 
 Rollback disables new Checkout creation and the Add usage actions first. It
 does not delete purchases or grants and must not disable the existing usage
