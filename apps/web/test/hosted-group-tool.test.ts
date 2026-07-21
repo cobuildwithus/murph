@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
@@ -124,9 +124,6 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
-  isHostedGroupDisclosureProducerEnabled: (
-    source: Readonly<Record<string, string | undefined>> = process.env,
-  ) => source.HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED === "1",
   requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
   requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
 }));
@@ -1435,7 +1432,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubEnv("HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED", "1");
     mocks.assertHostedLinqRouteEgressAuthority.mockResolvedValue({});
     mocks.canonicalizeHostedGroupDisclosurePermissionText.mockImplementation(
       (value: string) => value.replaceAll("\r\n", "\n").trim(),
@@ -1484,10 +1480,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
     mocks.updateHostedLinqChatAvatar.mockResolvedValue(undefined);
     mocks.updateHostedLinqChatDisplayName.mockResolvedValue(undefined);
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
   });
 
   it("fails closed when the runtime supplied no linq thread context", async () => {
@@ -1604,28 +1596,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
-  });
-
-  it("does not send or bind disclosure consent while the producer gate is off", async () => {
-    vi.stubEnv("HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED", "0");
-
-    await expect(handleHostedRuntimeGroupTool({
-      memberId: "member_container",
-      request: {
-        action: "post_disclosure_request",
-        linqThread: LINQ_THREAD,
-        originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
-        permissionText: "Recent sleep timing and duration",
-      },
-    })).resolves.toEqual({
-      action: "post_disclosure_request",
-      result: { status: "unavailable", unavailableReason: "feature_disabled" },
-    });
-
-    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
-    expect(mocks.readHostedGroupIdByRuntimeMemberId).not.toHaveBeenCalled();
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.recordHostedGroupDisclosurePermissionTx).not.toHaveBeenCalled();
   });
 
   it("does not send a fresh disclosure request when permission history is full", async () => {

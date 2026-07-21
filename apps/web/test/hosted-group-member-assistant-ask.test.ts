@@ -43,7 +43,6 @@ import {
   createHostedAssistantAskCompletionId,
   createHostedGroupMemberAssistantAskRequestId,
   handleHostedRuntimeAssistantAskControl,
-  isHostedGroupDisclosureProducerEnabled,
   requestHostedGroupMemberAssistantAsk,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -77,10 +76,6 @@ const PERMISSION_DIGEST = "d".repeat(64);
 const PERMISSION_TEXT =
   "Share my calendar availability only for coordinating a call with this group.";
 const QUESTION = "Which times work for a call tomorrow?";
-const ENABLED_ENVIRONMENT = {
-  HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED: "1",
-} as const;
-
 function disclosureAuthority() {
   return {
     grantId: GRANT_ID,
@@ -263,7 +258,6 @@ function requestDisclosure(
   >> = {},
 ) {
   return requestHostedGroupMemberAssistantAsk({
-    environment: ENABLED_ENVIRONMENT,
     grantId: GRANT_ID,
     memberId: GROUP_RUNTIME_MEMBER_ID,
     now: NOW,
@@ -298,21 +292,6 @@ describe("Hosted consented group-to-member Assistant Ask", () => {
         },
       }),
     );
-  });
-
-  it("uses a separate exact-one producer gate", async () => {
-    const { prisma } = createPrisma();
-
-    expect(isHostedGroupDisclosureProducerEnabled({
-      HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED: "true",
-    })).toBe(false);
-    await expect(requestDisclosure(prisma, {
-      environment: { HOSTED_ASSISTANT_ASK_PRODUCER_ENABLED: "1" },
-    })).resolves.toEqual({
-      mailboxWake: null,
-      result: { status: "unavailable", unavailableReason: "feature_disabled" },
-    });
-    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("pins the exact current grant generation before waking the personal runtime", async () => {

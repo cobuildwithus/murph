@@ -456,14 +456,16 @@ discriminant owns what happens next. `accepted_input` bypasses a provider
 continuation and delivers the reviewed answer byte-for-byte on the revalidated
 original group route through the existing outbox. `automation_occurrence` does
 not wake the group runtime or create a delivery. The live scheduled Codex turn
-starts every selected ask, uses one ordinary `sleep 60`, then repeats each exact
-`ask_member` call once. Web returns a flat completed result only after
-the ordinary cron owner revalidates the current canonical automation and
-non-direct Linq route immediately before the tool call, and Web revalidates the
-same request, completion, member, grant, permission, target runtime, origin,
-expiry, and runtime fences. An accepted or unavailable replay ends the turn without an
-answer; later completion is ignored. Cannot-answer uses the fixed non-disclosing
-result. The original private-to-group continuation retains its
+starts every selected ask, then uses ordinary shell waits and exact replay to
+poll each accepted `ask_member` call until it returns completed or unavailable.
+The existing request expiry bounds the loop. Web returns a flat completed
+result only after the ordinary cron owner revalidates the current canonical
+automation and non-direct Linq route immediately before the tool call, and Web
+revalidates the same request, completion, member, grant, permission, target
+runtime, origin, expiry, and runtime fences. An unavailable result ends that
+request without an answer, and no callback is held open while the member
+runtime works. Cannot-answer uses the fixed non-disclosing result. The original
+private-to-group continuation retains its
 legacy payload shape without an `origin` object. Leave/rejoin and revoke/regrant
 produce new generations, so old work cannot cross either lifecycle boundary.
 For accepted-input delivery, if live authority disappears after an exact answer
@@ -501,17 +503,12 @@ below that floor only after the full ten-minute request lifetime has elapsed
 and pending work has drained or expired; prefer a forward fix when imported
 items may remain.
 
-The consented reverse adapter has a distinct producer gate. First deploy
-consumers that tolerate the `consented_member` target, trusted invocation
-origins, reviewed exact accepted-input completion, and isolated internal
-automation completion while
-`HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` is unset or `0`. After Web and the
-immediate runner fleet converge and confinement/fingerprint smoke passes,
-the synchronous 25-row permission and per-group/per-member grant-generation
-caps satisfy the cardinality prerequisite. Enable exact `1` only after that
-convergence proof. Rollback turns that gate
-off first and keeps compatible consumers until new requests and completions
-have drained or expired from both Web mailboxes and imported runtime state.
+The consented reverse adapter is also hard-cut with no producer flag or disabled
+protocol mode. The first compatible runner bundle remains the rollback floor
+while a request or completion can remain in a Web mailbox or imported runtime
+state. Roll below that floor only after the full ten-minute request lifetime has
+elapsed and pending work has drained or expired; prefer a forward fix when an
+imported item may remain.
 
 ### Deploy Compatibility Rule
 

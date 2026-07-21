@@ -132,15 +132,16 @@ same bounded group port only after route authority resolves a non-direct thread,
 and the notification retains it only with runtime-minted occurrence authority.
 Ordinary notifications and manual, direct, unknown-audience, or local cron runs
 do not receive that group capability.
-A scheduled Codex turn starts every needed member ask, uses one ordinary
-`sleep 60`, and repeats each exact `ask_member` call once. Web returns a
-completed result only after the ordinary cron owner revalidates the current
-canonical automation and non-direct route immediately before the tool call, and
-Web revalidates the exact request and completion, member, grant, permission,
-personal runtime, origin, expiry, and runtime fences. An accepted or unavailable
-replay ends that same turn without an answer. Scheduled completion
-never wakes the group runtime, starts another provider turn, or creates a group
-outbox delivery; a completion that arrives after the replay is ignored. The
+A scheduled Codex turn starts every needed member ask, then uses ordinary shell
+waits and exact replay to poll each accepted `ask_member` call until it returns
+completed or unavailable. The existing request expiry bounds the loop. Web
+returns a completed result only after the ordinary cron owner revalidates the
+current canonical automation and non-direct route immediately before the tool
+call, and Web revalidates the exact request and completion, member, grant,
+permission, personal runtime, origin, expiry, and runtime fences. An unavailable
+result ends that request without an answer. Scheduled completion never wakes the
+group runtime, starts another provider turn, creates a group outbox delivery, or
+holds a callback open while the member runtime works. The
 reviewed answer remains untrusted data rather than consent for an external
 action, and the ordinary scheduled turn may use only tools independently
 authorized by their existing owners. It never gains access to the grantor's

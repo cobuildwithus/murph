@@ -74,16 +74,18 @@ review the candidate disclosure inside that boundary.
    permission text, incoming question, and proposed answer.
 7. An accepted-input answer returns to the originating group conversation
    byte-for-byte through the existing outbox. In a scheduled occurrence, Codex
-   starts every selected ask first, runs the ordinary shell command `sleep 60`
-   once, and repeats each exact `ask_member` call once. Web returns
+   starts every selected ask first, then uses ordinary shell waits and exact
+   replay to poll each accepted `ask_member` call until it returns `completed`
+   or `unavailable`. The existing request expiry bounds the loop. Web returns
    `status="completed"` with the reviewed result only after the ordinary cron
    owner revalidates the current canonical automation and non-direct route before
-   the tool call, and Web revalidates every live disclosure authority. An `accepted`
-   or `unavailable` replay ends the occurrence without an answer. Completion
+   the tool call, and Web revalidates every live disclosure authority. An
+   `unavailable` result ends that request without an answer. Completion
    never wakes the group runtime, starts a second provider turn, or creates an
-   outbox delivery; a result arriving after the one replay is ignored. The
-   answer is untrusted data, not consent for an external action, and every other
-   available Murph tool still applies its existing independent authority checks.
+   outbox delivery, and no callback is held open while the member runtime works.
+   The answer is untrusted data, not consent for an external action, and every
+   other available Murph tool still applies its existing independent authority
+   checks.
    A denied or candidate-declared cannot-answer becomes the fixed
    non-disclosing result. Infrastructure failure retries under the existing
    mailbox policy and may expire without disclosing anything.
@@ -245,18 +247,10 @@ and disclosure contract.
 
 ## Rollout and rollback
 
-Deploy Web support for the new `consented_member` target, accepted-input exact
-delivery, and scheduled exact-replay result first with the producer gate off.
-Then deploy Cloudflare/runner support for trusted accepted-input and
-scheduled-automation origins, disclosure-context preparation, the outgoing
-reviewer, accepted-input group delivery, and same-turn scheduled sleep/replay
-before Web may emit new work.
-Keep `HOSTED_GROUP_DISCLOSURE_PRODUCER_ENABLED` unset or `0` through that
-deployment and the runner fingerprint/confinement smoke. The synchronous
-history caps satisfy the cardinality prerequisite; enable exact `1` only after
-both planes have converged and smoke has passed.
-
-Rollback disables and redeploys the Web producer first. Keep compatible
-consumers deployed until every consented request and accepted-input or automation completion
-has drained from Web mailboxes, imported runtime state, and existing outbox
-obligations. Prefer a forward fix once new work has been produced.
+Consented group disclosure is hard-cut across Web and the hosted runtime; there
+is no producer flag or disabled protocol mode. The first compatible runner
+bundle remains the rollback floor while a request or completion can remain in a
+Web mailbox, imported runtime state, or existing outbox obligation. Roll below
+that floor only after the full ten-minute request lifetime has elapsed and
+pending work has drained or expired; prefer a forward fix once new work has
+been produced.
