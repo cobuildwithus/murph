@@ -7,6 +7,7 @@ import {
 import {
   HOSTED_CLINICAL_RECORDS_MAX_RESOURCE_FAMILIES,
   buildHostedExecutionClinicalRecordsSyncRequestedWake,
+  hostedClinicalRecordsFetchPageRequestSchema,
   hostedClinicalRecordsRetrievalScopeSchema,
   parseHostedClinicalRecordsFetchPageResponse,
   parseHostedClinicalRecordsConnectLinkResponse,
@@ -152,6 +153,48 @@ describe("clinical records hosted execution contracts", () => {
     expect(() => parseHostedClinicalRecordsRunDescriptor({
       ...descriptor,
       sourceSystem: "unsupported-fhir",
+    })).toThrow();
+  });
+
+  it("parses query-aware descriptors and requires page requests to name the slice", () => {
+    const descriptor = {
+      connectionId: "connection_1",
+      fetchedAt: "2026-07-10T12:00:00.000Z",
+      fhirBaseUrlHash: HASH,
+      generation: 1,
+      grantedScopes: ["patient/Observation.read"],
+      patientIdHash: HASH,
+      requestedScopes: ["patient/Observation.read"],
+      retrievalJobId: "job_1",
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: ["observation-labs", "observation-vitals"].map((queryScopeId, index) => ({
+        coverage: "whole-family",
+        queryFingerprint: String(index + 1).repeat(64),
+        queryScopeId,
+        resourceType: "Observation",
+        sliceId: "whole",
+      })),
+      runId: "clinical_run_1",
+      sourceSystem: "epic-fhir",
+    };
+    expect(parseHostedClinicalRecordsRunDescriptor(descriptor)).toEqual(descriptor);
+    expect(hostedClinicalRecordsFetchPageRequestSchema.parse({
+      cursor: null,
+      generation: 1,
+      queryScopeId: "observation-vitals",
+      requestId: "request_1",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      runId: "clinical_run_1",
+      sliceId: "whole",
+    })).toMatchObject({ queryScopeId: "observation-vitals" });
+    expect(() => hostedClinicalRecordsFetchPageRequestSchema.parse({
+      cursor: null,
+      generation: 1,
+      requestId: "request_1",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      runId: "clinical_run_1",
     })).toThrow();
   });
 
