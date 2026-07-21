@@ -373,7 +373,7 @@ describe("@murphai/contracts public entrypoint", () => {
         elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
         gender: "female",
         id: "narrator",
-        label: "Audiobook narrator",
+        label: "Documentary narrator",
         previewPath: "/audio/murph-voices/narrator.mp3",
       },
       {

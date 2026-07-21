@@ -3,6 +3,7 @@ import {
   BiomarkerIndexStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { Separator } from "@/src/components/ui/separator";
+import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 
 function StudySection({
   children,
@@ -27,6 +28,12 @@ export function SectionsContent() {
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
+
+      <Separator />
+
+      <StudySection title="Persona onboarding">
+        <PersonaOnboardingStudy />
+      </StudySection>
 
       <Separator />
 

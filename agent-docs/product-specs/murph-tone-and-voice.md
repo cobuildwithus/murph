@@ -43,7 +43,7 @@ Its optional assistant block is:
 ```json
 {
   "assistant": {
-    "persona": "medical-detective",
+    "persona": "scientist-with-classic",
     "tone": "casual",
     "voice": "deep-calm",
     "personality": {
@@ -57,7 +57,7 @@ Its optional assistant block is:
 
 The personality object is strict and sparse. It stores only explicit user choices. Every stored value is an integer from 0 through 10. Unknown keys, fractions, and out-of-range scores fail validation instead of being ignored or clamped.
 
-The Classic Murph baseline defaults are:
+The Classic baseline defaults are:
 
 | Dial | Default |
 | --- | ---: |

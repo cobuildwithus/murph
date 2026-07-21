@@ -59,11 +59,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // consented group-to-member ask path measures 9,402,536B on that merged base;
 // the scheduled-authority remediation measures 9,402,701B, and the combined
 // post-#827 head measures 9,405,369B. After merging current main's biomarker
-// unit normalization, the combined head measures 9,410,180B. Ratchet the fixed
-// total backstop to that exact local measurement;
+// unit normalization, the combined head measures 9,410,180B. Current main's
+// persona redesign adds 10,122B, so the latest combined head measures
+// 9,420,302B. Ratchet the fixed total backstop to that exact local measurement;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_410_180;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_420_302;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

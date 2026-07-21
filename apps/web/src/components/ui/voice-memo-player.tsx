@@ -13,6 +13,9 @@ import { PauseIcon, PlayIcon } from "lucide-react";
 import { cn } from "@/src/lib/utils";
 
 const DEFAULT_BAR_COUNT = 32;
+const MIN_RESPONSIVE_BAR_COUNT = 24;
+const MAX_RESPONSIVE_BAR_COUNT = 72;
+const TARGET_BAR_CELL_WIDTH_PX = 6;
 
 // Fixed-precision strings: the server and client build pipelines stringify
 // raw floats at different precision, which trips React hydration on the
@@ -46,14 +49,15 @@ export interface VoiceMemoPlayerHandle {
 interface VoiceMemoPlayerProps {
   src: string;
   fallbackSrc?: string;
+  accessibleLabel?: string;
   caption?: string;
   accentClassName?: string;
   fillClassName?: string;
   trackClassName?: string;
   // Chrome around the play row; pass "" when the parent supplies the bubble.
   containerClassName?: string;
-  // Waveform density: scale with the rendered width so wide players do not
-  // look sparse and narrow ones do not look granular.
+  // Initial server-rendered density. The client measures the waveform and
+  // adjusts the count so narrow and wide players keep consistent spacing.
   bars?: number;
   exclusiveGroupId?: string;
   preload?: "none" | "metadata" | "auto";
@@ -67,6 +71,7 @@ export const VoiceMemoPlayer = forwardRef<
   {
     src,
     fallbackSrc,
+    accessibleLabel = "voice memo",
     caption,
     accentClassName = "bg-[#5e5530]",
     fillClassName = "bg-[#5e5530]",
@@ -80,12 +85,45 @@ export const VoiceMemoPlayer = forwardRef<
   ref,
 ) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const waveformRef = useRef<HTMLButtonElement | null>(null);
   const probedDurationRef = useRef(false);
+  const [barCount, setBarCount] = useState(bars);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [unavailable, setUnavailable] = useState(false);
   const [resolvedSrc, setResolvedSrc] = useState(src);
+
+  useEffect(() => {
+    setBarCount(bars);
+  }, [bars]);
+
+  useEffect(() => {
+    const waveform = waveformRef.current;
+    if (!waveform || typeof ResizeObserver === "undefined") return;
+
+    const updateBarCount = (width: number) => {
+      if (!Number.isFinite(width) || width <= 0) return;
+      const nextCount = Math.max(
+        MIN_RESPONSIVE_BAR_COUNT,
+        Math.min(
+          MAX_RESPONSIVE_BAR_COUNT,
+          Math.floor(width / TARGET_BAR_CELL_WIDTH_PX),
+        ),
+      );
+      setBarCount((currentCount) =>
+        currentCount === nextCount ? currentCount : nextCount,
+      );
+    };
+
+    updateBarCount(waveform.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) updateBarCount(entry.contentRect.width);
+    });
+    observer.observe(waveform);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     setResolvedSrc(src);
@@ -203,7 +241,7 @@ export const VoiceMemoPlayer = forwardRef<
           type="button"
           onClick={toggle}
           disabled={unavailable}
-          aria-label={playing ? "Pause voice memo" : "Play voice memo"}
+          aria-label={`${playing ? "Pause" : "Play"} ${accessibleLabel}`}
           className={cn(
             "flex size-9 shrink-0 items-center justify-center rounded-full text-white transition-transform active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-55",
             accentClassName,
@@ -226,19 +264,18 @@ export const VoiceMemoPlayer = forwardRef<
         </button>
 
         <button
+          ref={waveformRef}
           type="button"
           onClick={toggle}
           disabled={unavailable}
           aria-label={
-            playing
-              ? "Pause voice memo from waveform"
-              : "Play voice memo from waveform"
+            `${playing ? "Pause" : "Play"} ${accessibleLabel} from waveform`
           }
           data-voice-memo-waveform
           className="flex h-7 flex-1 cursor-pointer items-center justify-between rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed"
         >
-          {barHeightsFor(bars).map((h, i) => {
-            const filled = (i + 1) / bars <= progress;
+          {barHeightsFor(barCount).map((h, i) => {
+            const filled = (i + 1) / barCount <= progress;
             return (
               <span
                 key={i}

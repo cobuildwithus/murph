@@ -519,7 +519,6 @@ function VoiceCard({
         <VoiceMemoPlayer
           ref={playerRef}
           src={option.previewPath}
-          bars={12}
           exclusiveGroupId={groupId}
           preload="none"
           unavailableLabel="Pending"

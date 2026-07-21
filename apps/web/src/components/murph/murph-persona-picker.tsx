@@ -1,17 +1,23 @@
 "use client";
 
 import {
-  assistantPersonaOptions,
-  resolveAssistantPersonaOption,
+  assistantBasePersonaOptions,
+  assistantVoiceOptions,
+  resolveAssistantBasePersonaOption,
+  resolveAssistantPersonaCombinationId,
+  resolveAssistantPersonaParts,
   resolveAssistantPersonaRecommendedVoiceOptions,
+  type AssistantBasePersonaId,
+  type AssistantBasePersonaOption,
   type AssistantPersonaId,
   type AssistantVoiceOption,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
-import { CheckIcon, Loader2Icon, Mic2Icon, UsersIcon } from "lucide-react";
+import { CheckIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
+import { MurphPersonaGlyph } from "@/src/components/murph/murph-persona-glyph";
 import { Button } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -28,7 +34,10 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/src/components/ui/drawer";
-import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
+import {
+  VoiceMemoPlayer,
+  type VoiceMemoPlayerHandle,
+} from "@/src/components/ui/voice-memo-player";
 import { useIsMobile } from "@/src/hooks/use-mobile";
 import { cn } from "@/src/lib/utils";
 
@@ -37,6 +46,8 @@ export interface MurphPersonaPreferences {
   tone: AssistantTonePreference;
   voice: AssistantVoiceOptionId;
 }
+
+type PersonaPickerStep = "main" | "supporting" | "voices" | "tone";
 
 export function MurphPersonaPicker({
   initialPersona = "classic",
@@ -60,11 +71,19 @@ export function MurphPersonaPicker({
   savePreference?: typeof saveAssistantPersonaPreference;
 }) {
   const isMobile = useIsMobile();
-  const personaGroupId = useId();
+  const mainPersonaGroupId = useId();
+  const supportingPersonaGroupId = useId();
   const toneGroupId = useId();
-  const voiceGroupId = useId();
-  const initialOption = resolveAssistantPersonaOption(initialPersona);
-  const [persona, setPersona] = useState<AssistantPersonaId>(initialOption.id);
+  const voicePreviewGroupId = useId();
+  const stepTitleId = useId();
+  const initialPersonaParts = resolveAssistantPersonaParts(initialPersona);
+  const initialOption = resolveAssistantBasePersonaOption(initialPersonaParts.mainId);
+  const [step, setStep] = useState<PersonaPickerStep>("main");
+  const [persona, setPersona] = useState<AssistantBasePersonaId>(
+    initialPersonaParts.mainId,
+  );
+  const [supportingPersona, setSupportingPersona] =
+    useState<AssistantBasePersonaId | null>(initialPersonaParts.supportingId);
   const [tone, setTone] = useState<AssistantTonePreference>(
     initialTone ?? initialOption.defaultTone,
   );
@@ -74,6 +93,8 @@ export function MurphPersonaPicker({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(false);
+  const stepTitleRef = useRef<HTMLDivElement | null>(null);
+  const previousStepRef = useRef<PersonaPickerStep>(step);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -82,17 +103,39 @@ export function MurphPersonaPicker({
     };
   }, []);
 
-  const selected = resolveAssistantPersonaOption(persona);
-  const voices = resolveAssistantPersonaRecommendedVoiceOptions(selected.id).map(
-    (option) => ({
-      ...option,
-      previewPath: `/audio/murph-personas/${selected.id}/${option.id}.mp3`,
-    }),
-  );
+  useEffect(() => {
+    if (!open) {
+      previousStepRef.current = step;
+      return;
+    }
+    if (previousStepRef.current === step) return;
+    previousStepRef.current = step;
+    stepTitleRef.current?.focus({ preventScroll: true });
+  }, [open, step]);
 
-  const selectPersona = (nextPersona: AssistantPersonaId) => {
-    const next = resolveAssistantPersonaOption(nextPersona);
-    setPersona(next.id);
+  const selectedPersona = resolveAssistantBasePersonaOption(persona);
+  const selectedSupportingPersona = supportingPersona
+    ? resolveAssistantBasePersonaOption(supportingPersona)
+    : null;
+  const supportingPersonaOptions = assistantBasePersonaOptions.filter(
+    (option) => option.id !== persona,
+  );
+  const recommendedVoiceOptions =
+    resolveAssistantPersonaRecommendedVoiceOptions(persona).map((option) => ({
+      ...option,
+      previewPath: `/audio/murph-personas/${persona}/${option.id}.mp3`,
+    }));
+  const recommendedVoiceIds = new Set(
+    recommendedVoiceOptions.map((option) => option.id),
+  );
+  const otherVoiceOptions = assistantVoiceOptions
+    .filter((option) => !recommendedVoiceIds.has(option.id))
+    .map((option) => ({ ...option, previewPath: option.previewPath }));
+
+  const selectPersona = (nextPersona: AssistantBasePersonaId) => {
+    const next = resolveAssistantBasePersonaOption(nextPersona);
+    setPersona(nextPersona);
+    if (supportingPersona === next.id) setSupportingPersona(null);
     setTone(next.defaultTone);
     setVoice(next.defaultVoiceId);
   };
@@ -101,10 +144,15 @@ export function MurphPersonaPicker({
     setSaving(true);
     setError(null);
     try {
-      const saved = await savePreference({ persona, tone, voice });
+      const saved = await savePreference({
+        persona: resolveAssistantPersonaCombinationId(persona, supportingPersona),
+        tone,
+        voice,
+      });
       if (!mountedRef.current) return;
       onSaved?.(saved);
       onComplete?.(saved);
+      setStep("main");
       onOpenChange(false);
     } catch {
       if (mountedRef.current) {
@@ -119,134 +167,209 @@ export function MurphPersonaPicker({
     setError(null);
     onSkip?.();
     onComplete?.(null);
+    setStep("main");
     onOpenChange(false);
   };
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen && saving) return;
+    if (!nextOpen) setStep("main");
     onOpenChange(nextOpen);
   };
 
-  const content = (
-    <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-2 md:px-0">
+  const mainPersonaContent = (
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
+      data-persona-picker-step="main"
+    >
       <fieldset>
-        <legend className="sr-only">Murph persona</legend>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {assistantPersonaOptions.map((option) => {
-            const checked = option.id === persona;
-            const inputId = `${personaGroupId}-${option.id}`;
-            return (
-              <label key={option.id} htmlFor={inputId} className="cursor-pointer">
-                <input
-                  checked={checked}
-                  className="peer sr-only"
-                  disabled={saving}
-                  id={inputId}
-                  name={personaGroupId}
-                  onChange={() => selectPersona(option.id)}
-                  type="radio"
-                  value={option.id}
-                />
-                <span
-                  className={cn(
-                    "flex min-h-28 flex-col items-start gap-2 rounded-xl border p-3 text-left transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:cursor-not-allowed peer-disabled:opacity-60",
-                    checked
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-background hover:border-primary/45",
-                  )}
-                >
-                  <span className="flex w-full items-start justify-between gap-2">
-                    <span className="font-serif text-base/5 font-semibold text-foreground">
-                      {option.label}
-                    </span>
-                    <SelectedCheck selected={checked} />
-                  </span>
-                  <span className="text-sm leading-5 text-muted-foreground">
-                    {option.sample}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      <section className="rounded-xl border border-border bg-muted/35 p-4">
-        <p className="font-serif text-lg font-semibold text-foreground">
-          {selected.label}
-        </p>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          {selected.description}
-        </p>
-        <p className="mt-3 rounded-lg bg-background p-3 text-sm leading-6 text-foreground ring-1 ring-border">
-          “{selected.previewText}”
-        </p>
-      </section>
-
-      <fieldset className="flex flex-col gap-2">
-        <legend className="text-sm font-medium text-foreground">Text style</legend>
-        <div className="grid grid-cols-2 gap-2">
-          {([
-            ["formal", "Standard", "Normal capitalization."],
-            ["casual", "Lowercase", "Relaxed, lowercase messages."],
-          ] as const).map(([id, label, description]) => {
-            const inputId = `${toneGroupId}-${id}`;
-            return (
-              <label key={id} htmlFor={inputId} className="cursor-pointer">
-                <input
-                  checked={tone === id}
-                  className="peer sr-only"
-                  disabled={saving}
-                  id={inputId}
-                  name={toneGroupId}
-                  onChange={() => setTone(id)}
-                  type="radio"
-                  value={id}
-                />
-                <span
-                  className={cn(
-                    "block rounded-lg border p-3 text-left peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:cursor-not-allowed peer-disabled:opacity-60",
-                    tone === id
-                      ? "border-primary bg-primary/10"
-                      : "border-border bg-background",
-                  )}
-                >
-                  <span className="block text-sm font-medium text-foreground">
-                    {label}
-                  </span>
-                  <span className="mt-1 block text-sm text-muted-foreground">
-                    {description}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      <fieldset className="flex flex-col gap-2">
-        <legend className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Mic2Icon className="size-4" aria-hidden="true" /> Voice
-        </legend>
-        <p className="text-sm leading-5 text-muted-foreground">
-          Preview voices that fit {selected.label}.
-        </p>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {voices.map((option) => (
-            <PersonaVoiceCard
+        <legend className="sr-only">Main Murph personality</legend>
+        <div className="grid content-start gap-3 pb-1 sm:grid-cols-2">
+          {assistantBasePersonaOptions.map((option) => (
+            <PersonaMatchCard
               key={option.id}
               disabled={saving}
-              groupId={voiceGroupId}
+              groupId={mainPersonaGroupId}
               option={option}
-              selected={voice === option.id}
-              onSelect={() => setVoice(option.id)}
+              selected={persona === option.id}
+              onSelect={() => selectPersona(option.id)}
             />
           ))}
         </div>
       </fieldset>
-
     </div>
   );
+
+  const supportingPersonaContent = (
+    <div
+      className="grid min-h-0 flex-1 gap-5 overflow-y-auto overscroll-contain px-4 pb-2 md:grid-cols-[minmax(15rem,0.9fr)_minmax(19rem,1.1fr)] md:px-0 md:pr-1"
+      data-persona-picker-step="supporting"
+    >
+      <section
+        aria-label="Your Murph personality blend"
+        className="flex self-start flex-col rounded-xl bg-muted/45 p-5"
+      >
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Your Murph
+        </p>
+        <div className="mt-5 flex items-end gap-2.5" aria-hidden="true">
+          <span className="flex size-20 items-center justify-center rounded-xl bg-background text-primary ring-1 ring-border">
+            <MurphPersonaGlyph className="size-10" personaId={persona} />
+          </span>
+          {selectedSupportingPersona ? (
+            <>
+              <span className="pb-3 font-serif text-xl text-muted-foreground">
+                +
+              </span>
+              <span className="flex size-14 items-center justify-center rounded-lg bg-background text-primary/75 ring-1 ring-border">
+                <MurphPersonaGlyph
+                  className="size-7"
+                  personaId={selectedSupportingPersona.id}
+                />
+              </span>
+            </>
+          ) : null}
+        </div>
+        <div className="mt-5">
+          <p className="font-serif text-2xl/7 font-semibold text-foreground">
+            {selectedPersona.label} leads
+          </p>
+          <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+            {selectedSupportingPersona
+              ? `Supported by ${selectedSupportingPersona.label}.`
+              : "No supporting personality added."}
+          </p>
+        </div>
+        <div className="pt-7">
+          <div className="flex h-1.5 overflow-hidden rounded-full bg-border">
+            <span
+              className={cn(
+                "bg-primary",
+                selectedSupportingPersona ? "w-3/4" : "w-full",
+              )}
+            />
+            {selectedSupportingPersona ? (
+              <span className="w-1/4 bg-primary/30" />
+            ) : null}
+          </div>
+          <div className="mt-2 flex justify-between gap-3 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
+            <span>Main</span>
+            {selectedSupportingPersona ? <span>Supporting</span> : null}
+          </div>
+        </div>
+      </section>
+
+      <fieldset className="min-w-0">
+        <legend className="sr-only">Supporting Murph personality</legend>
+        <div className="flex flex-col gap-2 pb-1">
+          <SupportingPersonaChoice
+            disabled={saving}
+            groupId={supportingPersonaGroupId}
+            mainPersonaLabel={selectedPersona.label}
+            onSelect={() => setSupportingPersona(null)}
+            selected={supportingPersona === null}
+          />
+          {supportingPersonaOptions.map((option) => (
+            <SupportingPersonaChoice
+              key={option.id}
+              disabled={saving}
+              groupId={supportingPersonaGroupId}
+              onSelect={() => setSupportingPersona(option.id)}
+              option={option}
+              selected={supportingPersona === option.id}
+            />
+          ))}
+        </div>
+      </fieldset>
+    </div>
+  );
+
+  const voicesContent = (
+    <div
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-2 md:px-0 md:pr-1"
+      data-persona-picker-step="voices"
+    >
+      <fieldset>
+        <legend className="sr-only">Murph voice</legend>
+        <div className="flex flex-col gap-6 pb-1">
+          <div className="flex flex-col gap-3">
+            <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Recommended for {selectedPersona.label}
+            </h3>
+            <div className="grid content-start gap-2 sm:grid-cols-2">
+              {recommendedVoiceOptions.map((option) => (
+                <PersonaVoiceChoice
+                  key={option.id}
+                  disabled={saving}
+                  groupId={voicePreviewGroupId}
+                  option={option}
+                  selected={voice === option.id}
+                  onSelect={() => setVoice(option.id)}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-border pt-5">
+            <h3 className="text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              Other voices
+            </h3>
+            <div className="grid content-start gap-2 sm:grid-cols-2">
+              {otherVoiceOptions.map((option) => (
+                <PersonaVoiceChoice
+                  key={option.id}
+                  disabled={saving}
+                  groupId={voicePreviewGroupId}
+                  option={option}
+                  selected={voice === option.id}
+                  onSelect={() => setVoice(option.id)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+  );
+
+  const toneContent = (
+    <div
+      className="min-h-0 flex-1 overflow-y-auto px-4 pb-2 md:px-0"
+      data-persona-picker-step="tone"
+    >
+      <fieldset disabled={saving}>
+        <legend className="sr-only">Murph tone</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ToneChoiceCard
+            disabled={saving}
+            groupId={toneGroupId}
+            label="Formal"
+            onSelect={() => setTone("formal")}
+            sample="Your sleep is down this week. Want to work on sleep first?"
+            selected={tone === "formal"}
+            value="formal"
+          />
+          <ToneChoiceCard
+            disabled={saving}
+            groupId={toneGroupId}
+            label="Casual"
+            onSelect={() => setTone("casual")}
+            sample="sleep is way down this week. wanna fix sleep first?"
+            selected={tone === "casual"}
+            value="casual"
+          />
+        </div>
+      </fieldset>
+    </div>
+  );
+
+  const activeContent =
+    step === "main"
+      ? mainPersonaContent
+      : step === "supporting"
+        ? supportingPersonaContent
+        : step === "voices"
+          ? voicesContent
+          : toneContent;
 
   const actions = (
     <div className="flex flex-col gap-2">
@@ -264,16 +387,43 @@ export function MurphPersonaPicker({
           size="lg"
           variant="ghost"
           disabled={saving}
-          onClick={handleSkip}
+          onClick={() => {
+            if (step === "main") {
+              handleSkip();
+              return;
+            }
+            setError(null);
+            setStep(
+              step === "tone"
+                ? "voices"
+                : step === "voices"
+                  ? "supporting"
+                  : "main",
+            );
+          }}
         >
-          Skip
+          {step === "main" ? "Skip" : "Back"}
         </Button>
         <Button
           type="button"
           size="lg"
-          aria-busy={saving}
+          aria-busy={step === "tone" && saving}
           disabled={saving}
-          onClick={handleSave}
+          onClick={() => {
+            if (step === "main") {
+              setStep("supporting");
+              return;
+            }
+            if (step === "supporting") {
+              setStep("voices");
+              return;
+            }
+            if (step === "voices") {
+              setStep("tone");
+              return;
+            }
+            void handleSave();
+          }}
         >
           {saving ? (
             <Loader2Icon data-icon="inline-start" className="animate-spin" />
@@ -284,30 +434,55 @@ export function MurphPersonaPicker({
     </div>
   );
 
-  const icon = (
-    <div
-      aria-hidden="true"
-      className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
-    >
-      <UsersIcon className="size-5" strokeWidth={1.8} />
-    </div>
-  );
+  const stepNumber =
+    step === "main" ? 1 : step === "supporting" ? 2 : step === "voices" ? 3 : 4;
+  const title =
+    step === "main"
+      ? "Choose Murph’s main personality"
+      : step === "supporting"
+        ? "Add a supporting personality"
+        : step === "voices"
+          ? "Choose a voice"
+          : "Pick Murph’s tone";
+  const description =
+    step === "main"
+      ? "This is how Murph will show up most of the time. You can change it anytime."
+      : step === "supporting"
+        ? `Optional. Murph will lead with ${selectedPersona.label} and borrow a little from one other personality.`
+        : step === "tone"
+          ? "Which sounds more like you?"
+          : null;
+  const accessibleDescription =
+    description
+    ?? `Choose a voice for ${selectedPersona.label}.`;
 
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-start gap-2 pb-3 text-left">
-            {icon}
-            <DrawerTitle className="font-serif text-2xl/7 font-semibold">
-              Who do you want in your corner?
-            </DrawerTitle>
-            <DrawerDescription className="text-sm leading-6">
-              Choose how Murph should show up. You can fine-tune the writing
-              style, voice, and personality later.
+            <StepProgress step={stepNumber} />
+            <div
+              ref={stepTitleRef}
+              aria-labelledby={stepTitleId}
+              className="outline-none"
+              data-persona-picker-step-title
+              tabIndex={-1}
+            >
+              <DrawerTitle
+                id={stepTitleId}
+                className="font-serif text-[2rem] leading-9 font-semibold tracking-[-0.02em]"
+              >
+                {title}
+              </DrawerTitle>
+            </div>
+            <DrawerDescription
+              className={cn("text-sm leading-6", !description && "sr-only")}
+            >
+              {accessibleDescription}
             </DrawerDescription>
           </DrawerHeader>
-          {content}
+          {activeContent}
           <DrawerFooter className="border-t border-border px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
             {actions}
           </DrawerFooter>
@@ -320,26 +495,267 @@ export function MurphPersonaPicker({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6 sm:max-w-4xl"
+        style={{
+          height:
+            step === "main" || step === "supporting" || step === "voices"
+              ? "min(44rem, calc(100dvh - 2rem))"
+              : undefined,
+          maxWidth:
+            step === "tone" ? "44rem" : "52rem",
+          width: "calc(100% - 2rem)",
+        }}
+        className="flex max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
       >
         <DialogHeader className="gap-2 text-left">
-          {icon}
-          <DialogTitle className="font-serif text-2xl/7 font-semibold">
-            Who do you want in your corner?
-          </DialogTitle>
-          <DialogDescription className="text-sm leading-6">
-            Choose how Murph should show up. You can fine-tune the writing
-            style, voice, and personality later.
+          <StepProgress step={stepNumber} />
+          <div
+            ref={stepTitleRef}
+            aria-labelledby={stepTitleId}
+            className="outline-none"
+            data-persona-picker-step-title
+            tabIndex={-1}
+          >
+            <DialogTitle
+              id={stepTitleId}
+              className="font-serif text-[2.5rem] leading-[2.75rem] font-semibold tracking-[-0.025em]"
+            >
+              {title}
+            </DialogTitle>
+          </div>
+          <DialogDescription
+            className={cn("text-sm leading-6", !description && "sr-only")}
+          >
+            {accessibleDescription}
           </DialogDescription>
         </DialogHeader>
-        {content}
+        {activeContent}
         {actions}
       </DialogContent>
     </Dialog>
   );
 }
 
-function PersonaVoiceCard({
+function PersonaMatchCard({
+  disabled,
+  groupId,
+  onSelect,
+  option,
+  selected,
+}: {
+  disabled: boolean;
+  groupId: string;
+  onSelect: () => void;
+  option: AssistantBasePersonaOption;
+  selected: boolean;
+}) {
+  const inputId = useId();
+
+  return (
+    <div
+      style={{ position: "relative" }}
+      className={cn(
+        "relative flex min-h-28 items-center gap-4 rounded-xl border p-4 transition-[border-color,background-color]",
+        selected
+          ? "border-primary bg-primary/10"
+          : "border-border bg-background hover:border-primary/45",
+      )}
+    >
+      <input
+        checked={selected}
+        className="peer sr-only"
+        disabled={disabled}
+        id={inputId}
+        aria-describedby={`${inputId}-description`}
+        aria-labelledby={`${inputId}-label`}
+        name={groupId}
+        onChange={onSelect}
+        type="radio"
+        value={option.id}
+      />
+      <label
+        htmlFor={inputId}
+        onClick={onSelect}
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+      >
+        <span className="sr-only">Select {option.label}</span>
+      </label>
+      <div className="pointer-events-none relative flex size-16 items-center justify-center rounded-xl bg-muted/70 text-primary">
+        <MurphPersonaGlyph className="size-8" personaId={option.id} />
+      </div>
+      <div className="pointer-events-none relative min-w-0 flex-1">
+        <span
+          id={`${inputId}-label`}
+          className="block pr-7 font-serif text-xl/6 font-semibold text-foreground"
+        >
+          {option.label}
+        </span>
+        <span
+          id={`${inputId}-description`}
+          className="mt-1 line-clamp-2 text-pretty text-sm leading-5 text-muted-foreground"
+        >
+          {option.description}
+        </span>
+      </div>
+      <div
+        className="pointer-events-none z-10"
+        style={{ position: "absolute", right: "1rem", top: "1rem" }}
+      >
+        <SelectedCheck selected={selected} />
+      </div>
+    </div>
+  );
+}
+
+function SupportingPersonaChoice({
+  disabled,
+  groupId,
+  mainPersonaLabel,
+  onSelect,
+  option,
+  selected,
+}: {
+  disabled: boolean;
+  groupId: string;
+  mainPersonaLabel?: string;
+  onSelect: () => void;
+  option?: AssistantBasePersonaOption;
+  selected: boolean;
+}) {
+  const inputId = useId();
+  const label = option?.label ?? "No supporting personality";
+  const description =
+    option?.supportDescription
+    ?? `Keep ${mainPersonaLabel ?? "the main personality"} focused.`;
+
+  return (
+    <div
+      className={cn(
+        "relative grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_1.25rem] items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-[border-color,background-color]",
+        selected
+          ? "border-primary bg-primary/10"
+          : "border-border bg-background hover:border-primary/45",
+      )}
+    >
+      <input
+        checked={selected}
+        className="peer sr-only"
+        disabled={disabled}
+        id={inputId}
+        aria-describedby={`${inputId}-description`}
+        aria-labelledby={`${inputId}-label`}
+        name={groupId}
+        onChange={onSelect}
+        type="radio"
+        value={option?.id ?? "none"}
+      />
+      <label
+        htmlFor={inputId}
+        onClick={onSelect}
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+      >
+        <span className="sr-only">Select {label}</span>
+      </label>
+      <span className="pointer-events-none relative flex size-10 items-center justify-center rounded-lg bg-muted/70 text-primary">
+        {option ? (
+          <MurphPersonaGlyph className="size-5" personaId={option.id} />
+        ) : (
+          <span className="h-px w-4 bg-muted-foreground/70" />
+        )}
+      </span>
+      <span className="pointer-events-none relative min-w-0">
+        <span
+          id={`${inputId}-label`}
+          className="block truncate font-serif text-base/5 font-semibold text-foreground"
+        >
+          {label}
+        </span>
+        <span
+          id={`${inputId}-description`}
+          className="mt-0.5 block truncate text-xs leading-5 text-muted-foreground"
+        >
+          {description}
+        </span>
+      </span>
+      <span className="pointer-events-none relative">
+        <SelectedCheck selected={selected} />
+      </span>
+    </div>
+  );
+}
+
+function ToneChoiceCard({
+  disabled,
+  groupId,
+  label,
+  onSelect,
+  sample,
+  selected,
+  value,
+}: {
+  disabled: boolean;
+  groupId: string;
+  label: string;
+  onSelect: () => void;
+  sample: string;
+  selected: boolean;
+  value: AssistantTonePreference;
+}) {
+  const inputId = useId();
+
+  return (
+    <div
+      className={cn(
+        "relative flex min-h-28 items-start rounded-xl border p-5 transition-[border-color,background-color]",
+        selected
+          ? "border-primary bg-primary/10"
+          : "border-border bg-background hover:border-primary/45",
+      )}
+      style={{ position: "relative" }}
+    >
+      <input
+        checked={selected}
+        className="peer sr-only"
+        disabled={disabled}
+        id={inputId}
+        aria-describedby={`${inputId}-sample`}
+        aria-labelledby={`${inputId}-label`}
+        name={groupId}
+        onChange={onSelect}
+        type="radio"
+        value={value}
+      />
+      <label
+        htmlFor={inputId}
+        onClick={onSelect}
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+      >
+        <span className="sr-only">Select {label}</span>
+      </label>
+      <div className="pointer-events-none relative min-w-0 pr-7">
+        <span
+          id={`${inputId}-label`}
+          className="block font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground"
+        >
+          {label}
+        </span>
+        <span
+          id={`${inputId}-sample`}
+          className="mt-3 block text-[0.9375rem] leading-6 text-foreground"
+        >
+          {sample}
+        </span>
+      </div>
+      <div
+        className="pointer-events-none z-10"
+        style={{ position: "absolute", right: "1rem", top: "1rem" }}
+      >
+        <SelectedCheck selected={selected} />
+      </div>
+    </div>
+  );
+}
+
+function PersonaVoiceChoice({
   disabled,
   groupId,
   onSelect,
@@ -353,11 +769,12 @@ function PersonaVoiceCard({
   selected: boolean;
 }) {
   const inputId = useId();
+  const playerRef = useRef<VoiceMemoPlayerHandle | null>(null);
 
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-lg border p-3",
+        "relative flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-background hover:border-primary/45",
@@ -368,30 +785,46 @@ function PersonaVoiceCard({
         className="peer sr-only"
         disabled={disabled}
         id={inputId}
+        aria-describedby={`${inputId}-description`}
+        aria-labelledby={`${inputId}-label`}
         name={groupId}
         onChange={onSelect}
+        onClick={() => {
+          onSelect();
+          playerRef.current?.play();
+        }}
         type="radio"
         value={option.id}
       />
       <label
         htmlFor={inputId}
-        className="flex cursor-pointer items-start justify-between gap-2 rounded-md peer-focus-visible:ring-2 peer-focus-visible:ring-ring"
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
       >
-        <span>
-          <span className="block font-serif text-base/5 font-semibold text-foreground">
+        <span className="sr-only">Select {option.label}</span>
+      </label>
+      <div className="pointer-events-none relative flex items-start justify-between gap-3">
+        <span className="min-w-0 flex-1">
+          <span
+            id={`${inputId}-label`}
+            className="block font-serif text-base/5 font-semibold text-foreground"
+          >
             {option.label}
           </span>
-          <span className="mt-0.5 block text-sm leading-5 text-muted-foreground">
+          <span
+            id={`${inputId}-description`}
+            className="mt-1 block truncate text-sm leading-5 text-muted-foreground"
+          >
             {option.description}
           </span>
         </span>
         <SelectedCheck selected={selected} />
-      </label>
-      <div>
+      </div>
+      <div className="relative" onClick={onSelect} role="presentation">
         <VoiceMemoPlayer
+          ref={playerRef}
+          accessibleLabel={`${option.label} voice preview`}
           src={option.previewPath}
           fallbackSrc={`/audio/murph-voices/${option.id}.mp3`}
-          bars={12}
           exclusiveGroupId={groupId}
           preload="metadata"
           unavailableLabel="Preview unavailable"
@@ -401,6 +834,27 @@ function PersonaVoiceCard({
           trackClassName="bg-primary/20"
         />
       </div>
+    </div>
+  );
+}
+
+function StepProgress({ step }: { step: 1 | 2 | 3 | 4 }) {
+  return (
+    <div className="flex w-full items-center gap-3" aria-label={`Step ${step} of 4`}>
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        Step {step} of 4
+      </span>
+      <span className="grid flex-1 grid-cols-4 gap-1.5" aria-hidden="true">
+        {[1, 2, 3, 4].map((segment) => (
+          <span
+            key={segment}
+            className={cn(
+              "h-px",
+              segment <= step ? "bg-primary" : "bg-border",
+            )}
+          />
+        ))}
+      </span>
     </div>
   );
 }
