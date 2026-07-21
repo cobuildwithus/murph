@@ -6,8 +6,6 @@ import {
   EPIC_ACQUISITION_POLICY,
   EPIC_ACQUISITION_POLICY_ID,
   EPIC_BETA_REQUESTED_BASE_SCOPES,
-  parseEpicAcquisitionPolicy,
-  type EpicAcquisitionPolicy,
 } from "./epic-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1 =
@@ -51,7 +49,6 @@ export interface ClinicalProviderDirectoryEntry {
 export interface ClinicalProviderDirectory {
   entries: readonly ClinicalProviderDirectoryEntry[];
   generatedAt: string;
-  policies: readonly EpicAcquisitionPolicy[];
   schema:
     | typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA
     | typeof CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1;
@@ -140,16 +137,13 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
     throw new TypeError("Clinical provider directory schema is unsupported.");
   }
   const isV2 = record.schema === CLINICAL_PROVIDER_DIRECTORY_SCHEMA;
-  const policies = isV2
-    ? parseDirectoryPolicies(record.policies)
-    : [EPIC_ACQUISITION_POLICY];
-  const policyById = new Map(policies.map((policy) => [policy.id, policy]));
+  if (isV2) assertExactOwnedDirectoryPolicy(record.policies);
   const rawEntries = requireArray(record.entries, "Clinical provider directory entries");
   if (rawEntries.length === 0 || rawEntries.length > MAX_DIRECTORY_ENTRIES) {
     throw new RangeError("Clinical provider directory entry count is out of bounds.");
   }
   const entries = rawEntries.map((entry, index) =>
-    parseDirectoryEntry(entry, index, { isV2, policyById })
+    parseDirectoryEntry(entry, index, isV2)
   );
   const locationCount = entries.reduce((sum, entry) => sum + entry.facilities.length, 0);
   if (locationCount > MAX_DIRECTORY_LOCATIONS_TOTAL) {
@@ -166,7 +160,6 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
   return {
     entries,
     generatedAt: requireIsoTimestamp(record.generatedAt, "Clinical provider directory generatedAt"),
-    policies,
     schema: record.schema,
     sourceBundleSha256: isV2
       ? requireSha256(record.sourceBundleSha256, "Clinical provider directory source bundle hash")
@@ -175,26 +168,20 @@ export function parseClinicalProviderDirectory(value: unknown): ClinicalProvider
   };
 }
 
-function parseDirectoryPolicies(value: unknown): EpicAcquisitionPolicy[] {
+function assertExactOwnedDirectoryPolicy(value: unknown): void {
   const rawPolicies = requireArray(value, "Clinical provider directory policies");
-  if (rawPolicies.length === 0 || rawPolicies.length > 20) {
-    throw new RangeError("Clinical provider directory policy count is out of bounds.");
+  if (rawPolicies.length !== 1) {
+    throw new RangeError("Clinical provider directory must contain exactly one owned policy.");
   }
-  const policies = rawPolicies.map(parseEpicAcquisitionPolicy);
-  assertStrictlySorted(
-    policies.map((policy) => policy.id),
-    "Clinical provider directory policies",
-  );
-  return policies;
+  if (JSON.stringify(rawPolicies[0]) !== JSON.stringify(EPIC_ACQUISITION_POLICY)) {
+    throw new TypeError("Clinical provider directory policy must exactly match the owned Epic policy.");
+  }
 }
 
 function parseDirectoryEntry(
   value: unknown,
   index: number,
-  context: {
-    isV2: boolean;
-    policyById: ReadonlyMap<string, EpicAcquisitionPolicy>;
-  },
+  isV2: boolean,
 ): ClinicalProviderDirectoryEntry {
   const record = requireRecord(value, `Clinical provider directory entry ${index}`);
   const fhirBaseUrl = requireCanonicalPublicHttpsUrl(
@@ -209,7 +196,7 @@ function parseDirectoryEntry(
     throw new RangeError(`Clinical provider directory entry ${index} has too many locations.`);
   }
 
-  if (!context.isV2 && record.sourceSystem !== "epic-fhir") {
+  if (!isV2 && record.sourceSystem !== "epic-fhir") {
     throw new TypeError(`Clinical provider directory entry ${index} source system is unsupported.`);
   }
   if (
@@ -219,20 +206,19 @@ function parseDirectoryEntry(
     throw new TypeError(`Clinical provider directory entry ${index} client-id configuration is unsupported.`);
   }
 
-  const policyId = context.isV2
+  const policyId = isV2
     ? requireIdentifier(record.policyId, `Clinical provider directory entry ${index} policy id`)
     : EPIC_ACQUISITION_POLICY_ID;
-  const policy = context.policyById.get(policyId);
-  if (!policy) {
+  if (policyId !== EPIC_ACQUISITION_POLICY_ID) {
     throw new TypeError(`Clinical provider directory entry ${index} references an unknown policy.`);
   }
-  const activeQueryScopes = policy.queryScopes
+  const activeQueryScopes = EPIC_ACQUISITION_POLICY.queryScopes
     .filter((query) => query.status === "active-beta")
     .sort((left, right) => (left.activeOrder ?? 0) - (right.activeOrder ?? 0));
-  const requestedBaseScopes = context.isV2
+  const requestedBaseScopes = isV2
     ? EPIC_BETA_REQUESTED_BASE_SCOPES
     : parseRequestedBaseScopes(record.requestedBaseScopes, index);
-  const resourceTypes = context.isV2
+  const resourceTypes = isV2
     ? activeQueryScopes.map((query) => query.resourceType)
     : parseResourceTypes(
         record.resourceTypes,
@@ -243,8 +229,8 @@ function parseDirectoryEntry(
   return {
     aliases: parseUniqueStrings(record.aliases, `Clinical provider directory entry ${index} aliases`, 20, 120),
     brandName: requireBoundedString(record.brandName, `Clinical provider directory entry ${index} brand`, 160),
-    capabilityOverrides: context.isV2
-      ? parseCapabilityOverrides(record.capabilityOverrides, index, policy)
+    capabilityOverrides: isV2
+      ? parseCapabilityOverrides(record.capabilityOverrides, index)
       : [],
     clientIdEnvironmentKey: record.clientIdEnvironmentKey,
     facilities: locations.map((location, locationIndex) =>
@@ -255,26 +241,27 @@ function parseDirectoryEntry(
     policyId,
     requestedBaseScopes,
     resourceTypes,
-    sourceSystem: policy.sourceSystem,
+    sourceSystem: EPIC_ACQUISITION_POLICY.sourceSystem,
   };
 }
 
 function parseCapabilityOverrides(
   value: unknown,
   entryIndex: number,
-  policy: EpicAcquisitionPolicy,
 ): ClinicalProviderCapabilityOverride[] {
   if (value === undefined) return [];
   const rawOverrides = requireArray(
     value,
     `Clinical provider directory entry ${entryIndex} capability overrides`,
   );
-  if (rawOverrides.length > policy.queryScopes.length) {
+  if (rawOverrides.length > EPIC_ACQUISITION_POLICY.queryScopes.length) {
     throw new RangeError(
       `Clinical provider directory entry ${entryIndex} has too many capability overrides.`,
     );
   }
-  const queryScopeIds = new Set(policy.queryScopes.map((query) => query.queryScopeId));
+  const queryScopeIds = new Set(
+    EPIC_ACQUISITION_POLICY.queryScopes.map((query) => query.queryScopeId),
+  );
   const overrides = rawOverrides.map((item, overrideIndex): ClinicalProviderCapabilityOverride => {
     const record = requireRecord(
       item,

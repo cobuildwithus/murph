@@ -6,7 +6,6 @@ import {
   buildEpicBetaInitialFhirPageUrl,
   buildEpicBetaRetrievalQueryFingerprintInput,
   buildEpicBetaSmartResourceScope,
-  parseEpicAcquisitionPolicy,
 } from "@/src/lib/clinical-records/epic-policy";
 
 describe("Epic Clinical Records acquisition policy", () => {
@@ -68,162 +67,68 @@ describe("Epic Clinical Records acquisition policy", () => {
     })).toBe("epic-fhir-r4:DiagnosticReport:search:patient:_count=100:v1");
   });
 
-  it("rejects duplicate and unsorted policy identifiers", () => {
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      registrationApis: [
-        EPIC_ACQUISITION_POLICY.registrationApis[0],
-        EPIC_ACQUISITION_POLICY.registrationApis[0],
-        ...EPIC_ACQUISITION_POLICY.registrationApis.slice(2),
-      ],
-    })).toThrow(/duplicate/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: [
-        EPIC_ACQUISITION_POLICY.queryScopes[1],
-        EPIC_ACQUISITION_POLICY.queryScopes[0],
-        ...EPIC_ACQUISITION_POLICY.queryScopes.slice(2),
-      ],
-    })).toThrow(/strictly sorted/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      registrationApis: [
-        EPIC_ACQUISITION_POLICY.registrationApis[1],
-        EPIC_ACQUISITION_POLICY.registrationApis[0],
-        ...EPIC_ACQUISITION_POLICY.registrationApis.slice(2),
-      ],
-    })).toThrow(/strictly sorted/u);
-  });
-
-  it("rejects unknown references, missing API registration, and active-set expansion", () => {
-    const allergies = requireQueryScope("allergies");
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        queryTemplateId: "unknown-template",
-      }),
-    })).toThrow(/incompatible query template/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        registrationApiKeys: [
-          ...allergies.registrationApiKeys,
-          "unknown-registration-api",
-        ],
-      }),
-    })).toThrow(/unknown Epic registration API/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        registrationApiKeys: [
-          ...allergies.registrationApiKeys,
-          "binary-read-clinical-notes",
-        ],
-      }),
-    })).toThrow(/incompatible Epic registration API/u);
-
-    const binaryAttachment = requireDependencyPolicy("binary-attachment");
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      dependencyPolicies: EPIC_ACQUISITION_POLICY.dependencyPolicies.map((dependency) =>
-        dependency.id === binaryAttachment.id
-          ? {
-              ...dependency,
-              registrationApiKeys: [
-                ...dependency.registrationApiKeys,
-                "unknown-registration-api",
-              ],
-            }
-          : dependency
-      ),
-    })).toThrow(/unknown Epic registration API/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        registrationApiKeys: [],
-      }),
-    })).toThrow(/no matching Epic registration API/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        slicingPolicyId: "unknown-slice",
-      }),
-    })).toThrow(/unknown slicing policy/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        dependencyPolicyIds: ["unknown-dependency"],
-      }),
-    })).toThrow(/incompatible dependency policy/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: EPIC_ACQUISITION_POLICY.queryScopes.map((query) =>
-        query.queryScopeId === allergies.queryScopeId
-          ? { ...query, requiredOperations: ["delete"] }
-          : query
-      ),
-    })).toThrow(/required operation is invalid/u);
-
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryScopes: replaceQueryScope(allergies.queryScopeId, {
-        ...allergies,
-        activeOrder: 3,
-        status: "active-beta",
-      }),
-    })).toThrow(/existing beta query contract/u);
-
-    const patientTemplate = EPIC_ACQUISITION_POLICY.queryTemplates.find((template) =>
-      template.id === "patient-demographics-read"
+  it("keeps the owned policy internally consistent", () => {
+    const registrationApiByKey = new Map(
+      EPIC_ACQUISITION_POLICY.registrationApis.map((api) => [api.key, api]),
     );
-    if (!patientTemplate) throw new TypeError("Missing patient test query template.");
-    expect(() => parseEpicAcquisitionPolicy({
-      ...EPIC_ACQUISITION_POLICY,
-      queryTemplates: EPIC_ACQUISITION_POLICY.queryTemplates.map((template) =>
-        template.id === patientTemplate.id
-          ? { ...template, fingerprintTemplate: "changed-active-fingerprint" }
-          : template
-      ),
-    })).toThrow(/existing beta query contract/u);
+    const queryTemplateById = new Map(
+      EPIC_ACQUISITION_POLICY.queryTemplates.map((template) => [template.id, template]),
+    );
+    const slicingPolicyIds = new Set(
+      EPIC_ACQUISITION_POLICY.slicingPolicies.map((policy) => policy.id),
+    );
+    const dependencyPolicyById = new Map(
+      EPIC_ACQUISITION_POLICY.dependencyPolicies.map((policy) => [policy.id, policy]),
+    );
+    const queryScopeIds = new Set(
+      EPIC_ACQUISITION_POLICY.queryScopes.map((query) => query.queryScopeId),
+    );
+
+    expect(registrationApiByKey.size).toBe(EPIC_ACQUISITION_POLICY.registrationApis.length);
+    expect(queryTemplateById.size).toBe(EPIC_ACQUISITION_POLICY.queryTemplates.length);
+    expect(slicingPolicyIds.size).toBe(EPIC_ACQUISITION_POLICY.slicingPolicies.length);
+    expect(dependencyPolicyById.size).toBe(EPIC_ACQUISITION_POLICY.dependencyPolicies.length);
+    expect(queryScopeIds.size).toBe(EPIC_ACQUISITION_POLICY.queryScopes.length);
+    expectStrictlySorted(EPIC_ACQUISITION_POLICY.registrationApis.map((api) => api.key));
+    expectStrictlySorted(EPIC_ACQUISITION_POLICY.queryTemplates.map((template) => template.id));
+    expectStrictlySorted(EPIC_ACQUISITION_POLICY.slicingPolicies.map((policy) => policy.id));
+    expectStrictlySorted(EPIC_ACQUISITION_POLICY.dependencyPolicies.map((policy) => policy.id));
+    expectStrictlySorted(EPIC_ACQUISITION_POLICY.queryScopes.map((query) => query.queryScopeId));
+
+    for (const dependency of EPIC_ACQUISITION_POLICY.dependencyPolicies) {
+      expectStrictlySorted(dependency.allowedParentQueryScopeIds);
+      expectStrictlySorted(dependency.registrationApiKeys);
+      expect(dependency.allowedParentQueryScopeIds.every((id) => queryScopeIds.has(id))).toBe(true);
+      expect(dependency.registrationApiKeys).not.toHaveLength(0);
+      expect(dependency.registrationApiKeys.every((key) => {
+        const api = registrationApiByKey.get(key);
+        return api?.operation === dependency.operation
+          && api.resourceType === dependency.resourceType;
+      })).toBe(true);
+    }
+
+    for (const query of EPIC_ACQUISITION_POLICY.queryScopes) {
+      expectStrictlySorted(query.dependencyPolicyIds);
+      expectStrictlySorted(query.registrationApiKeys);
+      expectStrictlySorted(query.requiredOperations);
+      const template = queryTemplateById.get(query.queryTemplateId);
+      expect(template?.resourceType).toBe(query.resourceType);
+      expect(template && query.requiredOperations.includes(template.operation)).toBe(true);
+      expect(slicingPolicyIds.has(query.slicingPolicyId)).toBe(true);
+      expect(query.dependencyPolicyIds.every((id) =>
+        dependencyPolicyById.get(id)?.allowedParentQueryScopeIds.includes(query.queryScopeId)
+      )).toBe(true);
+      expect(query.registrationApiKeys).not.toHaveLength(0);
+      expect(query.registrationApiKeys.every((key) => {
+        const api = registrationApiByKey.get(key);
+        return api?.resourceType === query.resourceType
+          && query.requiredOperations.includes(api.operation);
+      })).toBe(true);
+    }
   });
 });
 
-function requireQueryScope(queryScopeId: string) {
-  const query = EPIC_ACQUISITION_POLICY.queryScopes.find((candidate) =>
-    candidate.queryScopeId === queryScopeId
-  );
-  if (!query) throw new TypeError(`Missing test query scope ${queryScopeId}.`);
-  return query;
-}
-
-function requireDependencyPolicy(dependencyPolicyId: string) {
-  const dependency = EPIC_ACQUISITION_POLICY.dependencyPolicies.find((candidate) =>
-    candidate.id === dependencyPolicyId
-  );
-  if (!dependency) throw new TypeError(`Missing test dependency policy ${dependencyPolicyId}.`);
-  return dependency;
-}
-
-function replaceQueryScope(
-  queryScopeId: string,
-  replacement: typeof EPIC_ACQUISITION_POLICY.queryScopes[number],
-) {
-  return EPIC_ACQUISITION_POLICY.queryScopes.map((query) =>
-    query.queryScopeId === queryScopeId ? replacement : query
-  );
+function expectStrictlySorted(values: readonly string[]): void {
+  expect(values).toEqual([...values].sort((left, right) => left.localeCompare(right)));
+  expect(new Set(values).size).toBe(values.length);
 }

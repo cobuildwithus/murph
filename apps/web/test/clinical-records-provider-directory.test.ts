@@ -28,7 +28,6 @@ describe("Clinical Records provider directory", () => {
     expect(directory.version).toMatch(/^2026-07-20\.epic-brands-r4-policy-v2$/u);
     expect(directory.schema).toBe(CLINICAL_PROVIDER_DIRECTORY_SCHEMA);
     expect(directory.sourceBundleSha256).toMatch(/^[a-f0-9]{64}$/u);
-    expect(directory.policies).toHaveLength(1);
     expect(new Set(directory.entries.map((entry) => entry.id)).size).toBe(directory.entries.length);
     expect(directory.entries.every((entry) => entry.policyId === EPIC_ACQUISITION_POLICY_ID)).toBe(true);
     expect(directory.entries.every((entry) =>
@@ -218,14 +217,30 @@ describe("Clinical Records provider directory", () => {
     }))).toThrow(/unknown query scope/u);
   });
 
-  it("rejects unsorted policies, malformed hashes, and malformed capability evidence", () => {
+  it("requires the exact owned policy and rejects malformed hashes and capability evidence", () => {
     expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
       policies: [
         { ...EPIC_ACQUISITION_POLICY, id: "z-policy" },
         { ...EPIC_ACQUISITION_POLICY, id: "a-policy" },
       ],
       policyId: "z-policy",
-    }))).toThrow(/policies must be strictly sorted/u);
+    }))).toThrow(/exactly one owned policy/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policies: [{
+        ...EPIC_ACQUISITION_POLICY,
+        registrationApis: [
+          EPIC_ACQUISITION_POLICY.registrationApis[0],
+          EPIC_ACQUISITION_POLICY.registrationApis[0],
+          ...EPIC_ACQUISITION_POLICY.registrationApis.slice(2),
+        ],
+      }],
+    }))).toThrow(/exactly match the owned Epic policy/u);
+    expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
+      policies: [{
+        ...EPIC_ACQUISITION_POLICY,
+        registrationApis: EPIC_ACQUISITION_POLICY.registrationApis.slice(1),
+      }],
+    }))).toThrow(/exactly match the owned Epic policy/u);
     expect(() => parseClinicalProviderDirectory(makeDirectoryV2({
       sourceBundleSha256: "not-a-sha256",
     }))).toThrow(/source bundle hash/u);
