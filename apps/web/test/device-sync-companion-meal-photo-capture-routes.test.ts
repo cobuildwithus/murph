@@ -18,7 +18,7 @@ const mocks = vi.hoisted(() => ({
   parseMealPhotoCaptureRevocationRequest: vi.fn(),
   readAndValidateMealPhotoUpload: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
-  readHostedMemberRoutingState: vi.fn(),
+  readCurrentHostedMemberDirectRoute: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
   requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
@@ -79,8 +79,8 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
-  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
+  readCurrentHostedMemberDirectRoute: mocks.readCurrentHostedMemberDirectRoute,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -156,9 +156,9 @@ describe("meal photo companion routes", () => {
       sha256: "b".repeat(64),
       width: 3,
     });
-    mocks.readHostedMemberRoutingState.mockResolvedValue({
-      linqChatId: "linq-home-thread",
-      telegramThreadId: null,
+    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValue({
+      channel: "linq",
+      threadId: "linq-home-thread",
     });
     mocks.stageMealPhoto.mockResolvedValue({
       byteLength: JPEG.byteLength,
@@ -183,10 +183,6 @@ describe("meal photo companion routes", () => {
 
   function buildMealPhotoWake(mealPhotoKey = "meal-photo-key") {
     return {
-      directRoute: {
-        channel: "linq",
-        threadId: "linq-home-thread",
-      },
       eventId: EVENT_ID,
       kind: "meal-photo.captured",
       mealPhoto: {
@@ -287,10 +283,6 @@ describe("meal photo companion routes", () => {
       byteLength: JPEG.byteLength,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
-      directRoute: {
-        channel: "linq",
-        threadId: "linq-home-thread",
-      },
       eventId: EVENT_ID,
       mealPhotoKey: "meal-photo-key",
       memberId: MEMBER_ID,
@@ -323,7 +315,7 @@ describe("meal photo companion routes", () => {
   });
 
   it("fails before staging when no established private route exists", async () => {
-    mocks.readHostedMemberRoutingState.mockResolvedValueOnce(null);
+    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
 
     const response = await photosRoute.POST(new Request(
       "https://app.example.test/photos",
@@ -336,15 +328,12 @@ describe("meal photo companion routes", () => {
     expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("deletes staging when the private route changes before append", async () => {
-    mocks.readHostedMemberRoutingState
+  it("accepts capture when the current private route changes before append", async () => {
+    mocks.readCurrentHostedMemberDirectRoute
+      .mockResolvedValueOnce({ channel: "linq", threadId: "linq-home-thread" })
       .mockResolvedValueOnce({
-        linqChatId: "linq-home-thread",
-        telegramThreadId: null,
-      })
-      .mockResolvedValueOnce({
-        linqChatId: null,
-        telegramThreadId: "telegram-home-thread",
+        channel: "telegram",
+        threadId: "telegram-home-thread",
       });
 
     const response = await photosRoute.POST(new Request(
@@ -352,12 +341,12 @@ describe("meal photo companion routes", () => {
       { body: requestBody(JPEG), method: "POST" },
     ));
 
-    expect(response.status).toBe(503);
-    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
-      mealPhotoKey: "meal-photo-key",
-      userId: MEMBER_ID,
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: buildMealPhotoWake(),
+      tx: { label: "tx" },
     });
+    expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
   });
 
   it("re-signals exact duplicates and rejects conflicting capture reuse", async () => {

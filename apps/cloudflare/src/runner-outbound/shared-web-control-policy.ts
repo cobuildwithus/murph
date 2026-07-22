@@ -31,6 +31,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH,
@@ -79,6 +80,7 @@ export type HostedRunnerWebControlOperation =
   | "codex_auth_update"
   | "computer_use"
   | "connected_apps"
+  | "current_direct_route"
   | "clinical_records_connect_link"
   | "clinical_records_fetch_page"
   | "clinical_records_read_run"
@@ -138,6 +140,7 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_LATENCY_TRACE_PATH, "runtime_latency_trace"],
   [HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH, "browser_vault_replica_publish"],
   [HOSTED_RUNTIME_CODEX_AUTH_PATH, "codex_auth_update"],
+  [HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH, "current_direct_route"],
   [HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH, "family_plan_tool"],
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
   [HOSTED_RUNTIME_LABS_TOOL_PATH, "labs_tool"],

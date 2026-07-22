@@ -335,17 +335,12 @@ describe("parseHostedExecutionEvent", () => {
       threadId: "chat_123",
     });
 
-    expect(parseHostedExecutionExternalThreadRouteAuthority({
+    expect(() => parseHostedExecutionExternalThreadRouteAuthority({
       channel: "linq",
       containerMemberId: "member_container_123",
       threadIsDirect: true,
       threadId: "chat_123",
-    })).toEqual({
-      channel: "linq",
-      containerMemberId: "member_container_123",
-      threadIsDirect: true,
-      threadId: "chat_123",
-    });
+    })).toThrow(/unsupported field "threadIsDirect"/u);
   });
 
   it("rejects routed Linq conversation wakes with non-Linq route authority", () => {

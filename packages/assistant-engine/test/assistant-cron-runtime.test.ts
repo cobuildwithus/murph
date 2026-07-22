@@ -6854,7 +6854,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
   })
 
-  it('revalidates automatic meal closeout Telegram direct authority before provider work', async () => {
+  it('delivers automatic meal closeout to the current private route instead of the saved route', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
     const { vaultRoot } = await createRuntimeContext(
@@ -6885,13 +6885,10 @@ describe('assistant cron runtime orchestration', () => {
       title: 'Automatic meal daily closeout',
       updatedAt: '2026-07-22T20:00:00.000Z',
     })
-    const routeAuthority = {
-      channel: 'telegram' as const,
-      containerMemberId: 'member-meal-closeout-direct-route',
-      threadId: 'telegram_direct_123',
-      threadIsDirect: true,
-    }
-    const resolveScheduledExternalThreadRoute = vi.fn(async () => routeAuthority)
+    const resolveScheduledDirectRoute = vi.fn(async () => ({
+      channel: 'linq' as const,
+      threadId: 'linq_current_456',
+    }))
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input) => {
       await input.beforeToolExecution?.()
       return {
@@ -6905,7 +6902,7 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-meal-closeout-direct-route',
-          resolveScheduledExternalThreadRoute,
+          resolveScheduledDirectRoute,
           userEnvKeys: [],
         },
       },
@@ -6916,16 +6913,15 @@ describe('assistant cron runtime orchestration', () => {
     })
 
     expect(result.run.status).toBe('succeeded')
-    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
-      channel: 'telegram',
+    expect(resolveScheduledDirectRoute).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
-      target: 'telegram_direct_123',
-      threadIsDirect: true,
     })
-    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledTimes(2)
+    expect(resolveScheduledDirectRoute).toHaveBeenCalledTimes(2)
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        outboxExternalThreadRouteAuthority: routeAuthority,
+        channel: 'linq',
+        outboxExternalThreadRouteAuthority: null,
+        threadId: 'linq_current_456',
         threadIsDirect: true,
       }),
     )
@@ -6963,19 +6959,19 @@ describe('assistant cron runtime orchestration', () => {
       updatedAt: '2026-07-22T20:00:00.000Z',
     })
     const sequence: string[] = []
-    const resolveScheduledLinqRoute = vi.fn()
+    const resolveScheduledDirectRoute = vi.fn()
       .mockImplementationOnce(async () => {
         sequence.push('initial_authority')
         return {
-          target: 'linq_direct_123',
-          threadIsDirect: true,
+          channel: 'linq' as const,
+          threadId: 'linq_direct_123',
         }
       })
       .mockImplementationOnce(async () => {
         sequence.push('effect_authority')
         return {
-          target: 'linq_direct_replacement',
-          threadIsDirect: true,
+          channel: 'linq' as const,
+          threadId: 'linq_direct_replacement',
         }
       })
     cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input) => {
@@ -6992,7 +6988,7 @@ describe('assistant cron runtime orchestration', () => {
       executionContext: {
         hosted: {
           memberId: 'member-meal-closeout-stale-direct-route',
-          resolveScheduledLinqRoute,
+          resolveScheduledDirectRoute,
           userEnvKeys: [],
         },
       },
@@ -7008,7 +7004,7 @@ describe('assistant cron runtime orchestration', () => {
       'provider_turn',
       'effect_authority',
     ])
-    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(2)
+    expect(resolveScheduledDirectRoute).toHaveBeenCalledTimes(2)
   })
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {

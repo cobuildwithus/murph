@@ -70,7 +70,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
       return blockedMealPhotoImport("meal_photo.capture_conflict", false);
     }
     if (!(await automaticMealCloseoutIsReady({
-      directRoute: input.wake.directRoute ?? null,
+      effectsPort: input.effectsPort,
       vaultRoot: input.vaultRoot,
     }))) {
       return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
@@ -133,7 +133,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   }
 
   if (!(await automaticMealCloseoutIsReady({
-    directRoute: input.wake.directRoute ?? null,
+    effectsPort: input.effectsPort,
     vaultRoot: input.vaultRoot,
   }))) {
     return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
@@ -143,24 +143,23 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
 }
 
 async function automaticMealCloseoutIsReady(input: {
-  directRoute: HostedExecutionMealPhotoCapturedWake["directRoute"];
+  effectsPort: HostedRuntimeEffectsPort;
   vaultRoot: string;
 }): Promise<boolean> {
-  // Old Web producers did not carry a private route. Import those already-
-  // durable captures without creating an automation; the first routed
-  // capture after the coordinated rollout installs it safely.
-  if (!input.directRoute) {
-    return true;
-  }
   try {
+    const resolveCurrentDirectRoute = input.effectsPort.resolveCurrentDirectRoute;
+    if (!resolveCurrentDirectRoute) {
+      return false;
+    }
+    const directRoute = await resolveCurrentDirectRoute();
     await ensureAutomaticMealCloseoutAutomation({
       defaultRoute: {
-        channel: input.directRoute.channel,
+        channel: directRoute.channel,
         deliverySource: null,
         deliveryTarget: null,
         identityId: null,
         participantId: null,
-        threadId: input.directRoute.threadId,
+        threadId: directRoute.threadId,
         threadIsDirect: true,
       },
       routeValidationProfile: "hosted",

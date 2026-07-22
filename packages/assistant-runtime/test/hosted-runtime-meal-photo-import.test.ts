@@ -204,18 +204,25 @@ describe("hosted meal photo mailbox import", () => {
     ).toHaveBeenCalledTimes(2);
   });
 
-  it("imports a legacy capture without installing an unproven delivery route", async () => {
+  it("keeps capture retryable when current private route resolution is unavailable", async () => {
     const vaultRoot = await createTestVault();
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);
 
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
-      effectsPort: createEffectsPort({ readMealPhoto }),
+      effectsPort: createEffectsPort({
+        readMealPhoto,
+        resolveCurrentDirectRoute: undefined,
+      }),
       item: createMealPhotoMailboxItem(),
       vaultRoot,
-      wake: createMealPhotoWake(null),
+      wake: createMealPhotoWake(),
     });
 
-    expect(outcome.status).toBe("imported");
+    expect(outcome).toEqual({
+      reasonCode: "meal_photo.closeout_automation_failed",
+      retryable: true,
+      status: "blocked",
+    });
     expect(readMealPhoto).toHaveBeenCalledTimes(1);
     expect(
       mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
@@ -234,17 +241,11 @@ async function createTestVault(): Promise<string> {
   return vaultRoot;
 }
 
-function createMealPhotoWake(
-  directRoute: { channel: "linq" | "telegram"; threadId: string } | null = {
-    channel: "linq",
-    threadId: "linq_home_thread",
-  },
-) {
+function createMealPhotoWake() {
   return buildHostedExecutionMealPhotoCapturedWake({
     byteLength: JPEG_BYTES.byteLength,
     captureId: CAPTURE_ID,
     capturedAt: CAPTURED_AT,
-    ...(directRoute ? { directRoute } : {}),
     eventId: "meal-photo:enrollment:capture",
     mealPhotoKey: "meal_photo_opaque_key",
     memberId: "member_synthetic_001",
@@ -293,10 +294,17 @@ function createMealPhotoMailboxItem(): HostedMailboxResolvedImportItem {
 }
 
 function createEffectsPort(
-  overrides: Pick<HostedRuntimeEffectsPort, "deleteMealPhoto" | "readMealPhoto"> = {},
+  overrides: Pick<
+    HostedRuntimeEffectsPort,
+    "deleteMealPhoto" | "readMealPhoto" | "resolveCurrentDirectRoute"
+  > = {},
 ): HostedRuntimeEffectsPort {
   return {
     readRawEmailMessage: async () => null,
+    resolveCurrentDirectRoute: async () => ({
+      channel: "linq",
+      threadId: "linq_home_thread",
+    }),
     sendEmail: async () => undefined,
     ...overrides,
   };

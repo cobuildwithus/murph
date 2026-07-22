@@ -371,7 +371,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           : {
               directRoute: record.directRoute === null
                 ? null
-                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                : parseHostedExecutionDirectRoute(
                     record.directRoute,
                     "Hosted execution wake group-newsletter.email-needed directRoute",
                   ),
@@ -407,7 +407,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
       });
     case "meal-photo.captured": {
       assertExactHostedExecutionKeys(record, [
-        "directRoute",
         "eventId",
         "kind",
         "mealPhoto",
@@ -424,16 +423,6 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         byteLength: mealPhoto.byteLength,
         captureId: mealPhoto.captureId,
         capturedAt: mealPhoto.capturedAt,
-        ...(record.directRoute === undefined
-          ? {}
-          : {
-              directRoute: record.directRoute === null
-                ? null
-                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
-                    record.directRoute,
-                    "Hosted execution wake meal-photo.captured directRoute",
-                  ),
-            }),
         eventId,
         mealPhotoKey: mealPhoto.mealPhotoKey,
         memberId: wireUserId,
@@ -833,6 +822,9 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
   label = "Hosted execution external thread route authority",
 ): HostedExecutionExternalThreadRouteAuthority {
   const record = requireObject(value, label);
+  if (record.threadIsDirect !== undefined) {
+    throw new TypeError(`${label} contains unsupported field "threadIsDirect".`);
+  }
   // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
   // emitters keep sending it until both web and runner readers are rolled out.
   return {
@@ -846,14 +838,6 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
         }),
     channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
-    ...(record.threadIsDirect === undefined
-      ? {}
-      : {
-          threadIsDirect: requireBoolean(
-            record.threadIsDirect,
-            `${label} threadIsDirect`,
-          ),
-        }),
     threadId: requireString(record.threadId, `${label} threadId`),
   };
 }
@@ -1228,7 +1212,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           : {
               directRoute: record.directRoute === null
                 ? null
-                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                : parseHostedExecutionDirectRoute(
                     record.directRoute,
                     "Hosted execution group-newsletter.email-needed directRoute",
                   ),
@@ -1425,11 +1409,12 @@ function parseHostedExecutionAssistantNotificationRoute(
   };
 }
 
-function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+export function parseHostedExecutionDirectRoute(
   value: unknown,
-  label: string,
+  label = "Hosted execution direct route",
 ): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
   const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["channel", "threadId"], label);
   const channel = requireString(record.channel, `${label}.channel`);
   if (channel !== "linq" && channel !== "telegram") {
     throw new TypeError(`${label}.channel is invalid.`);

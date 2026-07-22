@@ -2277,8 +2277,31 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   if (
     normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
       !== "telegram"
-    || payload.threadIsDirect !== false
   ) {
+    return null;
+  }
+
+  const target = input.target?.trim() ?? "";
+  if (payload.threadIsDirect === true && input.intent?.automationAuthority) {
+    const resolveCurrentDirectRoute = input.effectsPort.resolveCurrentDirectRoute;
+    if (!resolveCurrentDirectRoute) {
+      throw new VaultCliError(
+        "ASSISTANT_DIRECT_ROUTE_AUTHORITY_UNAVAILABLE",
+        "Hosted automated private delivery requires current direct route authority.",
+        { retryable: true },
+      );
+    }
+    const directRoute = await resolveCurrentDirectRoute({ signal: input.signal });
+    if (directRoute.channel !== "telegram" || directRoute.threadId !== target) {
+      throw new VaultCliError(
+        "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+        "Hosted automated private delivery no longer matches the current direct route.",
+        { retryable: false },
+      );
+    }
+    return target;
+  }
+  if (payload.threadIsDirect !== false) {
     return null;
   }
 
@@ -2294,7 +2317,6 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     );
   }
 
-  const target = input.target?.trim() ?? "";
   if (
     authority.channel !== "telegram"
     || authority.containerMemberId !== input.userId

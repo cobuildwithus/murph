@@ -15,14 +15,9 @@ import {
 } from "@/src/lib/hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import { readCurrentHostedMemberDirectRoute } from "@/src/lib/hosted-routing/member-direct-route";
 import { getPrisma } from "@/src/lib/prisma";
-
-type MealPhotoDirectRoute = {
-  channel: "linq" | "telegram";
-  threadId: string;
-};
 
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
@@ -31,7 +26,7 @@ export const POST = withJsonError(async (request: Request) => {
     request,
   });
   const upload = await readAndValidateMealPhotoUpload(request);
-  const directRoute = await requireMealPhotoDirectRoute({
+  await requireMealPhotoDirectRoute({
     memberId: enrollment.memberId,
     prisma,
   });
@@ -55,7 +50,6 @@ export const POST = withJsonError(async (request: Request) => {
     byteLength: staged.byteLength,
     captureId: upload.captureId,
     capturedAt: upload.capturedAt,
-    directRoute,
     eventId,
     mealPhotoKey: staged.mealPhotoKey,
     memberId: enrollment.memberId,
@@ -70,18 +64,10 @@ export const POST = withJsonError(async (request: Request) => {
         prisma: tx,
         request,
       });
-      const currentDirectRoute = await requireMealPhotoDirectRoute({
+      await requireMealPhotoDirectRoute({
         memberId: enrollment.memberId,
         prisma: tx,
       });
-      if (!hasSameDirectRoute(currentDirectRoute, directRoute)) {
-        throw hostedOnboardingError({
-          code: "MEAL_PHOTO_PRIVATE_ROUTE_CHANGED",
-          httpStatus: 503,
-          message: "The private meal summary route changed during upload. Please retry.",
-          retryable: true,
-        });
-      }
       return await appendHostedMealPhotoMailboxEnvelopeTx({
         envelope,
         tx,
@@ -130,35 +116,16 @@ export const POST = withJsonError(async (request: Request) => {
 
 async function requireMealPhotoDirectRoute(input: {
   memberId: string;
-  prisma: Parameters<typeof readHostedMemberRoutingState>[0]["prisma"];
-}): Promise<MealPhotoDirectRoute> {
-  const routing = await readHostedMemberRoutingState(input);
-  const linqThreadId = normalizeRouteId(routing?.linqChatId);
-  if (linqThreadId) {
-    return { channel: "linq", threadId: linqThreadId };
-  }
-  const telegramThreadId = normalizeRouteId(routing?.telegramThreadId);
-  if (telegramThreadId) {
-    return { channel: "telegram", threadId: telegramThreadId };
-  }
+  prisma: Parameters<typeof readCurrentHostedMemberDirectRoute>[0]["prisma"];
+}) {
+  const route = await readCurrentHostedMemberDirectRoute(input);
+  if (route) return route;
   throw hostedOnboardingError({
     code: "MEAL_PHOTO_PRIVATE_ROUTE_UNAVAILABLE",
     httpStatus: 503,
     message: "A private Murph conversation is required before meal photos can be captured.",
     retryable: true,
   });
-}
-
-function normalizeRouteId(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
-}
-
-function hasSameDirectRoute(
-  left: MealPhotoDirectRoute,
-  right: MealPhotoDirectRoute,
-): boolean {
-  return left.channel === right.channel && left.threadId === right.threadId;
 }
 
 async function deleteUnclaimedStaging(input: {

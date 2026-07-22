@@ -77,6 +77,7 @@ import {
   HOSTED_RUNTIME_ACTION_APPROVAL_REQUEST_PATH,
   HOSTED_RUNTIME_BROWSER_VAULT_REPLICA_PUBLISH_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
@@ -303,6 +304,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync connect-target connect-link",
     path: "/api/internal/device-sync/connect-targets/google/connect-link",
+  },
+  {
+    body: {},
+    name: "hosted current direct route resolution",
+    path: HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
   },
   {
     body: {

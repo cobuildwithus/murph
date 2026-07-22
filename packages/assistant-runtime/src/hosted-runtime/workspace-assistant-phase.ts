@@ -1364,11 +1364,22 @@ export async function runHostedWorkspaceAssistantPhase(
           }),
         providerFetch: input.runtime.platform.providerFetch ?? null,
         publicInternetFetch: input.runtime.platform.publicInternetFetch ?? null,
+        resolveScheduledDirectRoute: async ({ signal }) => {
+          const resolveCurrentDirectRoute =
+            input.runtime.platform.effectsPort.resolveCurrentDirectRoute;
+          if (!resolveCurrentDirectRoute) {
+            throw new VaultCliError(
+              "ASSISTANT_DIRECT_ROUTE_AUTHORITY_UNAVAILABLE",
+              "Hosted private delivery requires current direct route authority.",
+              { retryable: true },
+            );
+          }
+          return await resolveCurrentDirectRoute({ signal });
+        },
         resolveScheduledExternalThreadRoute: async ({
           channel,
           signal,
           target,
-          threadIsDirect,
         }) => {
           const assertAuthority =
             input.runtime.platform.effectsPort.assertExternalThreadRouteAuthority;
@@ -1382,7 +1393,6 @@ export async function runHostedWorkspaceAssistantPhase(
           const authority = {
             channel,
             containerMemberId: input.request.userId,
-            ...(threadIsDirect === undefined ? {} : { threadIsDirect }),
             threadId: target,
           } as const;
           await assertAuthority(authority, { signal });

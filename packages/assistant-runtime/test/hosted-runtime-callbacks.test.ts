@@ -7854,6 +7854,222 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it.each(["text", "image", "reaction", "voice"] as const)(
+    "blocks stale automated direct Telegram %s delivery before any provider call",
+    async (transport) => {
+      const staleTarget = "telegram_direct_old";
+      const effect = createEffect({
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: staleTarget,
+        threadId: staleTarget,
+        threadIsDirect: true,
+      });
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+        createMirrorState({
+          automationAuthority: {
+            automationId: "automation_synthetic_meal_closeout",
+            expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+          },
+          delivery: null,
+          intentId: "intent_123",
+          lastError: null,
+          status: "pending",
+        }),
+      );
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies }) => {
+          if (transport === "text") {
+            await dependencies.sendTelegram({
+              idempotencyKey: "assistant-outbox:intent_123",
+              message: "Daily meal summary",
+              replyToMessageId: null,
+              target: staleTarget,
+            });
+          } else if (transport === "image") {
+            const sendTelegramImage = dependencies.sendTelegramImage;
+            if (!sendTelegramImage) throw new Error("Missing Telegram image transport.");
+            await sendTelegramImage({
+              media: [{
+                alt: "Daily summary",
+                kind: "image",
+                source: "test",
+                url: "https://cdn.example.test/summary.png",
+              }],
+              message: "Daily meal summary",
+              target: staleTarget,
+            });
+          } else if (transport === "reaction") {
+            const setReaction = dependencies.setTelegramMessageReaction;
+            if (!setReaction) throw new Error("Missing Telegram reaction transport.");
+            await setReaction({
+              reaction: "heart",
+              target: staleTarget,
+              targetMessageId: "message_123",
+            });
+          } else {
+            const providerBoundary =
+              dependencies.telegramVoiceMemoRuntime?.fetchImplementation;
+            if (!providerBoundary) throw new Error("Missing Telegram voice transport.");
+            await providerBoundary("https://api.telegram.example/bot-token/sendVoice", {
+              method: "POST",
+            });
+          }
+          throw new Error("unreachable after stale direct route");
+        },
+      );
+      const providerFetch = vi.fn<typeof fetch>();
+      const resolveCurrentDirectRoute = vi.fn(async () => ({
+        channel: "telegram" as const,
+        threadId: "telegram_direct_current",
+      }));
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          resolveCurrentDirectRoute,
+        }),
+        forwardedEnv: {},
+        platformEnv: {
+          TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+          TELEGRAM_BOT_TOKEN: "telegram-token",
+          TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+        },
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+        context: expect.objectContaining({ retryable: false }),
+      });
+
+      expect(resolveCurrentDirectRoute).toHaveBeenCalledTimes(1);
+      expect(providerFetch).not.toHaveBeenCalled();
+      expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+      expect(mocks.setTelegramMessageReaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it("delivers an automated direct Telegram message when the live route still matches", async () => {
+    const target = "telegram_direct_current";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        automationAuthority: {
+          automationId: "automation_synthetic_meal_closeout",
+          expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+        },
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "provider_123",
+      target,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Daily meal summary",
+          replyToMessageId: null,
+          target,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+          }),
+          status: "sent",
+        });
+      },
+    );
+    const resolveCurrentDirectRoute = vi.fn(async () => ({
+      channel: "telegram" as const,
+      threadId: target,
+    }));
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ resolveCurrentDirectRoute }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+    expect(resolveCurrentDirectRoute).toHaveBeenCalledTimes(1);
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target }),
+      expect.objectContaining({ authorityBoundTarget: target }),
+    );
+  });
+
+  it("makes no Telegram provider call when automated direct-route access is revoked", async () => {
+    const target = "telegram_direct_current";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        automationAuthority: {
+          automationId: "automation_synthetic_meal_closeout",
+          expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+        },
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Daily meal summary",
+          replyToMessageId: null,
+          target,
+        });
+        throw new Error("unreachable after revoked access");
+      },
+    );
+    const resolveCurrentDirectRoute = vi.fn().mockRejectedValue(
+      new Error("direct route access revoked"),
+    );
+    const providerFetch = vi.fn<typeof fetch>();
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ resolveCurrentDirectRoute }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toThrow("direct route access revoked");
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
   it("carries the exact Telegram group route into image and reaction transports", async () => {
     const routeAuthority = {
       channel: "telegram" as const,

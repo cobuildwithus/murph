@@ -584,10 +584,6 @@ function hasSameMealPhotoCapture(
   return existing.eventId === requested.eventId
     && existing.userId === requested.userId
     && existing.occurredAt === requested.occurredAt
-    && (existing.directRoute?.channel ?? null)
-      === (requested.directRoute?.channel ?? null)
-    && (existing.directRoute?.threadId ?? null)
-      === (requested.directRoute?.threadId ?? null)
     && existing.mealPhoto.byteLength === requested.mealPhoto.byteLength
     && existing.mealPhoto.captureId === requested.mealPhoto.captureId
     && existing.mealPhoto.capturedAt === requested.mealPhoto.capturedAt

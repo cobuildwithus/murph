@@ -60,6 +60,8 @@ export const HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH =
   "/api/internal/hosted-runtime/linq-egress/delivery";
 export const HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH =
   "/api/internal/hosted-runtime/thread-route/authority";
+export const HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH =
+  "/api/internal/hosted-runtime/direct-route/current";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_PATH =
   "/api/internal/device-sync/recovery-sweep";
 export const HOSTED_DEVICE_SYNC_RECOVERY_SWEEP_CALLBACK_USER_ID =

@@ -335,7 +335,6 @@ export const assistantExternalThreadRouteAuthoritySchema = z
     accountLookupKey: z.string().min(1).nullable().optional(),
     channel: z.enum(['email', 'linq', 'telegram']),
     containerMemberId: z.string().min(1),
-    threadIsDirect: z.boolean().optional(),
     threadId: z.string().min(1),
   })
   .strict()

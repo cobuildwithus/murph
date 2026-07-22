@@ -63,6 +63,7 @@ import type {
 } from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   HostedBrowserVaultReplicaRef,
+  HostedExecutionDirectRoute,
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
 import type {
@@ -353,6 +354,9 @@ type HostedRuntimeEffectsPortBase = {
     authority: HostedExecutionExternalThreadRouteAuthority,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
+  resolveCurrentDirectRoute?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<HostedExecutionDirectRoute>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },

@@ -720,6 +720,7 @@ export async function executeClaimedAssistantCronJob(
             ? {
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
+                target: claimedJob.target,
               }
             : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
                 directAudienceRequired,
@@ -728,9 +729,10 @@ export async function executeClaimedAssistantCronJob(
                 target: claimedJob.target,
               })
           const deliveryRoute = authorizedDelivery.route
+          const notificationTarget = authorizedDelivery.target
           const notificationExecutionContext =
             scopeAssistantCronScheduledGroupTools({
-              channel: claimedJob.target.channel,
+              channel: notificationTarget.channel,
               executionContext: automationTurn.executionContext,
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
@@ -775,6 +777,8 @@ export async function executeClaimedAssistantCronJob(
               if (
                 currentRoute.threadIsDirect
                   !== (directAudienceRequired ? true : false)
+                || currentAuthorizedDelivery.target.channel
+                  !== notificationTarget.channel
                 || !expectedTarget
                 || currentTarget !== expectedTarget
               ) {
@@ -838,20 +842,20 @@ export async function executeClaimedAssistantCronJob(
               job: claimedJob,
               trigger: input.trigger,
             }),
-            sessionId: claimedJob.target.sessionId,
-            alias: claimedJob.target.alias,
-            allowBindingRebind: claimedJob.target.sessionId !== null,
-            channel: claimedJob.target.channel,
-            identityId: claimedJob.target.identityId,
+            sessionId: notificationTarget.sessionId,
+            alias: notificationTarget.alias,
+            allowBindingRebind: notificationTarget.sessionId !== null,
+            channel: notificationTarget.channel,
+            identityId: notificationTarget.identityId,
             onTraceEvent: input.onTraceEvent,
             outboxAutomationAuthority:
               resolveAssistantCronOutboxAutomationAuthority(input.job),
             outboxExternalThreadRouteAuthority:
               authorizedDelivery.externalThreadRouteAuthority,
-            participantId: claimedJob.target.participantId,
+            participantId: notificationTarget.participantId,
             turnPolicy: resolveAssistantCronNotificationTurnPolicy(input.job),
             responsePolicy: resolveAssistantCronNotificationResponsePolicy(input.job),
-            threadId: claimedJob.target.threadId,
+            threadId: notificationTarget.threadId,
             bindingDeliveryTarget:
               deliveryRoute.bindingDelivery?.target ??
               deliveryRoute.deliveryTarget ??
@@ -859,7 +863,7 @@ export async function executeClaimedAssistantCronJob(
             deferCommitUntilDeliveryAccepted:
               input.deliveryDispatchMode === 'queue-only',
             deliveryKind: deliveryRoute.bindingDelivery?.kind ?? undefined,
-            deliverySource: claimedJob.target.deliverySource,
+            deliverySource: notificationTarget.deliverySource,
             deliveryTarget: deliveryRoute.deliveryTarget,
             threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
@@ -2168,6 +2172,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   externalThreadRouteAuthority:
     AssistantOutboxIntent['externalThreadRouteAuthority']
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
+  target: AssistantCronJob['target']
 }> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
   if (
@@ -2184,12 +2189,42 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     )
   }
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
-    return { externalThreadRouteAuthority: null, route }
+    return { externalThreadRouteAuthority: null, route, target: input.target }
+  }
+
+  if (input.directAudienceRequired) {
+    const resolveScheduledDirectRoute =
+      input.executionContext?.hosted?.resolveScheduledDirectRoute
+    if (!resolveScheduledDirectRoute) {
+      throw new VaultCliError(
+        'ASSISTANT_DIRECT_ROUTE_AUTHORITY_UNAVAILABLE',
+        'Automatic meal closeout requires current private route authority.',
+        { retryable: true },
+      )
+    }
+    const directRoute = await resolveScheduledDirectRoute({ signal: input.signal })
+    const target: AssistantCronJob['target'] = {
+      ...input.target,
+      alias: null,
+      channel: directRoute.channel,
+      deliverySource: null,
+      deliveryTarget: null,
+      identityId: null,
+      participantId: null,
+      sessionId: null,
+      threadId: directRoute.threadId,
+      threadIsDirect: true,
+    }
+    return {
+      externalThreadRouteAuthority: null,
+      route: resolveAssistantCronNotificationDeliveryRoute(target),
+      target,
+    }
   }
 
   if (
     input.target.channel === 'telegram'
-    && (route.threadIsDirect === false || input.directAudienceRequired)
+    && route.threadIsDirect === false
   ) {
     const target = normalizeNullableString(
       route.deliveryTarget ?? route.bindingDelivery?.target,
@@ -2213,15 +2248,10 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       channel: 'telegram',
       signal: input.signal,
       target,
-      ...(input.directAudienceRequired ? { threadIsDirect: true } : {}),
     })
     if (
       authority.channel !== 'telegram'
       || normalizeNullableString(authority.containerMemberId) === null
-      || (
-        input.directAudienceRequired
-        && authority.threadIsDirect !== true
-      )
       || normalizeNullableString(authority.threadId) !== target
     ) {
       throw new VaultCliError(
@@ -2233,11 +2263,12 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
     return {
       externalThreadRouteAuthority: authority,
       route,
+      target: input.target,
     }
   }
 
   if (input.target.channel !== 'linq') {
-    return { externalThreadRouteAuthority: null, route }
+    return { externalThreadRouteAuthority: null, route, target: input.target }
   }
 
   const target = normalizeNullableString(
@@ -2278,14 +2309,6 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       { retryable: true },
     )
   }
-  if (input.directAudienceRequired && authority.threadIsDirect !== true) {
-    throw new VaultCliError(
-      'ASSISTANT_CRON_PRIVATE_ROUTE_REQUIRED',
-      'Automatic meal closeout requires current direct-message authority before provider work.',
-      { retryable: true },
-    )
-  }
-
   const bindingDelivery = route.bindingDelivery
     ? {
         kind: route.bindingDelivery.kind === 'participant'
@@ -2302,6 +2325,7 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       deliveryTarget: route.deliveryTarget === null ? null : authorizedTarget,
       threadIsDirect: authority.threadIsDirect,
     },
+    target: input.target,
   }
 }
 

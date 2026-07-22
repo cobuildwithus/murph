@@ -6,10 +6,14 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
 } from "@murphai/hosted-execution/routes";
+import {
+  parseHostedExecutionDirectRoute,
+} from "@murphai/hosted-execution/parsers";
 
 import { CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS } from "../internal-hosts.ts";
 import { HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH } from "../runner-email-route.ts";
@@ -199,6 +203,26 @@ export function createCloudflareEffectsPort(input: {
                 "Hosted external thread route authority response is invalid.",
               );
             }
+          },
+          async resolveCurrentDirectRoute(context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {},
+              boundUserId: input.boundUserId,
+              description: "Hosted current direct route resolution",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted current direct route resolution",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            return parseHostedExecutionDirectRoute(
+              payload,
+              "Hosted current direct route response",
+            );
           },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({

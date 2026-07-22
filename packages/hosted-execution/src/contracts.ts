@@ -120,7 +120,6 @@ export interface HostedExecutionExternalThreadRouteAuthority {
   accountLookupKey?: string | null;
   channel: HostedExecutionExternalThreadRouteChannel;
   containerMemberId: string;
-  threadIsDirect?: boolean;
   threadId: string;
 }
 
@@ -386,14 +385,19 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+export type HostedExecutionDirectRouteChannel =
   | "linq"
   | "telegram";
 
-export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
-  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
+export interface HostedExecutionDirectRoute {
+  channel: HostedExecutionDirectRouteChannel;
   threadId: string;
 }
+
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  HostedExecutionDirectRouteChannel;
+export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
+  HostedExecutionDirectRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
   directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
@@ -677,13 +681,7 @@ export interface HostedExecutionMealPhotoCapturedPayload {
   sha256: string;
 }
 
-export interface HostedExecutionMealPhotoCapturedDirectRoute {
-  channel: "linq" | "telegram";
-  threadId: string;
-}
-
 export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionMealPhotoCapturedDirectRoute | null;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }

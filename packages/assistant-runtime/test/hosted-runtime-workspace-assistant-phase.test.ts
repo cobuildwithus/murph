@@ -1160,9 +1160,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("resolves scheduled Telegram audience authority through the live Web route owner", async () => {
     const signal = new AbortController().signal;
     const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+    const resolveCurrentDirectRoute = vi.fn(async () => ({
+      channel: "telegram" as const,
+      threadId: "telegram_direct_123",
+    }));
     const phaseInput = createPhaseInput({});
     phaseInput.runtime.platform.effectsPort.assertExternalThreadRouteAuthority =
       assertExternalThreadRouteAuthority;
+    phaseInput.runtime.platform.effectsPort.resolveCurrentDirectRoute =
+      resolveCurrentDirectRoute;
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
       async ({ executionContext }) => {
         const resolveScheduledExternalThreadRoute =
@@ -1180,15 +1186,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           containerMemberId: "member_synthetic_phase",
           threadId: "telegram_group_123",
         });
-        await expect(resolveScheduledExternalThreadRoute({
+        const resolveScheduledDirectRoute =
+          executionContext.hosted?.resolveScheduledDirectRoute;
+        if (!resolveScheduledDirectRoute) {
+          throw new Error("Expected scheduled direct route authority.");
+        }
+        await expect(resolveScheduledDirectRoute({ signal })).resolves.toEqual({
           channel: "telegram",
-          target: "telegram_direct_123",
-          threadIsDirect: true,
-        })).resolves.toEqual({
-          channel: "telegram",
-          containerMemberId: "member_synthetic_phase",
           threadId: "telegram_direct_123",
-          threadIsDirect: true,
         });
 
         return {
@@ -1207,12 +1212,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       containerMemberId: "member_synthetic_phase",
       threadId: "telegram_group_123",
     }, { signal });
-    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith({
-      channel: "telegram",
-      containerMemberId: "member_synthetic_phase",
-      threadId: "telegram_direct_123",
-      threadIsDirect: true,
-    }, { signal: undefined });
+    expect(resolveCurrentDirectRoute).toHaveBeenCalledWith({ signal });
   });
 
   it("passes the hosted assistant configuration port into assistant execution", async () => {

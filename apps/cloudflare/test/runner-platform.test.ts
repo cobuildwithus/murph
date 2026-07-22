@@ -40,6 +40,7 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
+  HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -4545,6 +4546,37 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature"))
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("resolves the current direct route through signed web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_CURRENT_DIRECT_ROUTE_PATH,
+      );
+      await expect(request.json()).resolves.toEqual({});
+      return Response.json({
+        channel: "telegram",
+        threadId: "telegram_home_123",
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(platform.effectsPort.resolveCurrentDirectRoute?.()).resolves.toEqual({
+      channel: "telegram",
+      threadId: "telegram_home_123",
+    });
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "current direct route request");
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
   });
 
   it("write-fences Linq egress authority assertions and preserves boolean fallback/directness", async () => {

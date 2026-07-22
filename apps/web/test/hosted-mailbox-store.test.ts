@@ -1664,41 +1664,8 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       },
       tx,
     });
-    const routeChannelConflict = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: {
-        ...buildHostedMealPhotoEnvelope("meal-photo-attempt-c"),
-        directRoute: {
-          channel: "telegram",
-          threadId: "linq-home-thread",
-        },
-      },
-      tx,
-    });
-    const routeThreadConflict = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: {
-        ...buildHostedMealPhotoEnvelope("meal-photo-attempt-d"),
-        directRoute: {
-          channel: "linq",
-          threadId: "replacement-linq-home-thread",
-        },
-      },
-      tx,
-    });
-
     expect(conflict).toMatchObject({
       claimedMealPhotoKey: "meal-photo-attempt-b",
-      dedupeConflict: true,
-      duplicate: true,
-      inserted: false,
-    });
-    expect(routeChannelConflict).toMatchObject({
-      claimedMealPhotoKey: "meal-photo-attempt-c",
-      dedupeConflict: true,
-      duplicate: true,
-      inserted: false,
-    });
-    expect(routeThreadConflict).toMatchObject({
-      claimedMealPhotoKey: "meal-photo-attempt-d",
       dedupeConflict: true,
       duplicate: true,
       inserted: false,
@@ -3119,10 +3086,6 @@ function buildHostedGroupEmailEnvelope(userId: string) {
 
 function buildHostedMealPhotoEnvelope(mealPhotoKey: string) {
   return {
-    directRoute: {
-      channel: "linq" as const,
-      threadId: "linq-home-thread",
-    },
     eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
     kind: "meal-photo.captured" as const,
     mealPhoto: {

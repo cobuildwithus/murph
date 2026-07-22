@@ -6,6 +6,7 @@ import type {
 import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
+  HostedExecutionDirectRoute,
   HostedExecutionExternalThreadRouteAuthority,
 } from '@murphai/hosted-execution/contracts'
 import type {
@@ -394,11 +395,13 @@ export interface AssistantHostedExecutionContext {
     target: string
     threadIsDirect: boolean
   }>
+  resolveScheduledDirectRoute?(input: {
+    signal?: AbortSignal | null
+  }): Promise<HostedExecutionDirectRoute>
   resolveScheduledExternalThreadRoute?(input: {
     channel: 'telegram'
     signal?: AbortSignal | null
     target: string
-    threadIsDirect?: boolean
   }): Promise<HostedExecutionExternalThreadRouteAuthority>
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]
@@ -540,6 +543,9 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...(typeof hosted?.resolveScheduledLinqRoute === 'function'
         ? { resolveScheduledLinqRoute: hosted.resolveScheduledLinqRoute }
+        : {}),
+      ...(typeof hosted?.resolveScheduledDirectRoute === 'function'
+        ? { resolveScheduledDirectRoute: hosted.resolveScheduledDirectRoute }
         : {}),
       ...(typeof hosted?.resolveScheduledExternalThreadRoute === 'function'
         ? {
