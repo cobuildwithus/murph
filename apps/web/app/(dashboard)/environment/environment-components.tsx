@@ -1,14 +1,21 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useEffect, useState, type SVGProps } from "react";
 import { cva } from "class-variance-authority";
 import Image from "next/image";
 import {
-  Cat,
+  Building2,
+  Check,
   ChevronDown,
-  Info,
+  ChevronRight,
+  ChevronUp,
   MapPin,
+  MessageCircle,
   Moon,
+  Share2,
   Sun,
   Wind,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -19,8 +26,33 @@ import {
   TooltipTrigger,
 } from "@/src/components/ui/tooltip";
 
-import type { CategoryGrade, CategoryNote, FactRow } from "./category-notes";
-import type { ResolvedCategory } from "./home-model";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/src/components/ui/sheet";
+import type {
+  CategoryGrade,
+  CategoryNote,
+  FactRow,
+  QuietFact,
+} from "./category-notes";
+import { INDICATOR_GUIDES } from "./indicator-guides";
+import {
+  CATEGORY_THUMBNAILS,
+  INDICATOR_SPRITES,
+  type ObjectSprite as ObjectSpriteDefinition,
+  type ResolvedCategory,
+} from "./home-model";
 
 type EnvironmentContext = {
   location: string;
@@ -28,7 +60,6 @@ type EnvironmentContext = {
   weather: string;
   nights: string;
   outdoorAir: string;
-  pets: string;
 };
 
 type GradeTone = "olive" | "amber" | "terracotta" | "muted";
@@ -44,6 +75,7 @@ export const gradeBadgeVariants = cva(
         muted: "bg-muted text-muted-foreground",
       },
       size: {
+        xs: "size-7 rounded-lg text-sm",
         sm: "size-10 text-xl",
         lg: "size-20 text-5xl tracking-[-0.03em]",
       },
@@ -67,7 +99,7 @@ export function GradeBadge({
   size = "sm",
 }: {
   grade: CategoryGrade;
-  size?: "sm" | "lg";
+  size?: "xs" | "sm" | "lg";
 }) {
   const label =
     grade.letter && grade.pct !== null
@@ -84,16 +116,238 @@ export function GradeBadge({
   );
 }
 
+function GradeDialog({
+  open,
+  onOpenChange,
+  title,
+  grade,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  grade: CategoryGrade;
+  children: React.ReactNode;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b border-border bg-muted/40 px-7 pb-6 pt-7">
+          <div className="flex items-center gap-5 pr-8">
+            <GradeBadge grade={grade} size="lg" />
+            <div className="min-w-0">
+              <DialogTitle className="font-serif text-xl font-semibold tracking-[-0.02em]">
+                {title}
+              </DialogTitle>
+              <DialogDescription className="mt-1.5 text-sm leading-relaxed">
+                {grade.graded === 0
+                  ? "Informational facts only — this category isn't graded."
+                  : `${grade.met} of ${grade.graded} targets met. Fixing any flagged fact raises the grade.`}
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="px-7 py-4">{children}</div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GradeBadgeButton({
+  grade,
+  onClick,
+  size = "sm",
+}: {
+  grade: CategoryGrade;
+  onClick: () => void;
+  size?: "sm" | "lg";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
+      className="cursor-pointer rounded-xl transition-transform duration-150 hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+      aria-label="How this grade is calculated"
+    >
+      <GradeBadge grade={grade} size={size} />
+    </button>
+  );
+}
+
+function CategoryGradeButton({ note }: { note: CategoryNote }) {
+  const [open, setOpen] = useState(false);
+  const unmet = note.rows.filter((row) => row.met === false);
+
+  return (
+    <>
+      <GradeBadgeButton grade={note.grade} onClick={() => setOpen(true)} />
+      <GradeDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={note.title}
+        grade={note.grade}
+      >
+        {unmet.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {unmet.map((row) => (
+              <li
+                key={row.indicatorId}
+                className="flex items-baseline justify-between gap-4 py-3 text-sm"
+              >
+                <span className="font-medium text-foreground">{row.label}</span>
+                <span className="text-destructive">{row.value}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="py-3 text-sm text-muted-foreground">
+            {note.grade.graded > 0
+              ? "Everything graded here is within target."
+              : "Nothing to fix — these facts are context, not targets."}
+          </p>
+        )}
+      </GradeDialog>
+    </>
+  );
+}
+
+function OverallGradeDialog({
+  open,
+  onOpenChange,
+  grade,
+  notes,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  grade: CategoryGrade;
+  notes: CategoryNote[];
+}) {
+  return (
+    <GradeDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Environment grade"
+      grade={grade}
+    >
+      <ul className="divide-y divide-border">
+        {notes.map((note) => {
+          const thumbnail = CATEGORY_THUMBNAILS[note.id];
+          const pct =
+            note.grade.graded === 0
+              ? 0
+              : Math.round((100 * note.grade.met) / note.grade.graded);
+          return (
+            <li key={note.id} className="flex items-center gap-3.5 py-3">
+              {thumbnail ? (
+                <Image
+                  src={thumbnail.src}
+                  alt=""
+                  width={thumbnail.w}
+                  height={thumbnail.h}
+                  className="size-8 shrink-0 object-contain"
+                />
+              ) : (
+                <span className="size-8 shrink-0" aria-hidden="true" />
+              )}
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                {note.title}
+              </span>
+              {note.grade.graded === 0 ? (
+                <span className="text-xs text-muted-foreground">
+                  not graded
+                </span>
+              ) : (
+                <>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {note.grade.met}/{note.grade.graded}
+                  </span>
+                  <span
+                    className="h-1 w-16 overflow-hidden rounded-full bg-secondary/40"
+                    aria-hidden="true"
+                  >
+                    <span
+                      className="block h-full rounded-full bg-primary"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </span>
+                </>
+              )}
+              <GradeBadge grade={note.grade} size="xs" />
+            </li>
+          );
+        })}
+      </ul>
+    </GradeDialog>
+  );
+}
+
+export function ShareEnvironmentButton() {
+  const [copied, setCopied] = useState(false);
+
+  const share = async () => {
+    const url = window.location.origin + window.location.pathname;
+    const title = "My environment, graded — Murph";
+    try {
+      const response = await fetch("/environment/opengraph-image");
+      const blob = await response.blob();
+      const file = new File([blob], "my-environment-grade.png", {
+        type: "image/png",
+      });
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title,
+          text: `What would yours score? ${url}`,
+        });
+        return;
+      }
+      if (navigator.share) {
+        await navigator.share({ title, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Share sheet dismissed or clipboard blocked — nothing to clean up.
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={share}
+      className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {copied ? (
+        <>
+          <Check className="size-3.5 text-primary" aria-hidden="true" />
+          Link copied
+        </>
+      ) : (
+        <>
+          <Share2 className="size-3.5" aria-hidden="true" />
+          Share
+        </>
+      )}
+    </button>
+  );
+}
+
 const CONTEXT_ICONS: ReadonlyArray<{
-  key: keyof Omit<EnvironmentContext, "areaType">;
+  key: keyof EnvironmentContext;
   label: string;
   icon: LucideIcon;
 }> = [
   { key: "location", label: "Location", icon: MapPin },
+  { key: "areaType", label: "Area", icon: Building2 },
   { key: "weather", label: "Weather", icon: Sun },
   { key: "nights", label: "Nights", icon: Moon },
   { key: "outdoorAir", label: "Outdoor air", icon: Wind },
-  { key: "pets", label: "Pets", icon: Cat },
 ];
 
 export function EnvironmentHero({
@@ -101,13 +355,16 @@ export function EnvironmentHero({
   known,
   total,
   context,
+  notes,
 }: {
   grade: CategoryGrade;
   known: number;
   total: number;
   context: EnvironmentContext;
+  notes: CategoryNote[];
 }) {
   const coverage = total === 0 ? 0 : Math.round((100 * known) / total);
+  const [gradeOpen, setGradeOpen] = useState(false);
 
   return (
     <section
@@ -125,11 +382,22 @@ export function EnvironmentHero({
               Environment grade
             </p>
             {grade.pct === null ? null : (
-              <p className="mt-1 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground">
+              <button
+                type="button"
+                onClick={() => setGradeOpen(true)}
+                aria-label="How this grade is calculated"
+                className="mt-1 cursor-pointer border-b border-dotted border-muted-foreground/60 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 {grade.pct}%
-              </p>
+              </button>
             )}
           </div>
+          <OverallGradeDialog
+            open={gradeOpen}
+            onOpenChange={setGradeOpen}
+            grade={grade}
+            notes={notes}
+          />
         </div>
 
         <div className="border-t border-border px-5 py-6 sm:px-6 lg:border-l lg:border-t-0">
@@ -158,41 +426,28 @@ export function EnvironmentHero({
         </div>
       </div>
 
-      <TooltipProvider delay={250}>
-        <div
-          className="grid grid-cols-2 gap-x-4 gap-y-5 border-t border-border px-5 py-5 sm:px-6 md:grid-cols-3 xl:grid-cols-5"
-          aria-label="Current home context"
-        >
-          {CONTEXT_ICONS.map((item) => {
-            const Icon = item.icon;
-            const value = context[item.key];
-            const isLocation = item.key === "location";
-            return (
-              <div key={item.key} className="flex min-w-0 items-center gap-3">
-                <Icon
-                  className="size-4 shrink-0 text-primary"
-                  aria-hidden="true"
-                />
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  {isLocation ? (
-                    <Tooltip>
-                      <TooltipTrigger className="block max-w-full truncate border-b border-dotted border-muted-foreground/60 text-left text-sm font-medium text-foreground">
-                        {value}
-                      </TooltipTrigger>
-                      <TooltipContent>{context.areaType}</TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {value}
-                    </p>
-                  )}
-                </div>
+      <div
+        className="grid grid-cols-2 gap-x-4 gap-y-5 border-t border-border px-5 py-5 sm:px-6 md:grid-cols-3 xl:grid-cols-5"
+        aria-label="Current home context"
+      >
+        {CONTEXT_ICONS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.key} className="flex min-w-0 items-center gap-3">
+              <Icon
+                className="size-4 shrink-0 text-primary"
+                aria-hidden="true"
+              />
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">{item.label}</p>
+                <p className="truncate text-sm font-medium text-foreground">
+                  {context[item.key]}
+                </p>
               </div>
-            );
-          })}
-        </div>
-      </TooltipProvider>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -200,19 +455,15 @@ export function EnvironmentHero({
 export function CategoryCard({
   category,
   note,
-  visual,
+  chatHref,
 }: {
   category: ResolvedCategory;
   note: CategoryNote;
-  visual: ReactNode;
+  chatHref: string;
 }) {
   const headingId = `environment-category-${note.id}`;
   const coverage =
     note.total === 0 ? 0 : Math.round((100 * note.known) / note.total);
-  const visualLabel =
-    category.presentation === "vignette"
-      ? `${note.title} illustrated setup`
-      : `${note.title} equipment and access`;
 
   return (
     <article
@@ -236,7 +487,7 @@ export function CategoryCard({
           >
             {note.title}
           </span>
-          <GradeBadge grade={note.grade} />
+          <CategoryGradeButton note={note} />
           <span className="w-12 shrink-0 sm:w-24">
             <span className="flex items-baseline justify-between gap-1">
               <span className="font-serif text-base font-semibold text-foreground sm:text-lg">
@@ -266,14 +517,8 @@ export function CategoryCard({
           />
         </summary>
 
-        <div className="grid gap-6 border-t border-border px-4 py-5 sm:px-6 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,1.1fr)] lg:gap-8 lg:px-8 lg:py-7">
-          <section
-            aria-label={visualLabel}
-            className="bg-muted/60 px-4 py-5 sm:px-5"
-          >
-            {visual}
-          </section>
-          <CategoryFactList note={note} />
+        <div className="border-t border-border px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
+          <CategoryFactList category={category} note={note} chatHref={chatHref} />
         </div>
       </details>
     </article>
@@ -281,62 +526,79 @@ export function CategoryCard({
 }
 
 function FactValue({ row }: { row: FactRow }) {
-  if (!row.detail) {
-    return <span className="text-sm text-foreground">{row.value}</span>;
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger className="inline-flex items-center gap-1 border-b border-dotted border-muted-foreground/60 text-left text-sm text-foreground">
-        {row.value}
-        <Info className="size-3 text-muted-foreground" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent>{row.detail}</TooltipContent>
-    </Tooltip>
-  );
+  return <span className="text-sm text-foreground">{row.value}</span>;
 }
 
 type FactStatusKind = "met" | "unmet" | "known" | "unknown" | "skipped";
 
-const FACT_STATUS: Record<
-  FactStatusKind,
-  { label: string; className: string }
-> = {
-  met: { label: "within target", className: "border-primary bg-primary" },
-  unmet: {
-    label: "needs attention",
-    className: "border-destructive bg-destructive",
-  },
-  known: {
-    label: "known",
-    className: "border-muted-foreground/50 bg-transparent",
-  },
-  unknown: {
-    label: "not known yet",
-    className: "border-dashed border-muted-foreground/70 bg-transparent",
-  },
-  skipped: {
-    label: "skipped",
-    className: "border-muted-foreground/60 bg-transparent",
-  },
+const FACT_ICON_RING: Record<FactStatusKind, string> = {
+  met: "border border-secondary",
+  unmet: "border border-secondary",
+  known: "border border-secondary",
+  unknown: "border border-dashed border-muted-foreground/70",
+  skipped: "border border-dashed border-muted-foreground/70",
 };
 
-function FactStatus({ kind }: { kind: FactStatusKind }) {
-  const status = FACT_STATUS[kind];
-
+function ObjectSprite({
+  sprite,
+  ...imageProps
+}: Omit<SVGProps<SVGImageElement>, "href"> & {
+  sprite: ObjectSpriteDefinition;
+}) {
   return (
-    <span className="flex size-3 items-center justify-center pt-0.5">
-      <span
-        className={`flex size-2.5 items-center justify-center rounded-full border ${status.className}`}
-        aria-hidden="true"
-      >
-        {kind === "skipped" ? (
-          <span className="text-[8px] leading-none text-muted-foreground">
-            –
-          </span>
-        ) : null}
-      </span>
-      <span className="sr-only">{status.label}</span>
+    <image
+      href={sprite.src}
+      width={sprite.w}
+      height={sprite.h}
+      preserveAspectRatio="xMidYMid meet"
+      {...imageProps}
+    />
+  );
+}
+
+function FactIcon({
+  kind,
+  sprite,
+}: {
+  kind: FactStatusKind;
+  sprite?: ObjectSpriteDefinition;
+}) {
+  return (
+    <span
+      className={`flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary/20 ${FACT_ICON_RING[kind]}`}
+    >
+      {kind === "unknown" ? (
+        <span
+          className="font-mono text-sm font-semibold text-primary"
+          aria-hidden="true"
+        >
+          ?
+        </span>
+      ) : kind === "skipped" ? (
+        <span className="font-mono text-sm text-muted-foreground" aria-hidden="true">
+          –
+        </span>
+      ) : (
+        <svg viewBox="0 0 64 64" className="size-8" aria-hidden="true">
+          {sprite ? (
+            <ObjectSprite sprite={sprite} x={4} y={4} width={56} height={56} />
+          ) : (
+            <>
+              <rect
+                x={13}
+                y={15}
+                width={38}
+                height={34}
+                rx={7}
+                fill="#fffcf6"
+                stroke="#736a58"
+                strokeWidth={1.5}
+              />
+              <circle cx={32} cy={32} r={4} fill="#7a8c6e" />
+            </>
+          )}
+        </svg>
+      )}
     </span>
   );
 }
@@ -348,91 +610,611 @@ function factStatusKind(met: FactRow["met"]): FactStatusKind {
 }
 
 const FACT_ROW_GRID =
-  "gap-x-5 gap-y-1 sm:grid-cols-[minmax(150px,0.9fr)_minmax(90px,0.55fr)_minmax(150px,1fr)]";
+  "gap-x-5 gap-y-1 sm:grid-cols-[minmax(170px,1fr)_minmax(120px,0.7fr)_minmax(140px,0.9fr)_1rem] sm:items-center";
 
-function QuietFactRow({
-  label,
-  kind,
-}: {
+export type SelectedFact = {
+  indicatorId: string;
   label: string;
-  kind: "unknown" | "skipped";
+  kind: FactStatusKind;
+  value: string | null;
+  target: string | null;
+  detail: string | null;
+};
+
+function UnmetFlag() {
+  return (
+    <span className="ml-2 text-xs font-medium text-destructive">
+      needs attention
+    </span>
+  );
+}
+
+function FactRowButton({
+  children,
+  muted = false,
+  onClick,
+}: {
+  children: React.ReactNode;
+  muted?: boolean;
+  onClick: () => void;
 }) {
   return (
-    <li
-      className={`grid ${FACT_ROW_GRID} py-3 text-muted-foreground last:pb-0`}
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        <FactStatus kind={kind} />
-        <p className="text-sm font-medium">{label}</p>
-      </div>
-      <p className="pl-6 text-sm sm:pl-0">
-        {kind === "unknown" ? "not known yet" : "skipped"}
-      </p>
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        className={`group/fact relative grid w-full ${FACT_ROW_GRID} cursor-pointer rounded-lg px-3 py-2.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset motion-reduce:transition-none ${
+          muted ? "text-muted-foreground" : ""
+        }`}
+      >
+        {children}
+      </button>
     </li>
   );
 }
 
-function CategoryFactList({ note }: { note: CategoryNote }) {
-  const hasRows =
-    note.rows.length > 0 ||
-    note.unknownLabels.length > 0 ||
-    note.skippedLabels.length > 0;
+function RowChevron() {
+  return (
+    <ChevronRight
+      className="absolute right-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50 transition-colors duration-150 group-hover/fact:text-muted-foreground sm:static sm:translate-y-0 sm:justify-self-end"
+      aria-hidden="true"
+    />
+  );
+}
+
+function buildChatMessage(fact: SelectedFact): string {
+  const topic = fact.label.toLowerCase();
+  if (fact.kind === "unknown" || fact.kind === "skipped") {
+    return `Hey Murph — you don't know about my ${topic} yet. Let's fill it in.`;
+  }
+  if (fact.kind === "unmet") {
+    const target = fact.target ? ` (target: ${fact.target})` : "";
+    return `Hey Murph — my ${topic} is "${fact.value}"${target}. Can you help me improve it?`;
+  }
+  return `Hey Murph — can we talk about my ${topic}? Mine is "${fact.value}".`;
+}
+
+function buildChatHref(chatHref: string, fact: SelectedFact): string {
+  const query = new URLSearchParams({ text: buildChatMessage(fact) });
+  return `${chatHref}${chatHref.includes("?") ? "&" : "?"}${query}`;
+}
+
+const DISMISSED_CHECKS_KEY = "murph-environment-dismissed-checks";
+
+function loadDismissedChecks(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_CHECKS_KEY);
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDismissedChecks(next: Set<string>) {
+  try {
+    window.localStorage.setItem(
+      DISMISSED_CHECKS_KEY,
+      JSON.stringify([...next]),
+    );
+  } catch {
+    // Private-mode storage failures just lose the preference.
+  }
+}
+
+function GuideTipList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        {title}
+      </p>
+      <ul className="mt-3.5 flex flex-col gap-3.5">
+        {items.map((item) => (
+          <li key={item} className="text-sm leading-relaxed text-foreground">
+            {item}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function replaceHash(hash: string | null) {
+  if (typeof window === "undefined") return;
+  const { pathname, search } = window.location;
+  window.history.replaceState(null, "", hash ? `#${hash}` : pathname + search);
+}
+
+function FactDrawer({
+  fact,
+  sprite,
+  chatHref,
+  onClose,
+  onStep,
+  position,
+}: {
+  fact: SelectedFact | null;
+  sprite?: ObjectSpriteDefinition;
+  chatHref: string;
+  onClose: () => void;
+  onStep?: (delta: 1 | -1) => void;
+  position?: { index: number; total: number };
+}) {
+  const guide = fact ? INDICATOR_GUIDES[fact.indicatorId] : undefined;
+  const quiet = fact?.kind === "unknown" || fact?.kind === "skipped";
+
+  return (
+    <Sheet open={fact !== null} onOpenChange={(open) => open || onClose()}>
+      <SheetContent
+        side="right"
+        className="w-full overflow-y-auto sm:max-w-md"
+        onKeyDown={(event) => {
+          if (!onStep) return;
+          if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+            event.preventDefault();
+            onStep(1);
+          }
+          if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            onStep(-1);
+          }
+        }}
+      >
+        {fact ? (
+          <>
+            {onStep && position ? (
+              <div className="absolute left-3 top-3 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onStep(-1)}
+                  disabled={position.index === 0}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
+                  aria-label="Previous fact"
+                >
+                  <ChevronUp className="size-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onStep(1)}
+                  disabled={position.index === position.total - 1}
+                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-30"
+                  aria-label="Next fact"
+                >
+                  <ChevronDown className="size-4" aria-hidden="true" />
+                </button>
+                <span className="ml-1 text-xs tabular-nums text-muted-foreground">
+                  {position.index + 1}/{position.total}
+                </span>
+              </div>
+            ) : null}
+            <SheetHeader className="items-center gap-4 pt-10 text-center">
+              <span className="flex size-24 items-center justify-center rounded-full border border-secondary bg-secondary/20">
+                {fact.kind === "skipped" ? (
+                  <span className="font-mono text-2xl text-muted-foreground">
+                    –
+                  </span>
+                ) : quiet || !sprite ? (
+                  <span className="font-mono text-2xl font-semibold text-primary">
+                    ?
+                  </span>
+                ) : (
+                  <svg viewBox="0 0 64 64" className="size-18" aria-hidden="true">
+                    <ObjectSprite sprite={sprite} x={4} y={4} width={56} height={56} />
+                  </svg>
+                )}
+              </span>
+              <SheetTitle className="text-2xl tracking-[-0.02em]">
+                {fact.label}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex flex-col gap-7 px-6 pb-6">
+              {guide && guide.keyPoints.length > 0 ? (
+                <p className="font-serif text-[15.5px] leading-relaxed text-foreground/90 text-pretty">
+                  {guide.keyPoints.join(" ")}
+                </p>
+              ) : null}
+              <div className="rounded-lg border border-border bg-muted/40 px-4 py-3">
+                {fact.kind === "unknown" ? (
+                  <p className="text-sm text-muted-foreground">
+                    Murph doesn&apos;t know this about your home yet.
+                  </p>
+                ) : fact.kind === "skipped" ? (
+                  <p className="text-sm text-muted-foreground">
+                    You skipped this one — you can pick it up with Murph any
+                    time.
+                  </p>
+                ) : (
+                  <dl className="flex flex-col gap-3">
+                    <div
+                      className={`grid gap-4 ${
+                        fact.target ? "grid-cols-2" : "grid-cols-1"
+                      }`}
+                    >
+                      <div className="flex flex-col gap-1">
+                        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                          Yours
+                        </dt>
+                        <dd className="text-sm font-medium text-foreground">
+                          {fact.value}
+                          {fact.kind === "unmet" ? <UnmetFlag /> : null}
+                        </dd>
+                      </div>
+                      {fact.target ? (
+                        <div className="flex flex-col gap-1">
+                          <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                            Target
+                          </dt>
+                          <dd className="text-sm text-muted-foreground">
+                            {fact.target}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </div>
+                    {fact.detail ? (
+                      <p className="text-xs text-muted-foreground">
+                        {fact.detail}
+                      </p>
+                    ) : null}
+                  </dl>
+                )}
+              </div>
+
+              {guide?.sections.map((section) => (
+                <GuideTipList
+                  key={section.title}
+                  title={section.title}
+                  items={section.items}
+                />
+              ))}
+            </div>
+
+            <SheetFooter className="border-t border-border">
+              <a
+                href={buildChatHref(chatHref, fact)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <MessageCircle className="size-4" aria-hidden="true" />
+                {quiet ? "Tell Murph about it" : "Talk to Murph about it"}
+              </a>
+            </SheetFooter>
+          </>
+        ) : null}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export type NextCheckItem = {
+  fact: SelectedFact;
+  sprite?: ObjectSpriteDefinition;
+  categoryTitle: string;
+};
+
+export function NextChecksStrip({
+  items,
+  chatHref,
+}: {
+  items: NextCheckItem[];
+  chatHref: string;
+}) {
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDismissed(loadDismissedChecks());
+  }, []);
+
+  const remaining = items.filter(
+    (item) => !dismissed.has(item.fact.indicatorId),
+  );
+  const unmet = remaining.filter((item) => item.fact.kind === "unmet");
+  const shown = [...unmet.slice(0, 2), ...remaining.filter((item) => item.fact.kind !== "unmet"), ...unmet.slice(2)].slice(0, 3);
+  const dismissedCount = items.length - remaining.length;
+  const selectedIndex = shown.findIndex(
+    (item) => item.fact.indicatorId === selectedId,
+  );
+  const selected = selectedIndex === -1 ? null : shown[selectedIndex];
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  const open = (item: NextCheckItem) => {
+    setSelectedId(item.fact.indicatorId);
+    replaceHash(item.fact.indicatorId);
+  };
+  const close = () => {
+    setSelectedId(null);
+    replaceHash(null);
+  };
+  const step = (delta: 1 | -1) => {
+    if (selectedIndex === -1) return;
+    const next = shown[selectedIndex + delta];
+    if (next) open(next);
+  };
+  const dismiss = (indicatorId: string) => {
+    const next = new Set(dismissed).add(indicatorId);
+    setDismissed(next);
+    saveDismissedChecks(next);
+    if (selectedId === indicatorId) close();
+  };
+  const restore = () => {
+    setDismissed(new Set());
+    saveDismissedChecks(new Set());
+  };
+
+  return (
+    <TooltipProvider delay={150}>
+      <section aria-label="What to check next">
+        <div className="flex items-baseline justify-between">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+          What to check next
+        </p>
+        {dismissedCount > 0 ? (
+          <button
+            type="button"
+            onClick={restore}
+            className="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            Show dismissed ({dismissedCount})
+          </button>
+        ) : null}
+      </div>
+      {shown.length > 0 ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shown.map((item) => (
+            <div key={item.fact.indicatorId} className="group/check relative">
+              <button
+                type="button"
+                onClick={() => open(item)}
+                className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+              >
+                <FactIcon kind={item.fact.kind} sprite={item.sprite} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-foreground">
+                    {item.fact.label}
+                  </span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {item.fact.kind === "unknown"
+                      ? `not known yet · ${item.categoryTitle}`
+                      : `${item.fact.value} · ${item.categoryTitle}`}
+                  </span>
+                </span>
+                {item.fact.kind === "unmet" ? (
+                  <span className="shrink-0 text-xs font-medium text-destructive">
+                    fix
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-xs font-medium text-primary">
+                    fill in
+                  </span>
+                )}
+                <ChevronRight
+                  className="size-4 shrink-0 text-muted-foreground/50 transition-colors duration-150 group-hover/check:text-muted-foreground"
+                  aria-hidden="true"
+                />
+              </button>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={() => dismiss(item.fact.indicatorId)}
+                      className="absolute -right-1.5 -top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
+                      aria-label={`Don't suggest ${item.fact.label} again`}
+                    />
+                  }
+                >
+                  <X className="size-3" aria-hidden="true" />
+                </TooltipTrigger>
+                <TooltipContent>Don&apos;t suggest this again</TooltipContent>
+              </Tooltip>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted-foreground">
+          Nothing left to suggest — you&apos;ve dismissed all current
+          suggestions.
+        </p>
+      )}
+
+        <FactDrawer
+          fact={selected?.fact ?? null}
+          sprite={selected?.sprite}
+          chatHref={chatHref}
+          onClose={close}
+          onStep={step}
+          position={
+            selected === null
+              ? undefined
+              : { index: selectedIndex, total: shown.length }
+          }
+        />
+      </section>
+    </TooltipProvider>
+  );
+}
+
+function quietToSelected(
+  fact: QuietFact,
+  kind: "unknown" | "skipped",
+): SelectedFact {
+  return {
+    indicatorId: fact.indicatorId,
+    label: fact.label,
+    kind,
+    value: null,
+    target: null,
+    detail: null,
+  };
+}
+
+function rowToSelected(row: FactRow): SelectedFact {
+  return {
+    indicatorId: row.indicatorId,
+    label: row.label,
+    kind: factStatusKind(row.met),
+    value: row.value,
+    target: row.target,
+    detail: row.detail,
+  };
+}
+
+function CategoryFactList({
+  category,
+  note,
+  chatHref,
+}: {
+  category: ResolvedCategory;
+  note: CategoryNote;
+  chatHref: string;
+}) {
+  const facts: SelectedFact[] = [
+    ...note.rows.map(rowToSelected),
+    ...note.unknownFacts.map((fact) => quietToSelected(fact, "unknown")),
+    ...note.skippedFacts.map((fact) => quietToSelected(fact, "skipped")),
+  ];
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const selected = selectedIndex === null ? null : facts[selectedIndex] ?? null;
+
+  const openIndex = (index: number) => {
+    setSelectedIndex(index);
+    replaceHash(facts[index]?.indicatorId ?? null);
+  };
+  const close = () => {
+    setSelectedIndex(null);
+    replaceHash(null);
+  };
+  const step = (delta: 1 | -1) => {
+    if (selectedIndex === null) return;
+    const next = selectedIndex + delta;
+    if (next >= 0 && next < facts.length) openIndex(next);
+  };
+
+  const hashTargets = facts.map((fact) => fact.indicatorId).join(",");
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash) return;
+    const index = facts.findIndex((fact) => fact.indicatorId === hash);
+    if (index >= 0) {
+      setSelectedIndex(index);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hashTargets]);
+
+  const spriteByIndicatorId = new Map(
+    category.objects.flatMap((object) =>
+      object.sprite && !object.decor
+        ? [[object.indicatorId, object.sprite] as const]
+        : [],
+    ),
+  );
+  const spriteFor = (indicatorId: string) =>
+    spriteByIndicatorId.get(indicatorId) ?? INDICATOR_SPRITES[indicatorId];
+  const hasRows = facts.length > 0;
   const hasGoal = note.rows.some((row) => row.target !== null);
 
   return (
-    <TooltipProvider delay={250}>
-      <section aria-label={`${note.title} facts`} className="min-w-0">
-        {hasGoal ? (
+    <section aria-label={`${note.title} facts`} className="min-w-0">
+        {hasRows ? (
           <div
             className={`hidden ${FACT_ROW_GRID} mb-1 border-b border-border pb-1.5 sm:grid`}
             aria-hidden="true"
           >
-            <span className="text-right text-xs text-muted-foreground sm:col-start-3">
-              Target
-            </span>
+            <span />
+            <span className="text-xs text-muted-foreground">Yours</span>
+            {hasGoal ? (
+              <span className="text-xs text-muted-foreground">Target</span>
+            ) : null}
           </div>
         ) : null}
 
         {hasRows ? (
-          <ul className="divide-y divide-border" role="list">
-            {note.rows.map((row) => (
-              <li
+          <ul className="-mx-3 divide-y divide-border" role="list">
+            {note.rows.map((row, index) => (
+              <FactRowButton
                 key={row.indicatorId}
-                className={`grid ${FACT_ROW_GRID} py-3 last:pb-0`}
+                onClick={() => openIndex(index)}
               >
-                <div className="flex min-w-0 items-start gap-3">
-                  <FactStatus kind={factStatusKind(row.met)} />
-                  <p className="text-sm font-medium text-foreground">
+                <span className="flex min-w-0 items-center gap-3">
+                  <FactIcon
+                    kind={factStatusKind(row.met)}
+                    sprite={spriteFor(row.indicatorId)}
+                  />
+                  <span className="text-sm font-medium text-foreground">
                     {row.label}
-                  </p>
-                </div>
-                <p className="min-w-0 pl-6 sm:pl-0">
+                  </span>
+                </span>
+                <span className="min-w-0 pl-13 sm:pl-0">
+                  <span className="sr-only">Yours: </span>
                   <FactValue row={row} />
-                </p>
-                {row.target ? (
-                  <p className="pl-6 text-xs text-muted-foreground sm:pl-0 sm:text-right">
-                    {row.target}
-                  </p>
-                ) : null}
-              </li>
+                  {row.met === false ? <UnmetFlag /> : null}
+                </span>
+                <span className="pl-13 text-xs text-muted-foreground sm:pl-0">
+                  {row.target ? (
+                    <>
+                      <span className="sr-only">Target: </span>
+                      {row.target}
+                    </>
+                  ) : null}
+                </span>
+                <RowChevron />
+              </FactRowButton>
             ))}
-            {note.unknownLabels.map((label) => (
-              <QuietFactRow
-                key={`unknown-${label}`}
-                label={label}
-                kind="unknown"
-              />
+            {note.unknownFacts.map((fact, index) => (
+              <FactRowButton
+                key={`unknown-${fact.indicatorId}`}
+                muted
+                onClick={() => openIndex(note.rows.length + index)}
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <FactIcon kind="unknown" />
+                  <span className="text-sm font-medium">{fact.label}</span>
+                </span>
+                <span className="pl-13 text-sm sm:pl-0">not known yet</span>
+                <span aria-hidden="true" />
+                <RowChevron />
+              </FactRowButton>
             ))}
-            {note.skippedLabels.map((label) => (
-              <QuietFactRow
-                key={`skipped-${label}`}
-                label={label}
-                kind="skipped"
-              />
+            {note.skippedFacts.map((fact, index) => (
+              <FactRowButton
+                key={`skipped-${fact.indicatorId}`}
+                muted
+                onClick={() =>
+                  openIndex(note.rows.length + note.unknownFacts.length + index)
+                }
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <FactIcon kind="skipped" />
+                  <span className="text-sm font-medium">{fact.label}</span>
+                </span>
+                <span className="pl-13 text-sm sm:pl-0">skipped</span>
+                <span aria-hidden="true" />
+                <RowChevron />
+              </FactRowButton>
             ))}
           </ul>
         ) : null}
-      </section>
-    </TooltipProvider>
+
+      <FactDrawer
+        fact={selected}
+        sprite={selected ? spriteFor(selected.indicatorId) : undefined}
+        chatHref={chatHref}
+        onClose={close}
+        onStep={step}
+        position={
+          selectedIndex === null
+            ? undefined
+            : { index: selectedIndex, total: facts.length }
+        }
+      />
+    </section>
   );
 }

@@ -73,11 +73,20 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     "What Murph knows about your home, and what to check next.",
   );
 
+  const environmentImage = {
+    alt: "My environment grade — Murph",
+    height: 630,
+    type: "image/png",
+    url: "/environment/opengraph-image",
+    width: 1200,
+  };
+  assert.deepEqual(environmentMetadata.openGraph?.images, [environmentImage]);
+  assert.deepEqual(environmentMetadata.twitter?.images, [environmentImage]);
+
   for (const routeMetadata of [
     overviewMetadata,
     historyMetadata,
     experimentsMetadata,
-    environmentMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
       {
@@ -194,7 +203,7 @@ test("EnvironmentPage renders the habitat catalog mock", () => {
 
   assert.match(markup, /Your environment/);
   assert.match(markup, /Environment grade/);
-  assert.match(markup, /Murph knows 43 of 49/);
+  assert.match(markup, /Murph knows 42 of 48/);
   assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
   assert.match(markup, /Recovery &amp; devices/);

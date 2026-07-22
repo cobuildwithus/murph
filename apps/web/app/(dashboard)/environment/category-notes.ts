@@ -25,6 +25,11 @@ export type FactRow = {
   detail: string | null;
 };
 
+export type QuietFact = {
+  indicatorId: string;
+  label: string;
+};
+
 export type CategoryNote = {
   id: string;
   title: string;
@@ -32,8 +37,8 @@ export type CategoryNote = {
   total: number;
   grade: CategoryGrade;
   rows: FactRow[];
-  unknownLabels: string[];
-  skippedLabels: string[];
+  unknownFacts: QuietFact[];
+  skippedFacts: QuietFact[];
 };
 
 type Evaluator = {
@@ -93,10 +98,6 @@ const TARGET_EVALUATORS: Readonly<Record<string, Evaluator>> = {
   daytime_light: {
     met: (value) => value !== "dim",
     goal: "bright daytime light",
-  },
-  sauna_access: {
-    met: (value) => value !== "none",
-    showGoal: false,
   },
   standing_desk: { met: (value) => value === "adjustable_used" },
   screen_at_eye_level: { met: (value) => value === true },
@@ -273,8 +274,8 @@ export function deriveCategoryNote(
   }
 
   const rows: Array<FactRow & { index: number }> = [];
-  const unknown: Array<{ label: string; rank: number; index: number }> = [];
-  const skipped: Array<{ label: string; rank: number; index: number }> = [];
+  const unknown: Array<QuietFact & { rank: number; index: number }> = [];
+  const skipped: Array<QuietFact & { rank: number; index: number }> = [];
   let known = 0;
 
   for (const { aspectId, indicator, value, index } of indicators) {
@@ -282,11 +283,11 @@ export function deriveCategoryNote(
     const rank = PRIORITY_RANK[indicator.priority];
 
     if (value === undefined || value === null) {
-      unknown.push({ label, rank, index });
+      unknown.push({ indicatorId: indicator.id, label, rank, index });
       continue;
     }
     if (value === HABITAT_DECLINED_VALUE) {
-      skipped.push({ label, rank, index });
+      skipped.push({ indicatorId: indicator.id, label, rank, index });
       continue;
     }
 
@@ -357,11 +358,11 @@ export function deriveCategoryNote(
         detail,
       }),
     ),
-    unknownLabels: unknown
+    unknownFacts: unknown
       .sort((a, b) => a.rank - b.rank || a.index - b.index)
-      .map(({ label }) => label),
-    skippedLabels: skipped
+      .map(({ indicatorId, label }) => ({ indicatorId, label })),
+    skippedFacts: skipped
       .sort((a, b) => a.rank - b.rank || a.index - b.index)
-      .map(({ label }) => label),
+      .map(({ indicatorId, label }) => ({ indicatorId, label })),
   };
 }

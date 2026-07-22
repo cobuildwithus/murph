@@ -1,29 +1,11 @@
-// Catalog-backed scene model for the environment page. Each catalog category
-// owns one free-standing stage.
+// Catalog-backed model for the environment page: five categories, each
+// aggregating catalog aspects, with illustration sprites per indicator.
 
 import {
   HABITAT_CATALOG,
   HABITAT_DECLINED_VALUE,
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
-
-export type HabitatState = "known" | "skipped" | "unknown";
-
-export type ObjectKind =
-  | "bed"
-  | "ac"
-  | "window"
-  | "sensor"
-  | "lamp"
-  | "sun"
-  | "purifier"
-  | "stove"
-  | "sauna"
-  | "plunge"
-  | "redlight"
-  | "desk"
-  | "chair"
-  | "device";
 
 export interface ObjectSprite {
   src: string;
@@ -34,38 +16,22 @@ export interface ObjectSprite {
 
 interface ObjectDef {
   id: string;
-  kind: ObjectKind;
   aspectId: string;
   indicatorId: string;
   label: string;
-  lx: number;
-  ly: number;
-  z?: number;
   decor?: boolean;
-  absent?: readonly HabitatIndicatorValue[];
-  mount?: { side: "n" | "w"; z: number };
   sprite?: ObjectSprite;
 }
 
 interface CategoryDef {
   id: string;
   title: string;
-  presentation: "vignette" | "shelf";
   aspectIds: readonly string[];
   thumbnail: ObjectSprite;
-  w: number;
-  d: number;
   objects: readonly ObjectDef[];
 }
 
-export interface ResolvedObject extends ObjectDef {
-  state: HabitatState;
-  value: HabitatIndicatorValue | undefined;
-  valueText: string | null;
-}
-
-export interface ResolvedCategory extends Omit<CategoryDef, "objects"> {
-  objects: ResolvedObject[];
+export interface ResolvedCategory extends CategoryDef {
   known: number;
   total: number;
 }
@@ -76,226 +42,122 @@ export interface HabitatScene {
   total: number;
 }
 
+const habitatSprite = (
+  file: string,
+  w: number,
+  h: number,
+  anchorY?: number,
+): ObjectSprite => ({
+  src: `/design-assets/habitat/${file}.svg`,
+  w,
+  h,
+  ...(anchorY === undefined ? {} : { anchorY }),
+});
+
 const CATEGORIES: readonly CategoryDef[] = [
   {
     id: "sleep",
     title: "Sleep",
-    presentation: "vignette",
     aspectIds: ["sleep-environment"],
-    thumbnail: {
-      src: "/design-assets/habitat/bed.svg",
-      w: 48,
-      h: 48,
-    },
-    w: 5,
-    d: 4,
+    thumbnail: habitatSprite("bed", 48, 48),
     objects: [
       {
         id: "bed",
-        kind: "bed",
         aspectId: "sleep-environment",
         indicatorId: "mattress_satisfaction",
         label: "Mattress",
-        lx: 1.9,
-        ly: 1.7,
-        sprite: {
-          src: "/design-assets/habitat/bed.svg",
-          w: 168,
-          h: 135,
-          anchorY: 0.78,
-        },
+        sprite: habitatSprite("bed", 168, 135, 0.78),
       },
       {
         id: "window",
-        kind: "window",
         aspectId: "sleep-environment",
         indicatorId: "window_at_night",
         label: "Window at night",
-        lx: 4,
-        ly: 0,
-        mount: { side: "n", z: 8 },
-        sprite: {
-          src: "/design-assets/habitat/window-front.svg",
-          w: 88,
-          h: 88,
-          anchorY: 1,
-        },
+        sprite: habitatSprite("window-front", 88, 88, 1),
       },
       {
         id: "ac",
-        kind: "ac",
         aspectId: "sleep-environment",
         indicatorId: "temp_control",
         label: "Temperature control",
-        lx: 1.3,
-        ly: 0,
-        absent: ["none"],
-        mount: { side: "n", z: 50 },
-        sprite: {
-          src: "/design-assets/habitat/ac-front.svg",
-          w: 70,
-          h: 30,
-          anchorY: 1,
-        },
+        sprite: habitatSprite("ac-front", 70, 30, 1),
       },
       {
         id: "phone",
-        kind: "device",
         aspectId: "sleep-environment",
         indicatorId: "phone_by_bed",
         label: "Phone by the bed",
-        lx: 0.55,
-        ly: 0.95,
-        absent: [false],
-        sprite: {
-          src: "/design-assets/habitat/nightstand.svg",
-          w: 80,
-          h: 73,
-          anchorY: 0.78,
-        },
+        sprite: habitatSprite("nightstand", 80, 73, 0.78),
       },
       {
         id: "co2",
-        kind: "sensor",
         aspectId: "sleep-environment",
         indicatorId: "co2_typical_ppm",
         label: "Bedroom CO₂",
-        lx: 0.6,
-        ly: 3.5,
-        sprite: {
-          src: "/design-assets/habitat/aranet.svg",
-          w: 34,
-          h: 27,
-          anchorY: 0.82,
-        },
+        sprite: habitatSprite("aranet", 34, 27, 0.82),
       },
       {
         id: "tv",
-        kind: "device",
         aspectId: "sleep-environment",
         indicatorId: "tv_in_bedroom",
         label: "Bedroom TV",
-        lx: 0.5,
-        ly: 2.3,
-        absent: [false],
-        sprite: {
-          src: "/design-assets/habitat/tv.svg",
-          w: 62,
-          h: 73,
-          anchorY: 0.84,
-        },
+        sprite: habitatSprite("tv", 62, 73, 0.84),
       },
       {
         id: "humidifier",
-        kind: "purifier",
         aspectId: "sleep-environment",
         indicatorId: "humidity_known",
         label: "Humidity",
-        lx: 4.45,
-        ly: 1,
-        absent: ["unmanaged"],
-        sprite: {
-          src: "/design-assets/habitat/humidifier.svg",
-          w: 38,
-          h: 68,
-          anchorY: 0.86,
-        },
+        sprite: habitatSprite("humidifier", 38, 68, 0.86),
       },
     ],
   },
   {
     id: "air",
     title: "Air & water",
-    presentation: "shelf",
     aspectIds: ["home-air", "water"],
-    thumbnail: {
-      src: "/design-assets/habitat/purifier.svg",
-      w: 48,
-      h: 48,
-    },
-    w: 4,
-    d: 3.5,
+    thumbnail: habitatSprite("purifier", 48, 48),
     objects: [
       {
         id: "purifier",
-        kind: "purifier",
         aspectId: "home-air",
         indicatorId: "air_purifier",
         label: "Air purifier",
-        lx: 0.65,
-        ly: 2.85,
-        absent: ["none"],
-        sprite: {
-          src: "/design-assets/habitat/purifier.svg",
-          w: 74,
-          h: 74,
-          anchorY: 0.84,
-        },
+        sprite: habitatSprite("purifier", 74, 74, 0.84),
       },
       {
         id: "stove",
-        kind: "stove",
         aspectId: "home-air",
         indicatorId: "stove",
         label: "Stove",
-        lx: 2.7,
-        ly: 0.9,
-        sprite: {
-          src: "/design-assets/habitat/stove.svg",
-          w: 84,
-          h: 106,
-          anchorY: 0.82,
-        },
+        sprite: habitatSprite("stove", 84, 106, 0.82),
       },
       {
         id: "airmeter",
-        kind: "sensor",
         aspectId: "home-air",
         indicatorId: "air_quality_meter",
         label: "Air-quality meter",
-        lx: 3.25,
-        ly: 2.75,
-        absent: ["none"],
       },
     ],
   },
   {
     id: "light",
     title: "Light",
-    presentation: "shelf",
     aspectIds: ["lighting"],
-    thumbnail: {
-      src: "/design-assets/habitat/lamp.svg",
-      w: 48,
-      h: 48,
-    },
-    w: 3.5,
-    d: 3.5,
+    thumbnail: habitatSprite("lamp", 48, 48),
     objects: [
       {
         id: "lamp",
-        kind: "lamp",
         aspectId: "lighting",
         indicatorId: "evening_light",
         label: "Evening light",
-        lx: 1.05,
-        ly: 2.65,
-        sprite: {
-          src: "/design-assets/habitat/lamp.svg",
-          w: 52,
-          h: 151,
-          anchorY: 0.9,
-        },
+        sprite: habitatSprite("lamp", 52, 151, 0.9),
       },
       {
         id: "sun",
-        kind: "sun",
         aspectId: "lighting",
         indicatorId: "morning_light_access",
         label: "Morning daylight",
-        lx: 3.1,
-        ly: 0.15,
-        z: 70,
         decor: true,
       },
     ],
@@ -303,144 +165,108 @@ const CATEGORIES: readonly CategoryDef[] = [
   {
     id: "recovery",
     title: "Recovery & devices",
-    presentation: "shelf",
     aspectIds: ["recovery-access", "health-devices"],
-    thumbnail: {
-      src: "/design-assets/habitat/plunge.svg",
-      w: 48,
-      h: 48,
-    },
-    w: 4.5,
-    d: 4,
+    thumbnail: habitatSprite("plunge", 48, 48),
     objects: [
       {
         id: "sauna",
-        kind: "sauna",
         aspectId: "recovery-access",
         indicatorId: "sauna_access",
         label: "Sauna",
-        lx: 1.25,
-        ly: 0.9,
-        absent: ["none"],
-        sprite: {
-          src: "/design-assets/habitat/sauna-glass.svg",
-          w: 150,
-          h: 184,
-          anchorY: 0.82,
-        },
+        sprite: habitatSprite("sauna-glass", 150, 184, 0.82),
       },
       {
         id: "plunge",
-        kind: "plunge",
         aspectId: "recovery-access",
         indicatorId: "cold_exposure",
         label: "Cold exposure",
-        lx: 3.1,
-        ly: 1.1,
-        absent: ["none"],
-        sprite: {
-          src: "/design-assets/habitat/plunge.svg",
-          w: 96,
-          h: 96,
-          anchorY: 0.82,
-        },
+        sprite: habitatSprite("plunge", 96, 96, 0.82),
       },
       {
         id: "redlight",
-        kind: "redlight",
         aspectId: "recovery-access",
         indicatorId: "red_light",
         label: "Red light",
-        lx: 3.5,
-        ly: 3,
-        absent: ["none"],
-        sprite: {
-          src: "/design-assets/habitat/redlight.svg",
-          w: 50,
-          h: 132,
-          anchorY: 0.9,
-        },
+        sprite: habitatSprite("redlight", 50, 132, 0.9),
       },
       {
         id: "scale",
-        kind: "device",
         aspectId: "health-devices",
         indicatorId: "scale",
         label: "Scale",
-        lx: 1.1,
-        ly: 3.25,
-        absent: ["none"],
-        sprite: {
-          src: "/design-assets/habitat/scale.svg",
-          w: 52,
-          h: 29,
-          anchorY: 0.72,
-        },
+        sprite: habitatSprite("scale", 52, 29, 0.72),
       },
       {
         id: "bpcuff",
-        kind: "device",
         aspectId: "health-devices",
         indicatorId: "bp_cuff",
         label: "Blood-pressure cuff",
-        lx: 2.25,
-        ly: 3.2,
-        absent: [false],
-        sprite: {
-          src: "/design-assets/habitat/bpcuff.svg",
-          w: 56,
-          h: 43,
-          anchorY: 0.8,
-        },
+        sprite: habitatSprite("bpcuff", 56, 43, 0.8),
       },
     ],
   },
   {
     id: "workspace",
     title: "Workspace",
-    presentation: "vignette",
     aspectIds: ["workspace"],
-    thumbnail: {
-      src: "/design-assets/habitat/desk.svg",
-      w: 48,
-      h: 48,
-    },
-    w: 4,
-    d: 4,
+    thumbnail: habitatSprite("desk", 48, 48),
     objects: [
       {
         id: "desk",
-        kind: "desk",
         aspectId: "workspace",
         indicatorId: "standing_desk",
         label: "Standing desk",
-        lx: 2,
-        ly: 1.2,
-        sprite: {
-          src: "/design-assets/habitat/desk.svg",
-          w: 126,
-          h: 133,
-          anchorY: 0.8,
-        },
+        sprite: habitatSprite("desk", 126, 133, 0.8),
       },
       {
         id: "chair",
-        kind: "chair",
         aspectId: "workspace",
         indicatorId: "chair",
         label: "Chair",
-        lx: 2,
-        ly: 2.7,
-        sprite: {
-          src: "/design-assets/habitat/chair.svg",
-          w: 84,
-          h: 84,
-          anchorY: 0.82,
-        },
+        sprite: habitatSprite("chair", 84, 84, 0.82),
       },
     ],
   },
 ];
+
+const indicatorSprite = (file: string): ObjectSprite => ({
+  src: `/design-assets/habitat/${file}.svg`,
+  w: 150,
+  h: 150,
+});
+
+export const INDICATOR_SPRITES: Readonly<Record<string, ObjectSprite>> = {
+  night_temp_c: indicatorSprite("night-temp"),
+  darkness: indicatorSprite("curtains"),
+  night_noise: indicatorSprite("night-noise"),
+  noise_countermeasures: indicatorSprite("earplugs"),
+  bedding_overheating: indicatorSprite("duvet"),
+  co_sleepers: indicatorSprite("pillows"),
+  ventilation: indicatorSprite("vent"),
+  damp_or_mold: indicatorSprite("mold"),
+  air_quality_meter: indicatorSprite("airmeter"),
+  smoke_sources: indicatorSprite("smoke"),
+  radon_tested: indicatorSprite("radon"),
+  morning_light_access: indicatorSprite("morning-sun"),
+  daytime_light: indicatorSprite("day-window"),
+  high_cri_bulbs: indicatorSprite("bulb"),
+  light_therapy_lamp: indicatorSprite("sad-lamp"),
+  drinking_water: indicatorSprite("water-pitcher"),
+  thermometer: indicatorSprite("thermometer"),
+  pulse_oximeter: indicatorSprite("oximeter"),
+  work_mode: indicatorSprite("briefcase"),
+  desk_hours: indicatorSprite("wall-clock"),
+  screen_setup: indicatorSprite("monitor"),
+  screen_at_eye_level: indicatorSprite("monitor-riser"),
+  external_keyboard: indicatorSprite("keyboard"),
+  wrist_complaints: indicatorSprite("wrist"),
+  breaks: indicatorSprite("coffee-break"),
+};
+
+export const CATEGORY_THUMBNAILS: Readonly<Record<string, ObjectSprite>> =
+  Object.fromEntries(
+    CATEGORIES.map((category) => [category.id, category.thumbnail]),
+  );
 
 const catalogAspectById = new Map(
   HABITAT_CATALOG.aspects.map((aspect) => [aspect.id, aspect]),
@@ -454,27 +280,6 @@ function isKnownIndicatorValue(
   );
 }
 
-function resolveState(value: HabitatIndicatorValue | undefined): HabitatState {
-  if (value === undefined || value === null) {
-    return "unknown";
-  }
-  return value === HABITAT_DECLINED_VALUE ? "skipped" : "known";
-}
-
-function valueText(value: HabitatIndicatorValue | undefined): string | null {
-  if (
-    value === undefined ||
-    value === null ||
-    value === HABITAT_DECLINED_VALUE
-  ) {
-    return null;
-  }
-  if (typeof value === "boolean") {
-    return value ? "yes" : "no";
-  }
-  return typeof value === "string" ? value.replaceAll("_", " ") : String(value);
-}
-
 export function resolveHabitatScene(
   values: Record<string, Record<string, HabitatIndicatorValue>>,
 ): HabitatScene {
@@ -482,20 +287,6 @@ export function resolveHabitatScene(
   let total = 0;
 
   const categories = CATEGORIES.map<ResolvedCategory>((category) => {
-    const objects = category.objects.map<ResolvedObject>((object) => {
-      if (object.decor) {
-        return { ...object, state: "known", value: undefined, valueText: null };
-      }
-
-      const value = values[object.aspectId]?.[object.indicatorId];
-      return {
-        ...object,
-        state: resolveState(value),
-        value,
-        valueText: valueText(value),
-      };
-    });
-
     const categoryKnown = category.aspectIds.reduce((sum, aspectId) => {
       const aspect = catalogAspectById.get(aspectId);
       const aspectValues = values[aspectId] ?? {};
@@ -515,20 +306,29 @@ export function resolveHabitatScene(
     known += categoryKnown;
     total += categoryTotal;
 
-    return { ...category, objects, known: categoryKnown, total: categoryTotal };
+    return { ...category, known: categoryKnown, total: categoryTotal };
   });
 
   return { categories, known, total };
 }
 
-export function isInstalled(object: ResolvedObject): boolean {
-  if (object.decor) {
-    return true;
-  }
-  if (object.state !== "known") {
-    return false;
-  }
-  return !object.absent?.includes(object.value ?? null);
+// Home-context facts shown in the hero strip rather than category lists.
+// They still count toward overall coverage everywhere the score appears.
+export function resolveEnvironmentCoverage(
+  scene: HabitatScene,
+  values: Record<string, Record<string, HabitatIndicatorValue>>,
+): { known: number; total: number; coverage: number } {
+  const homeFacts = [
+    values["home-location"]?.location,
+    values["home-location"]?.area_type,
+  ];
+  const known = scene.known + homeFacts.filter(isKnownIndicatorValue).length;
+  const total = scene.total + homeFacts.length;
+  return {
+    known,
+    total,
+    coverage: total === 0 ? 0 : Math.round((100 * known) / total),
+  };
 }
 
 export const MOCK_HABITAT_VALUES: Record<

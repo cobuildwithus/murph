@@ -63,8 +63,12 @@ test("Habitat fact rows fold sub-facts, sort unmet facts first, and preserve cov
     sleep.rows.some(({ indicatorId }) => indicatorId === "co2_meter"),
     false,
   );
-  assert.deepEqual(sleep.unknownLabels, ["Mattress age"]);
-  assert.deepEqual(sleep.skippedLabels, ["Noise countermeasures"]);
+  assert.deepEqual(sleep.unknownFacts, [
+    { indicatorId: "mattress_age_years", label: "Mattress age" },
+  ]);
+  assert.deepEqual(sleep.skippedFacts, [
+    { indicatorId: "noise_countermeasures", label: "Noise countermeasures" },
+  ]);
   assert.equal(
     sleep.rows.find(({ indicatorId }) => indicatorId === "bedding_overheating")
       ?.target,
@@ -94,7 +98,9 @@ test("Habitat fact rows fold sub-facts, sort unmet facts first, and preserve cov
     recovery.rows.some(({ indicatorId }) => indicatorId === "sauna_type"),
     false,
   );
-  assert.deepEqual(recovery.skippedLabels, ["Red light model"]);
+  assert.deepEqual(recovery.skippedFacts, [
+    { indicatorId: "red_light_model", label: "Red light model" },
+  ]);
 
   const workspaceCategory = scene.categories.find(
     ({ id }) => id === "workspace",
@@ -112,10 +118,10 @@ test("Habitat fact rows fold sub-facts, sort unmet facts first, and preserve cov
     deriveCategoryNote(category, MOCK_HABITAT_VALUES),
   );
   assert.deepEqual(overallGrade(notes), {
-    letter: "B",
-    pct: 75,
-    met: 18,
-    graded: 24,
+    letter: "C",
+    pct: 74,
+    met: 17,
+    graded: 23,
   });
 });
 
@@ -146,18 +152,19 @@ test("EnvironmentPage presents one grade, coverage, context, and five compact ca
   const gradeGlyph = document.querySelector(
     'section[aria-labelledby="environment-grade-title"] span[aria-hidden="true"]',
   );
-  assert.equal(gradeGlyph?.textContent, "B");
+  assert.equal(gradeGlyph?.textContent, "C");
   assert.equal(
     gradeGlyph?.parentElement?.querySelector(".sr-only")?.textContent,
-    "Grade B, 75 percent",
+    "Grade C, 74 percent",
   );
-  assert.match(markup, />Murph knows 43 of 49</);
+  assert.match(markup, />Murph knows 42 of 48</);
   assert.match(markup, /aria-label="Current home context"/);
   assert.match(markup, />Location</);
+  assert.match(markup, />Area</);
   assert.match(markup, />Weather</);
   assert.match(markup, />Nights</);
   assert.match(markup, />Outdoor air</);
-  assert.match(markup, />Pets</);
+  assert.doesNotMatch(markup, />Pets</);
 
   for (const category of [
     "Sleep",
@@ -212,12 +219,12 @@ test("EnvironmentPage presents one grade, coverage, context, and five compact ca
   assert.equal(
     document.querySelectorAll('section[aria-label$="illustrated setup"]')
       .length,
-    2,
+    0,
   );
   assert.equal(
     document.querySelectorAll('section[aria-label$="equipment and access"]')
       .length,
-    3,
+    0,
   );
   assert.equal(document.querySelectorAll('[role="progressbar"]').length, 6);
 
@@ -240,7 +247,8 @@ test("EnvironmentPage presents one grade, coverage, context, and five compact ca
   assert.match(sleepFacts?.textContent ?? "", /Target/);
   assert.doesNotMatch(sleepFacts?.textContent ?? "", /target 18-22°C/);
   assert.doesNotMatch(sleepFacts?.textContent ?? "", /[✓✗•]/);
-  assert.match(sleepFacts?.textContent ?? "", /within target/);
+  assert.doesNotMatch(sleepFacts?.textContent ?? "", /within target/);
   assert.match(sleepFacts?.textContent ?? "", /needs attention/);
   assert.match(sleepFacts?.textContent ?? "", /known/);
+  assert.ok(sleepFacts?.querySelector("li > button"));
 });
