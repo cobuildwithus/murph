@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import * as core from "@murphai/core";
+import { experimentFrontmatterSchema } from "@murphai/contracts";
 import { afterEach, test, vi } from "vitest";
 
 import { importWithMocks, mockActualModule } from "./mock-import.ts";
@@ -287,6 +288,17 @@ test("an active interim outcome advances once to a distinct final artifact", asy
     assert.notEqual(final.outcomePath, interim.outcomePath);
     assert.notEqual(final.outcome.outcomeId, interim.outcome.outcomeId);
     assert.equal(await fs.readFile(interimFile, "utf8"), interimBytes);
+    const completedFrontmatter = experimentFrontmatterSchema.parse(
+      core.parseFrontmatterDocument(
+        await fs.readFile(
+          path.join(vaultRoot, created.experiment.relativePath),
+          "utf8",
+        ),
+      ).attributes,
+    );
+    assert.equal(completedFrontmatter.status, "completed");
+    assert.equal(completedFrontmatter.endedOn, "2026-06-07");
+    assert.equal(completedFrontmatter.outcomeRef?.outcomeId, final.outcome.outcomeId);
 
     const repeated = await experimentJournal.writeExperimentOutcomeRecord({
       vault: vaultRoot,
@@ -296,6 +308,190 @@ test("an active interim outcome advances once to a distinct final artifact", asy
     assert.equal(repeated.updatedExperiment, false);
     assert.equal(repeated.outcomePath, final.outcomePath);
     assert.deepEqual(repeated.outcome, final.outcome);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("an on-time stopped run advances its active interim to one final artifact", async () => {
+  const vaultRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "murph-experiment-outcome-on-time-stop-"),
+  );
+
+  try {
+    await core.initializeVault({ vaultRoot, timezone: "UTC" });
+    const created = await core.createExperiment({
+      vaultRoot,
+      slug: "on-time-stop-final",
+      title: "On Time Stop Final",
+      startedOn: "2026-06-01T12:00:00.000Z",
+      status: "active",
+      runPlan: {
+        interventionStart: "2026-06-01",
+        interventionEnd: "2026-06-07",
+      },
+    });
+    const experimentJournal = await import(
+      "../src/usecases/experiment-journal-vault.ts"
+    );
+    const interim = await experimentJournal.writeExperimentOutcomeRecord({
+      vault: vaultRoot,
+      lookup: created.experiment.id,
+      asOf: "2026-06-04",
+    });
+    const interimFile = path.join(vaultRoot, interim.outcomePath);
+    const interimBytes = await fs.readFile(interimFile, "utf8");
+
+    await core.stopExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      occurredAt: "2026-06-07T20:00:00.000Z",
+      title: "Stopped",
+    });
+
+    const query = await vi.importActual<typeof import("@murphai/query")>(
+      "@murphai/query",
+    );
+    const analyzeExperimentOutcome = vi.fn(query.analyzeExperimentOutcome);
+    const finalJournal = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/runtime-import.ts": mockActualModule(
+        "../src/runtime-import.ts",
+        (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") return core;
+            if (specifier === "@murphai/query") {
+              return { ...query, analyzeExperimentOutcome };
+            }
+            throw new Error(`Unexpected runtime module: ${specifier}`);
+          }),
+        }),
+      ),
+    });
+
+    const final = await finalJournal.writeExperimentOutcomeRecord({
+      vault: vaultRoot,
+      lookup: created.experiment.id,
+      asOf: "2026-06-07",
+    });
+
+    assert.equal(analyzeExperimentOutcome.mock.calls.length, 1);
+    assert.equal(final.outcome.experiment.status, "completed");
+    assert.notEqual(final.outcomePath, interim.outcomePath);
+    assert.notEqual(final.outcome.outcomeId, interim.outcome.outcomeId);
+    assert.equal(await fs.readFile(interimFile, "utf8"), interimBytes);
+
+    const stoppedOnTimeFrontmatter = experimentFrontmatterSchema.parse(
+      core.parseFrontmatterDocument(
+        await fs.readFile(
+          path.join(vaultRoot, created.experiment.relativePath),
+          "utf8",
+        ),
+      ).attributes,
+    );
+    assert.equal(stoppedOnTimeFrontmatter.status, "completed");
+    assert.equal(stoppedOnTimeFrontmatter.endedOn, "2026-06-07");
+    assert.equal(
+      stoppedOnTimeFrontmatter.outcomeRef?.outcomeId,
+      final.outcome.outcomeId,
+    );
+
+    const repeated = await finalJournal.writeExperimentOutcomeRecord({
+      vault: vaultRoot,
+      lookup: created.experiment.id,
+      asOf: "2026-06-08",
+    });
+    assert.equal(analyzeExperimentOutcome.mock.calls.length, 1);
+    assert.equal(repeated.outcomePath, final.outcomePath);
+    assert.deepEqual(repeated.outcome, final.outcome);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("an early-stopped run keeps its active interim without fresh analysis", async () => {
+  const vaultRoot = await fs.mkdtemp(
+    path.join(os.tmpdir(), "murph-experiment-outcome-early-stop-"),
+  );
+
+  try {
+    await core.initializeVault({ vaultRoot, timezone: "UTC" });
+    const created = await core.createExperiment({
+      vaultRoot,
+      slug: "early-stop-interim",
+      title: "Early Stop Interim",
+      startedOn: "2026-06-01T12:00:00.000Z",
+      status: "active",
+      runPlan: {
+        interventionStart: "2026-06-01",
+        interventionEnd: "2026-06-07",
+      },
+    });
+    const experimentJournal = await import(
+      "../src/usecases/experiment-journal-vault.ts"
+    );
+    const interim = await experimentJournal.writeExperimentOutcomeRecord({
+      vault: vaultRoot,
+      lookup: created.experiment.id,
+      asOf: "2026-06-04",
+    });
+    const interimFile = path.join(vaultRoot, interim.outcomePath);
+    const interimBytes = await fs.readFile(interimFile, "utf8");
+
+    await core.stopExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      occurredAt: "2026-06-06T20:00:00.000Z",
+      title: "Stopped",
+    });
+
+    const analyzeExperimentOutcome = vi.fn(() => {
+      throw new Error("An early stop must not refresh its interim result.");
+    });
+    const stoppedJournal = await importWithMocks<
+      typeof import("../src/usecases/experiment-journal-vault.ts")
+    >("../src/usecases/experiment-journal-vault.ts", {
+      "../src/runtime-import.ts": mockActualModule(
+        "../src/runtime-import.ts",
+        (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") return core;
+            if (specifier === "@murphai/query") {
+              const query = await vi.importActual<typeof import("@murphai/query")>(
+                "@murphai/query",
+              );
+              return { ...query, analyzeExperimentOutcome };
+            }
+            throw new Error(`Unexpected runtime module: ${specifier}`);
+          }),
+        }),
+      ),
+    });
+
+    const repeated = await stoppedJournal.writeExperimentOutcomeRecord({
+      vault: vaultRoot,
+      lookup: created.experiment.id,
+      asOf: "2026-06-07",
+    });
+
+    assert.equal(analyzeExperimentOutcome.mock.calls.length, 0);
+    assert.equal(repeated.outcomePath, interim.outcomePath);
+    assert.deepEqual(repeated.outcome, interim.outcome);
+    assert.equal(await fs.readFile(interimFile, "utf8"), interimBytes);
+    const stoppedFrontmatter = experimentFrontmatterSchema.parse(
+      core.parseFrontmatterDocument(
+        await fs.readFile(
+          path.join(vaultRoot, created.experiment.relativePath),
+          "utf8",
+        ),
+      ).attributes,
+    );
+    assert.equal(stoppedFrontmatter.status, "completed");
+    assert.equal(stoppedFrontmatter.endedOn, "2026-06-06");
+    assert.equal(stoppedFrontmatter.outcomeRef?.outcomeId, interim.outcome.outcomeId);
   } finally {
     await fs.rm(vaultRoot, { recursive: true, force: true });
   }

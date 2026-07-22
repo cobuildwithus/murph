@@ -692,13 +692,16 @@ export async function writeExperimentOutcome(
     relativePath: input.relativePath,
     vaultRoot: input.vaultRoot,
   });
+  const shouldAdvanceReferencedOutcome =
+    referencedOutcome !== null &&
+    shouldAdvanceReferencedExperimentOutcome({
+      frontmatter: document.attributes,
+      referencedOutcome: referencedOutcome.outcome,
+      requestedAsOf: input.outcome.asOf,
+    });
   if (
     referencedOutcome !== null &&
-    !shouldReplaceActiveInterimOutcome(
-      document.attributes,
-      referencedOutcome.outcome,
-      input.outcome,
-    )
+    !shouldAdvanceReferencedOutcome
   ) {
     return referencedOutcome;
   }
@@ -788,7 +791,7 @@ export async function writeExperimentOutcome(
   );
   const existingOutcome = await readExistingExperimentOutcome(input.vaultRoot, outcomePath);
 
-  if (attributes.outcomeRef !== undefined && !shouldCompleteRun) {
+  if (attributes.outcomeRef !== undefined && !shouldAdvanceReferencedOutcome) {
     throw new VaultError(
       "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
       "The experiment already references a different immutable outcome artifact.",
@@ -993,16 +996,30 @@ async function resolveReferencedExperimentOutcome(input: {
   };
 }
 
-function shouldReplaceActiveInterimOutcome(
-  attributes: ExperimentFrontmatter,
-  referencedOutcome: ExperimentOutcome,
-  requestedOutcome: ExperimentOutcome,
-): boolean {
+export function shouldAdvanceReferencedExperimentOutcome(input: {
+  frontmatter: ExperimentFrontmatter;
+  referencedOutcome: ExperimentOutcome;
+  requestedAsOf: string;
+}): boolean {
+  const interventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  if (
+    interventionEnd === undefined ||
+    input.referencedOutcome.experiment.status !== "active" ||
+    input.requestedAsOf < interventionEnd ||
+    input.requestedAsOf <= input.referencedOutcome.asOf
+  ) {
+    return false;
+  }
+
   return (
-    referencedOutcome.experiment.status === "active" &&
-    attributes.status === "active" &&
-    attributes.runPlan?.interventionEnd !== undefined &&
-    requestedOutcome.asOf >= attributes.runPlan.interventionEnd
+    input.frontmatter.status === "active" ||
+    (
+      input.frontmatter.status === "completed" &&
+      (
+        input.frontmatter.endedOn === undefined ||
+        input.frontmatter.endedOn >= interventionEnd
+      )
+    )
   );
 }
 

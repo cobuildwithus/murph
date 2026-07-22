@@ -274,6 +274,11 @@ interface ExperimentJournalVaultCoreRuntime {
     outcomePath: string
     updatedExperiment: false
   } | null>
+  shouldAdvanceReferencedExperimentOutcome(input: {
+    frontmatter: ExperimentFrontmatter
+    referencedOutcome: z.infer<typeof experimentOutcomeSchema>
+    requestedAsOf: string
+  }): boolean
   writeExperimentOutcome(input: {
     vaultRoot: string
     relativePath: string
@@ -2026,6 +2031,7 @@ export async function writeExperimentOutcomeRecord(input: {
   for (let attempt = 0; attempt < EXPERIMENT_OUTCOME_WRITE_MAX_ATTEMPTS; attempt += 1) {
     try {
       return await core.withCanonicalWriteLock(input.vault, async () => {
+        const requestedAsOf = input.asOf ?? new Date().toISOString().slice(0, 10)
         const target = await resolveExperimentQueryTarget({
           invalidSlugMessage: 'Experiment outcome analysis requires a canonical slug.',
           lookup: input.lookup,
@@ -2039,11 +2045,11 @@ export async function writeExperimentOutcomeRecord(input: {
         })
         if (
           referenced !== null &&
-          !shouldReplaceActiveInterimOutcome(
-            expectedFrontmatter,
-            referenced.outcome,
-            input.asOf,
-          )
+          !core.shouldAdvanceReferencedExperimentOutcome({
+            frontmatter: expectedFrontmatter,
+            referencedOutcome: referenced.outcome,
+            requestedAsOf,
+          })
         ) {
           return {
             vault: input.vault,
@@ -2060,7 +2066,10 @@ export async function writeExperimentOutcomeRecord(input: {
         const {
           analysis,
           experimentPath,
-        } = await analyzeExperimentOutcomeRecordWithSource(input)
+        } = await analyzeExperimentOutcomeRecordWithSource({
+          ...input,
+          asOf: requestedAsOf,
+        })
         const outcomeId = `${expectedFrontmatter.experimentId}-outcome-${analysis.asOf}`
         const candidateOutcome = experimentOutcomeSchema.parse({
           ...analysis.outcome,
@@ -2095,24 +2104,6 @@ export async function writeExperimentOutcomeRecord(input: {
     'conflict',
     'Experiment kept changing while its outcome was being analyzed. Retry the closeout.',
   )
-}
-
-function shouldReplaceActiveInterimOutcome(
-  frontmatter: ExperimentFrontmatter,
-  outcome: z.infer<typeof experimentOutcomeSchema>,
-  requestedAsOf: string | undefined,
-): boolean {
-  const interventionEnd = frontmatter.runPlan?.interventionEnd
-  if (
-    outcome.experiment.status !== 'active' ||
-    frontmatter.status !== 'active' ||
-    interventionEnd === undefined
-  ) {
-    return false
-  }
-
-  const asOf = requestedAsOf ?? new Date().toISOString().slice(0, 10)
-  return asOf >= interventionEnd
 }
 
 function readErrorCode(error: unknown): string | null {
