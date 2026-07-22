@@ -1301,6 +1301,15 @@ Current hosted billing assumptions:
   mutation. Apply checks the same short-lived opaque proof under the shared
   hosted-member Stripe mutation lock, adds exactly seven days, and reconciles
   the local trial and usage-period window in that operation.
+- `/ops/usage` is the operator-only allowance inspection and recovery surface.
+  It derives personal-member and synthetic-group message activity from retained
+  canonical mailbox rows, derives all-time priced AI cost from immutable usage
+  rows, and labels the mailbox retention boundary. A row reset verifies the
+  displayed current-period and usage-credit versions, then atomically clears
+  current included spend and the block while releasing only that capacity
+  epoch's notice idempotency claim. It preserves immutable usage, purchased
+  credit, billing state, mailbox rows, and delivery history, and refuses to race
+  an in-flight notice dispatch.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
   The proof expires after 15 minutes. Active Family sponsorship and paid,
