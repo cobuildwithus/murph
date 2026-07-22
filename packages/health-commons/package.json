@@ -17,6 +17,11 @@
       "import": "./dist/runtime.js",
       "default": "./dist/runtime.js"
     },
+    "./biomarker-entity-mappings": {
+      "types": "./dist/biomarker-entity-mappings.d.ts",
+      "import": "./dist/biomarker-entity-mappings.js",
+      "default": "./dist/biomarker-entity-mappings.js"
+    },
     "./generated/*": "./generated/*"
   },
   "files": [

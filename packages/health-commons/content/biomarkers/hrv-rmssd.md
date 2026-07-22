@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:hrv-rmssd
 slug: biomarkers/hrv-rmssd
 title: HRV / RMSSD
-summary: Beat-to-beat variation in heart timing measured at rest, where more variation signals stronger vagal brake on the heart and a nervous system with room to respond rather than one stuck in overdrive.
+summary: "RMSSD estimates short-term beat-to-beat heart-rate variation, which can add context about autonomic recovery and strain when compared with a person’s own consistent baseline."
 status: field-testing
 quality: reviewed
 aliases:
@@ -196,6 +196,22 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
   placeholder: Early HRV outcome summaries will appear here once enough opted-in experiment runs are available with stable same-device baseline and intervention windows.
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for HRV / RMSSD (ms); use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies only to the same HRV metric, device or ECG method, posture, time window, artifact handling, and personal baseline."
+      source:
+        title: "Heart Rate Variability: Standards of Measurement, Physiological Interpretation and Clinical Use"
+        organization: "Task Force of the European Society of Cardiology and the North American Society of Pacing and Electrophysiology; Circulation"
+        year: 1996
+        sourceType: "consensus_statement"
+        url: "https://pubmed.ncbi.nlm.nih.gov/8598068/"
+        doi: "10.1161/01.CIR.93.5.1043"
+        pmid: "8598068"
 ---
 
 ## Bottom line

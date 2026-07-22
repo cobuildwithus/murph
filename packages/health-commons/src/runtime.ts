@@ -19,6 +19,7 @@ import {
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
 } from "@murphai/health-metrics";
+import { resolveHealthCommonsBiomarkerEntityKey } from "./biomarker-entity-mappings.ts";
 import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
@@ -577,11 +578,11 @@ function resolveCanonicalBiomarkerKey(biomarkerKey: string): string {
   const normalizedBiomarkerKey = normalized.startsWith("biomarker:")
     ? normalized
     : `biomarker:${slug}`;
-  return (
+  const metricBiomarkerKey =
     resolveMetricDefinitionForBiomarker(normalizedBiomarkerKey)?.biomarkerKey ??
     resolveMetricDefinition(slug)?.biomarkerKey ??
-    normalizedBiomarkerKey
-  );
+    normalizedBiomarkerKey;
+  return resolveHealthCommonsBiomarkerEntityKey(metricBiomarkerKey);
 }
 
 export function loadGeneratedHealthCommonsWebRouteBundle(input: {

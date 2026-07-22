@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:egfr"
 slug: "biomarkers/egfr"
 title: "eGFR"
-summary: "Kidney-function safety context for clinician-guided monitoring."
+summary: "eGFR estimates kidney filtration normalized to body surface area, which can support kidney-function assessment when equation, age, chronicity, and urine findings are considered."
 status: "draft"
 quality: "usable"
 aliases:
@@ -63,5 +63,26 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Community outcome summaries will appear once enough opted-in experiment runs are available."
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: decision_limit
+      guidance: "KDIGO uses eGFR below 60 mL/min/1.73 m² as one chronic-kidney-disease criterion only when present for at least three months or accompanied by other markers of kidney damage."
+      applicability: "Applies to an adult eGFR from a validated named equation; acute kidney changes, extremes of muscle mass or diet, pregnancy, medications, and absent chronicity limit interpretation."
+      numericValues:
+        - label: "CKD filtration criterion when chronic or accompanied by kidney-damage markers"
+          unit: "mL/min/1.73 m²"
+          upperBound:
+            value: 60
+            inclusive: false
+      source:
+        title: "KDIGO 2024 Clinical Practice Guideline for the Evaluation and Management of Chronic Kidney Disease"
+        organization: "Kidney Disease: Improving Global Outcomes; Kidney International"
+        year: 2024
+        sourceType: "clinical_guideline"
+        url: "https://kdigo.org/guidelines/ckd-evaluation-and-management/"
 ---
+
 Kidney-function safety context for clinician-guided monitoring.

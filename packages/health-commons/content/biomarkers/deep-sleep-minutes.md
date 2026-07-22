@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:deep-sleep-minutes
 slug: biomarkers/deep-sleep-minutes
 title: Deep Sleep
-summary: Time spent in slow-wave sleep each night, where the brain's deepest electrical slowdown drives growth-hormone release, tissue repair, and waste clearance that lighter stages do not match.
+summary: "Deep sleep minutes estimate time spent in the deepest non-REM sleep stage, which can add context to recovery and sleep continuity when viewed as a consistent same-device trend."
 status: field-testing
 quality: usable
 aliases:
@@ -56,7 +56,7 @@ biomarker:
       body: "Reflects sleep depth and recovery biology; useful for trends, not diagnosis or guaranteed cognitive improvement."
     -
       title: How to read it
-      body: "Typical range: about 45 minutes to 2 hours, or 10-20% of total sleep. Best when awakenings fall and recovery improves."
+      body: "There is no universal wearable target; compare same-device trends with total sleep, awakenings, and how restored you feel rather than treating one stage estimate as a verdict."
     -
       title: What moves it
       body: "Sleep opportunity, alcohol, illness, apnea, fragmentation, caffeine, late hard exercise, heat, stress, age, and device algorithms."
@@ -174,6 +174,20 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30
   placeholder: Early outcome summaries for deep sleep will appear once enough opted-in runs have same-device sleep-stage data and privacy thresholds are met.
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for Deep sleep (minutes); use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies to repeated same-device estimates under comparable wear, sleep-window, firmware, and signal-quality conditions; consumer staging is contextual rather than diagnostic."
+      source:
+        title: "Consumer Sleep Technology: An American Academy of Sleep Medicine Position Statement"
+        organization: "American Academy of Sleep Medicine; Journal of Clinical Sleep Medicine"
+        year: 2018
+        sourceType: "consensus_statement"
+        url: "https://aasm.org/advocacy/position-statements/consumer-sleep-technology/"
 ---
 
 Deep sleep minutes are useful when the measurement boundary is clear: this page is about a **consumer-wearable estimate** of N3 / slow-wave sleep duration, not a direct laboratory measurement of slow-wave activity or glymphatic clearance.

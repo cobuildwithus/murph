@@ -1,5 +1,24 @@
 import type { MetricDefinition } from "../types.ts";
 
+interface SourceUnitLabMetricInput {
+  aliases: readonly string[];
+  biomarkerKey: string;
+  displayName: string;
+  key: string;
+  valuePrecision?: number;
+}
+
+function sourceUnitLabMetric(input: SourceUnitLabMetricInput): MetricDefinition {
+  return {
+    ...input,
+    canonicalUnit: null,
+    category: "lab",
+    displayUnit: null,
+    selectionPolicy: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: 365 },
+    valuePrecision: input.valuePrecision ?? 1,
+  };
+}
+
 export const LAB_RESULT_METRICS = [
   {
     aliases: ["serum-albumin", "serum_albumin"],
@@ -59,7 +78,7 @@ export const LAB_RESULT_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["estimated-gfr-ckd-epi"],
+    aliases: ["estimated-gfr-ckd-epi", "e-gfr-ckd-epi"],
     biomarkerKey: "biomarker:egfr-ckd-epi",
     canonicalUnit: "mL/min/1.73m^2",
     category: "lab",
@@ -367,7 +386,7 @@ export const LAB_RESULT_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["vldl-cholesterol-cal"],
+    aliases: ["vldl-cholesterol-cal", "calculated-vldl-cholesterol"],
     biomarkerKey: "biomarker:vldl-cholesterol-calculated",
     canonicalUnit: null,
     category: "lab",
@@ -400,7 +419,7 @@ export const LAB_RESULT_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["fibrosis-score-fib4", "fibrosis-score-fib-4"],
+    aliases: ["fibrosis-score-fib4", "fibrosis-score-fib-4", "fib-4"],
     biomarkerKey: "biomarker:fib4",
     canonicalUnit: null,
     category: "lab",
@@ -641,6 +660,401 @@ export const LAB_RESULT_METRICS = [
     selectionPolicy: { kind: "latest-lab", preferCollectedAt: true, staleAfterDays: 365 },
     valuePrecision: 1,
   },
+  sourceUnitLabMetric({
+    aliases: ["c peptide", "c_peptide", "serum-c-peptide"],
+    biomarkerKey: "biomarker:c-peptide",
+    displayName: "C-peptide",
+    key: "c-peptide",
+    valuePrecision: 2,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-insulin", "fasting-insulin"],
+    biomarkerKey: "biomarker:insulin",
+    displayName: "Insulin",
+    key: "insulin",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["total-homocysteine"],
+    biomarkerKey: "biomarker:homocysteine",
+    displayName: "Homocysteine",
+    key: "homocysteine",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["large-ldl-particles", "ldl-large"],
+    biomarkerKey: "biomarker:ldl-large-particles",
+    displayName: "LDL large particles",
+    key: "ldl-large-particles",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["medium-ldl-particles", "ldl-medium"],
+    biomarkerKey: "biomarker:ldl-medium-particles",
+    displayName: "LDL medium particles",
+    key: "ldl-medium-particles",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["ldl-p", "ldl-particle-concentration"],
+    biomarkerKey: "biomarker:ldl-particle-number",
+    displayName: "LDL particle number",
+    key: "ldl-particle-number",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["ldl-size", "ldl-peak-particle-size"],
+    biomarkerKey: "biomarker:ldl-peak-size",
+    displayName: "LDL peak size",
+    key: "ldl-peak-size",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["small-ldl-particles", "ldl-small"],
+    biomarkerKey: "biomarker:ldl-small-particles",
+    displayName: "LDL small particles",
+    key: "ldl-small-particles",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["ldl-particle-pattern"],
+    biomarkerKey: "biomarker:ldl-pattern",
+    displayName: "LDL pattern",
+    key: "ldl-pattern",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["lp-a", "lpa", "lipoprotein(a)"],
+    biomarkerKey: "biomarker:lipoprotein-a",
+    displayName: "Lipoprotein(a)",
+    key: "lipoprotein-a",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["calculated-ldl", "ldl-c-calculated"],
+    biomarkerKey: "biomarker:ldl-calculated",
+    displayName: "LDL Calculated",
+    key: "ldl-calculated",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["ldl-cholesterol-calculated-nih", "ldl-calc-nih", "sampson-nih-ldl"],
+    biomarkerKey: "biomarker:ldl-chol-calc-nih",
+    displayName: "LDL CHOL CALC (NIH)",
+    key: "ldl-chol-calc-nih",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["troponin-i-poc", "point-of-care-troponin-i"],
+    biomarkerKey: "biomarker:poc-troponin-i",
+    displayName: "POC Troponin I",
+    key: "poc-troponin-i",
+    valuePrecision: 3,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-uric-acid", "urate"],
+    biomarkerKey: "biomarker:serum-uric-acid",
+    displayName: "Uric acid",
+    key: "uric-acid",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["protein-urine", "urine-protein-qualitative"],
+    biomarkerKey: "biomarker:urine-protein",
+    displayName: "Urine protein",
+    key: "urine-protein",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["bun-creatinine-ratio", "blood-urea-nitrogen-creatinine-ratio"],
+    biomarkerKey: "biomarker:bun-creatinine-ratio",
+    displayName: "BUN/Creatinine Ratio",
+    key: "bun-creatinine-ratio",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["gfr-mdrd-african-american", "mdrd-gfr-af-amer"],
+    biomarkerKey: "biomarker:gfr-mdrd-af-amer",
+    displayName: "GFR MDRD Af Amer",
+    key: "gfr-mdrd-af-amer",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["gfr-mdrd-non-african-american", "mdrd-gfr-non-af-amer"],
+    biomarkerKey: "biomarker:gfr-mdrd-non-af-amer",
+    displayName: "GFR MDRD Non Af Amer",
+    key: "gfr-mdrd-non-af-amer",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["random-urine-albumin-without-creatinine", "urine-microalbumin-random-without-creatinine"],
+    biomarkerKey: "biomarker:urine-albumin-random-without-creatinine",
+    displayName: "Urine albumin random without creatinine",
+    key: "urine-albumin-random-without-creatinine",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["a-g-ratio", "albumin-to-globulin-ratio"],
+    biomarkerKey: "biomarker:albumin-globulin-ratio",
+    displayName: "Albumin/Globulin Ratio",
+    key: "albumin-globulin-ratio",
+    valuePrecision: 2,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["protein-total", "serum-total-protein"],
+    biomarkerKey: "biomarker:total-protein",
+    displayName: "Total Protein",
+    key: "total-protein",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["triiodothyronine-free", "free-triiodothyronine"],
+    biomarkerKey: "biomarker:free-t3",
+    displayName: "Free T3",
+    key: "free-t3",
+    valuePrecision: 2,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["thyroxine-free", "free-thyroxine"],
+    biomarkerKey: "biomarker:free-t4",
+    displayName: "Free T4",
+    key: "free-t4",
+    valuePrecision: 2,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["thyroglobulin-antibody", "tg-antibodies", "tgab"],
+    biomarkerKey: "biomarker:thyroglobulin-antibodies",
+    displayName: "Thyroglobulin Antibodies",
+    key: "thyroglobulin-antibodies",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["thyroid-peroxidase-antibody", "tpo-antibodies", "tpoab"],
+    biomarkerKey: "biomarker:thyroid-peroxidase-antibodies",
+    displayName: "Thyroid Peroxidase Antibodies",
+    key: "thyroid-peroxidase-antibodies",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["mpv", "mean-platelet-volume"],
+    biomarkerKey: "biomarker:mean-platelet-volume",
+    displayName: "Mean Platelet Volume",
+    key: "mean-platelet-volume",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-cortisol", "plasma-cortisol"],
+    biomarkerKey: "biomarker:cortisol",
+    displayName: "Cortisol",
+    key: "cortisol",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["dheas", "dhea-s", "dehydroepiandrosterone-sulfate"],
+    biomarkerKey: "biomarker:dhea-sulfate",
+    displayName: "DHEA sulfate",
+    key: "dhea-sulfate",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["shbg", "sex-hormone-binding-globulin"],
+    biomarkerKey: "biomarker:sex-hormone-binding-globulin",
+    displayName: "Sex Hormone Binding Globulin",
+    key: "sex-hormone-binding-globulin",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["fsh", "follicle-stimulating-hormone"],
+    biomarkerKey: "biomarker:follicle-stimulating-hormone",
+    displayName: "Follicle Stimulating Hormone",
+    key: "follicle-stimulating-hormone",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["lh", "luteinizing-hormone"],
+    biomarkerKey: "biomarker:luteinizing-hormone",
+    displayName: "Luteinizing Hormone",
+    key: "luteinizing-hormone",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-prolactin"],
+    biomarkerKey: "biomarker:prolactin",
+    displayName: "Prolactin",
+    key: "prolactin",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["omega-3-total-omega-check", "omega3-total-omegacheck"],
+    biomarkerKey: "biomarker:omega-3-total-omegacheck",
+    displayName: "Omega-3 Total / OmegaCheck",
+    key: "omega-3-total-omegacheck",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["aa-fatty-acid"],
+    biomarkerKey: "biomarker:arachidonic-acid",
+    displayName: "Arachidonic Acid",
+    key: "arachidonic-acid",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["aa-epa-ratio", "arachidonic-acid-to-epa-ratio"],
+    biomarkerKey: "biomarker:arachidonic-acid-epa-ratio",
+    displayName: "Arachidonic Acid/EPA Ratio",
+    key: "arachidonic-acid-epa-ratio",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["docosahexaenoic-acid"],
+    biomarkerKey: "biomarker:dha",
+    displayName: "DHA",
+    key: "dha",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["docosapentaenoic-acid"],
+    biomarkerKey: "biomarker:dpa",
+    displayName: "DPA",
+    key: "dpa",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["eicosapentaenoic-acid"],
+    biomarkerKey: "biomarker:epa",
+    displayName: "EPA",
+    key: "epa",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["la-fatty-acid"],
+    biomarkerKey: "biomarker:linoleic-acid",
+    displayName: "Linoleic Acid",
+    key: "linoleic-acid",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["rbc-magnesium", "magnesium-red-blood-cell"],
+    biomarkerKey: "biomarker:magnesium-rbc",
+    displayName: "Magnesium RBC",
+    key: "magnesium-rbc",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["mma", "methylmalonate"],
+    biomarkerKey: "biomarker:methylmalonic-acid",
+    displayName: "Methylmalonic Acid",
+    key: "methylmalonic-acid",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["omega-6-to-3-ratio", "omega6-omega3-ratio"],
+    biomarkerKey: "biomarker:omega-6-3-ratio",
+    displayName: "Omega 6/3 Ratio",
+    key: "omega-6-3-ratio",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["tibc", "iron-binding-capacity-total"],
+    biomarkerKey: "biomarker:total-iron-binding-capacity",
+    displayName: "Total Iron Binding Capacity",
+    key: "total-iron-binding-capacity",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-zinc", "plasma-zinc"],
+    biomarkerKey: "biomarker:zinc",
+    displayName: "Zinc",
+    key: "zinc",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["total-omega-6", "omega6-total"],
+    biomarkerKey: "biomarker:omega-6-total",
+    displayName: "Omega-6 total",
+    key: "omega-6-total",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["omega-check-total"],
+    biomarkerKey: "biomarker:omegacheck-total",
+    displayName: "OmegaCheck total",
+    key: "omegacheck-total",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["antinuclear-antibody-screen", "antinuclear-antibodies-screen"],
+    biomarkerKey: "biomarker:ana-screen",
+    displayName: "ANA screen",
+    key: "ana-screen",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["rf", "rheumatoid-factor"],
+    biomarkerKey: "biomarker:rheumatoid-factor",
+    displayName: "Rheumatoid Factor",
+    key: "rheumatoid-factor",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["corrected-calcium", "albumin-adjusted-calcium"],
+    biomarkerKey: "biomarker:adjusted-calcium",
+    displayName: "Adjusted Calcium",
+    key: "adjusted-calcium",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-calcium", "total-calcium"],
+    biomarkerKey: "biomarker:calcium",
+    displayName: "Calcium",
+    key: "calcium",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["co2", "carbon-dioxide", "total-co2"],
+    biomarkerKey: "biomarker:carbon-dioxide",
+    displayName: "Carbon Dioxide",
+    key: "carbon-dioxide",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-chloride"],
+    biomarkerKey: "biomarker:chloride",
+    displayName: "Chloride",
+    key: "chloride",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["phosphorus", "serum-phosphate"],
+    biomarkerKey: "biomarker:phosphate",
+    displayName: "Phosphate",
+    key: "phosphate",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-potassium"],
+    biomarkerKey: "biomarker:potassium",
+    displayName: "Potassium",
+    key: "potassium",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["serum-sodium"],
+    biomarkerKey: "biomarker:sodium",
+    displayName: "Sodium",
+    key: "sodium",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["anion-gap-without-potassium"],
+    biomarkerKey: "biomarker:anion-gap",
+    displayName: "Anion Gap",
+    key: "anion-gap",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["ck", "total-ck", "creatine-phosphokinase", "cpk"],
+    biomarkerKey: "biomarker:creatine-kinase",
+    displayName: "Creatine Kinase",
+    key: "creatine-kinase",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["lactate-dehydrogenase", "lactic-dehydrogenase"],
+    biomarkerKey: "biomarker:ldh",
+    displayName: "LDH",
+    key: "ldh",
+    valuePrecision: 0,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["blood-lead", "blood-lead-level"],
+    biomarkerKey: "biomarker:lead",
+    displayName: "Lead",
+    key: "lead",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["total-mercury"],
+    biomarkerKey: "biomarker:mercury",
+    displayName: "Mercury",
+    key: "mercury",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["free-psa", "prostate-specific-antigen-free"],
+    biomarkerKey: "biomarker:psa-free",
+    displayName: "PSA free",
+    key: "psa-free",
+    valuePrecision: 2,
+  }),
+  sourceUnitLabMetric({
+    aliases: ["percent-free-psa", "free-psa-percent"],
+    biomarkerKey: "biomarker:psa-percent-free",
+    displayName: "PSA percent free",
+    key: "psa-percent-free",
+  }),
+  sourceUnitLabMetric({
+    aliases: ["total-psa", "prostate-specific-antigen-total"],
+    biomarkerKey: "biomarker:psa-total",
+    displayName: "PSA total",
+    key: "psa-total",
+    valuePrecision: 2,
+  }),
 ] satisfies readonly MetricDefinition[];
 
 /**

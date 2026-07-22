@@ -62,13 +62,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // unit normalization, the combined head measures 9,410,180B. Current main's
 // persona redesign adds 10,122B, producing 9,420,302B. PR #824's Epic query
 // expansion measures 9,388,733B on that mainline; the exact combined graph
-// measures 9,424,514B. Ratchet the fixed total backstop to that exact
-// local measurement. PR #835's memory-only ChatGPT auth bridge on
-// current main measures 9,430,166B on CI Linux; ratchet to that exact
-// production artifact measurement;
+// measures 9,424,514B. PR #838's reviewed biomarker catalog produces
+// 9,424,731B on CI Linux (+217B) and 9,460,571B on local macOS. Ratchet the
+// fixed total backstop to the larger exact measurement. PR #835's memory-only
+// ChatGPT auth bridge and hot auth-mode rollover produce 9,493,729B on that
+// merged local macOS graph. Ratchet to that exact combined measurement;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_430_166;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_493_729;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
@@ -105,8 +106,10 @@ const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
 // provide the headroom. This intentionally loosens the boot-surface creep
 // guard; the forbidden-input markers below and fixed 9.3 MB total ceiling
 // remain the hard backstops. Re-tighten to a measured value if boot-closure
-// creep needs active policing again.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_500_000;
+// creep needs active policing again. PR #835's merged auth-mode rollover
+// measures 7,854,784B on local macOS, 8,784B over the resulting cap; advance
+// only by that exact overage and preserve both existing allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_508_784;
 // Preserve the original emit-jitter bands and add one shared operational
 // allowance to both coupled boot-path caps. The static closure contains the
 // entry chunk, so applying the headroom to only one cap would be misleading.
