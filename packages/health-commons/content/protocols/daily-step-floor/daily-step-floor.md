@@ -304,15 +304,6 @@ experimentOnboarding:
       target:
         object: "protocol"
         field: "stepSource"
-    - id: "baseline_window"
-      label: "Baseline window"
-      question: "Use a 7-day or 14-day baseline before setting the floor?"
-      options:
-        - "seven_days"
-        - "fourteen_days"
-      target:
-        object: "analysisPlan"
-        field: "baselineWindow"
     - id: "floor_tier"
       label: "Step-floor tier"
       question: "Which floor tier should the experiment use?"

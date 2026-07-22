@@ -44,7 +44,7 @@ attribution:
   ownerType: murph
   note: A pragmatic one-variable transition routine informed by bedtime-procrastination research without copying a multicomponent clinical intervention.
 protocol:
-  doseSignature: Nightly · one transition cue · standard, tiny, or fallback version · 14 nights after 7-night baseline
+  doseSignature: Nightly · one transition cue · standard, tiny, or fallback version · 14 nights after 14-night baseline
   target: Reduce the nonnegative delay between a prospectively intended sleep-attempt time and the actual sleep attempt without reducing sleep opportunity.
   frequency:
     sessionsPerWeek: 7
@@ -63,7 +63,7 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Baseline for 7 nights without changing the routine; set the intended sleep-attempt time before the late-evening decision point, then record nonnegative bedtime delay, sleep opportunity, estimated sleep onset, daytime sleepiness 0-10 (higher is worse), and any burden, anxiety, or adverse effect 0-10.
+    - Baseline for 14 nights without changing the routine; set the intended sleep-attempt time before the late-evening decision point, then record nonnegative bedtime delay, sleep opportunity, estimated sleep onset, daytime sleepiness 0-10 (higher is worse), and any burden, anxiety, or adverse effect 0-10.
     - Choose one realistic transition cue tied to the intended sleep attempt, not an exact universal bedtime.
     - Standard version (up to 10 minutes): park the current activity with one next-action note, complete only essential bedtime tasks, put discretionary entertainment down, and begin the sleep attempt.
     - Tiny version (about 2 minutes): save the current stopping point, do the one essential bedtime task, and begin the sleep attempt.
@@ -99,8 +99,8 @@ protocol:
     - An external constraint or suspected sleep disorder makes bedtime delay the wrong target.
 testPlans:
   - planId: bedtime-transition-21d
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: biomarker:bedtime-delay
     secondaryBiomarkerKeys:
@@ -121,7 +121,7 @@ expectedSignalDescriptions:
     description: A prechosen transition directly targets the gap between an intended sleep-attempt time and when the attempt actually begins.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights versus 7-night baseline
+      window: 14 nights versus 14-night baseline
       confidence: low
       basis: A small randomized trial reduced bedtime procrastination with a broader individualized intervention; this compact transition and exact delay metric have not been tested directly.
     protocolProminence: focus
@@ -131,7 +131,7 @@ expectedSignalDescriptions:
     description: Getting to the sleep attempt closer to the intended time does not guarantee faster sleep onset, so latency remains a separate supporting signal.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights versus 7-night baseline
+      window: 14 nights versus 14-night baseline
       confidence: low
       basis: The broader intervention reported sleep benefits, but this compact transition is designed around bedtime delay rather than a direct sleep-onset treatment.
     protocolProminence: context
@@ -141,7 +141,7 @@ expectedSignalDescriptions:
     description: Starting the sleep attempt on time may preserve sleep opportunity, but daytime safety outweighs adherence.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights versus 7-night baseline
+      window: 14 nights versus 14-night baseline
       confidence: low
       basis: Daytime sleepiness improved in the broader young-adult intervention, but the compact transition has not been tested directly.
     protocolProminence: context

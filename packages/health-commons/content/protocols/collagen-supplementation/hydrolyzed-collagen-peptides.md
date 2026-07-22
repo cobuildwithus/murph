@@ -448,7 +448,7 @@ attribution:
   ownerType: murph
   note: Drafted from the collagen-supplementation research run using the canonical source ledger and section syntheses, with claims limited to cited evidence.
 protocol:
-  doseSignature: Daily oral HCP · fixed user-selected grams/day · 7-day baseline + 6–12+ week target window
+  doseSignature: Daily oral HCP · fixed user-selected grams/day · 14-day baseline + 6–12+ week target window
   target: One primary outcome selected before start; common options are skin, joint pain/function, tendon/loading, recovery, or tolerability.
   frequency:
     sessionsPerDay: 1
@@ -459,7 +459,7 @@ protocol:
   - Choose one primary target and one matching metric before starting; do not try to prove every collagen claim at once.
   - Confirm the product is an oral hydrolyzed collagen peptide product and record the exact label name, manufacturer, grams per serving, planned daily grams, source species/category, full ingredients, allergen information, serving instructions, lot/batch, and expiration date.
   - 'Complete hard-stop safety screening before dose planning: prior collagen/gelatin/source-product reaction, fish or Crustacean-shellfish allergy with fish/marine/unclear source, alpha-gal or mammalian-source reactions, kidney/stone/protein-restriction context, pregnancy/lactation/child/adolescent use, active medical care, active coingredients, and upcoming lab testing.'
-  - Collect a 7-day baseline for the chosen target, dose plan, and confounders before interpreting changes.
+  - Collect a 14-day baseline for the chosen target, dose plan, and confounders before interpreting changes.
   - Take only the pre-specified labeled daily grams; do not stack collagen products or increase dose to chase faster results.
   - Log daily grams taken, missed doses, product/lot identity, GI symptoms, allergy/rash symptoms, urinary or stone-warning symptoms, and major confounders.
   - Review the primary outcome weekly and at the target-specific endpoint window; mark a new experiment if the product, dose, source, or active coingredients change.
@@ -531,8 +531,8 @@ protocol:
 testPlans:
 -
   planId: chosen-primary-outcome-91d
-  durationDays: 91
-  baselineDays: 7
+  durationDays: 98
+  baselineDays: 14
   interventionDays: 84
   primaryBiomarkerKey: biomarker:chosen-primary-outcome-score
   secondaryBiomarkerKeys:
@@ -546,12 +546,12 @@ testPlans:
   minimumAdherenceSessions: 56
   targetAdherenceSessions: 84
   notes:
-  - Pick one primary endpoint before the baseline week. Skin and joint targets are often read over 6–12 weeks; tendon/loading contexts may need longer; bone-density claims are not suitable for a short consumer self-test.
+  - Pick one primary endpoint before the baseline period. Skin and joint targets are often read over 6–12 weeks; tendon/loading contexts may need longer; bone-density claims are not suitable for a short consumer self-test.
   - Treat product, dose, source species, training, skincare, diet/protein, analgesics, sleep, illness, and new supplements as interpretation context.
 -
   planId: tolerability-adherence-35d
-  durationDays: 35
-  baselineDays: 7
+  durationDays: 42
+  baselineDays: 14
   interventionDays: 28
   primaryBiomarkerKey: biomarker:gi-tolerance
   secondaryBiomarkerKeys:
@@ -571,7 +571,7 @@ expectedSignalDescriptions:
     kind: mixed_or_contextual
     window: target-specific
     confidence: low
-    basis: "HCP evidence is endpoint-specific, so the primary signal is only interpretable after the user selects the target, direction, scale, and matching context before the baseline week."
+    basis: "HCP evidence is endpoint-specific, so the primary signal is only interpretable after the user selects the target, direction, scale, and matching context before the baseline period."
 -
   biomarkerKey: biomarker:standardized-skin-photo-score
   expected: Could improve slowly
@@ -766,7 +766,7 @@ experimentOnboarding:
         field: "setupAnswers.primaryMetric"
     - id: "baseline_plan"
       label: "Baseline plan"
-      question: "How will you collect a 7-day baseline before starting the supplement?"
+      question: "How will you collect a 14-day baseline before starting the supplement?"
       target:
         object: "onboardingCapture"
         field: "setupAnswers.baselinePlan"
@@ -837,7 +837,7 @@ whyItWorks:
 - “## Collagen peptides survive digestion and reach target tissues\n\nHydrolysis breaks collagen into low-molecular-weight peptides (Pro-Hyp, Hyp-Gly, and others) that survive gastric acid and appear in blood within hours. These peptide fragments accumulate in skin, cartilage, and connective tissue, where they act as both building blocks and signaling molecules for local matrix turnover.”
 - “## Skin outcomes have the strongest direct signal\n\nAcross RCTs and meta-analyses, daily HCP intake improves dermal hydration, elasticity, and wrinkle depth over 6–12 weeks. The peptides stimulate fibroblast collagen synthesis and glycosaminoglycan production in the dermis. Results remain product-, dose-, and population-specific rather than universal.”
 - “## Joint, tendon, and recovery signals depend on loading context\n\nConnective-tissue remodeling around joints and tendons requires mechanical stimulus alongside the peptide signal. Activity-related joint-pain improvements appear over 12–24 weeks in loaded populations, while tendon and recovery effects are mixed and inseparable from the training program. A useful run isolates one target, one stressor, and one measurement plan.”
-- “## One target, one product, one test\n\nCollagen evidence is endpoint-specific. Mixing skin, joint, tendon, bone, and recovery claims into a single run produces uninterpretable noise. A good Murph experiment locks the product, dose, source species, primary metric, and confounders before the baseline week.”
+- “## One target, one product, one test\n\nCollagen evidence is endpoint-specific. Mixing skin, joint, tendon, bone, and recovery claims into a single run produces uninterpretable noise. A good Murph experiment locks the product, dose, source species, primary metric, and confounders before the baseline period.”
 mechanismChain:
 -
   label: “Dose”
@@ -1437,7 +1437,7 @@ If the product includes biotin, herbs, high-dose vitamins/minerals, glucosamine,
 2. Confirm the product meets the HCP identity and product-quality requirements above.
 3. Screen hard-stop safety gates before dose planning: allergy/source, alpha-gal/mammalian source, kidney/stone/protein restriction, pregnancy/lactation/child/adolescent, active medical care, active coingredients, and upcoming lab tests.
 4. Record the exact product, grams per serving, planned grams per day, source species/category, full ingredients, allergen information, coingredients, lot/batch, expiration date, and third-party testing or recall information if available.
-5. Collect a 7-day baseline for the chosen target and the major confounders.
+5. Collect a 14-day baseline for the chosen target and the major confounders.
 6. Take only the planned labeled daily grams and log adherence and symptoms.
 7. Recheck the primary outcome weekly and at the endpoint window that matches the target; restart or mark a new experiment if product, dose, source, or active coingredients change.
 

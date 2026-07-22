@@ -52,7 +52,7 @@ biomarker:
     title: How to measure it
     body: Use the same scale, timing, lighting or activity context, and weekly review cadence throughout the run.
   measurement:
-    bestContext: Use after a 7-day baseline and then weekly during the intervention, with the same scale and context each time.
+    bestContext: Use after a 14-day baseline and then weekly during the intervention, with the same scale and context each time.
     howToMeasure:
     - Define the target and direction before starting.
     - Use the same scale at baseline and follow-up.

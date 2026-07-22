@@ -267,7 +267,7 @@ lineage:
 attribution:
   ownerType: "murph"
 protocol:
-  doseSignature: "Daily · chosen 60-minute wake/rise window · protect sleep opportunity · 7-day baseline + 28-day intervention"
+  doseSignature: "Daily · chosen 60-minute wake/rise window · protect sleep opportunity · 14-day baseline + 28-day intervention"
   target: "Wake or rise within a personally realistic 60-minute window that still allows adequate sleep opportunity."
   frequency:
     sessionsPerWeek: 7
@@ -283,7 +283,7 @@ protocol:
   interventionSessionsMinimum: 20
   interventionSessionsTarget: 28
   steps:
-    - "Baseline 7 days: log final wake, out-of-bed time, lights-out, sleep duration, sleepiness, naps, and major confounders."
+    - "Baseline 14 days: log final wake, out-of-bed time, lights-out, sleep duration, sleepiness, naps, and major confounders."
     - "Choose a daily wake/rise window ≤60 min that preserves enough sleep opportunity."
     - "Treat the window as a consistency target, not an exact-minute alarm."
     - "Plan bedtime backward from wake time; choose later wake or postpone if bedtime cannot move earlier."
@@ -337,8 +337,8 @@ testPlans:
 
   -
     planId: "wake-regularity-35d"
-    durationDays: 35
-    baselineDays: 7
+    durationDays: 42
+    baselineDays: 14
     interventionDays: 28
     primaryBiomarkerKey: "biomarker:daytime-sleepiness"
     secondaryBiomarkerKeys:
@@ -354,7 +354,7 @@ testPlans:
       - "Track total sleep time, sleep opportunity, and daytime sleepiness as safety guardrails; do not count short-sleep success as a clean win."
       - "Use sleep efficiency, resting heart rate, HRV/RMSSD, and sleep-onset latency as measurable downstream signals; interpret autonomic changes cautiously because direct evidence is small and mixed."
       - "Use the same wearable and diary method across baseline and intervention when possible; manually correct obvious wake-time detection errors."
-      - "The 7-day baseline and 28-day intervention are Murph-pragmatic defaults, not source-validated optimum lengths."
+      - "The 14-day baseline and 28-day intervention are Murph-pragmatic defaults, not source-validated optimum lengths."
       - "Interpret the 20/28 minimum only after separating unsafe or medically appropriate safety overrides from ordinary missed adherence days."
 expectedSignalDescriptions:
 
@@ -830,7 +830,7 @@ The clean win is not “woke up early.” The clean win is: wake-time variabilit
 
 ## What to compare
 
-Use the 7-day baseline as your normal schedule. During the 28-day intervention, compare:
+Use the 14-day baseline as your normal schedule. During the 28-day intervention, compare:
 
 - wake-time variability and days inside the target window,
 - total sleep time or sleep opportunity,

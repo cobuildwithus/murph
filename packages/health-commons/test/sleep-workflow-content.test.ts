@@ -77,8 +77,8 @@ describe("sleep workflow content", () => {
       status: "field-testing",
       testPlans: [
         {
-          baselineDays: 7,
-          durationDays: 21,
+          baselineDays: 14,
+          durationDays: 28,
           interventionDays: 14,
           planId: "bedtime-transition-21d",
           primaryBiomarkerKey: "biomarker:bedtime-delay",
@@ -129,8 +129,8 @@ describe("sleep workflow content", () => {
       status: "field-testing",
       testPlans: [
         {
-          baselineDays: 7,
-          durationDays: 21,
+          baselineDays: 14,
+          durationDays: 28,
           interventionDays: 14,
           planId: "tomorrow-list-21d",
           primaryBiomarkerKey: "biomarker:pre-sleep-arousal",

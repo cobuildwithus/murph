@@ -168,8 +168,8 @@ protocol:
   - End the experiment if fasting triggers restriction urges, binge/restrict cycling, or compensatory motives.
 testPlans:
 - planId: acute-fast-tolerance-14d
-  durationDays: 14
-  baselineDays: 7
+  durationDays: 21
+  baselineDays: 14
   interventionDays: 7
   primaryBiomarkerKey: biomarker:blood-ketones-beta-hydroxybutyrate
   secondaryBiomarkerKeys:
@@ -182,7 +182,7 @@ testPlans:
   minimumAdherenceSessions: 1
   targetAdherenceSessions: 1
   notes:
-  - Use 7 days of baseline context where practical, then one selected fasting run and a post-refeed observation window.
+  - Use 14 days of baseline context where practical, then one selected fasting run and a post-refeed observation window.
   - The primary read is safe completion and refeed tolerance, not durable metabolic improvement.
   - Ketones, CGM/glucose, body weight, HR/HRV, and blood pressure are optional or risk-driven context, not required for every user.
   - Do not compare a 24-hour run directly with a 72-hour run as if they were the same dose.

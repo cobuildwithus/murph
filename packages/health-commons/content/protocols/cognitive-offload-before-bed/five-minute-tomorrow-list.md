@@ -43,7 +43,7 @@ attribution:
   ownerType: murph
   note: A repeated-home adaptation of a single-night future-task-list study with a shorter fallback for burden and activation.
 protocol:
-  doseSignature: Nightly · 5-min specific tomorrow list · 60-sec fallback · stop at the timer · 14 nights after 7-night baseline
+  doseSignature: Nightly · 5-min specific tomorrow list · 60-sec fallback · stop at the timer · 14 nights after 14-night baseline
   target: Unfinished future tasks that keep recycling near bedtime.
   frequency:
     sessionsPerWeek: 7
@@ -62,7 +62,7 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - Baseline for 7 nights without adding bedtime writing; at the matched point before the ordinary sleep attempt, record pre-sleep arousal 0-10, sleep opportunity, estimated sleep onset, and daytime sleepiness 0-10 (higher is worse). Writing burden or activation is intervention-only and should stay blank during baseline.
+    - Baseline for 14 nights without adding bedtime writing; at the matched point before the ordinary sleep attempt, record pre-sleep arousal 0-10, sleep opportunity, estimated sleep onset, and daytime sleepiness 0-10 (higher is worse). Writing burden or activation is intervention-only and should stay blank during baseline.
     - In the last 30 minutes before the intended sleep attempt, set a quiet 5-minute timer.
     - Write only specific tasks for tomorrow or the next few days; add the first action when that makes a task easier to park.
     - Do not solve the tasks, rank the whole life backlog, process trauma, or turn the list into an open-ended journal.
@@ -98,8 +98,8 @@ protocol:
     - Dangerous sleepiness, drowsy driving, severe mood change, agitation, or markedly reduced need for sleep appears.
 testPlans:
   - planId: tomorrow-list-21d
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: biomarker:pre-sleep-arousal
     secondaryBiomarkerKeys:
@@ -118,7 +118,7 @@ expectedSignalDescriptions:
     description: A bounded specific list externalizes unfinished tasks, but direct evidence for repeated arousal improvement is limited.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights versus 7-night baseline
+      window: 14 nights versus 14-night baseline
       confidence: low
       basis: The direct study found faster sleep onset after a single future-task list but did not measure a repeated pre-sleep-arousal outcome.
     protocolProminence: focus
@@ -127,7 +127,7 @@ expectedSignalDescriptions:
     description: Parking specific future tasks may reduce the planning loop that continues after lights-out.
     estimatedChange:
       kind: mixed_or_contextual
-      window: 14 nights versus 7-night baseline
+      window: 14 nights versus 14-night baseline
       confidence: low
       basis: One active-comparator laboratory study in healthy young adults found faster polysomnography-measured sleep onset after a five-minute future-task list; repeated home effects are unknown.
     protocolProminence: context

@@ -85,7 +85,7 @@ describe("ProtocolTab", () => {
     expect(markup).toContain("Run the protocol");
     expect(markup).toContain("Why it works");
     expect(markup).toContain("Schedule &amp; dose");
-    expect(markup).toContain("7-day baseline then 14-day protocol");
+    expect(markup).toContain("14-day baseline then 14-day protocol");
     expect(markup).not.toContain("days to analysis");
     expect(markup).not.toContain("Total run");
     expect(markup).not.toContain("Protocol window");
