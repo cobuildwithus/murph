@@ -397,12 +397,13 @@ pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child.
 
-When a request reaches a dirty warm runtime, the source-blind mailbox prefetch
+When a joined-group request reaches a dirty warm runtime, the mailbox prefetch
 may import it before the routine idle checkpoint only when the entire fetched
-prefix contains pre-checkpoint-safe system wakes. Import kicks the existing
-detached controller; it does not start or advance the at-least-180-second idle
-snapshot. Any unrelated system wake in that prefix keeps the whole system
-prefix checkpoint-gated.
+prefix contains pre-checkpoint-safe system wakes. The decoded request target is
+revalidated during import; a consented-member request remains checkpoint-gated.
+Import kicks the existing detached controller; it does not start or advance the
+at-least-180-second idle snapshot. Any unrelated system wake in that prefix
+keeps the whole system prefix checkpoint-gated.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -413,12 +414,16 @@ runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
 
-If that joined-group completion and a later private input are both pending, the
-completion uses the existing foreground-causal mailbox lane and owns the next
-assistant pass. The existing output-only continuation composes and queues one
-natural Murph response under its stable idempotency key; after the ordinary
-mailbox/outbox barrier, the still-pending private input runs on the next pass.
-The mailbox remains transport, not an Ask-specific delivery coordinator.
+If that joined-group completion and private input are both pending, the
+completion uses the existing foreground-causal mailbox lane only when its
+occurrence timestamp predates the oldest pending input. It then owns the next
+assistant pass, and the existing output-only continuation composes and durably
+queues one natural Murph response under its stable idempotency key before the
+still-pending input runs on the next pass. A newer completion does not overtake
+older personal input. This ordering contract ends at durable intent creation;
+ordinary carrier retry ordering remains scoped to one assistant turn so a
+retrying Ask send cannot block all newer personal replies. The mailbox remains
+transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask

@@ -79,6 +79,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
+  resolveHostedOldestPendingAssistantInputAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
@@ -178,6 +179,8 @@ vi.mock("../src/hosted-runtime/device-sync-maintenance-import.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/pending-assistant-input.ts", () => ({
+  resolveHostedOldestPendingAssistantInputAt:
+    mocks.resolveHostedOldestPendingAssistantInputAt,
   resolveHostedPendingAssistantInputWakeAt:
     mocks.resolveHostedPendingAssistantInputWakeAt,
 }));
@@ -640,6 +643,7 @@ beforeEach(() => {
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
+  mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
     if (
@@ -11872,10 +11876,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("drains a completed assistant ask before later foreground input", async () => {
     const now = "2026-04-27T00:03:00.000Z";
+    const pendingInputAt = "2026-04-27T00:02:30.000Z";
     const logRequests: HostedRuntimeLogRequest[] = [];
     const completionItem = createAssistantAskCompletionSystemMailboxItem();
     const deliveryEffect = createDeliveryEffect();
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(pendingInputAt);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: completionItem,
       itemId: completionItem.itemId,
@@ -11907,6 +11913,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "runtime.pending-effects-reconcile-requested",
           "assistant.ask.completed",
         ],
+        assistantAskCompletionOccurredBefore: pendingInputAt,
       }),
     );
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();

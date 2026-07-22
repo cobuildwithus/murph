@@ -129,6 +129,7 @@ import {
   normalizeHostedGroupSharedProjectionScopes,
 } from "./group-shared-reader.ts";
 import {
+  resolveHostedOldestPendingAssistantInputAt,
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
@@ -4019,6 +4020,12 @@ async function runSystemMailboxMaintenancePhase(input: {
     : await resolvePendingAssistantInputWakeAt(phaseInput, {
         inspectOnly: input.hasFreshConversationInput,
       });
+  const assistantAskCompletionOccurredBefore = pendingAssistantInputWakeAt === null
+    ? undefined
+    : await resolveHostedOldestPendingAssistantInputAt({
+        signal: phaseInput.signal ?? null,
+        vaultRoot: phaseInput.restored.vaultRoot,
+      });
   const foregroundCausalPreparation =
     (
       pendingAssistantInputWakeAt !== null
@@ -4027,6 +4034,9 @@ async function runSystemMailboxMaintenancePhase(input: {
       ? await prepareHostedSystemMailboxItemForCheckpoint({
           allowedRouteActions: HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
           allowedWakeKinds: HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
+          ...(assistantAskCompletionOccurredBefore === undefined
+            ? {}
+            : { assistantAskCompletionOccurredBefore }),
           executionContext: input.executionContext,
           ...(phaseInput.now ? { now: phaseInput.now } : {}),
           operatorHomeRoot: phaseInput.restored.operatorHomeRoot,

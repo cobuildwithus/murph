@@ -324,6 +324,7 @@ const HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES = 4;
 const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
+  assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationInputStaged?: (() => void) | null;
   runtimeAttemptId?: string | null;

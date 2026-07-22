@@ -538,6 +538,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantAskRequestTargetKind?: "joined_group";
   onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
@@ -1007,6 +1008,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      ...(context?.assistantAskRequestTargetKind
+        ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
+        : {}),
       recordMessagingReturnTarget: (target) => {
         deviceSyncMessagingReturnTarget = target;
       },
@@ -2726,7 +2730,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         await finishMailboxImportWithoutAssistant(conversationImport);
 
-        const systemImport = await importMailboxLanes(["system"], importMailboxItem);
+        const systemImport = await importMailboxLanes(
+          ["system"],
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+            ? (item, context) => importMailboxItem(item, {
+                ...context,
+                assistantAskRequestTargetKind: "joined_group",
+              })
+            : importMailboxItem,
+        );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;

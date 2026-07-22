@@ -5714,8 +5714,12 @@ describe("hosted workspace runtime entrypoint", () => {
               }),
             };
           },
-          async importItem(item) {
+          async importItem(item, context) {
             assert.equal(item.route.action, "run-assistant-ask");
+            assert.equal(
+              context?.assistantAskRequestTargetKind,
+              "joined_group",
+            );
             events.push(`mailbox.importItem:${item.item.id}`);
             return { status: "imported" };
           },
