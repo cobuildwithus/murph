@@ -103,5 +103,8 @@ Updated: 2026-07-22
   rejected a sub-7.5-minute response, and the response correctly identified
   missing rendered desktop/mobile evidence. After the base advanced, the task
   rebased onto the new design-proof contract and added source-limit and fallback
-  states to the Sections catalog; rendered evidence and the valid preliminary
-  retry remain open.
+  states to the Sections catalog. The user explicitly authorized local
+  Playwright capture and requested a durable workflow clarification that a
+  missing in-app Browser attachment must not block design proof when Playwright
+  can reach the local catalog; rendered evidence and the valid preliminary retry
+  remain open.
