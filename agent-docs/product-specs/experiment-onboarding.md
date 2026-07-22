@@ -49,7 +49,7 @@ The onboarding block must not duplicate fields already owned by canonical protoc
 - Use a 14-day prospective baseline for the normal repeated-measurement experiment plan. A longer baseline is appropriate when the outcome or known variability requires it.
 - A shorter or absent prospective baseline requires a concrete protocol-specific reason, such as a point-in-time lab anchor, acute safety or tolerability measurement, or disproportionate observation burden. Record the chosen duration in the canonical `testPlan`; do not add a second onboarding or runtime default.
 - Preserve the intervention window when changing baseline length. For every authored test plan, `durationDays` must equal `baselineDays + interventionDays`.
-- Already-saved private runs keep their saved windows. New protocol-backed runs use the exact current test plan and run-spec revision.
+- Already-saved private runs keep their saved windows. Run projections derive phase timing only from those persisted windows; an incomplete legacy record reports timing as unknown instead of borrowing dates or durations from the mutable current catalog. New protocol-backed runs use the exact current test plan and run-spec revision.
 
 ## Start Drafts Today, Start Intents Later
 

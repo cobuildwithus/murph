@@ -35,10 +35,7 @@ export interface ResolveBrowserVaultExperimentRunByIdInput {
 }
 
 export interface BrowserVaultExperimentProtocol {
-  baselineDays: number;
   commons?: ExperimentCommonsReference;
-  durationDays: number;
-  durationDaysKnown?: boolean;
   id: string;
   protocol: ExperimentProtocolStep[];
 }
@@ -104,6 +101,7 @@ function mapExperimentResultsProjection(
   results: BrowserVaultExperimentResultsView,
 ): ExperimentRunProjection {
   const { experiment } = results;
+  const runTiming = resolveSavedRunTiming(results);
   const status = results.persistedOutcome
     ? "finished"
     : normalizePrivateRunStatus(results);
@@ -119,19 +117,21 @@ function mapExperimentResultsProjection(
       experiment.windows.interventionEnd ??
       experiment.completedAt ??
       undefined;
-  const fallbackDurationDays = normalizeDayCount(protocol.durationDays, 1);
-  const durationDaysKnown = protocol.durationDaysKnown !== false;
-  const baselineDays = resolveResultBaselineDays(results, protocol);
+  const fallbackDurationDays = runTiming.durationDays;
+  const durationDaysKnown = runTiming.durationDaysKnown;
+  const baselineDays = runTiming.baselineDays;
   const durationDays =
     status !== "stopped" && startedOn && analysisAvailableOn
       ? Math.max(1, daysBetweenInclusive(startedOn, analysisAvailableOn))
       : fallbackDurationDays;
-  const day = results.progress?.dayInRun ?? experiment.dayInRun ?? (startedOn
-    ? clamp(daysBetweenInclusive(startedOn, referenceDate), 1, durationDays)
-    : undefined);
+  const day = runTiming.timingKnown
+    ? results.progress?.dayInRun ?? experiment.dayInRun ?? (durationDaysKnown && startedOn
+      ? clamp(daysBetweenInclusive(startedOn, referenceDate), 1, durationDays)
+      : undefined)
+    : undefined;
   const completionPercent = status === "finished"
     ? 100
-    : durationDaysKnown && day
+    : runTiming.timingKnown && durationDaysKnown && day
       ? clamp(Math.round((day / durationDays) * 100), 1, 99)
       : undefined;
   const tags = lookupExperimentTags(client, experiment.id, experiment.slug);
@@ -148,26 +148,28 @@ function mapExperimentResultsProjection(
     startedOn,
     tags,
     title: experiment.title,
-    baselineDays,
-    durationDays: durationDaysKnown ? durationDays : undefined,
+    baselineDays: runTiming.timingKnown ? baselineDays : undefined,
+    durationDays: runTiming.timingKnown && durationDaysKnown ? durationDays : undefined,
     day,
     completionPercent,
-    dateRange: dateRangeStart && analysisAvailableOn
+    dateRange: runTiming.timingKnown && dateRangeStart && analysisAvailableOn
       ? formatDateRange(dateRangeStart, analysisAvailableOn)
       : undefined,
     analysisAvailableOn,
     signals: buildSignals(results),
     trends: buildTrends(client, results),
-    timeline: buildPrivateRunTimeline({
-      analysisAvailableOn,
-      baselineDays,
-      day,
-      phase: experiment.phase,
-      interventionStart: experiment.windows.interventionStart,
-      referenceDate,
-      startedOn,
-      status,
-    }),
+    timeline: runTiming.timingKnown
+      ? buildPrivateRunTimeline({
+          analysisAvailableOn,
+          baselineDays,
+          day,
+          phase: experiment.phase,
+          interventionStart: experiment.windows.interventionStart,
+          referenceDate,
+          startedOn,
+          status,
+        })
+      : [],
     schedule: buildSchedule(results),
     sessionContext: buildSessionContext(results),
     nextStep: status === "active" || status === "paused"
@@ -177,12 +179,14 @@ function mapExperimentResultsProjection(
           progress: results.progress,
           protocol,
           status,
+          timingKnown: runTiming.timingKnown,
         })
       : undefined,
     outcomeStatus: results.savedOutcomeStatus,
     outcomeConfidence: results.persistedOutcome?.confidence.level,
     summary,
     summaryDetail,
+    timingKnown: runTiming.timingKnown,
     conclusions: results.persistedOutcome
       ? buildConclusions(results)
       : undefined,
@@ -192,13 +196,36 @@ function mapExperimentResultsProjection(
 function buildPrivateRunProtocol(
   results: BrowserVaultExperimentResultsView,
 ): BrowserVaultExperimentProtocol {
+  return {
+    id: results.experiment.id,
+    protocol: [],
+  };
+}
+
+interface SavedRunTiming {
+  baselineDays: number;
+  durationDays: number;
+  durationDaysKnown: boolean;
+  timingKnown: boolean;
+}
+
+function resolveSavedRunTiming(
+  results: BrowserVaultExperimentResultsView,
+): SavedRunTiming {
   const { experiment } = results;
   const knownDurationDays = resolvePrivateRunDurationDays(results);
   const durationDays = knownDurationDays
     ?? normalizeDayCount(results.progress?.dayInRun ?? experiment.dayInRun ?? 1, 1);
   const baselineStart = experiment.windows.baselineStart;
   const baselineEnd = experiment.windows.baselineEnd;
-  const baselineDays = baselineStart && baselineEnd
+  const hasBaselineWindow = baselineStart !== null && baselineEnd !== null;
+  const hasInterventionWindow =
+    experiment.windows.interventionStart !== null &&
+    experiment.windows.interventionEnd !== null;
+  const hasExplicitZeroBaseline =
+    hasInterventionWindow &&
+    experiment.startedOn === experiment.windows.interventionStart;
+  const baselineDays = hasBaselineWindow
     ? knownDurationDays === null
       ? Math.max(0, daysBetweenInclusive(baselineStart, baselineEnd))
       : Math.max(
@@ -211,8 +238,7 @@ function buildPrivateRunProtocol(
     baselineDays,
     durationDays,
     durationDaysKnown: knownDurationDays !== null,
-    id: experiment.id,
-    protocol: [],
+    timingKnown: hasBaselineWindow || hasExplicitZeroBaseline,
   };
 }
 
@@ -987,7 +1013,19 @@ function buildRunNextStep(input: {
   progress: BrowserVaultExperimentResultsView["progress"];
   protocol: BrowserVaultExperimentProtocol;
   status: "active" | "paused";
+  timingKnown: boolean;
 }): ExperimentRunProjection["nextStep"] {
+  if (!input.timingKnown) {
+    return {
+      title: input.status === "paused" ? "Review before resuming" : "Continue your saved plan",
+      when: "Timing unavailable",
+      instructions: input.status === "paused"
+        ? "Resume only if the original plan and dates are still clear to you."
+        : "Follow the plan you originally saved; Murph cannot recover its original phase dates from this older run.",
+      context: "This older run does not contain complete original phase dates, so Murph will not infer them from the current protocol.",
+    };
+  }
+
   const day = input.day ?? 1;
   const inBaseline = input.baselineDays > 0 && day <= input.baselineDays;
   const adherence = input.progress?.adherence;
@@ -1030,32 +1068,6 @@ function buildRunNextStep(input: {
       ? formatAdherenceDetail(adherence)
       : "Personal outcome analysis becomes useful after the protocol window closes and enough follow-up evidence is available.",
   };
-}
-
-function resolveResultBaselineDays(
-  results: BrowserVaultExperimentResultsView,
-  protocol: BrowserVaultExperimentProtocol,
-): number {
-  const baselineStart = results.experiment.windows.baselineStart;
-  const baselineEnd = results.experiment.windows.baselineEnd;
-  const protocolDurationDays = normalizeDayCount(protocol.durationDays, 1);
-
-  if (baselineStart && baselineEnd) {
-    if (protocol.durationDaysKnown === false) {
-      return Math.max(0, daysBetweenInclusive(baselineStart, baselineEnd));
-    }
-
-    return Math.max(0, Math.min(daysBetweenInclusive(baselineStart, baselineEnd), protocolDurationDays - 1));
-  }
-
-  if (protocol.durationDaysKnown === false) {
-    return normalizeDayCount(protocol.baselineDays, 0);
-  }
-
-  return Math.min(
-    normalizeDayCount(protocol.baselineDays, 0),
-    Math.max(0, protocolDurationDays - 1),
-  );
 }
 
 function buildPrivateRunTimeline(input: {

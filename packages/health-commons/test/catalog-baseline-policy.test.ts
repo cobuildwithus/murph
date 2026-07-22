@@ -64,4 +64,30 @@ describe("Health Commons experiment baseline policy", () => {
     expect(standardPlanCount).toBeGreaterThan(observedExceptions.size);
     expect(observedExceptions).toEqual(new Set(baselineExceptions.keys()));
   });
+
+  it("keeps Daily Step Floor timing exclusively on its fixed two-week test plan", async () => {
+    const catalog = await buildHealthCommonsCatalog({ contentRoot });
+    const dailyStepFloor = catalog.entities.find(
+      (entity) => entity.key === "protocol_variant:daily-step-floor/daily-step-floor",
+    );
+
+    expect(dailyStepFloor?.testPlans).toEqual([
+      expect.objectContaining({
+        baselineDays: 14,
+        durationDays: 42,
+        interventionDays: 28,
+        planId: "wearable-step-floor-42d",
+      }),
+    ]);
+    expect(
+      dailyStepFloor?.experimentOnboarding?.setupSlots?.map((slot) => slot.id),
+    ).not.toContain("baseline_window");
+    const runnablePlan = JSON.stringify({
+      experimentOnboarding: dailyStepFloor?.experimentOnboarding,
+      protocol: dailyStepFloor?.protocol,
+    });
+    expect(runnablePlan).not.toMatch(/7\s*[–-]\s*14\s+days?/iu);
+    expect(runnablePlan).not.toMatch(/(?:7|seven)[\s-]+day\s+baseline/iu);
+    expect(runnablePlan).toMatch(/14 day baseline/iu);
+  });
 });

@@ -259,21 +259,93 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(privateRun).toEqual(expect.objectContaining({
-      completionPercent: 11,
-      day: 3,
+      baselineDays: undefined,
+      completionPercent: undefined,
+      day: undefined,
+      durationDays: undefined,
       id: "exp_sauna_01",
       slug: "finnish-sauna",
       status: "active",
       statusLabel: "Active",
+      timingKnown: false,
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
-      title: "Keep the baseline clean",
-      when: "Baseline day 3 of 14",
+      title: "Continue your saved plan",
+      when: "Timing unavailable",
     }));
-    expect(privateRun?.timeline).toEqual(expect.arrayContaining([
-      expect.objectContaining({ title: "Baseline started" }),
-      expect.objectContaining({ title: "Protocol window starts", upcoming: true }),
+    expect(privateRun?.timeline).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: "Protocol window starts" }),
     ]));
+
+    const legacyMarkup = renderToStaticMarkup(
+      <ResultsTab
+        experiment={composeExperimentDetail({ protocol: protocol!, privateRun })}
+        privateRunError={null}
+        privateRunStatus="ready"
+      />,
+    );
+
+    expect(legacyMarkup).toContain("Timing unavailable");
+    expect(legacyMarkup).toContain("Original phase timing is incomplete");
+    expect(legacyMarkup).not.toContain("Baseline day 3 of 14");
+  });
+
+  it("keeps intervention-only legacy timing neutral when the saved run started earlier", async () => {
+    const client = await createClient({
+      generatedAt: "2026-04-03T08:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          id: "exp_partial_legacy_timing",
+          runPlan: {
+            interventionEnd: "2026-04-21",
+            interventionStart: "2026-04-08",
+          },
+          slug: "partial-legacy-timing",
+          startedOn: "2026-04-01",
+          status: "active",
+          title: "Partial legacy timing",
+        }),
+        id: "exp_partial_legacy_timing",
+        slug: "partial-legacy-timing",
+        startedOn: "2026-04-01",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Partial legacy timing",
+      }],
+    });
+
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client,
+      experimentId: "exp_partial_legacy_timing",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: undefined,
+      completionPercent: undefined,
+      day: undefined,
+      durationDays: undefined,
+      timingKnown: false,
+    }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      context: "This older run does not contain complete original phase dates, so Murph will not infer them from the current protocol.",
+      title: "Continue your saved plan",
+      when: "Timing unavailable",
+    }));
+    expect(privateRun?.timeline).toEqual([]);
+
+    const partialMarkup = renderToStaticMarkup(
+      <ExperimentSummaryTiles
+        experiment={{
+          baselineDays: 14,
+          nextStep: privateRun?.nextStep,
+          privateRun: privateRun ?? undefined,
+        }}
+      />,
+    );
+
+    expect(partialMarkup).toContain("Timing unavailable");
+    expect(partialMarkup).toContain("Original phase timing is incomplete");
   });
 
   it("does not bind a private run on title-only collisions", async () => {
@@ -423,13 +495,15 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: undefined,
       id: "exp_sauna_protocol_ref",
       slug: null,
       status: "active",
+      timingKnown: false,
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
-      title: "Keep the baseline clean",
-      when: "Baseline day 3 of 14",
+      title: "Continue your saved plan",
+      when: "Timing unavailable",
     }));
   });
 
@@ -613,6 +687,19 @@ describe("experiment detail private-run composition", () => {
       client: await createClient({
         generatedAt: "2026-04-12T08:00:00.000Z",
         trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            id: "exp_sauna_01",
+            runPlan: {
+              baselineEnd: "2026-04-23",
+              baselineStart: "2026-04-10",
+              interventionEnd: "2026-05-07",
+              interventionStart: "2026-04-24",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-10",
+            status: "active",
+            title: "Sauna protocol",
+          }),
           id: "exp_sauna_01",
           slug: "finnish-sauna",
           startedOn: "2026-04-10",
@@ -624,6 +711,14 @@ describe("experiment detail private-run composition", () => {
       }),
       protocol: protocol!,
     });
+
+    expect(activeBaselineRun).toEqual(expect.objectContaining({
+      baselineDays: 14,
+      completionPercent: 11,
+      day: 3,
+      durationDays: 28,
+      timingKnown: true,
+    }));
 
     const baselineMarkup = renderToStaticMarkup(
       <ResultsTab
@@ -2149,6 +2244,19 @@ describe("experiment detail private-run composition", () => {
       client: await createClient({
         generatedAt: "2026-04-20T08:00:00.000Z",
         trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            id: "exp_sauna_paused",
+            runPlan: {
+              baselineEnd: "2026-04-16",
+              baselineStart: "2026-04-10",
+              interventionEnd: "2026-04-30",
+              interventionStart: "2026-04-17",
+            },
+            slug: "finnish-sauna",
+            startedOn: "2026-04-10",
+            status: "paused",
+            title: "Sauna protocol",
+          }),
           id: "exp_sauna_paused",
           slug: "finnish-sauna",
           startedOn: "2026-04-10",
@@ -2162,8 +2270,12 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(pausedRun).toEqual(expect.objectContaining({
+      baselineDays: 7,
+      day: 11,
+      durationDays: 21,
       status: "paused",
       statusLabel: "Paused",
+      timingKnown: true,
     }));
 
     const pausedMarkup = renderToStaticMarkup(
@@ -2175,8 +2287,11 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(pausedMarkup).toContain("Your experiment is paused");
-    expect(pausedMarkup).toContain("Paused during baseline day 11 of 14");
-    expect(pausedMarkup).toContain("Resume when ready");
+    expect(pausedMarkup).toContain("Day 11 of 21");
+    expect(pausedMarkup).toContain("Paused on day 4");
+    expect(pausedMarkup).toContain("Resume the protocol");
+    expect(pausedMarkup).not.toContain("Day 11 of 14");
+    expect(pausedMarkup).not.toContain("Starts day 15");
     expect(pausedMarkup).not.toContain("Continue the protocol");
   });
 
