@@ -222,11 +222,15 @@ sienna for flags that need review, and slate for an unflagged reported result.
 Keep the complete result ledger below the chart, including the date, exact
 reported value, source reference range, and lab/source label. Comparator,
 qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger; a concise caption names the plotted result count and unit, plus any
-shaded two-sided lab range or dashed one-sided lab limit. Simplifying the
-hierarchy must not imply that excluded values were plotted. The loading skeleton
-mirrors the same latest-result, chart, and ledger structure rather than
-substituting a generic card grid.
+the ledger. When the latest comparable result has an unqualified normalized lab
+range, place one quiet `Latest lab range` legend above its shaded two-sided band
+or dashed one-sided limit. Clip that overlay to the data-focused vertical scale
+rather than flattening the historical trend to fit a wide range, and label it as
+latest so it does not imply that older labs shared the same range. Qualified
+ranges remain ledger-only. Simplifying the hierarchy must not imply that
+excluded values were plotted. The loading skeleton mirrors the same
+latest-result, chart, and ledger structure rather than substituting a generic
+card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature

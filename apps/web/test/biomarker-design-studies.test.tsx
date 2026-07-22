@@ -48,19 +48,22 @@ vi.mock("@/src/components/biomarkers/lab-biomarker-history-chart", async () => {
       displayName,
       points,
       referenceRange,
+      referenceRangeLabel,
     }: {
       ariaDescribedBy?: string;
       displayName: string;
       points: readonly unknown[];
       referenceRange: { high: number | null; low: number | null };
+      referenceRangeLabel?: string | null;
       unit: string | null;
     }): ReactNode {
       return React.createElement("div", {
         "aria-describedby": ariaDescribedBy,
-        "aria-label": `${displayName} results over time`,
+        "aria-label": `${displayName} results over time; latest lab range ${referenceRangeLabel}`,
         "data-high": referenceRange.high,
         "data-low": referenceRange.low,
         "data-point-count": points.length,
+        "data-reference-range-label": referenceRangeLabel,
         role: "img",
       });
     },
@@ -289,7 +292,10 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain("exact results plotted");
   expect(markup).not.toContain("shaded band");
   expect(markup).not.toContain('aria-describedby="illustrative-biomarker-chart-caption"');
-  expect(markup).toContain('aria-label="Illustrative hemoglobin results over time"');
+  expect(markup).toContain(
+    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL"',
+  );
+  expect(markup).toContain('data-reference-range-label="13.0 to 17.0 g/dL"');
   expect(markup).toContain('data-point-count="4"');
   expect(markup).toContain('data-low="13"');
   expect(markup).toContain('data-high="17"');

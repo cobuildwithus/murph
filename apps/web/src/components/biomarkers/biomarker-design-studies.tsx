@@ -521,20 +521,15 @@ export function BiomarkerDetailStudy() {
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-              Results over time
-            </h4>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-primary" />Result</span>
-              <span className="inline-flex items-center gap-2"><span className="h-2 w-5 bg-primary/10" />Lab range</span>
-            </div>
-          </div>
+          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Results over time
+          </h4>
           <div className="mt-4 min-w-0">
             <LabBiomarkerHistoryChart
               displayName="Illustrative hemoglobin"
               points={HEMOGLOBIN_HISTORY}
               referenceRange={{ high: 17, low: 13 }}
+              referenceRangeLabel="13.0 to 17.0 g/dL"
               unit="g/dL"
             />
           </div>

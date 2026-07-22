@@ -723,7 +723,9 @@ describe("recordHostedAiUsageRecords", () => {
         usageExtractionVersion: "codex-usage-v1",
       }),
       select: expect.any(Object),
-      update: {},
+      update: {
+        id: "turn_123.attempt-1",
+      },
     });
     const upsertCall = hostedAiUsageUpsert.mock.calls[0]?.[0] as { create?: Record<string, unknown> } | undefined;
     expect(upsertCall?.create).toBeDefined();
