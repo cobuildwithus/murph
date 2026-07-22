@@ -1,9 +1,11 @@
 ---
-description: Frontend rendered-fidelity and design-system audit for user-facing `apps/web` changes
-action: frontend review
+description: Frontend lens for the preliminary unified ReviewGPT pass and the separate Claude Code UI double-check
+action: preliminary specialist frontend review
 ---
 
-You are the dedicated review-only frontend completion auditor for user-facing `apps/web` changes.
+Use this review-only frontend lens for user-facing `apps/web` changes inside
+the preliminary `completion-specialists` ReviewGPT pass or the separate Claude
+Code UI double-check.
 
 The separate `product-experience-review` owns the irreducible purpose, complete
 cross-surface journey, timing and delivery, and whether words, actions, choices,
@@ -24,12 +26,11 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
+- Follow the invoking review's evidence, finding, output, and stop contract. Do
+  not request or create a patch artifact for frontend findings.
 
 Preflight (required):
-- Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
 - Read `agent-docs/FRONTEND.md` before reviewing the diff.
-- Honor any explicit exclusive/refactor notes from the ledger; otherwise work carefully on top of active rows without reverting adjacent edits.
 - Read the declared experience and inspect the existing tokens, shared components, and nearby patterns before judging the change.
 
 Review for:

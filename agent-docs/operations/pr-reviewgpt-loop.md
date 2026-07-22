@@ -1,24 +1,28 @@
-# PR ReviewGPT Loop
+# PR ReviewGPT Completion Loops
 
-Last verified: 2026-07-14
+Last verified: 2026-07-22
 
-Required post-completion ReviewGPT loop for ReviewGPT-eligible PR-lane work. It runs
-the repo-local `pr-review` preset through `pnpm review:gpt`, using one of the
-managed ReviewGPT browser lanes. The repo config chooses randomly among usable
-Eragon, Phlebas, and Mountain lanes by default so PR-review load is spread
-across signed-in browser profiles without selecting a profile that is already
-locked without remote debugging. It does **not** run the local Codex
-`deep-review` pass.
+This document owns two distinct managed-browser ReviewGPT stages for PR-lane
+completion:
 
-For PR-lane patch implementation, this loop is the sole cross-cutting audit
-gate and replaces local `deep-review`. Never run both for the same completed
-change, including when the change is complex, sensitive, or the user asks for a
-final bug hunt. This loop does not replace the specialist `prompt-review`,
-`product-experience-review`, `frontend-review`, or write-capable
-`coverage-write` passes triggered by
-`agent-docs/operations/completion-workflow.md`.
+1. One preliminary `completion-specialists` pass combines the applicable
+   prompt, frontend, and coverage lenses. It replaces those three former local
+   audit subagents and may return one bounded coverage patch artifact.
+2. The later `pr-review` loop is the final cross-cutting gate for eligible work
+   and replaces local `deep-review`.
 
-For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
+Both stages use the managed Eragon, Phlebas, and Mountain browser lanes. They
+never share round state: the preliminary pass does not create or advance the
+final gate's immutable first-reviewed-head baseline. Final round 1 starts only
+after preliminary findings are resolved, parent final review and verification
+are complete, and the resulting head is pushed.
+
+The local `product-experience-review` remains separate when its trigger applies.
+Never combine local `deep-review` with the final ReviewGPT gate for the same
+completed change, including when the change is complex, sensitive, or the user
+asks for a final bug hunt.
+
+For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
 latest substantive round returns `ROUND_OUTCOME: PASS`, local triage has zero
 accepted findings, and PR CI is green on the final head. A completed anomaly
 retrospective may justify continuing the same PR, but it never substitutes for
@@ -60,23 +64,116 @@ running. Never restart a shared lane merely to apply this setting while it has
 pending reviews; let the new flags take effect on the lane's next normal
 restart.
 
-## When It Runs
+## Preliminary Specialist Pass
+
+Run one preliminary specialist pass when any of these lenses apply:
+
+- prompt: prompt text, instruction stacks, tool descriptions, prompt assembly,
+  or prompt regression behavior changed;
+- frontend: user-facing `apps/web` UI changed outside the tiny static-copy fast
+  path; or
+- coverage: the routed verification includes truthful `pnpm test:diff` or an
+  owner-level coverage command.
+
+The task must use a clean worktree/PR lane. Commit and push the review candidate,
+open or update the PR, and run
+`scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>`. The PR body must
+declare each lens `applicable` or `not applicable`, name the coverage-bearing
+command and outcome, and list the redacted rendered-evidence files for every
+applicable frontend state and viewport.
+
+Do not add `ReviewGPT first-reviewed head` to the PR body yet. The preliminary
+pass does not consume the final gate's baseline.
+
+Run the preliminary preset with exact-head packaging:
+
+```bash
+REVIEW_GPT_PR_URL=<pr-url-or-number> \
+REVIEW_GPT_REVIEW_PHASE=preliminary \
+REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
+  pnpm review:gpt completion-specialists \
+    --wait \
+    --wait-timeout 120m \
+    --response-marker SPECIALIST_REVIEW_COMPLETE \
+    --response-file audit-packages/pr-<number>-specialists.md \
+    --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the prompt, frontend, and coverage lenses declared in the PR body."
+```
+
+Omit `REVIEW_GPT_RENDERED_EVIDENCE_PATHS` only when the frontend lens is not
+applicable. Evidence paths must be repo-relative PNG, JPEG, or WebP files under
+`.artifacts/review-gpt/` or `audit-packages/`; they stay ignored and uncommitted.
+Redact direct identifiers and private content before packaging them. The
+packager rejects absolute paths, traversal, symlinks, missing files, unsupported
+types, and paths outside those two roots.
+
+The guarded ZIP contains:
+
+- `review-gpt-pr-context/pr-body.md`
+- `review-gpt-pr-context/pr.diff`
+- `review-gpt-pr-context/changed-files.txt`
+- `review-gpt-pr-context/review-phase.json`
+- `review-gpt-pr-context/rendered-evidence.txt`
+- the three lens references under `agent-docs/prompts/`
+- every explicitly listed rendered-evidence image
+- current source, tests, and repository guidance
+
+`review-phase.json` must identify `preliminary_specialists` and the exact pushed
+head. The response must contain `SPECIALIST_REVIEW_COMPLETE` and one of
+`SPECIALIST_OUTCOME: PASS`, `SPECIALIST_OUTCOME: FINDINGS`, or
+`SPECIALIST_OUTCOME: INVALID`. Apply the same exact-turn, attachment, configured
+model, minimum-duration, and owned-target checks used by the final gate. An
+`INVALID` result is a tooling/evidence failure: correct the gap and retry the
+same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
+specialist pass; do not split or rerun it by lens.
+
+Triage every finding against the real code and tests. If the response attaches
+`reviewgpt-coverage.patch`, retain the exact review thread URL, artifact index,
+and selected lane. Download only that assistant-owned artifact from the same
+thread with the managed lane's CDP endpoint, for example:
+
+```bash
+pnpm exec cobuild-review-gpt thread download \
+  --artifact-index <index> \
+  --chat-url <exact-review-thread-url> \
+  --browser-endpoint http://127.0.0.1:<selected-lane-port> \
+  --output-dir audit-packages/pr-<number>-specialists
+```
+
+Read the full patch before applying it. Confirm every path is a test, fixture,
+or direct-proof scaffold; reject production, prompt, UI, config, schema,
+workflow, dependency, lockfile, generated, or docs hunks. Run
+`git apply --check audit-packages/pr-<number>-specialists/reviewgpt-coverage.patch`
+only after that inspection, then apply that same named file deliberately and
+rerun the canonical coverage-bearing command. Never pipe a downloaded artifact
+directly into `git apply`, and never treat the attachment as landed code.
+
+Resolve accepted prompt/frontend findings in the parent, rerun focused proof,
+and push the resulting candidate. Do not rerun the preliminary pass for those
+substantive corrections. Complete parent final review and final verification,
+then close any active plan and push the final task head. Only after that may an
+eligible final ReviewGPT round-one baseline be recorded.
+
+## Final Gate: When It Runs
 
 Run the loop when all of the following hold:
 
 1. The task used the worktree/PR lane and a PR is open.
-2. The routed work is ReviewGPT-eligible rather than docs/process-only,
+2. The routed work is final-ReviewGPT-eligible rather than docs/process-only,
    prompt-primary, or trivial copy-only.
-3. The routed completion workflow has completed and the scoped commit is pushed.
-4. The user has not explicitly opted out in the current task.
+3. The preliminary specialist pass has completed when any of its lenses applied,
+   every accepted finding is resolved, and any coverage patch disposition is
+   recorded.
+4. Parent final review, final verification, plan closure, and the resulting
+   scoped commit are complete and pushed.
+5. The user has not explicitly opted out of the final gate in the current task.
 
 The review target is the pushed PR head. Run the loop from a clean checkout or
 worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
 merge target all refer to the same commit. Do not run it on unpushed local
 changes, a dirty worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the intent contract, applicable product-experience
-contract, and change-shape breakdown from
+The PR body must carry the intent contract, applicable preliminary specialist
+lenses, product-experience contract, and change-shape breakdown from
 `agent-docs/operations/completion-workflow.md` § PR Description: why the PR
 exists, the user-visible goal and smallest complete flow it is meant to ship,
 immediate feedback, timing and continuation ownership, terminal delivery or
@@ -97,14 +194,14 @@ Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. CI and the review round run in parallel; green CI on the
 final head remains a separate merge-readiness gate.
 
-Skip it for docs/process-only PRs, prompt-primary PRs, trivial copy-only
-changes, other low-risk changes that satisfy
-`agent-docs/operations/completion-workflow.md` § ReviewGPT Eligibility, or
+Skip the final gate for docs/process-only PRs, prompt-primary PRs, trivial
+copy-only changes, other low-risk changes that satisfy
+`agent-docs/operations/completion-workflow.md` § Final ReviewGPT Eligibility, or
 explicit current-task user opt-out. If ReviewGPT is opted out and the
 cross-cutting trigger still applies, route to local `deep-review` instead;
-never run both. Prompt-primary PRs use the local `prompt-review` pass instead;
-run ReviewGPT only when non-prompt scope independently requires it or the
-current user explicitly asks for the loop.
+never run both. Prompt-primary PRs still run the preliminary specialist prompt
+lens; run the separate final gate only when non-prompt scope independently
+requires it or the current user explicitly asks for it.
 
 ## One Round
 
@@ -115,8 +212,9 @@ current user explicitly asks for the loop.
    ```
 
 2. Run ReviewGPT with the PR preset and the default randomized usable managed
-   browser lane. Pass the PR ref and substantive round through
-   `REVIEW_GPT_PR_URL` and `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
+   browser lane. Set `REVIEW_GPT_REVIEW_PHASE=final` and pass the PR ref and
+   substantive round through `REVIEW_GPT_PR_URL` and
+   `REVIEW_GPT_ROUND_NUMBER`. The packager adds the full
    PR body, current patch, exact round metadata, and the delta from the previous
    reviewed head to the guarded `codebase.zip` source snapshot:
 
@@ -134,6 +232,7 @@ current user explicitly asks for the loop.
 
    ```bash
    REVIEW_GPT_PR_URL=<pr-url-or-number> \
+   REVIEW_GPT_REVIEW_PHASE=final \
    REVIEW_GPT_ROUND_NUMBER=1 \
      pnpm review:gpt pr-review \
        --wait \
@@ -145,6 +244,7 @@ current user explicitly asks for the loop.
 
    ```bash
    REVIEW_GPT_PR_URL=<pr-url-or-number> \
+   REVIEW_GPT_REVIEW_PHASE=final \
    REVIEW_GPT_ROUND_NUMBER=<k> \
    REVIEW_GPT_FIRST_REVIEWED_HEAD=<round-1-full-sha> \
    REVIEW_GPT_PREVIOUS_REVIEWED_HEAD=<round-k-minus-1-full-sha> \
@@ -356,8 +456,9 @@ the touched surface, push it, and use the ordinary review-loop rules.
 - Hard cap: 5 rounds per PR. There is no automatic sixth substantive round. An
   accepted round-five finding may still be reproduced and fixed; do not leave a
   known bug in place merely because the review counter reached five. After that
-  fix, pause the ReviewGPT loop and make every other required specialist audit,
-  parent final review, verification check, and PR CI job green. Record the cap
+  fix, pause the ReviewGPT loop and confirm the preliminary specialist pass,
+  required local audit, parent final review, verification, and PR CI are all
+  complete. Record the cap
   retrospective and obtain an explicit continuation decision before starting
   round six; the answer may be delete, revert, shrink, split, redesign,
   continue, or abandon. A green non-ReviewGPT gate does not make the PR
@@ -368,18 +469,23 @@ the touched surface, push it, and use the ordinary review-loop rules.
 
 ## Boundaries
 
-- For current-checkout work, never use this loop to satisfy local required
-  completion audits; see `agent-docs/operations/completion-workflow.md`.
+- The preliminary specialist pass and final gate both require a clean exact-head
+  worktree/PR lane. Current-checkout fast-path work cannot use this document as
+  a substitute for its routed local proof.
 - Do not run local Codex `deep-review` for a completed change that uses this PR
   gate. An explicit request for deep review or a final bug hunt is fulfilled by
   this cross-cutting ReviewGPT review and does not create a second pass.
-- Do not use other Codex subagents, pasted text, connector context,
+- Do not substitute Codex subagents, pasted text, connector context,
   dirty-worktree context, ad hoc archives, or an unmanaged/non-ReviewGPT browser
-  profile for this PR gate.
-- Do not commit each ReviewGPT round as a Markdown document. Response files
-  under `audit-packages/` are local working artifacts and stay uncommitted.
+  profile for either ReviewGPT stage. The separately routed local
+  `product-experience-review` remains allowed.
+- Do not commit ReviewGPT responses, rendered evidence, or downloaded patch
+  artifacts. Files under `audit-packages/` and `.artifacts/review-gpt/` are
+  local working artifacts.
   Agents may instead post a concise PR comment as each round is resolved,
   stating what they fixed and why; these comments are optional.
 - The `pr-review` prompt lives at
   `scripts/chatgpt-review-presets/pr-deep-review.md`; despite the historical
   filename, it is the ReviewGPT PR-review prompt used by this loop.
+- The preliminary prompt lives at
+  `scripts/chatgpt-review-presets/completion-specialists.md`.

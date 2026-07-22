@@ -76,8 +76,9 @@ Audit interaction economy and craft:
   Reject generic dashboard clutter and ornamental work that competes with the
   feature's purpose. Defer component and token implementation, spacing,
   typography, motion, responsive behavior, accessibility, and design-system
-  execution to `frontend-review`.
-- Prefer the smallest established product interaction when it expresses the
+  execution to the preliminary ReviewGPT frontend lens and the separate UI
+  double-check.
+- Prefer the smallest established product interaction that expresses the
   outcome cleanly. Do not preserve a weaker journey merely because it is an
   existing pattern.
 
