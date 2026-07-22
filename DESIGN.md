@@ -325,7 +325,9 @@ phrase, and an optional mono metadata line. Product-specific inline artwork can
 sit behind the content when one quiet, familiar visual cue replaces explanatory
 copy; keep it flat, `aria-hidden`, and subordinate to the text. Selected cards
 normally use the sage selection tint and warm border, but a quiet accent drawn
-from product-specific artwork can carry through the border, tint, and radio.
+from product-specific artwork can carry through the border, tint, and selection
+check. Keep the semantic radio visually hidden and place the visible check at
+the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
@@ -340,7 +342,7 @@ credit belongs to the group, and one primary action. Keep status in a muted
 badge and retain `Open Murph` as the quiet secondary action.
 
 Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
-large radio cards, then one primary `Continue to Stripe` action and a plain
+large choice cards, then one primary `Continue to checkout` action and a plain
 cancel action. The title and one short support sentence carry the explanation;
 do not repeat plan mechanics or payment detail across multiple paragraphs.
 Stack amount cards and actions on narrow screens, preserve visible focus and
