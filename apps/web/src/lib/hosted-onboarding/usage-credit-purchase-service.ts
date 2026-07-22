@@ -476,6 +476,20 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
+  if (resolution.targetConflict && input.target.kind === "family") {
+    const projected = await projectHostedUsageCreditCheckoutResult({
+      prisma,
+      purchase: resolution.purchase,
+    });
+    return {
+      purchaseId: projected.purchaseId,
+      recovered: true,
+      ...(projected.restartAt ? { restartAt: projected.restartAt } : {}),
+      status: projected.status,
+      targetConflict: true,
+    };
+  }
+
   try {
     const checkout = await continueHostedUsageCreditCheckout({
       now,

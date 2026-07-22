@@ -1373,7 +1373,7 @@ test("lets the member choose a different amount with a fresh request key", async
   }
 });
 
-test("offers target-neutral recovery for an active checkout on another destination", async () => {
+test("keeps a conflicting Family checkout nonpayable and refreshes on close", async () => {
   mocks.requestHostedOnboardingJson.mockImplementation(async (request: {
     method: string;
     url: string;
@@ -1396,7 +1396,6 @@ test("offers target-neutral recovery for an active checkout on another destinati
       recovered: true,
       status: "checkout_open",
       targetConflict: true,
-      url: "https://checkout.stripe.test/other-target",
     };
   });
   const { HostedUsageTopUpDialog } = await import(
@@ -1404,9 +1403,12 @@ test("offers target-neutral recovery for an active checkout on another destinati
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      checkoutUrl:
+        "/api/settings/billing/family/members/member_b/usage-credit/checkout",
       initialOpen: true,
       offers: usageCreditOffers(),
-      scope: "group",
+      scope: "family",
+      targetLabel: "Member B",
     }),
     {
       location: { href: "https://example.test/groups/fund/group_join_code_1234" },
@@ -1432,6 +1434,19 @@ test("offers target-neutral recovery for an active checkout on another destinati
       ),
       false,
     );
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Resume checkout",
+      ),
+      false,
+    );
+    assert.equal(
+      Array.from(rendered.container.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Retry checkout",
+      ),
+      false,
+    );
+    expect(rendered.assign).not.toHaveBeenCalled();
 
     await clickButton(rendered.container, rendered.window, "Cancel checkout");
 
@@ -1445,6 +1460,8 @@ test("offers target-neutral recovery for an active checkout on another destinati
       rendered.container.textContent ?? "",
       /Other checkout canceled/,
     );
+    await clickButton(rendered.container, rendered.window, "Close");
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();
   }

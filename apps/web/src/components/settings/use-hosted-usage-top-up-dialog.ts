@@ -299,11 +299,12 @@ function useHostedUsageTopUpDialog({
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
-      const refreshRecoveryHost =
-        deferTerminalRefreshUntilClose &&
-        state.screen.kind === "purchase" &&
-        state.screen.status !== null &&
-        !shouldPollPurchaseStatus(state.screen.status);
+      const refreshOnClose = state.screen.kind === "purchase" && (
+        state.screen.targetConflict ||
+        (deferTerminalRefreshUntilClose &&
+          state.screen.status !== null &&
+          !shouldPollPurchaseStatus(state.screen.status))
+      );
       const request = checkoutRequestRef.current;
       if (request) {
         request.abortReason = "dismissed";
@@ -311,7 +312,7 @@ function useHostedUsageTopUpDialog({
       }
       statusControllerRef.current?.abort();
       dispatch({ type: "close" });
-      if (refreshRecoveryHost) {
+      if (refreshOnClose) {
         refresh();
       }
       return;
@@ -407,6 +408,7 @@ function useHostedUsageTopUpDialog({
         response.recovered
         && response.status === "checkout_open"
         && !resolvedCheckoutUrl
+        && !response.targetConflict
       ) {
         throw new Error("Could not open Stripe right now. Try again.");
       }

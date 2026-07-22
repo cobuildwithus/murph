@@ -2298,6 +2298,10 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       "route those through `murph.plan_usage`'s private management handoff",
     )
+    expect(prompt).toContain(`${MURPH_PRODUCT_ORIGIN}/settings#family`)
+    expect(prompt).toContain('`owner: true`, `billingActive: true`')
+    expect(prompt).toContain('matches exactly one active member row')
+    expect(prompt).toContain('This is navigation only')
     expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
     expect(prompt).toContain('User-provided content and vault writes:')

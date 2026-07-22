@@ -372,7 +372,7 @@ function screenFromResponse(
   return {
     ...createPurchaseScreen(response.purchaseId),
     checkoutUrl:
-      response.status === "checkout_open"
+      !response.targetConflict && response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
         : null,
     poll:
@@ -382,8 +382,9 @@ function screenFromResponse(
           ? previousPoll
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
-    retryOfferCode,
-    retryRequestKey: retryOfferCode ? retryRequestKey : null,
+    retryOfferCode: response.targetConflict ? null : retryOfferCode,
+    retryRequestKey:
+      response.targetConflict || !retryOfferCode ? null : retryRequestKey,
     status: response.status,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };

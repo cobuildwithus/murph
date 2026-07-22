@@ -86,6 +86,7 @@ const mocks = vi.hoisted(() => ({
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
+  readHostedFamilyUsageCreditBeneficiaryLabel: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     hostedCodexAuthConnection: {
@@ -222,6 +223,8 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+  readHostedFamilyUsageCreditBeneficiaryLabel:
+    mocks.readHostedFamilyUsageCreditBeneficiaryLabel,
 }));
 
 vi.mock("@/src/lib/sensitive-actions/secure-approval-status", () => ({
@@ -259,6 +262,7 @@ beforeEach(() => {
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
+  mocks.readHostedFamilyUsageCreditBeneficiaryLabel.mockResolvedValue(null);
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
   mocks.readHostedConfiguredUsageCreditOfferCodes.mockReturnValue([
     "usage_5_usd",
@@ -835,9 +839,10 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
   mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue(
     activePurchase.target,
   );
+  mocks.readHostedFamilyUsageCreditBeneficiaryLabel.mockResolvedValue("Mom");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage({
+  const markup = renderToStaticMarkup(await SettingsPage({
     searchParams: Promise.resolve({
       usageCheckout: "success",
       usageFamily: "hbag_abcdefghijklmnop",
@@ -845,6 +850,7 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
       usagePurchase: "hucp_abcdefghijklmnop",
     }),
   }));
+  assert.match(markup, /id="family"/);
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -857,11 +863,8 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
     ownerSnapshot: familyOwner,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
-    usageTopUpOffers: [
-      { amountLabel: "$5", offerCode: "usage_5_usd" },
-      { amountLabel: "$10", offerCode: "usage_10_usd" },
-      { amountLabel: "$25", offerCode: "usage_25_usd" },
-    ],
+    usageTopUpFormerMemberLabels: { member_family: "Mom" },
+    usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",
       purchaseId: "hucp_abcdefghijklmnop",
@@ -873,6 +876,13 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
     prisma: mocks.prisma,
     purchaseId: "hucp_abcdefghijklmnop",
   });
+  expect(mocks.readHostedFamilyUsageCreditBeneficiaryLabel).toHaveBeenCalledWith({
+    beneficiaryMemberId: "member_family",
+    groupId: "hbag_abcdefghijklmnop",
+    ownerMemberId: "member_123",
+    prisma: mocks.prisma,
+  });
+  expect(mocks.readHostedConfiguredUsageCreditOfferCodes).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -1148,6 +1158,46 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
+      usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage keeps Family settings available when the top-up catalog is unavailable", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [{ isOwner: true, label: null, memberId: "member_123" }],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  });
+  mocks.readHostedConfiguredUsageCreditOfferCodes.mockImplementation(() => {
+    throw new Error("catalog unavailable");
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage());
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpFormerMemberLabels: {},
       usageTopUpOffers: [],
     }),
     undefined,
