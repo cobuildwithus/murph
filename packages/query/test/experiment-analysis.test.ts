@@ -11,9 +11,12 @@ import {
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
   type MetricPoint,
+  upgradeLegacyExperimentOutcome,
 } from "../src/index.ts";
 import {
+  experimentOutcomeSchema,
   type ExperimentAdherenceTarget,
+  type ExperimentOutcome,
   buildExperimentProgressCardPath,
   decodeExperimentProgressCard,
   EXPERIMENT_PROGRESS_CARD_MAX_WEEKS,
@@ -3339,6 +3342,301 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
   });
   assert.deepEqual(repeatedOutcome, outcome);
 });
+
+test("legacy outcome reconstruction uses canonical selection and excludes later evidence", () => {
+  const slug = "legacy-deep-sleep";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/legacy-deep-sleep",
+    metadata: null,
+    entities: [makeExperiment("completed", {
+      commonsProtocolRef: null,
+      effectiveProtocolSnapshot: null,
+      slug,
+      runPlan: {
+        baselineStart: "2026-04-01",
+        baselineEnd: "2026-04-02",
+        interventionStart: "2026-04-03",
+        interventionEnd: "2026-04-04",
+      },
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:deep-sleep-minutes",
+        desiredDirection: "increase",
+      },
+    })],
+  });
+  const originalPoints = [
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-01", 60, "minutes"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-02", 62, "minutes"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-03", 70, "minutes"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-04", 72, "minutes"),
+  ];
+  const generatedAt = "2026-04-05T12:00:00.000Z";
+  const legacy = legacyOutcomeFromAnalysis(
+    analyzeExperimentOutcome(vault, slug, { asOf: "2026-04-04", metricPoints: originalPoints }),
+    generatedAt,
+  );
+  const laterCorrections = [
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-01", 59, "minutes", "2026-04-06T12:00:00.000Z"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-02", 63, "minutes", "2026-04-06T12:00:00.000Z"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-03", 69, "minutes", "2026-04-06T12:00:00.000Z"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-04", 73, "minutes", "2026-04-06T12:00:00.000Z"),
+  ];
+
+  const upgraded = upgradeLegacyExperimentOutcome(vault, legacy, {
+    metricPoints: [...originalPoints, ...laterCorrections],
+  });
+  assert.equal(upgraded.schemaVersion, "murph.experiment-outcome.v2");
+  assert.deepEqual(upgraded.metricResults[0]?.points?.map((point) => point.value), [60, 62, 70, 72]);
+
+  const unprovable = upgradeLegacyExperimentOutcome(vault, legacy, {
+    metricPoints: laterCorrections,
+  });
+  assert.deepEqual(unprovable, legacy);
+});
+
+test("legacy outcome reconstruction preserves canonical anchors outside run windows", () => {
+  const slug = "legacy-anchored-glucose";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/legacy-anchored-glucose",
+    metadata: null,
+    entities: [makeExperiment("completed", {
+      commonsProtocolRef: null,
+      effectiveProtocolSnapshot: null,
+      slug,
+      runPlan: {
+        baselineStart: "2026-05-02",
+        baselineEnd: "2026-05-08",
+        interventionStart: "2026-07-05",
+        interventionEnd: "2026-08-01",
+      },
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:blood-glucose",
+        desiredDirection: "decrease",
+        measurementAnchors: [
+          {
+            role: "baseline",
+            kind: "lab_panel",
+            recordId: "evt_legacy_anchor_baseline",
+            biomarkerKeys: ["biomarker:blood-glucose"],
+            observedOn: "2026-04-23",
+          },
+          {
+            role: "followup",
+            kind: "lab_panel",
+            recordId: "evt_legacy_anchor_followup",
+            biomarkerKeys: ["biomarker:blood-glucose"],
+            observedOn: "2026-08-02",
+          },
+        ],
+      },
+    })],
+  });
+  const metricPoints = [
+    makeProjectedGlucosePoint({
+      contributingRecordIds: ["evt_legacy_anchor_baseline"],
+      date: "2026-04-23",
+      sourceRecordId: "legacy-anchor-baseline-summary",
+      value: 100,
+    }),
+    makeProjectedGlucosePoint({
+      contributingRecordIds: ["evt_legacy_anchor_followup"],
+      date: "2026-08-02",
+      sourceRecordId: "legacy-anchor-followup-summary",
+      value: 90,
+    }),
+  ];
+  const legacy = legacyOutcomeFromAnalysis(
+    analyzeExperimentOutcome(vault, slug, { asOf: "2026-08-02", metricPoints }),
+    "2026-08-03T12:00:00.000Z",
+  );
+
+  const upgraded = upgradeLegacyExperimentOutcome(vault, legacy, { metricPoints });
+
+  assert.equal(upgraded.schemaVersion, "murph.experiment-outcome.v2");
+  assert.deepEqual(upgraded.metricResults[0]?.points, [
+    { date: "2026-04-23", phase: "baseline", unit: "mg/dL", value: 100 },
+    { date: "2026-08-02", phase: "intervention", unit: "mg/dL", value: 90 },
+  ]);
+});
+
+test("legacy outcome reconstruction is atomic across canonical metrics", () => {
+  const slug = "legacy-multi-metric";
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/legacy-multi-metric",
+    metadata: null,
+    entities: [makeExperiment("completed", {
+      commonsProtocolRef: null,
+      effectiveProtocolSnapshot: null,
+      slug,
+      runPlan: {
+        baselineStart: "2026-04-01",
+        baselineEnd: "2026-04-01",
+        interventionStart: "2026-04-02",
+        interventionEnd: "2026-04-02",
+      },
+      analysisPlan: {
+        primaryBiomarkerKey: "biomarker:deep-sleep-minutes",
+        secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
+        desiredDirection: "increase",
+      },
+    })],
+  });
+  const deepSleepPoints = [
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-01", 60, "minutes"),
+    outcomeMetricPoint("deep-sleep-minutes", "biomarker:deep-sleep-minutes", "2026-04-02", 70, "minutes"),
+  ];
+  const hrvPoints = [
+    outcomeMetricPoint("hrv-rmssd", "biomarker:hrv-rmssd", "2026-04-01", 40, "ms"),
+    outcomeMetricPoint("hrv-rmssd", "biomarker:hrv-rmssd", "2026-04-02", 45, "ms"),
+  ];
+  const legacy = legacyOutcomeFromAnalysis(
+    analyzeExperimentOutcome(vault, slug, {
+      asOf: "2026-04-02",
+      metricPoints: [...deepSleepPoints, ...hrvPoints],
+    }),
+    "2026-04-03T12:00:00.000Z",
+  );
+  const lateHrvPoints = hrvPoints.map((point) => ({
+    ...point,
+    id: `${point.id}:late`,
+    recordedAt: "2026-04-04T12:00:00.000Z",
+  }));
+
+  const upgraded = upgradeLegacyExperimentOutcome(vault, legacy, {
+    metricPoints: [...deepSleepPoints, ...lateHrvPoints],
+  });
+
+  assert.deepEqual(upgraded, legacy);
+  assert.ok(upgraded.metricResults.every((metric) => metric.points === undefined));
+});
+
+test("legacy outcome reconstruction uses scoped declared session fields", () => {
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJGY";
+  const slug = "legacy-session-field";
+  const sessions = [
+    ["evt_legacy_session_1", "2026-04-01", 45],
+    ["evt_legacy_session_2", "2026-04-02", 40],
+    ["evt_legacy_session_3", "2026-04-03", 25],
+    ["evt_legacy_session_4", "2026-04-04", 20],
+  ] as const;
+  const sessionEntities = sessions.map(([entityId, date, value]) => {
+    const session = makeSession({
+      entityId,
+      experimentId,
+      experimentSlug: slug,
+      occurredAt: `${date}T08:00:00.000Z`,
+      sessionLocalDate: date,
+      fields: { "estimated-sleep-onset-minutes": value },
+    });
+    return {
+      ...session,
+      attributes: {
+        ...session.attributes,
+        recordedAt: `${date}T08:00:00.000Z`,
+      },
+    };
+  });
+  const lateSession = makeSession({
+    entityId: "evt_legacy_session_late",
+    experimentId,
+    experimentSlug: slug,
+    occurredAt: "2026-04-04T09:00:00.000Z",
+    sessionLocalDate: "2026-04-04",
+    fields: { "estimated-sleep-onset-minutes": 999 },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/legacy-session-field",
+    metadata: { timezone: "UTC" },
+    entities: [
+      makeExperiment("completed", {
+        commonsProtocolRef: null,
+        effectiveProtocolSnapshot: null,
+        experimentId,
+        slug,
+        runPlan: {
+          baselineStart: "2026-04-01",
+          baselineEnd: "2026-04-02",
+          interventionStart: "2026-04-03",
+          interventionEnd: "2026-04-04",
+          logging: { sessionFields: ["estimated-sleep-onset-minutes"] },
+        },
+        analysisPlan: {
+          primaryBiomarkerKey: "biomarker:sleep-onset-latency",
+          desiredDirection: "decrease",
+        },
+      }),
+      ...sessionEntities,
+      {
+        ...lateSession,
+        attributes: {
+          ...lateSession.attributes,
+          recordedAt: "2026-04-06T12:00:00.000Z",
+        },
+      },
+      {
+        ...sessionEntities[0],
+        entityId: "evt_legacy_session_other_run",
+        primaryLookupId: "evt_legacy_session_other_run",
+        lookupIds: ["evt_legacy_session_other_run"],
+        experimentSlug: "other-run",
+        attributes: {
+          ...sessionEntities[0]?.attributes,
+          experimentId: "exp_01JNV4458HYPP53JDQCBP1QJGZ",
+          experimentSlug: "other-run",
+          fields: { "estimated-sleep-onset-minutes": 700 },
+        },
+      } as CanonicalEntity,
+    ],
+  });
+  const legacy = legacyOutcomeFromAnalysis(
+    analyzeExperimentOutcome(vault, slug, { asOf: "2026-04-04" }),
+    "2026-04-05T12:00:00.000Z",
+  );
+
+  const upgraded = upgradeLegacyExperimentOutcome(vault, legacy);
+
+  assert.equal(upgraded.schemaVersion, "murph.experiment-outcome.v2");
+  assert.deepEqual(upgraded.metricResults[0]?.points?.map((point) => point.value), [45, 40, 25, 20]);
+});
+
+function legacyOutcomeFromAnalysis(
+  outcome: ExperimentOutcome,
+  generatedAt: string,
+): ExperimentOutcome {
+  return experimentOutcomeSchema.parse({
+    ...outcome,
+    generatedAt,
+    schema: "murph.experiment-outcome.v1",
+    schemaVersion: "murph.experiment-outcome.v1",
+    metricResults: outcome.metricResults.map(({ points: _points, ...metric }) => {
+      void _points;
+      return metric;
+    }),
+  });
+}
+
+function outcomeMetricPoint(
+  metricKey: string,
+  biomarkerKey: string,
+  date: string,
+  value: number,
+  unit: string,
+  recordedAt = `${date}T12:00:00.000Z`,
+): MetricPoint {
+  return {
+    ...makeProjectedMetricPoint({
+      biomarkerKey,
+      date,
+      metricKey,
+      sourceKind: "wearable-summary",
+      sourceLabel: "Wearable summary",
+      sourceRecordId: `${metricKey}:${date}:${recordedAt}`,
+      unit,
+      value,
+    }),
+    recordedAt,
+  };
+}
 
 test("experiment progress prioritizes safety follow-up over ordinary reminder logic", () => {
   const progress = summarizeExperimentProgress(

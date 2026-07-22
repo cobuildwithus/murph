@@ -1,5 +1,6 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
+import { upgradeLegacyExperimentOutcome } from "../experiments.ts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
@@ -45,13 +46,11 @@ import {
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
 import {
-  browserMetricRowToSeriesPoint,
   createBrowserVaultMetricSelectionRows,
   toBrowserVaultMetricRows,
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
-import { upgradeLegacyExperimentOutcomeForBrowser } from "./legacy-experiment-outcome.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -101,12 +100,10 @@ export async function createBrowserVaultReplica(
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
-      upgradeLegacyExperimentOutcomeForBrowser(
+      upgradeLegacyExperimentOutcome(
+        input.vault,
         experimentOutcomeSchema.parse(outcome),
-        {
-          browserSeriesPoints: metricRows.map(browserMetricRowToSeriesPoint),
-          metricPoints: allMetricPoints,
-        },
+        { metricPoints: allMetricPoints },
       )
     ),
     generatedAt,

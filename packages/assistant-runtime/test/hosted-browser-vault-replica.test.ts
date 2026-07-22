@@ -244,13 +244,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
         vaultRoot,
       });
 
-      expect(replica.experimentOutcomes).toEqual([
-        {
-          ...outcome,
-          schema: "murph.experiment-outcome.v2",
-          schemaVersion: "murph.experiment-outcome.v2",
-        },
-      ]);
+      expect(replica.experimentOutcomes).toEqual([outcome]);
       expect(firstHash.fileCount).toBe(2);
 
       const revisedOutcome = {

@@ -141,6 +141,106 @@ test("experiment outcome closeout rejects a stale frontmatter revision without o
   );
 });
 
+test("experiment outcome closeout fails closed when a referenced artifact is missing", async () => {
+  const vaultRoot = await makeVault("murph-experiment-outcome-missing-reference");
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "missing-reference",
+    title: "Missing Reference",
+    startedOn: "2026-06-01",
+    status: "active",
+  });
+  await updateExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-07",
+    },
+  });
+  const expected = await readExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+  });
+  const written = await writeExperimentOutcome({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    expectedFrontmatter: expected.frontmatter,
+    outcome: buildOutcome(expected.frontmatter),
+  });
+  await fs.unlink(path.join(vaultRoot, written.outcomePath));
+  const completed = await readExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+  });
+
+  await assert.rejects(
+    writeExperimentOutcome({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      expectedFrontmatter: completed.frontmatter,
+      outcome: buildOutcome(completed.frontmatter),
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+  );
+});
+
+test("experiment outcome closeout returns the immutable artifact when later analysis changes", async () => {
+  const vaultRoot = await makeVault("murph-experiment-outcome-write-once");
+  const created = await createExperiment({
+    vaultRoot,
+    slug: "write-once-outcome",
+    title: "Write Once Outcome",
+    startedOn: "2026-06-01",
+    status: "active",
+  });
+  await updateExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-07",
+    },
+  });
+  const active = await readExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+  });
+  const first = await writeExperimentOutcome({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    expectedFrontmatter: active.frontmatter,
+    outcome: buildOutcome(active.frontmatter),
+  });
+  const outcomeFile = path.join(vaultRoot, first.outcomePath);
+  const firstBytes = await fs.readFile(outcomeFile, "utf8");
+  const completed = await readExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+  });
+  const changedAnalysis = experimentOutcomeSchema.parse({
+    ...buildOutcome(completed.frontmatter),
+    conclusion: {
+      caveats: ["Evidence arrived after the saved result."],
+      headline: "A later analysis reached a different conclusion.",
+      plainLanguage: "This candidate must not replace the saved result.",
+    },
+  });
+
+  const repeated = await writeExperimentOutcome({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    expectedFrontmatter: completed.frontmatter,
+    outcome: changedAnalysis,
+  });
+
+  assert.equal(repeated.updatedExperiment, false);
+  assert.deepEqual(repeated.outcome, first.outcome);
+  assert.equal(await fs.readFile(outcomeFile, "utf8"), firstBytes);
+});
+
 test("concurrent closeout and member pause preserve the pause, consent edit, and body", async () => {
   const vaultRoot = await makeVault("murph-experiment-outcome-race");
   const created = await createExperiment({

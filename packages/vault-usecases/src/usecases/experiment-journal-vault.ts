@@ -2032,16 +2032,7 @@ export async function writeExperimentOutcomeRecord(input: {
 
         return {
           ...analysis,
-          outcome: {
-            ...analysis.outcome,
-            schema: analysis.outcome.schema,
-            generatedAt: written.outcome.generatedAt,
-            outcomeId: written.outcome.outcomeId,
-            experiment: {
-              ...analysis.outcome.experiment,
-              status: written.outcome.experiment.status,
-            },
-          },
+          outcome: written.outcome,
           outcomePath: written.outcomePath,
           updatedExperiment: written.updatedExperiment,
         }

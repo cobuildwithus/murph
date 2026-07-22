@@ -1780,6 +1780,11 @@ describe("record service seams", () => {
           status: "active",
           outcome: {
             ...input.outcome,
+            conclusion: {
+              caveats: ["This is the already-saved result."],
+              headline: "The immutable saved conclusion.",
+              plainLanguage: "Later analysis does not replace this artifact.",
+            },
             generatedAt: "2026-04-09T01:02:03.000Z",
             schema: "murph.experiment-outcome.v2",
           },
@@ -1903,6 +1908,11 @@ describe("record service seams", () => {
           generatedAt: "2026-04-09T01:02:03.000Z",
           outcomeId: `${experimentId}-outcome-2026-04-08`,
           schema: "murph.experiment-outcome.v2",
+          conclusion: {
+            caveats: ["This is the already-saved result."],
+            headline: "The immutable saved conclusion.",
+            plainLanguage: "Later analysis does not replace this artifact.",
+          },
         },
       });
       expect(experimentOutcomeCore.writeExperimentOutcome).toHaveBeenCalledTimes(2);

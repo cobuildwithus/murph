@@ -769,17 +769,32 @@ export async function writeExperimentOutcome(
     outcomePath,
   );
   if (
-    existingOutcome?.outcomeId === outcomeId &&
-    existingOutcome.asOf === requestedOutcome.asOf &&
-    existingOutcome.generatedAt === attributes.outcomeRef?.generatedAt &&
-    existingOutcome.experiment.status === nextStatus &&
-    attributes.status === nextStatus &&
-    attributes.endedOn === nextEndedOn &&
-    attributes.outcome?.finalAnalysisStatus === "generated" &&
     attributes.outcomeRef?.outcomeId === outcomeId &&
-    attributes.outcomeRef.relativePath === outcomePath &&
-    experimentOutcomesAreEquivalent(existingOutcome, candidateOutcome)
+    attributes.outcomeRef.relativePath === outcomePath
   ) {
+    if (
+      existingOutcome === null ||
+      existingOutcome.outcomeId !== outcomeId ||
+      existingOutcome.asOf !== requestedOutcome.asOf ||
+      existingOutcome.generatedAt !== attributes.outcomeRef.generatedAt ||
+      existingOutcome.experiment.id !== attributes.experimentId ||
+      existingOutcome.experiment.slug !== attributes.slug ||
+      existingOutcome.experiment.status !== nextStatus ||
+      attributes.status !== nextStatus ||
+      attributes.endedOn !== nextEndedOn ||
+      attributes.outcome?.finalAnalysisStatus !== "generated" ||
+      attributes.outcomeRef.outcomeId !== outcomeId ||
+      attributes.outcomeRef.relativePath !== outcomePath
+    ) {
+      throw new VaultError(
+        "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+        "The saved experiment outcome reference is missing or does not match its immutable artifact.",
+        {
+          experimentId: attributes.experimentId,
+          relativePath: input.relativePath,
+        },
+      );
+    }
     return {
       experimentId: attributes.experimentId,
       slug: attributes.slug,
@@ -791,7 +806,29 @@ export async function writeExperimentOutcome(
     };
   }
 
-  const generatedAt = nextExperimentOutcomeGeneratedAt(existingOutcome?.generatedAt);
+  if (attributes.outcomeRef !== undefined && !shouldCompleteRun) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The experiment already references a different immutable outcome artifact.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  if (existingOutcome !== null) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_UNREFERENCED",
+      "An unreferenced experiment outcome artifact already exists and requires explicit repair.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const generatedAt = new Date().toISOString();
   const validatedOutcome = validateContract(
     experimentOutcomeSchema,
     {
@@ -888,36 +925,6 @@ async function readExistingExperimentOutcome(
     }
     throw error;
   }
-}
-
-function experimentOutcomesAreEquivalent(
-  left: ExperimentOutcome,
-  right: ExperimentOutcome,
-): boolean {
-  const {
-    generatedAt: leftGeneratedAt,
-    schema: leftSchema,
-    ...leftComparable
-  } = left;
-  const {
-    generatedAt: rightGeneratedAt,
-    schema: rightSchema,
-    ...rightComparable
-  } = right;
-  void leftGeneratedAt;
-  void leftSchema;
-  void rightGeneratedAt;
-  void rightSchema;
-  return isDeepStrictEqual(leftComparable, rightComparable);
-}
-
-function nextExperimentOutcomeGeneratedAt(previous: string | undefined): string {
-  const now = new Date().toISOString();
-  if (!previous || now > previous) {
-    return now;
-  }
-
-  return new Date(Date.parse(previous) + 1).toISOString();
 }
 
 async function appendExperimentLifecycleEvent(

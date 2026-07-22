@@ -122,6 +122,7 @@ export {
   collectExperimentAdherenceCalendar,
   decideExperimentFollowupDue,
   summarizeExperimentProgress,
+  upgradeLegacyExperimentOutcome,
 } from "./experiments.ts";
 export { buildExperimentProgressCard } from "./experiment-progress-card.ts";
 export type {
