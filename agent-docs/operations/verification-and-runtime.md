@@ -11,8 +11,8 @@ through `scripts/verification-dispatch.mjs`:
 
 - CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
 - A local Codex parent in `auto` mode uses Crabbox's direct
-  `blacksmith-testbox` provider only when both CLIs are available and either
-  `MURPH_CRABBOX_BLACKSMITH=1` or `MURPH_CRABBOX_LEASE_ID` is set.
+  `blacksmith-testbox` provider only when both CLIs are available and
+  `MURPH_CRABBOX_BLACKSMITH=1` is set.
 - Other callers and unconfigured or unavailable CLIs retain local shared-host
   admission. Canonical acceptance intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
@@ -26,8 +26,10 @@ through `scripts/verification-dispatch.mjs`:
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
   introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, canonical commands can create or
-  reuse Testboxes from feature branches normally.
+  and PR gates; after that bootstrap lands, canonical commands can create fresh
+  one-shot Testboxes from feature branches normally. Canonical verification
+  rejects reusable lease IDs because current provider metadata does not prove
+  the Blacksmith organization that installed the root-owned entrypoint.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
@@ -47,10 +49,10 @@ MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
 ```
 
-Use an existing task-owned Crabbox lease when one is already available;
-otherwise the forced executor creates a fresh one-shot Testbox. Do not leave the
-local waiter running concurrently, forward local environment values, bypass the
-canonical command, or return automatically to another unbounded local wait.
+The forced executor creates a fresh one-shot Testbox through the fully pinned
+route. Do not leave the local waiter running concurrently, forward local
+environment values, bypass the canonical command, warm a lease separately, or
+return automatically to another unbounded local wait.
 Before delegation, satisfy the Git-state admission boundary, including fully
 staging any new non-ignored source or documentation file. If Crabbox cannot run
 because its CLIs, authentication, or capacity are unavailable, fail closed and
@@ -79,19 +81,23 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   paths. Authorized staged and modified tracked working-tree content must leave
   the host so the Testbox verifies the exact candidate change rather than only
   the pushed commit. `.gitignore` carries the matching normal exclusions,
-  including local Crabbox run artifacts.
+  including local Crabbox run artifacts. Every Git subprocess in this guard
+  receives the same scrubbed environment as Crabbox, so ambient `GIT_*`
+  overrides cannot make the guard inspect a different index or worktree from
+  the upload path.
 - The default-branch hydration workflow has read-only repository contents
   permission, attaches no GitHub Environment, requests no OIDC authority, and
   references no Actions secrets. It copies
-  `scripts/crabbox/trusted-verification-entrypoint.mjs` into a root-owned path
+  `scripts/crabbox/trusted-verification-entrypoint.sh` into a root-owned path
   outside the synced workspace before opening the delegated Testbox session.
-  Canonical commands invoke only that installed entrypoint. The trusted copy
-  validates the two allowed verification commands, erases its own ambient
-  Actions/Blacksmith environment, and launches candidate-controlled repository
-  code with only basic host paths plus a one-bit trusted-entry marker.
+  Canonical commands invoke only that installed shell. It validates the two
+  allowed verification commands, resolves the candidate verifier from the real
+  current directory, and directly `exec`s it through `env -i` with an isolated
+  temporary home, fixed basic host paths, and a one-bit trusted-entry marker.
 - Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
-  and hydration job on the command line. Local `CRABBOX_CONFIG`, profile, ref,
-  workflow, or job overrides are not trusted routing inputs.
+  and hydration job on the command line before the one-shot Testbox is created.
+  Local `CRABBOX_CONFIG`, profile, ref, workflow, job, or arbitrary existing
+  lease IDs are not trusted routing inputs.
 - `scripts/crabbox/run-verification.mjs` fails closed without that marker, then
   independently rebuilds the process environment with deterministic CI-style
   placeholder values required by hosted-web build and smoke checks. Candidate
