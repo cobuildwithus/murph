@@ -480,6 +480,10 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
+        codexChatGptAuthResolver:
+          executionPlan.executionContext?.hosted?.codexChatGptAuthResolver ?? null,
+        codexChatGptAuthSubject:
+          executionPlan.executionContext?.hosted?.memberId ?? null,
         generatedImageUploader: outputOnlyTurn
           ? null
           : executionPlan.executionContext?.hosted?.generatedImageUploader ?? null,

@@ -175,6 +175,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes hosted workspace checkpoint refs, browser vault replica refs, next-wake state, inbox media-retention wake state, and redacted status.",
   },
   {
+    slug: "prisma.hosted_codex_auth_connection",
+    label: "Hosted ChatGPT access connection",
+    deletion: "live-delete",
+    note: "Deletes ChatGPT connection state and its encrypted bounded access seed. Export omits credential plaintext, account routing identifiers, and ciphertext.",
+  },
+  {
     slug: "prisma.hosted_computer_run",
     label: "Hosted computer-use runs",
     deletion: "live-delete",

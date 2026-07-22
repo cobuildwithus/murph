@@ -55,22 +55,7 @@ export async function executeHostedCodexAuthWake(input: {
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_HOME_DIR_NAME);
   try {
     if (input.wake.action === "connect") {
-      await connectHostedCodexManagedAccount({
-        codexHome,
-        platform: input.platform,
-        runtimeEnv: input.runtimeEnv,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-      return createNoopMailboxEffect({
-        conversationMetrics: null,
-        mailboxLane: "runtime-control",
-        postCheckpointRecord: {
-          attemptId: input.wake.attemptId,
-          kind: "codex-auth.updated",
-          phase: "connected",
-        },
-      });
+      throw new Error("Legacy hosted Codex account connect is disabled.");
     }
 
     await disconnectHostedCodexManagedAccountBestEffort({
@@ -192,33 +177,6 @@ async function removeHostedCodexAuthJsonBestEffort(input: {
       phase: "wake.running",
       wake: input.wake,
     });
-  }
-}
-
-async function connectHostedCodexManagedAccount(input: {
-  codexHome: string;
-  platform: HostedRuntimePlatform;
-  runtimeEnv: Readonly<Record<string, string>>;
-  vaultRoot: string;
-  wake: HostedExecutionCodexAuthRequestedWake;
-}): Promise<void> {
-  const result = await executeCodexManagedAccountOperation({
-    action: "connect",
-    codexCommand: input.runtimeEnv[HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV],
-    codexHome: input.codexHome,
-    env: buildCodexManagedAccountOperationEnv(input.runtimeEnv),
-    onDeviceCode: async ({ userCode, verificationUrl }) => {
-      await input.platform.codexAuthPort?.update({
-        attemptId: input.wake.attemptId,
-        phase: "device_code",
-        userCode,
-        verificationUrl,
-      });
-    },
-    workingDirectory: input.vaultRoot,
-  });
-  if (result.kind !== "connected") {
-    throw new Error("Hosted Codex account connect did not complete.");
   }
 }
 

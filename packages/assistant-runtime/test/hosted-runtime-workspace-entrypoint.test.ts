@@ -1777,6 +1777,145 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("loads the bounded ChatGPT seed before Codex config and passes only its resolver to the assistant phase", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const connectionVersion = `hca_${"a".repeat(16)}`;
+    const turnSignal = new AbortController().signal;
+    const prepareHostedCodexRuntimeEnvironmentImpl =
+      mocks.prepareHostedCodexRuntimeEnvironment.getMockImplementation();
+    let assistantPhaseCalls = 0;
+    let seedReadCalls = 0;
+    const updateCodexAuth = vi.fn(async () => ({
+      applied: true,
+      status: "applied" as const,
+    }));
+
+    assert.ok(prepareHostedCodexRuntimeEnvironmentImpl);
+    mocks.prepareHostedCodexRuntimeEnvironment.mockImplementationOnce(async (input) => {
+      events.push("codex.config");
+      assert.equal(input.clearFileBackedChatGptAuth, true);
+      assert.equal(input.externalChatGptAuth, true);
+      return await prepareHostedCodexRuntimeEnvironmentImpl(input);
+    });
+
+    const readAccessSeed = vi.fn(async (request, context) => {
+      seedReadCalls += 1;
+      events.push(seedReadCalls === 1 ? "seed.read.startup" : "seed.read.turn");
+      assert.deepEqual(request, {
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      });
+      if (seedReadCalls === 1) {
+        assert.ok(context?.signal instanceof AbortSignal);
+      } else {
+        assert.equal(context?.signal, turnSignal);
+      }
+      return {
+        accessToken: "fixture-memory-only-access-token",
+        chatgptAccountId: "account_fixture",
+        connectionVersion,
+        expiresAt: "2026-07-22T00:00:00.000Z",
+        schemaVersion: 1 as const,
+        status: "available" as const,
+      };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_memory_chatgpt_seed",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-chatgpt-seed.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              readAccessSeed,
+              update: updateCodexAuth,
+            },
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_memory_chatgpt_seed",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push("assistant.phase");
+            assert.ok(input.codexChatGptAuthResolver);
+            await expect(input.codexChatGptAuthResolver.resolve({
+              knownConnectionVersion: null,
+              reason: "turn_start",
+              signal: turnSignal,
+            })).resolves.toEqual({
+              accessToken: "fixture-memory-only-access-token",
+              chatgptAccountId: "account_fixture",
+              connectionVersion,
+              expiresAt: "2026-07-22T00:00:00.000Z",
+              kind: "login",
+            });
+            assert.ok(input.codexChatGptAuthResolver.reportLoginResult);
+            await expect(input.codexChatGptAuthResolver.reportLoginResult({
+              connectionVersion,
+              result: "connected",
+            })).resolves.toBe("current");
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(readAccessSeed.mock.calls.length, 2);
+      expect(updateCodexAuth).toHaveBeenCalledWith({
+        attemptId: connectionVersion,
+        phase: "connected",
+      });
+      assert.equal(assistantPhaseCalls, 1);
+      assert.ok(
+        requireEventIndex(events, "seed.read.startup")
+          < requireEventIndex(events, "codex.config"),
+      );
+      assert.ok(requireEventIndex(events, "codex.config") < requireEventIndex(events, "assistant.phase"));
+      assert.ok(
+        requireEventIndex(events, "assistant.phase")
+          < requireEventIndex(events, "seed.read.turn"),
+      );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("uses hosted Codex runtime CA env for intercepted OpenAI HTTPS requests", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -24879,6 +25018,7 @@ function createPlatform(input: {
   artifactGetCalls?: string[];
   artifactLabelsByHash?: ReadonlyMap<string, string>;
   artifactPutCalls?: Array<{ byteLength: number; sha256: string }>;
+  codexAuthPort?: HostedRuntimePlatform["codexAuthPort"] | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   events?: string[];
   groupToolPort?: HostedRuntimePlatform["groupToolPort"] | null;
@@ -24938,6 +25078,7 @@ function createPlatform(input: {
       },
     },
     ...(input.deviceSyncPort ? { deviceSyncPort: input.deviceSyncPort } : {}),
+    ...(input.codexAuthPort ? { codexAuthPort: input.codexAuthPort } : {}),
     ...(input.groupToolPort ? { groupToolPort: input.groupToolPort } : {}),
     ...(input.logRequests
       ? {

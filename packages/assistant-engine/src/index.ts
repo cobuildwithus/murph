@@ -25,6 +25,9 @@ export {
 } from './assistant/group-shared-read-limits.js'
 export * from './assistant/group-newsletter-automation.js'
 export type {
+  AssistantCodexChatGptAuthResolution,
+  AssistantCodexChatGptAuthResolveInput,
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGroupPermissionOfferRequest,
   AssistantHostedGroupPermissionOfferTool,
   AssistantHostedGroupSharedMember,

@@ -41,6 +41,7 @@ describe('executeReadOnlyAssistantAsk', () => {
     const workspaceRoot = await createTempRoot('murph-assistant-ask-vault-')
     const now = new Date('2026-07-15T12:00:00.000Z')
     const groupSharedReader = { request: vi.fn() }
+    const codexChatGptAuthResolver = { resolve: vi.fn() }
     let observedWorkingDirectory: string | null = null
     askMocks.buildEvidence.mockResolvedValue(
       '## Conversation evidence\n\n- user: Today is 3 x 8 squats.',
@@ -68,6 +69,8 @@ describe('executeReadOnlyAssistantAsk', () => {
           OPENAI_API_KEY: 'provider-auth-stays-on-supervisor',
           PATH: '/runtime/bin',
         },
+        codexChatGptAuthResolver,
+        codexChatGptAuthSubject: 'member-group-runtime',
         groupSharedReader,
         model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
@@ -93,6 +96,8 @@ describe('executeReadOnlyAssistantAsk', () => {
       approvalPolicy: 'never',
       codexCommand: '/runtime/codex',
       codexHome: '/runtime/codex-home',
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-group-runtime',
       developerInstructions: 'Use Murph voice.',
       dynamicTools: [expect.objectContaining({ name: 'group', namespace: 'murph' })],
       ephemeral: true,

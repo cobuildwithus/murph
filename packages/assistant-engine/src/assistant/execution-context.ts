@@ -346,6 +346,39 @@ export type AssistantWorkspaceArtifactMaterializer = (
   options?: AssistantWorkspaceArtifactMaterializationOptions,
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
+export interface AssistantCodexChatGptAuthResolveInput {
+  knownConnectionVersion: string | null
+  reason: 'turn_start'
+  signal?: AbortSignal | null
+}
+
+export type AssistantCodexChatGptAuthResolution =
+  | {
+      kind: 'unchanged'
+    }
+  | {
+      accessToken: string
+      chatgptAccountId: string
+      connectionVersion: string
+      expiresAt: string
+      kind: 'login'
+    }
+  | {
+      authRequired: boolean
+      connectionVersion: string | null
+      kind: 'logout'
+    }
+
+export interface AssistantCodexChatGptAuthResolver {
+  resolve(
+    input: AssistantCodexChatGptAuthResolveInput,
+  ): Promise<AssistantCodexChatGptAuthResolution>
+  reportLoginResult?(input: {
+    connectionVersion: string
+    result: 'connected' | 'failed'
+  }): Promise<'current' | 'superseded'>
+}
+
 export interface AssistantHostedExecutionContext {
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   automationTool?: AssistantHostedAutomationTool | null
@@ -375,6 +408,7 @@ export interface AssistantHostedExecutionContext {
   planUsageTool?: AssistantHostedPlanUsageTool | null
   subscriptionTool?: AssistantHostedSubscriptionTool | null
   dynamicContextPrompts?: readonly string[] | null
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
   generatedImageUploader?: AssistantHostedGeneratedImageUploader | null
   generatedImageUploaderRequired?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
@@ -439,6 +473,9 @@ export function normalizeAssistantExecutionContext(
   const generatedImageUploader = normalizeAssistantGeneratedImageUploader(
     hosted?.generatedImageUploader,
   )
+  const codexChatGptAuthResolver = normalizeAssistantCodexChatGptAuthResolver(
+    hosted?.codexChatGptAuthResolver,
+  )
   const familyPlanTool = normalizeAssistantFamilyPlanTool(hosted?.familyPlanTool)
   const personalizationTool = normalizeAssistantPersonalizationTool(
     hosted?.personalizationTool,
@@ -482,6 +519,7 @@ export function normalizeAssistantExecutionContext(
       ...(assistantConfigurationTool ? { assistantConfigurationTool } : {}),
       ...(connectedApps ? { connectedApps } : {}),
       ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
+      ...(codexChatGptAuthResolver ? { codexChatGptAuthResolver } : {}),
       ...(generatedImageUploader ? { generatedImageUploader } : {}),
       ...(familyPlanTool ? { familyPlanTool } : {}),
       ...(personalizationTool ? { personalizationTool } : {}),
@@ -550,6 +588,23 @@ export function normalizeAssistantExecutionContext(
           .map((key) => normalizeNullableString(key))
           .filter((key): key is string => key !== null) ?? [],
     },
+  }
+}
+
+function normalizeAssistantCodexChatGptAuthResolver(
+  input: AssistantHostedExecutionContext['codexChatGptAuthResolver'] | undefined,
+): AssistantCodexChatGptAuthResolver | undefined {
+  if (!input || typeof input.resolve !== 'function') {
+    return undefined
+  }
+
+  const reportLoginResult = typeof input.reportLoginResult === 'function'
+    ? input.reportLoginResult.bind(input)
+    : null
+
+  return {
+    resolve: input.resolve.bind(input),
+    ...(reportLoginResult ? { reportLoginResult } : {}),
   }
 }
 

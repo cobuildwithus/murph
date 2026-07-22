@@ -42,6 +42,8 @@ export const HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH =
   "/api/internal/hosted-execution/groups/newsletter-tool";
 export const HOSTED_RUNTIME_CODEX_AUTH_PATH =
   "/api/internal/hosted-runtime/codex-auth";
+export const HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH =
+  "/api/internal/hosted-runtime/codex-auth/seed";
 export const HOSTED_RUNTIME_VAULT_SHARE_DELIVER_PATH =
   "/api/internal/hosted-runtime/vault-share/deliver";
 export const HOSTED_RUNTIME_VAULT_SHARE_ACTIVE_KINDS_PATH =

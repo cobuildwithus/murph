@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Decision
 
@@ -903,15 +903,85 @@ workspace may still hit the runtime's format gate on its next wake, so the
 operator rollout gate is zero known v1 hosted snapshots before returning to
 normal traffic.
 
-Hosted Codex auth is system-mailbox runtime-control work, but hosted ChatGPT
-connect is disabled until credentials have an isolated control-plane owner
-outside the hosted tool filesystem. Already-queued connect wakes fail closed
-without starting OAuth. Disconnect remains local-revocation-first for cleanup:
-remote app-server logout is best effort, local `auth.json` deletion is required,
-and a local deletion failure keeps the system-mailbox item retryable instead of
-consuming a revocation request. Any terminal `connected` callback from an old
-in-flight wake prunes local managed `auth.json` and is reported as a failed
-connection cleanup callback, not as a durable connected state.
+### Hosted ChatGPT Access-Token Handoff
+
+The legacy hosted device-code connect producer must stay disabled. Companion
+ingestion cannot be enabled until the old producer is blocked, queued connect
+wakes fail closed without starting OAuth, and old terminal callbacks cannot
+overwrite a companion-owned connection. The replacement is an internal,
+default-off companion producer. It depends on Codex App Server's unsupported
+OpenAI-internal `chatgptAuthTokens` request and cannot be described or enabled
+as production support until OpenAI approves the native client, redirect, scopes,
+and token handoff contract.
+
+The phone owns the durable refresh token in a non-syncing, this-device-only
+Keychain item. The companion connect/update boundary accepts an exact DTO with
+only `schemaVersion`, `accessToken`, `chatgptAccountId`, and `expiresAt`.
+Unknown fields fail closed, so an ID token, refresh token, plan hint, or expanded
+provider payload cannot cross this route. `accessToken` is a raw, time-limited
+OpenAI bearer, not a Murph-downscoped capability.
+
+Web reuses `HostedCodexAuthConnection` as the single state owner. Under the
+member lock it checks Privy bearer identity, active hosted access, and required
+consent, then encrypts the bearer plus account routing id before the first write.
+The row stores the ciphertext, bounded server-lease expiry, opaque connection
+version, and connection state. Status is credential-free. Identity-only disconnect remains available
+after access or consent loss, clears the ciphertext and expiry, rotates the
+version, and requests logout. Exact server-lease expiry projects public `off` so
+the phone may reseed from a still-valid local bearer and preserves that expired
+seed's connection version. DELETE advances the version before it projects
+`off`; the phone must not silently reverse a different/null `off` version.
+Invalid state remains `needs_attention` and cannot be replayed as expiry. Web
+cannot refresh because it never receives the refresh token. Account deletion
+cascade-deletes the connection row with its member and destroys the hosted
+runtime. Provider-side revocation is not promised without a documented OpenAI
+contract.
+
+Connect, update, and disconnect use the existing payload-free
+`runtime_recheck_requested` signal. The signal is only a latency hint: it carries
+no auth-specific mailbox item, token, routing id, or connection payload. Temporal
+and the mailbox never own the operation. Web acknowledges completion only for
+the exact attempt that reached its expected terminal state; the same terminal
+attempt is idempotent, while a newer upload or disconnect makes the older HTTP
+request fail with a retryable conflict. At cold start and turn-start
+reconciliation, the runtime supplies its known connection version through the
+signed Web-control seed read. Cloudflare attaches the active attempt and lease
+write fence, treats the bounded response as sensitive, and does not persist or
+log its body. Web rechecks current member access, consent, row version, and
+expiry immediately before decrypting. After an app-server login or unchanged
+warm binding, the runtime sends an exact-version, credential-free result
+callback. Web re-locks the member and sponsored-access rows and rechecks access,
+consent, connection generation, usable seed lifetime, and authenticated
+ciphertext; the engine may start a thread only after that callback confirms the
+current durable authority. A same-version read authenticates the ciphertext
+before returning token-free `unchanged`. The successful callback is the
+turn-authorization linearization point. An unchanged or unavailable response
+contains no credential.
+
+The available bearer and routing id pass through the invocation-scoped runtime
+resolver and engine login bridge directly into the resident Codex App Server's
+in-memory `account/login/start` request. The process caches only the opaque
+applied connection version and writes no auth file. The bearer and routing id
+must never enter runner environment variables, `auth.json`, system or
+conversation mailbox payloads, Temporal inputs or history, persisted or
+serialized assistant/runtime state, prompt or tool context, workspace or
+snapshot state, diagnostics, or logs. Expiry, disconnect, unavailable authority,
+or a newer version causes the resident process to reconcile and log out before
+it may authorize another turn. Disconnect does not preempt a turn whose
+authorization callback already linearized, even when the provider request has
+not started yet.
+The separate hosted-local environment-to-`auth.json` seed remains a development
+harness and is not a transport or compatibility path for this companion flow.
+
+Use a staged, additive rollout. Deploy Web's row fields and signed sensitive
+read first while companion ingestion remains disabled. Deploy the tolerant
+Cloudflare/runtime consumer second. Companion upload is enabled only when
+`MURPH_COMPANION_CHATGPT_AUTH_ENABLED=1`; it defaults off, while credential-free
+status and authority-reducing disconnect remain available. Do not set that gate
+for a production release without OpenAI approval for the integration contract.
+Rollback disables the producer and clears its persisted seed state first; only
+then may operators remove the consumer or Web read after old runtimes and rows
+have drained.
 
 Hosted device-sync webhook freshness is owned by web dirty state, not mailbox
 completion. The route claims the exact provider trace, writes sparse
@@ -1500,6 +1570,8 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - runtime status projection from `HostedWorkspace.redactedStatusJson`, mailbox lag, and bounded logs
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
+- hosted Codex connection state, encrypted time-limited access seed, expiry,
+  and opaque connection version on `HostedCodexAuthConnection`
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
 - anonymized assistant-runtime issue sink
 - Assistant Ask target resolution, membership-generation and origin binding,
@@ -1526,6 +1598,8 @@ routing.
 - checkpoint timing
 - the invocation-local one-child Assistant Ask controller, sealed group context
   builder, and exact-child abort/await lifecycle; none is durable queue state
+- turn-start hosted Codex external-auth reconciliation and the resident App
+  Server's process-memory-only applied connection version
 - checkpoint snapshot policy and metrics (`direct-r2-presigned-put`, the
   512 MiB encrypted single-object and 1 GiB total plain-byte limits, encrypted byte
   size, and warning threshold)
@@ -1547,6 +1621,9 @@ routing.
   recipient unwrap; Cloudflare must not hold GCP KMS decrypt authority
 - signed Assistant Ask Web-control transport and normal runner-container process
   hosting; Cloudflare does not own ask routing, membership, queueing, or results
+- signed, active-write-fenced hosted Codex seed transport with a bounded
+  sensitive response body; Cloudflare owns no seed state and must not persist or
+  log the plaintext
 
 Cloudflare does not own product facts, mailbox state, mailbox import progress,
 hosted AI usage spend, assistant channel enablement state, outbox truth, or
@@ -1565,6 +1642,9 @@ Temporal does not own raw webhook payloads, provider verification headers,
 provider secrets, mailbox payload content, product facts, workspace checkpoint
 truth, or runner coordination. Treat workflow state as durable execution state,
 not as queryable product truth.
+
+Hosted Codex runtime rechecks remain pointer-only. Temporal must never receive
+the access bearer, account routing id, expiry, ciphertext, or connection DTO.
 
 ### Vercel Workflow Owns
 

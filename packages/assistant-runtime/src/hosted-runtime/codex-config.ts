@@ -163,6 +163,8 @@ const HOSTED_CODEX_REJECTED_RUNTIME_AUTHORITY_ENV_KEYS = Object.values(
 );
 
 export interface HostedCodexRuntimeEnvironmentInput {
+  clearFileBackedChatGptAuth?: boolean;
+  externalChatGptAuth?: boolean;
   operatorHomeRoot: string;
   runtimeEnv: Readonly<Record<string, string>>;
 }
@@ -186,14 +188,28 @@ export async function prepareHostedCodexRuntimeEnvironment(
   const codexHome = path.join(input.operatorHomeRoot, HOSTED_CODEX_CONFIG_DIR_NAME);
   const codexConfigPath = path.join(codexHome, HOSTED_CODEX_CONFIG_FILE_NAME);
   const codexAuthPath = path.join(codexHome, HOSTED_CODEX_AUTH_FILE_NAME);
-  const seededChatGptAuthJson = readHostedCodexChatGptAuthJson(input.runtimeEnv);
+  const externalChatGptAuth = input.externalChatGptAuth === true;
+  const fileBackedChatGptAuthDisabled =
+    externalChatGptAuth || input.clearFileBackedChatGptAuth === true;
+  const seededChatGptAuthJson = fileBackedChatGptAuthDisabled
+    ? null
+    : readHostedCodexChatGptAuthJson(input.runtimeEnv);
 
   await mkdir(codexHome, {
     mode: 0o700,
     recursive: true,
   });
   await chmod(codexHome, 0o700);
-  let chatGptAuthKind = await readHostedCodexAuthKind(codexAuthPath);
+  // Seed-managed ChatGPT credentials belong only to the app-server's in-memory
+  // auth bridge. Active and explicitly cleared seed states both remove any
+  // legacy or development auth file without reading it, so disconnect cannot
+  // revive file-backed credentials.
+  if (fileBackedChatGptAuthDisabled) {
+    await rm(codexAuthPath, { force: true });
+  }
+  let chatGptAuthKind = fileBackedChatGptAuthDisabled
+    ? null
+    : await readHostedCodexAuthKind(codexAuthPath);
   if (
     chatGptAuthKind === "invalid"
     || (chatGptAuthKind === "managed" && seededChatGptAuthJson !== null)
@@ -213,7 +229,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     await rm(codexAuthPath, { force: true });
     chatGptAuthKind = null;
   }
-  const chatGptAuth = chatGptAuthKind !== null;
+  const chatGptAuth = externalChatGptAuth || chatGptAuthKind !== null;
   const apiKeyValue = normalizeHostedCodexEnvString(input.runtimeEnv[providerConfig.envKey]);
   if (!chatGptAuth && !apiKeyValue) {
     throw new HostedAssistantConfigurationError(

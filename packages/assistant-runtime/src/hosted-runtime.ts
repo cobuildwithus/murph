@@ -53,6 +53,9 @@ import {
   prepareHostedCodexRuntimeEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
+  prepareHostedCodexChatGptAuth,
+} from "./hosted-runtime/codex-chatgpt-auth.ts";
+import {
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./hosted-runtime/codex-runtime-env.ts";
 import {
@@ -1360,7 +1363,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       stage: "codex.prepare",
       status: "start",
     });
+    const codexChatGptAuth = await prepareHostedCodexChatGptAuth({
+      port: guardedRuntime.platform.codexAuthPort,
+      signal: runtimeAbortController.signal,
+      subject: input.request.userId,
+    });
     const hostedCodexRuntime = await prepareHostedCodexRuntimeEnvironment({
+      clearFileBackedChatGptAuth:
+        codexChatGptAuth.clearFileBackedChatGptAuth,
+      externalChatGptAuth: codexChatGptAuth.externalChatGptAuth,
       operatorHomeRoot: restored.operatorHomeRoot,
       runtimeEnv: baseRuntimeEnv,
     });
@@ -1730,6 +1741,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               )({
                 ...phaseInput,
                 currentAssistantInputId: () => currentAssistantInputId,
+                codexChatGptAuthResolver: codexChatGptAuth.resolver,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
                 request: input.request,
@@ -1888,6 +1900,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     detachedAssistantAskController = createHostedDetachedAssistantAskController({
       assistantAskPort: runtime.platform.assistantAskPort ?? null,
+      codexChatGptAuthResolver: codexChatGptAuth.resolver,
+      codexChatGptAuthSubject: input.request.userId,
       createGroupSharedReader() {
         return createHostedGroupSharedReader({
           groupToolPort: runtime.platform.groupToolPort ?? null,
@@ -4644,6 +4658,16 @@ function createAbortGuardedHostedRuntimePlatform(
               : {}),
             write: (writeInput) =>
               guard(() => platform.browserVaultReplicaPort!.write(writeInput)),
+          },
+        }
+      : {}),
+    ...(platform.codexAuthPort
+      ? {
+          codexAuthPort: {
+            readAccessSeed: (request, context) =>
+              guard(() => platform.codexAuthPort!.readAccessSeed(request, context)),
+            update: (update) =>
+              guard(() => platform.codexAuthPort!.update(update)),
           },
         }
       : {}),

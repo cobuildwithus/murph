@@ -45,6 +45,7 @@ import {
   type AssistantCronStatusOptions,
   type AssistantBeforeProviderAcceptedInputsHook,
   type AssistantAutomationOperationScope,
+  type AssistantCodexChatGptAuthResolver,
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
@@ -261,6 +262,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null;
   deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
@@ -1244,6 +1246,7 @@ export async function runHostedWorkspaceAssistantPhase(
     {
       hosted: {
         actionApprovalPort: input.runtime.platform.actionApprovalPort ?? null,
+        codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
         ...(input.currentAssistantInputId
           ? {
               currentAssistantInputId: input.currentAssistantInputId,

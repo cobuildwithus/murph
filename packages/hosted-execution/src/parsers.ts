@@ -160,6 +160,8 @@ export {
   parseHostedIngressLatencySource,
   parseHostedRuntimeIssueExportRequest,
   parseHostedRuntimeIssueExportResponse,
+  parseHostedCodexAuthSeedRequest,
+  parseHostedCodexAuthSeedResponse,
   parseHostedCodexAuthUpdate,
   parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeLatencyTraceEvent,

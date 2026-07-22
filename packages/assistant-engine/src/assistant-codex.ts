@@ -120,6 +120,8 @@ import {
   type CodexAppServerImageInput,
 } from './assistant-codex/images.js'
 import type {
+  AssistantCodexChatGptAuthResolution,
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from './assistant/execution-context.js'
@@ -220,6 +222,12 @@ type CodexAppServerProcessInput = {
   codexCommand: string
   env: NodeJS.ProcessEnv
   launchKey: string
+}
+
+type CodexAppliedChatGptAuthBinding = {
+  connectionVersion: string | null
+  kind: 'login' | 'logout'
+  subject: string
 }
 
 type CodexAppServerSpawnInput = CodexAppServerProcessInput & {
@@ -430,6 +438,8 @@ export interface CodexAppServerTurnInput {
   codexCommand?: string
   codexHome?: string | null
   env?: NodeJS.ProcessEnv
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
+  codexChatGptAuthSubject?: string | null
   fetchImpl?: typeof fetch | null
   baseInstructions?: string | null
   developerInstructions?: string | null
@@ -821,6 +831,7 @@ class CodexAppServerProcess {
   readonly startedAt = Date.now()
 
   private activeTurn: CodexAppServerActiveTurnBinding | null = null
+  private appliedChatGptAuthBinding: CodexAppliedChatGptAuthBinding | null = null
   private boundThreadId: string | null = null
   private boundThreadModel: string | null = null
   private boundThreadServiceTier: AssistantProviderServiceTier | null = null
@@ -911,6 +922,50 @@ class CodexAppServerProcess {
 
   get recordedEndReason(): CodexAppServerColdStartReason | null {
     return this.endReason
+  }
+
+  hasAppliedChatGptAuthBinding(
+    kind: CodexAppliedChatGptAuthBinding['kind'],
+    subject: string,
+    connectionVersion: string | null,
+  ): boolean {
+    return (
+      this.appliedChatGptAuthBinding?.kind === kind &&
+      this.appliedChatGptAuthBinding?.subject === subject &&
+      this.appliedChatGptAuthBinding.connectionVersion === connectionVersion
+    )
+  }
+
+  hasAppliedChatGptLoginForSubject(subject: string): boolean {
+    return (
+      this.appliedChatGptAuthBinding?.kind === 'login' &&
+      this.appliedChatGptAuthBinding.subject === subject
+    )
+  }
+
+  hasAppliedChatGptLogin(): boolean {
+    return this.appliedChatGptAuthBinding?.kind === 'login'
+  }
+
+  noteAppliedChatGptAuthBinding(
+    kind: CodexAppliedChatGptAuthBinding['kind'],
+    subject: string,
+    connectionVersion: string | null,
+  ): void {
+    this.appliedChatGptAuthBinding = {
+      connectionVersion,
+      kind,
+      subject,
+    }
+  }
+
+  readKnownChatGptAuthConnectionVersion(subject: string): string | null {
+    return (
+      this.appliedChatGptAuthBinding?.kind === 'login' &&
+      this.appliedChatGptAuthBinding.subject === subject
+    )
+      ? this.appliedChatGptAuthBinding.connectionVersion
+      : null
   }
 
   noteTurnAbort(): void {
@@ -1833,6 +1888,38 @@ export async function stopWarmCodexAppServer(
   })
 }
 
+export async function clearWarmCodexChatGptAuthForSubject(
+  subjectInput: string,
+): Promise<boolean> {
+  const subject = normalizeNullableString(subjectInput)
+  if (!subject) {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_INVALID',
+      message: 'Hosted ChatGPT authentication requires an authenticated subject.',
+      retryable: false,
+    })
+  }
+
+  return await withWarmCodexSlotLock(async () => {
+    const processInstance = warmCodexProcess
+    if (
+      !processInstance ||
+      processInstance.isStopped ||
+      !processInstance.hasAppliedChatGptLoginForSubject(subject)
+    ) {
+      return false
+    }
+    if (processInstance.hasInFlightTurn) {
+      throw processInstance.buildBusyError(
+        'Codex app-server is serving a turn and cannot clear ChatGPT authentication yet.',
+      )
+    }
+
+    await processInstance.stop('chatgpt-auth-cleared')
+    return true
+  })
+}
+
 export async function waitForWarmCodexBackgroundWork(
   input: WaitForWarmCodexBackgroundWorkInput = {},
 ): Promise<void> {
@@ -2728,6 +2815,324 @@ function readCodexDynamicToolKey(message: CodexRpcMessage): string | null {
   const namespace = readCodexStringField(params, 'namespace')
   const tool = readCodexStringField(params, 'tool')
   return namespace && tool ? `${namespace}.${tool}` : null
+}
+
+function isCodexChatGptAuthRpcMethod(method: string | undefined): boolean {
+  return method === 'account/login/start' || method === 'account/logout'
+}
+
+function buildCodexChatGptAuthError(input: {
+  code: string
+  message: string
+  retryable: boolean
+}): VaultCliError {
+  return new VaultCliError(input.code, input.message, {
+    retryable: input.retryable,
+  })
+}
+
+function normalizeCodexChatGptAuthConnectionVersion(
+  value: string | null,
+): string | null {
+  return value === null ? null : normalizeNullableString(value)
+}
+
+function assertCodexChatGptAuthLoginResolution(input: {
+  resolution: Extract<AssistantCodexChatGptAuthResolution, { kind: 'login' }>
+}): {
+  accessToken: string
+  chatgptAccountId: string
+  connectionVersion: string
+  expiresAtMs: number
+} {
+  const connectionVersion = normalizeCodexChatGptAuthConnectionVersion(
+    input.resolution.connectionVersion,
+  )
+  const chatgptAccountId = normalizeNullableString(
+    input.resolution.chatgptAccountId,
+  )
+  const expiresAt = normalizeNullableString(input.resolution.expiresAt)
+  const expiresAtMs = expiresAt ? Date.parse(expiresAt) : Number.NaN
+  if (
+    !connectionVersion ||
+    !chatgptAccountId ||
+    typeof input.resolution.accessToken !== 'string' ||
+    input.resolution.accessToken.length === 0 ||
+    !Number.isFinite(expiresAtMs)
+  ) {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_INVALID',
+      message: 'The hosted ChatGPT auth resolver returned an invalid login state.',
+      retryable: false,
+    })
+  }
+
+  return {
+    accessToken: input.resolution.accessToken,
+    chatgptAccountId,
+    connectionVersion,
+    expiresAtMs,
+  }
+}
+
+async function sendCodexChatGptAuthLogin(input: {
+  accessToken: string
+  chatgptAccountId: string
+  processInstance: CodexAppServerProcess
+}): Promise<void> {
+  let result: unknown
+  try {
+    result = await withCodexRpcTimeout(
+      input.processInstance.sendRequest('account/login/start', {
+        accessToken: input.accessToken,
+        chatgptAccountId: input.chatgptAccountId,
+        type: 'chatgptAuthTokens',
+      }),
+      CODEX_RPC_DEFAULT_TIMEOUT_MS,
+      'account/login/start',
+    )
+  } catch {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_LOGIN_FAILED',
+      message: 'Codex app-server could not apply external ChatGPT authentication.',
+      retryable: false,
+    })
+  }
+
+  if (asCodexString(asCodexRecord(result)?.type) !== 'chatgptAuthTokens') {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_LOGIN_FAILED',
+      message: 'Codex app-server could not apply external ChatGPT authentication.',
+      retryable: false,
+    })
+  }
+}
+
+async function sendCodexChatGptAuthLogout(
+  processInstance: CodexAppServerProcess,
+): Promise<void> {
+  try {
+    await withCodexRpcTimeout(
+      processInstance.sendRequest('account/logout', {}),
+      CODEX_RPC_DEFAULT_TIMEOUT_MS,
+      'account/logout',
+    )
+  } catch {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_LOGOUT_FAILED',
+      message: 'Codex app-server could not clear external ChatGPT authentication.',
+      retryable: true,
+    })
+  }
+}
+
+async function tryReportCodexChatGptAuthLoginResult(input: {
+  connectionVersion: string
+  resolver: AssistantCodexChatGptAuthResolver
+  result: 'connected' | 'failed'
+}): Promise<'current' | 'superseded' | null> {
+  if (!input.resolver.reportLoginResult) {
+    return 'current'
+  }
+
+  try {
+    const reportResult = await input.resolver.reportLoginResult({
+      connectionVersion: input.connectionVersion,
+      result: input.result,
+    })
+    return reportResult === 'current' || reportResult === 'superseded'
+      ? reportResult
+      : null
+  } catch {
+    return null
+  }
+}
+
+function buildCodexChatGptAuthSupersededError(): VaultCliError {
+  return buildCodexChatGptAuthError({
+    code: 'ASSISTANT_CODEX_CHATGPT_AUTH_SUPERSEDED',
+    message: 'ChatGPT authentication changed before this assistant could run.',
+    retryable: true,
+  })
+}
+
+function buildCodexChatGptAuthResultReportFailedError(): VaultCliError {
+  return buildCodexChatGptAuthError({
+    code: 'ASSISTANT_CODEX_CHATGPT_AUTH_RESULT_REPORT_FAILED',
+    message: 'ChatGPT authentication could not be confirmed before this assistant ran.',
+    retryable: true,
+  })
+}
+
+async function assertCodexChatGptAuthLoginIsCurrent(input: {
+  connectionVersion: string
+  resolver: AssistantCodexChatGptAuthResolver
+}): Promise<void> {
+  // A current report is the authorization linearization point for this turn.
+  // Revocation committed afterward applies to later turns or an explicit stop.
+  const reportResult = await tryReportCodexChatGptAuthLoginResult({
+    connectionVersion: input.connectionVersion,
+    resolver: input.resolver,
+    result: 'connected',
+  })
+  if (reportResult === 'superseded') {
+    throw buildCodexChatGptAuthSupersededError()
+  }
+  if (reportResult === null) {
+    throw buildCodexChatGptAuthResultReportFailedError()
+  }
+}
+
+async function applyCodexChatGptAuthLogout(input: {
+  authRequired: boolean
+  connectionVersion: string | null
+  processInstance: CodexAppServerProcess
+  subject: string
+}): Promise<void> {
+  if (
+    !input.processInstance.hasAppliedChatGptAuthBinding(
+      'logout',
+      input.subject,
+      input.connectionVersion,
+    )
+  ) {
+    if (input.processInstance.hasAppliedChatGptLogin()) {
+      await sendCodexChatGptAuthLogout(input.processInstance)
+    }
+    input.processInstance.noteAppliedChatGptAuthBinding(
+      'logout',
+      input.subject,
+      input.connectionVersion,
+    )
+  }
+
+  if (input.authRequired) {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_REQUIRED',
+      message: 'ChatGPT authentication needs attention before this assistant can run.',
+      retryable: false,
+    })
+  }
+}
+
+async function reconcileCodexChatGptAuth(input: {
+  abortSignal?: AbortSignal
+  processInstance: CodexAppServerProcess
+  resolver: AssistantCodexChatGptAuthResolver
+  subject: string
+}): Promise<void> {
+  const knownConnectionVersion =
+    input.processInstance.readKnownChatGptAuthConnectionVersion(input.subject)
+  let resolution: AssistantCodexChatGptAuthResolution
+  try {
+    resolution = await input.resolver.resolve({
+      knownConnectionVersion,
+      reason: 'turn_start',
+      signal: input.abortSignal ?? null,
+    })
+  } catch {
+    throw buildCodexChatGptAuthError({
+      code: 'ASSISTANT_CODEX_CHATGPT_AUTH_RESOLUTION_FAILED',
+      message: 'Hosted ChatGPT authentication could not be resolved.',
+      retryable: true,
+    })
+  }
+
+  switch (resolution.kind) {
+    case 'unchanged': {
+      if (
+        !knownConnectionVersion ||
+        !input.processInstance.hasAppliedChatGptAuthBinding(
+          'login',
+          input.subject,
+          knownConnectionVersion,
+        )
+      ) {
+        throw buildCodexChatGptAuthError({
+          code: 'ASSISTANT_CODEX_CHATGPT_AUTH_INVALID',
+          message: 'The hosted ChatGPT auth resolver returned an invalid unchanged state.',
+          retryable: false,
+        })
+      }
+      await assertCodexChatGptAuthLoginIsCurrent({
+        connectionVersion: knownConnectionVersion,
+        resolver: input.resolver,
+      })
+      return
+    }
+    case 'logout': {
+      const connectionVersion = normalizeCodexChatGptAuthConnectionVersion(
+        resolution.connectionVersion,
+      )
+      if (
+        (resolution.connectionVersion !== null && !connectionVersion) ||
+        typeof resolution.authRequired !== 'boolean'
+      ) {
+        throw buildCodexChatGptAuthError({
+          code: 'ASSISTANT_CODEX_CHATGPT_AUTH_INVALID',
+          message: 'The hosted ChatGPT auth resolver returned an invalid logout state.',
+          retryable: false,
+        })
+      }
+      await applyCodexChatGptAuthLogout({
+        authRequired: resolution.authRequired,
+        connectionVersion,
+        processInstance: input.processInstance,
+        subject: input.subject,
+      })
+      return
+    }
+    case 'login': {
+      const login = assertCodexChatGptAuthLoginResolution({ resolution })
+      if (login.expiresAtMs <= Date.now()) {
+        await applyCodexChatGptAuthLogout({
+          authRequired: true,
+          connectionVersion: login.connectionVersion,
+          processInstance: input.processInstance,
+          subject: input.subject,
+        })
+        return
+      }
+      if (
+        input.processInstance.hasAppliedChatGptAuthBinding(
+          'login',
+          input.subject,
+          login.connectionVersion,
+        )
+      ) {
+        return
+      }
+      try {
+        await sendCodexChatGptAuthLogin({
+          accessToken: login.accessToken,
+          chatgptAccountId: login.chatgptAccountId,
+          processInstance: input.processInstance,
+        })
+      } catch (error) {
+        const reportResult = await tryReportCodexChatGptAuthLoginResult({
+          connectionVersion: login.connectionVersion,
+          resolver: input.resolver,
+          result: 'failed',
+        })
+        if (reportResult === 'superseded') {
+          throw buildCodexChatGptAuthSupersededError()
+        }
+        if (reportResult === null) {
+          throw buildCodexChatGptAuthResultReportFailedError()
+        }
+        throw error
+      }
+      await assertCodexChatGptAuthLoginIsCurrent({
+        connectionVersion: login.connectionVersion,
+        resolver: input.resolver,
+      })
+      input.processInstance.noteAppliedChatGptAuthBinding(
+        'login',
+        input.subject,
+        login.connectionVersion,
+      )
+    }
+  }
 }
 
 async function runCodexAppServerTurnOnProcess(
@@ -4304,7 +4709,9 @@ async function runCodexAppServerTurnOnProcess(
         codexProcess.consumeIgnoredResponseId(responseId)
         return
       }
-      acceptJsonEvent(message)
+      if (!isCodexChatGptAuthRpcMethod(pending?.method)) {
+        acceptJsonEvent(message)
+      }
       if (message.error) {
         return
       }
@@ -4554,6 +4961,25 @@ async function runCodexAppServerTurnOnProcess(
     } else {
       lifecycleStage = 'initialized'
       emitAppServerTimingTrace('warm-reused')
+    }
+
+    if (input.codexChatGptAuthResolver) {
+      const subject = normalizeNullableString(input.codexChatGptAuthSubject)
+      if (!subject) {
+        throw buildCodexChatGptAuthError({
+          code: 'ASSISTANT_CODEX_CHATGPT_AUTH_INVALID',
+          message: 'Hosted ChatGPT authentication requires an authenticated subject.',
+          retryable: false,
+        })
+      }
+      lifecycleStage = 'chatgpt_auth_resolve'
+      await reconcileCodexChatGptAuth({
+        abortSignal: input.abortSignal,
+        processInstance: codexProcess,
+        resolver: input.codexChatGptAuthResolver,
+        subject,
+      })
+      lifecycleStage = 'chatgpt_auth_resolved'
     }
 
     const resumeThreadId = requestedResumeThreadId

@@ -551,6 +551,9 @@ describe('Codex model catalog', () => {
         source: 'system' as const,
       })),
     }
+    const codexChatGptAuthResolver = {
+      resolve: vi.fn(),
+    }
 
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text'],
@@ -563,6 +566,7 @@ describe('Codex model catalog', () => {
       activeTurnSteering: null,
       executionContext: {
         hosted: {
+          codexChatGptAuthResolver,
           generatedImageUploader: {
             uploadGeneratedImage: vi.fn(),
           },
@@ -654,6 +658,8 @@ describe('Codex model catalog', () => {
       'features.apps=true',
     )
     expect(providerInput).toMatchObject({
+      codexChatGptAuthResolver,
+      codexChatGptAuthSubject: 'member-system-notification',
       dynamicTools: [],
       environments: [],
       generatedImageUploader: null,

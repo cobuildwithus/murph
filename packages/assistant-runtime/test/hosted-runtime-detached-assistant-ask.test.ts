@@ -217,7 +217,12 @@ describe("hosted detached assistant ask controller", () => {
     }));
     const groupSharedReader = { request: sharedRead };
     const createGroupSharedReader = vi.fn(() => groupSharedReader);
+    const codexChatGptAuthResolver = {
+      resolve: vi.fn(async () => ({ kind: "unchanged" as const })),
+    };
     const executeAsk = vi.fn(async (input) => {
+      assert.equal(input.codexChatGptAuthResolver, codexChatGptAuthResolver);
+      assert.equal(input.codexChatGptAuthSubject, TEST_USER_ID);
       assert.equal(input.groupSharedReader, groupSharedReader);
       assert.equal(sharedRead.mock.calls.length, 0);
       return { answer: "answer", outcome: "answered" as const };
@@ -241,6 +246,8 @@ describe("hosted detached assistant ask controller", () => {
             };
           },
         },
+        codexChatGptAuthResolver,
+        codexChatGptAuthSubject: TEST_USER_ID,
         codexHome: null,
         createGroupSharedReader,
         env: {},

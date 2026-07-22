@@ -111,6 +111,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
+  "prisma.hosted_codex_auth_connection",
   "prisma.hosted_computer_run",
   "prisma.hosted_computer_handoff",
   "prisma.hosted_phone_call",

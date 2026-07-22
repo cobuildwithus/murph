@@ -4,6 +4,7 @@ import {
   type ReadOnlyAssistantAskResult,
 } from "@murphai/assistant-engine/assistant-ask";
 import type {
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGroupSharedReader,
 } from "@murphai/assistant-engine";
 import type {
@@ -38,6 +39,8 @@ export interface HostedDetachedAssistantAskController {
 
 export interface HostedDetachedAssistantAskControllerInput {
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null;
+  codexChatGptAuthSubject?: string | null;
   codexHome: string | null;
   createGroupSharedReader?(): AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
@@ -77,6 +80,8 @@ export function createHostedDetachedAssistantAskController(
     const completion = runOneHostedDetachedAssistantAsk({
       abortSignal: abortController.signal,
       assistantAskPort: input.assistantAskPort,
+      codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
+      codexChatGptAuthSubject: input.codexChatGptAuthSubject ?? null,
       codexHome: input.codexHome,
       ...(input.createGroupSharedReader
         ? { createGroupSharedReader: input.createGroupSharedReader }
@@ -165,6 +170,8 @@ export function createHostedDetachedAssistantAskController(
 async function runOneHostedDetachedAssistantAsk(input: {
   abortSignal: AbortSignal;
   assistantAskPort: HostedRuntimeAssistantAskPort | null;
+  codexChatGptAuthResolver: AssistantCodexChatGptAuthResolver | null;
+  codexChatGptAuthSubject: string | null;
   codexHome: string | null;
   createGroupSharedReader?: () => AssistantHostedGroupSharedReader | null;
   env: Readonly<Record<string, string>>;
@@ -229,6 +236,8 @@ async function runOneHostedDetachedAssistantAsk(input: {
     const answer = await input.executeAsk({
       abortSignal: input.abortSignal,
       codexHome: input.codexHome,
+      codexChatGptAuthResolver: input.codexChatGptAuthResolver,
+      codexChatGptAuthSubject: input.codexChatGptAuthSubject,
       env: { ...input.env },
       ...(input.createGroupSharedReader
         ? { groupSharedReader: input.createGroupSharedReader() }

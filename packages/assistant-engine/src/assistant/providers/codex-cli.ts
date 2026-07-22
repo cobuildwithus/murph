@@ -210,6 +210,8 @@ export async function executeCodexAssistantTurnAttempt(
     configOverrides:
       codexConfigOverrides.length > 0 ? codexConfigOverrides : undefined,
     env: codexProcessEnv,
+    codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
+    codexChatGptAuthSubject: input.codexChatGptAuthSubject ?? null,
     fetchImpl: input.providerFetch ?? undefined,
     hostedGeneratedImageUploader: input.generatedImageUploader ?? null,
     hostedToolContext: input.hostedToolContext ?? null,

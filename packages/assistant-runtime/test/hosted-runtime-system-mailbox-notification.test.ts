@@ -66,6 +66,15 @@ const FIXED_NOW = "2026-04-27T00:00:00.000Z";
 type HostedSystemMailboxRuntimeForTest =
   Parameters<typeof prepareHostedSystemMailboxItemForCheckpoint>[0]["runtime"];
 
+function createUnconfiguredCodexAuthSeedRead() {
+  return vi.fn(async () => ({
+    connectionVersion: null,
+    reason: "unconfigured" as const,
+    schemaVersion: 1 as const,
+    status: "unavailable" as const,
+  }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.executeHostedMailboxEvent.mockResolvedValue({
@@ -1182,6 +1191,7 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         codexAuthPort: {
+          readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
           update: updateCodexAuth,
         },
       });
@@ -1253,6 +1263,7 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         codexAuthPort: {
+          readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
           update: updateCodexAuth,
         },
       });
@@ -1326,6 +1337,7 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         codexAuthPort: {
+          readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
           update: updateCodexAuth,
         },
       });
@@ -1399,6 +1411,7 @@ describe("hosted system mailbox notification execution context", () => {
 
       const runtime = createRuntime({
         codexAuthPort: {
+          readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
           update: updateCodexAuth,
         },
       });

@@ -16,10 +16,13 @@ import {
 import type {
   HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
-import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
+
+type HostedCodexAuthUpdate = Parameters<
+  NonNullable<HostedRuntimePlatform["codexAuthPort"]>["update"]
+>[0];
 
 const mocks = vi.hoisted(() => ({
   executeCodexManagedAccountOperation: vi.fn(),
@@ -90,6 +93,15 @@ function createRuntime(
     resolvedConfig: createHostedRuntimeResolvedConfig(),
     userEnv: {},
   } as const;
+}
+
+function createUnconfiguredCodexAuthSeedRead() {
+  return vi.fn(async () => ({
+    connectionVersion: null,
+    reason: "unconfigured" as const,
+    schemaVersion: 1 as const,
+    status: "unavailable" as const,
+  }));
 }
 
 beforeEach(() => {
@@ -332,13 +344,16 @@ describe("hosted runtime event coverage", () => {
     });
   });
 
-  it("marks Codex auth connect wakes failed when the account command does not connect", async () => {
-    const update = vi.fn(async () => ({
+  it("fails queued legacy Codex connect wakes without starting an account operation", async () => {
+    const update = vi.fn(async (_update: HostedCodexAuthUpdate) => ({
       applied: true,
       status: "applied" as const,
     }));
     const runtime = createRuntime({
-      codexAuthPort: { update },
+      codexAuthPort: {
+        readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
+        update,
+      },
     });
     const wake = buildHostedExecutionCodexAuthRequestedWake({
       action: "connect",
@@ -366,13 +381,11 @@ describe("hosted runtime event coverage", () => {
       attemptId: "hca_abcdefghijklmnop",
       phase: "failed",
     });
-    expect(mocks.executeCodexManagedAccountOperation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "connect",
-        codexHome: "/tmp/assistant-runtime-events-operator/.codex-hosted",
-        workingDirectory: "/tmp/assistant-runtime-events-coverage",
-      }),
-    );
+    expect(Object.keys(update.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
+      "attemptId",
+      "phase",
+    ]);
+    expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
   });
 
   it("persists Codex auth connect failure diagnostics", async () => {
@@ -381,18 +394,11 @@ describe("hosted runtime event coverage", () => {
       status: "applied" as const,
     }));
     const logRequests: HostedRuntimeLogRequest[] = [];
-    mocks.executeCodexManagedAccountOperation.mockRejectedValueOnce(
-      new VaultCliError(
-        "ASSISTANT_CODEX_AUTH_FAILED",
-        "ChatGPT account authentication did not complete successfully.",
-        {
-          codexLoginError: "device auth failed with status 500",
-          retryable: false,
-        },
-      ),
-    );
     const runtime = createRuntime({
-      codexAuthPort: { update },
+      codexAuthPort: {
+        readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
+        update,
+      },
       logPort: {
         async write(request) {
           logRequests.push(request);
@@ -426,15 +432,12 @@ describe("hosted runtime event coverage", () => {
       expect.objectContaining({
         attemptId: "hca_diagnosticfailure",
         component: "assistant",
-        errorCode: "authorization_error",
         eventCode: "assistant.codex_auth_failed",
         level: "warn",
         phase: "error",
         redactedJson: expect.objectContaining({
           action: "connect",
-          errorCause: "device auth failed with status 500",
-          errorCode: "authorization_error",
-          safeErrorMessage: "Hosted execution authorization failed.",
+          safeErrorMessage: expect.any(String),
         }),
       }),
     );
@@ -442,10 +445,11 @@ describe("hosted runtime event coverage", () => {
       attemptId: "hca_diagnosticfailure",
       phase: "failed",
     });
+    expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
   });
 
-  it("runs Codex auth connect wakes and reports the device code", async () => {
-    const update = vi.fn(async () => ({
+  it("hard-cuts queued legacy connect before any device-code callback", async () => {
+    const update = vi.fn(async (_update: HostedCodexAuthUpdate) => ({
       applied: true,
       status: "applied" as const,
     }));
@@ -457,7 +461,10 @@ describe("hosted runtime event coverage", () => {
       return { kind: "connected" as const };
     });
     const runtime = createRuntime({
-      codexAuthPort: { update },
+      codexAuthPort: {
+        readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
+        update,
+      },
     });
     const wake = buildHostedExecutionCodexAuthRequestedWake({
       action: "connect",
@@ -483,33 +490,21 @@ describe("hosted runtime event coverage", () => {
     expect(result).toMatchObject({
       mailboxLane: "runtime-control",
       nextWakeAt: null,
-      postCheckpointRecord: {
-        attemptId: "hca_abcdefghijklmnop",
-        kind: "codex-auth.updated",
-        phase: "connected",
-      },
     });
+    expect(result.postCheckpointRecord).toBeNull();
     expect(update).toHaveBeenCalledWith({
       attemptId: "hca_abcdefghijklmnop",
-      phase: "device_code",
-      userCode: "ABCD-EFGH",
-      verificationUrl: "https://auth.openai.com/device",
+      phase: "failed",
     });
-    expect(mocks.executeCodexManagedAccountOperation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "connect",
-        codexCommand: "/tmp/codex-app-server",
-        codexHome: "/tmp/assistant-runtime-events-operator/.codex-hosted",
-        env: {
-          NODE_ENV: "test",
-          [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: "/tmp/codex-app-server",
-        },
-        workingDirectory: "/tmp/assistant-runtime-events-coverage",
-      }),
-    );
+    expect(Object.keys(update.mock.calls[0]?.[0] ?? {}).sort()).toEqual([
+      "attemptId",
+      "phase",
+    ]);
+    expect(update.mock.calls.some(([body]) => body.phase === "device_code")).toBe(false);
+    expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
   });
 
-  it("removes local Codex auth when connect fails after writing credentials", async () => {
+  it("removes stale local Codex auth for disabled connect wakes", async () => {
     const operatorHomeRoot = await mkdtemp(
       path.join(tmpdir(), "murph-codex-auth-connect-failure-"),
     );
@@ -518,13 +513,11 @@ describe("hosted runtime event coverage", () => {
       applied: true,
       status: "applied" as const,
     }));
-    mocks.executeCodexManagedAccountOperation.mockImplementationOnce(async () => {
-      await mkdir(path.dirname(authPath), { recursive: true });
-      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
-      throw new Error("synthetic connect failure");
-    });
     const runtime = createRuntime({
-      codexAuthPort: { update },
+      codexAuthPort: {
+        readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
+        update,
+      },
     });
     const wake = buildHostedExecutionCodexAuthRequestedWake({
       action: "connect",
@@ -535,6 +528,8 @@ describe("hosted runtime event coverage", () => {
     });
 
     try {
+      await mkdir(path.dirname(authPath), { recursive: true });
+      await writeFile(authPath, "{\"auth_mode\":\"chatgpt\"}\n");
       await expect(
         executeHostedMailboxEvent({
           executionContext,
@@ -555,6 +550,7 @@ describe("hosted runtime event coverage", () => {
         phase: "failed",
       });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(mocks.executeCodexManagedAccountOperation).not.toHaveBeenCalled();
     } finally {
       await rm(operatorHomeRoot, { force: true, recursive: true });
     }
@@ -573,7 +569,10 @@ describe("hosted runtime event coverage", () => {
       new Error("synthetic disconnect failure"),
     );
     const runtime = createRuntime({
-      codexAuthPort: { update },
+      codexAuthPort: {
+        readAccessSeed: createUnconfiguredCodexAuthSeedRead(),
+        update,
+      },
     });
     const wake = buildHostedExecutionCodexAuthRequestedWake({
       action: "disconnect",
@@ -606,6 +605,13 @@ describe("hosted runtime event coverage", () => {
       });
       await expect(access(authPath)).rejects.toMatchObject({ code: "ENOENT" });
       expect(update).not.toHaveBeenCalled();
+      expect(mocks.executeCodexManagedAccountOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "disconnect",
+          codexHome: path.join(operatorHomeRoot, ".codex-hosted"),
+          workingDirectory: "/tmp/assistant-runtime-events-coverage",
+        }),
+      );
     } finally {
       await rm(operatorHomeRoot, { force: true, recursive: true });
     }

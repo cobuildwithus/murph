@@ -5,7 +5,6 @@ import {
 } from "@/src/lib/codex-auth/store";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
-  requireActiveHostedAppSessionFromRequest,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -27,19 +26,11 @@ export const GET = withJsonError(async (request: Request) => {
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
-  await assertEmptyHostedCodexAuthRequest(request);
-  const auth = await requireActiveHostedAppSessionFromRequest(request);
-  const attempt = await beginHostedCodexAuthAttempt({
-    action: "connect",
-    memberId: auth.member.id,
+  throw hostedOnboardingError({
+    code: "HOSTED_CODEX_AUTH_DEVICE_CODE_DISABLED",
+    httpStatus: 410,
+    message: "Connect ChatGPT from the Murph iOS app.",
   });
-  await signalHostedCodexAuthAttempt({
-    action: "connect",
-    attemptId: attempt.attemptId,
-    mailboxItemId: attempt.mailboxItemId,
-    memberId: auth.member.id,
-  });
-  return jsonOk(attempt.view);
 });
 
 export const DELETE = withJsonError(async (request: Request) => {
@@ -51,7 +42,6 @@ export const DELETE = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
   });
   await signalHostedCodexAuthAttempt({
-    action: "disconnect",
     attemptId: attempt.attemptId,
     mailboxItemId: attempt.mailboxItemId,
     memberId: auth.member.id,
@@ -60,7 +50,6 @@ export const DELETE = withJsonError(async (request: Request) => {
 });
 
 async function signalHostedCodexAuthAttempt(input: {
-  action: "connect" | "disconnect";
   attemptId: string | null;
   mailboxItemId: string | null;
   memberId: string;
@@ -82,9 +71,7 @@ async function signalHostedCodexAuthAttempt(input: {
     throw hostedOnboardingError({
       code: "HOSTED_CODEX_AUTH_RUNTIME_UNAVAILABLE",
       httpStatus: 503,
-      message: input.action === "disconnect"
-        ? "Could not disconnect ChatGPT right now."
-        : "Could not start ChatGPT connection right now.",
+      message: "Could not disconnect ChatGPT right now.",
       retryable: true,
     });
   }

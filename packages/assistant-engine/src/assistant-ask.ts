@@ -34,6 +34,7 @@ import type {
   AssistantProviderServiceTier,
 } from './assistant/providers/types.js'
 import type {
+  AssistantCodexChatGptAuthResolver,
   AssistantHostedGroupSharedReader,
 } from './assistant/execution-context.js'
 import type {
@@ -112,6 +113,8 @@ export interface ReadOnlyAssistantAskInput {
   codexHome?: string | null
   developerInstructions?: string | null
   env?: NodeJS.ProcessEnv
+  codexChatGptAuthResolver?: AssistantCodexChatGptAuthResolver | null
+  codexChatGptAuthSubject?: string | null
   groupSharedReader?: AssistantHostedGroupSharedReader | null
   model?: string | null
   modelProvider?: string | null
@@ -166,6 +169,8 @@ export async function executeReadOnlyAssistantAsk(
       dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
       env: stripReadOnlyAssistantAskCapabilityEnv(input.env),
       ephemeral: true,
+      codexChatGptAuthResolver: input.codexChatGptAuthResolver ?? null,
+      codexChatGptAuthSubject: input.codexChatGptAuthSubject ?? null,
       hostedToolContext: createReadOnlyAssistantAskHostedToolContext(
         input.groupSharedReader ?? null,
       ),

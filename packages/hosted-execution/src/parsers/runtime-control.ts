@@ -41,6 +41,8 @@ import {
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_IDLE_CHECKPOINT_TRIGGERS,
+  HOSTED_CODEX_AUTH_SEED_ACCESS_TOKEN_MAX_LENGTH,
+  HOSTED_CODEX_AUTH_SEED_CHATGPT_ACCOUNT_ID_MAX_LENGTH,
   HOSTED_CODEX_AUTH_UPDATE_RESPONSE_STATUSES,
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_RUNTIME_LOG_COMPONENTS,
@@ -160,6 +162,9 @@ import {
   type HostedCodexAuthUpdate,
   type HostedCodexAuthUpdateResponse,
   type HostedCodexAuthUpdateResponseStatus,
+  type HostedCodexAuthSeedRequest,
+  type HostedCodexAuthSeedResponse,
+  type HostedCodexAuthSeedUnavailableReason,
   type HostedProductFeedbackKind,
   type HostedIngressLatencySource,
   type HostedIdleCheckpointTrigger,
@@ -3456,6 +3461,100 @@ export function parseHostedCodexAuthUpdateResponse(
   };
 }
 
+export function parseHostedCodexAuthSeedRequest(
+  value: unknown,
+): HostedCodexAuthSeedRequest {
+  const record = requireObject(value, "Hosted Codex auth seed request");
+  assertExactHostedCodexAuthSeedKeys(
+    record,
+    ["knownConnectionVersion", "schemaVersion"],
+    "Hosted Codex auth seed request",
+  );
+  return {
+    schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+    knownConnectionVersion: parseNullableHostedCodexAuthAttemptId(
+      record.knownConnectionVersion,
+      "Hosted Codex auth seed request knownConnectionVersion",
+    ),
+  };
+}
+
+export function parseHostedCodexAuthSeedResponse(
+  value: unknown,
+): HostedCodexAuthSeedResponse {
+  const record = requireObject(value, "Hosted Codex auth seed response");
+  const status = requireString(record.status, "Hosted Codex auth seed response status");
+
+  if (status === "available") {
+    assertExactHostedCodexAuthSeedKeys(
+      record,
+      [
+        "accessToken",
+        "chatgptAccountId",
+        "connectionVersion",
+        "expiresAt",
+        "schemaVersion",
+        "status",
+      ],
+      "Hosted Codex auth seed available response",
+    );
+    return {
+      schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+      status,
+      connectionVersion: parseHostedCodexAuthAttemptId(
+        record.connectionVersion,
+        "Hosted Codex auth seed available response connectionVersion",
+      ),
+      expiresAt: parseHostedCodexAuthSeedExpiresAt(record.expiresAt),
+      accessToken: parseHostedCodexAuthSeedVisibleAscii(
+        record.accessToken,
+        HOSTED_CODEX_AUTH_SEED_ACCESS_TOKEN_MAX_LENGTH,
+        "Hosted Codex auth seed available response accessToken",
+      ),
+      chatgptAccountId: parseHostedCodexAuthSeedVisibleAscii(
+        record.chatgptAccountId,
+        HOSTED_CODEX_AUTH_SEED_CHATGPT_ACCOUNT_ID_MAX_LENGTH,
+        "Hosted Codex auth seed available response chatgptAccountId",
+      ),
+    };
+  }
+
+  if (status === "unchanged") {
+    assertExactHostedCodexAuthSeedKeys(
+      record,
+      ["connectionVersion", "schemaVersion", "status"],
+      "Hosted Codex auth seed unchanged response",
+    );
+    return {
+      schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+      status,
+      connectionVersion: parseHostedCodexAuthAttemptId(
+        record.connectionVersion,
+        "Hosted Codex auth seed unchanged response connectionVersion",
+      ),
+    };
+  }
+
+  if (status === "unavailable") {
+    assertExactHostedCodexAuthSeedKeys(
+      record,
+      ["connectionVersion", "reason", "schemaVersion", "status"],
+      "Hosted Codex auth seed unavailable response",
+    );
+    return {
+      schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+      status,
+      connectionVersion: parseNullableHostedCodexAuthAttemptId(
+        record.connectionVersion,
+        "Hosted Codex auth seed unavailable response connectionVersion",
+      ),
+      reason: parseHostedCodexAuthSeedUnavailableReason(record.reason),
+    };
+  }
+
+  throw new TypeError("Hosted Codex auth seed response status is not supported.");
+}
+
 function parseHostedCodexAuthUpdateResponseStatus(
   value: unknown,
 ): HostedCodexAuthUpdateResponseStatus {
@@ -3468,12 +3567,92 @@ function parseHostedCodexAuthUpdateResponseStatus(
   throw new TypeError("Hosted Codex auth update response status is not supported.");
 }
 
-function parseHostedCodexAuthAttemptId(value: unknown): string {
-  const attemptId = requireString(value, "Hosted Codex auth update attemptId");
+function parseHostedCodexAuthAttemptId(
+  value: unknown,
+  label = "Hosted Codex auth update attemptId",
+): string {
+  const attemptId = requireString(value, label);
   if (!/^hca_[A-Za-z0-9_-]{16,64}$/u.test(attemptId)) {
-    throw new TypeError("Hosted Codex auth update attemptId is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   return attemptId;
+}
+
+function parseNullableHostedCodexAuthAttemptId(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  return parseHostedCodexAuthAttemptId(value, label);
+}
+
+function parseHostedCodexAuthSeedSchemaVersion(value: unknown): 1 {
+  if (value !== 1) {
+    throw new TypeError("Hosted Codex auth seed schemaVersion must be 1.");
+  }
+  return 1;
+}
+
+function parseHostedCodexAuthSeedUnavailableReason(
+  value: unknown,
+): HostedCodexAuthSeedUnavailableReason {
+  const reason = requireString(value, "Hosted Codex auth seed unavailable response reason");
+  switch (reason) {
+    case "unconfigured":
+    case "legacy_device_code":
+    case "disconnected":
+    case "expired":
+    case "needs_attention":
+      return reason;
+    default:
+      throw new TypeError("Hosted Codex auth seed unavailable response reason is not supported.");
+  }
+}
+
+function parseHostedCodexAuthSeedVisibleAscii(
+  value: unknown,
+  maxLength: number,
+  label: string,
+): string {
+  const text = requireString(value, label);
+  if (text.length > maxLength || !/^[\x21-\x7e]+$/u.test(text)) {
+    throw new TypeError(`${label} must be bounded visible ASCII without whitespace.`);
+  }
+  return text;
+}
+
+function parseHostedCodexAuthSeedExpiresAt(value: unknown): string {
+  const expiresAt = requireString(value, "Hosted Codex auth seed available response expiresAt");
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(expiresAt)
+    || Number.isNaN(Date.parse(expiresAt))
+    || new Date(expiresAt).toISOString() !== expiresAt
+  ) {
+    throw new TypeError(
+      "Hosted Codex auth seed available response expiresAt must be a canonical UTC timestamp.",
+    );
+  }
+  return expiresAt;
+}
+
+function assertExactHostedCodexAuthSeedKeys(
+  record: Record<string, unknown>,
+  requiredKeys: readonly string[],
+  label: string,
+): void {
+  const allowedKeys = new Set(requiredKeys);
+  for (const key of Object.keys(record)) {
+    if (!allowedKeys.has(key)) {
+      throw new TypeError(`${label}.${key} is not allowed.`);
+    }
+  }
+  for (const key of requiredKeys) {
+    if (!Object.prototype.hasOwnProperty.call(record, key)) {
+      throw new TypeError(`${label} is missing a required field.`);
+    }
+  }
 }
 
 function assertHostedCodexAuthVerificationUrl(value: string): void {

@@ -241,6 +241,9 @@ export type { ResolvedAssistantSession }
 export type {
   AssistantChannelTypingDependencies,
   AssistantExecutionContext,
+  AssistantCodexChatGptAuthResolution,
+  AssistantCodexChatGptAuthResolveInput,
+  AssistantCodexChatGptAuthResolver,
   AssistantGeneratedImageContentType,
   AssistantHostedGeneratedImageUploadInput,
   AssistantHostedGeneratedImageUploader,

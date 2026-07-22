@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 
 ## Accepted-Message Targeting
 
@@ -238,6 +238,82 @@ provider owner. That owner stops the browser to save the profile, creates and
 durably publishes its replacement, and atomically consumes the claim while
 returning browser control to the assistant. An ambiguous failure retains the
 claim for bounded stale-owner recovery; overlapping resumes cannot call Kernel.
+
+## Hosted ChatGPT Access-Token Handoff
+
+The companion-to-runtime ChatGPT handoff is an internal, default-off integration
+path, not a production-supported authentication option. It depends on Codex App
+Server's unsupported OpenAI-internal `chatgptAuthTokens` login request.
+Production enablement requires OpenAI approval for the native client, redirect,
+scopes, and token handoff contract; a successful internal proof is not that
+approval.
+
+The iPhone is the only durable refresh-token owner. The refresh token stays in a
+non-syncing, this-device-only iOS Keychain item and is never accepted by Murph.
+The exact companion DTO carries only a schema version, the raw time-limited
+OpenAI access bearer, its ChatGPT account routing id, and a server lease expiry
+no later than the provider expiry retained by the phone. Unknown fields fail
+closed, including refresh tokens, ID tokens, and plan hints. The access bearer
+is time-limited but is not Murph-downscoped: while valid, it retains the upstream
+capability OpenAI assigned to it.
+
+`apps/web` keeps the existing member-bound `HostedCodexAuthConnection` as the
+single persisted owner. After Privy bearer authentication plus active-access and
+consent checks, Web encrypts the access bearer and routing id before their first
+write on that row. The row stores only the ciphertext, explicit expiry, opaque
+connection version, and non-secret connection state. A connect,
+refreshed-access-bearer upload, or disconnect requests the existing payload-free
+runtime recheck; expiry is enforced again by the Web read and turn-start
+reconciliation. Completion is acknowledged only when that exact connection
+version reaches its expected terminal state; a newer upload or disconnect wins
+and the superseded request receives a retryable conflict. No credential enters
+a mailbox item or Temporal state.
+
+At cold start and before a hosted Codex turn, the active runtime resolves the
+current connection version through a signed Web-control read carrying the active
+runtime write fence. Web rechecks the member's current access, consent, row
+version, and expiry before decrypting. After app-server login, an exact-version,
+credential-free callback re-locks and rechecks access, consent, usable lease
+lifetime, and authenticated ciphertext before any thread starts. Warm
+same-version reads also authenticate the ciphertext before returning
+`unchanged`. That successful callback is the turn-authorization linearization
+point. Cloudflare treats an available response as a size-bounded sensitive body
+and does not persist it. The bearer and routing id pass through the
+invocation-scoped runtime resolver and engine login bridge directly into the
+resident Codex App Server's in-memory login method. They never enter runner
+environment variables, `auth.json`, mailbox or Temporal payloads, persisted or
+serialized assistant/runtime state, prompt or tool context, workspace or
+snapshot state, diagnostics, or logs. The separate hosted-local development
+seed harness is not a transport or compatibility path for this companion
+handoff.
+
+Server-lease expiry is terminal for that uploaded authority: Web projects the
+credential-free companion status as `off`, the runtime clears its in-memory
+external-auth binding, and preserves the expired seed's connection version so
+the phone can prove it is renewing the same accepted credential. The phone may
+then reseed from a still-valid local bearer or refresh it through OpenAI first.
+Invalid state and runtime rejection remain `needs_attention` and must not be
+treated as renewable expiry. Disconnect clears the encrypted seed and expiry,
+rotates the connection version, and prevents that generation from authorizing
+any subsequent turn. The next runtime invocation clears an idle bound process;
+disconnect does not preempt a turn whose authorization callback already
+linearized, even if its provider request has not started yet, and bearer bytes
+may remain in idle process memory until that invocation or normal idle
+destruction. The identity-only companion path remains available
+after hosted access or consent is lost because it only reduces authority. Murph
+account deletion cascade-deletes the connection row with its member and destroys
+the hosted runtime. Murph does not promise provider-side revocation without a
+documented OpenAI revocation contract.
+
+Rollout is staged and additive: deploy Web storage and the signed read with
+companion ingestion still disabled, then deploy the Cloudflare/runtime consumer.
+Only an explicitly approved internal test may set
+`MURPH_COMPANION_CHATGPT_AUTH_ENABLED=1`; the default and every production
+release remain disabled until OpenAI approves the integration contract. The
+gate affects companion upload only, so credential-free status and
+authority-reducing disconnect remain available. Rollback disables ingestion and
+clears server-held seed state before removing the runtime consumer or Web read
+support.
 
 ## Hosted Phone Calls
 
