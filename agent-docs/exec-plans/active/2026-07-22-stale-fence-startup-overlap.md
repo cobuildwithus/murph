@@ -81,4 +81,21 @@ measured owner without weakening cache, deletion, or command-budget semantics.
   `packages/assistant-runtime/dist` prerequisite in the unchanged hosted-local
   harness. Building that package and rerunning the harness alone passed 24
   files and 406 tests with one skip.
-- Final exact-current-main verification and final ReviewGPT are pending.
+- After a clean merge of current `origin/main`, a third canonical diff run
+  passed every guard and affected typecheck, 2,602 Assistant Engine tests, 128
+  Assistant CLI tests, 1,791 Assistant Runtime tests, and 40 Assistantd tests.
+  Its CLI aggregate had 1,079 passing tests and one failure in the unchanged
+  release-script audit: current main's ReviewGPT policy now allows a
+  discretionary 6.5-to-7.5-minute response window, while the audit still
+  requires the deleted blanket under-7.5-minute sentence. Both the policy and
+  audit files are byte-identical to `origin/main` in this branch.
+- `pnpm verify:acceptance` passed repository guards, all workspace typechecks,
+  hosted-execution coverage (381 tests), Assistant Engine coverage (2,602
+  tests), Assistant Runtime coverage (1,791 tests), and the other reported
+  package/app suites. It reproduced the same current-main CLI policy assertion.
+  It also exposed two exact Cloudflare route expectations that omitted the new
+  prior-version boolean; adding that expected field changed no production code.
+  The exact route file then passed 90 tests and the full Cloudflare node suite
+  passed 106 files and 1,857 tests.
+- `pnpm docs:drift` and `git diff --check` passed.
+- Final ReviewGPT and exact-head CI are pending.
