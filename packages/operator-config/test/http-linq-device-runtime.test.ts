@@ -416,6 +416,50 @@ test('linq runtime serializes reply targets only for marked native replies', asy
   expect(fetchImplementation).toHaveBeenCalledTimes(2)
 })
 
+test('linq runtime omits the text part for media-only messages and rejects empty text-only sends', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let body: Record<string, unknown> | null = null
+  const fetchImplementation = vi.fn(async (_url: string, init: RequestInit) => {
+    if (typeof init.body !== 'string' && !(init.body instanceof Blob)) {
+      throw new TypeError('Expected a JSON request body.')
+    }
+    body = parseJsonRequestBody(init.body)
+    return createJsonResponse({
+      chat_id: 'chat-123',
+      id: 'message-media-only',
+    })
+  })
+
+  await sendLinqChatMessage({
+    chatId: 'chat-123',
+    media: [{ attachmentId: 'attachment-pdf-1' }],
+    message: '',
+  }, { env, fetchImplementation })
+
+  assert.deepEqual(body, {
+    message: {
+      parts: [{
+        attachment_id: 'attachment-pdf-1',
+        type: 'media',
+      }],
+    },
+  })
+  await assert.rejects(
+    () => sendLinqChatMessage({
+      chatId: 'chat-123',
+      message: '   ',
+    }, { env, fetchImplementation }),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_INVALID_INPUT' &&
+      error.message === 'Linq messages must include text or media.',
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
 test('linq runtime converts supported text styles to iMessage text decorations', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom',

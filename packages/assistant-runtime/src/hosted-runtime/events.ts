@@ -73,6 +73,16 @@ export async function executeHostedMailboxEvent(input: {
   if (isHostedConversationMessageWake(input.wake)) {
     throw new TypeError(DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE);
   }
+  if (input.wake.kind === "runtime.pending-effects-reconcile-requested") {
+    return {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "runtime-control",
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      redactedLogEntries: [],
+    };
+  }
 
   const bootstrapResult = await prepareHostedWakeContext(
     input.vaultRoot,

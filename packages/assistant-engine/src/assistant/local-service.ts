@@ -782,7 +782,6 @@ export async function sendAssistantMessageLocal(
                       }
                       if (result.status === 'approved') {
                         return {
-                          file: result.file,
                           filename: result.filename,
                           status: 'approved',
                         }

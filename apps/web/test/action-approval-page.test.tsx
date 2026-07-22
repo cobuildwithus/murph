@@ -160,7 +160,7 @@ describe("action approval page", () => {
     assert.equal(markup.includes('href="'), false);
   });
 
-  it("redirects an approved revisit with the confirmation prefilled", async () => {
+  it("redirects an approved revisit through the bare conversation link", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -173,7 +173,7 @@ describe("action approval page", () => {
     });
     mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
       {
-        href: "sms:+15550100001?body=I%20approved%20the%20secure%20request.",
+        href: "sms:+15550100001",
         kind: "text",
         label: "Messages",
       },
@@ -186,17 +186,12 @@ describe("action approval page", () => {
     await stream.allReady;
 
     expect(mocks.resolveHostedMurphContactOptions).toHaveBeenCalledWith({
-      message: {
-        body: "I approved the secure request.",
-      },
       preferredKind: "text",
     });
-    expect(mocks.redirect).toHaveBeenCalledWith(
-      "sms:+15550100001?body=I%20approved%20the%20secure%20request.",
-    );
+    expect(mocks.redirect).toHaveBeenCalledWith("sms:+15550100001");
   });
 
-  it("shows the approval confirmation when contact resolution is unavailable", async () => {
+  it("shows bare return guidance when approved contact resolution is unavailable", async () => {
     mocks.readHostedActionApproval.mockResolvedValueOnce({
       approvalId: "haa_test",
       expiresAt: "2026-07-09T16:00:00.000Z",
@@ -221,9 +216,9 @@ describe("action approval page", () => {
     expect(mocks.redirect).not.toHaveBeenCalled();
     assert.match(
       markup,
-      /Return to the Murph conversation where this request started and send:/,
+      /Return to the Murph conversation where this request started\./,
     );
-    assert.match(markup, /I approved the secure request\./);
+    assert.equal(markup.includes("I approved the secure request."), false);
     assert.equal(markup.includes('href="'), false);
   });
 

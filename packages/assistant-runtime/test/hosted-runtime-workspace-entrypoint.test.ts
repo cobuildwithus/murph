@@ -5588,6 +5588,206 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("runs a causal pending-effects system wake before the dirty idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const causalPendingEffectsOnlyValues: boolean[] = [];
+    let assistantPhaseCalls = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_causal_pending_effects_dirty_wake",
+            idleCheckpointDelayMs: 500,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/causal-pending-effects.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            causalPendingEffectsOnlyValues.push(input.causalPendingEffectsOnly === true);
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_causal_pending_effects",
+                  kind: "runtime.pending-effects-reconcile-requested",
+                  lane: "system",
+                  laneSeq: "1",
+                }));
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const result = await withRealTimeout(
+        resultPromise,
+        2_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(causalPendingEffectsOnlyValues, [false, true]);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_causal_pending_effects",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("keeps a mixed causal and device system prefix checkpoint-gated while dirty", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_mixed_pending_effects_device_dirty_wake",
+            idleCheckpointDelayMs: 200,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/mixed-pending-effects-device.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => {
+                mailboxItems.push(
+                  createMailboxItem({
+                    id: "mailbox_item_entrypoint_mixed_pending_effects",
+                    kind: "runtime.pending-effects-reconcile-requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }),
+                  createMailboxItem({
+                    id: "mailbox_item_entrypoint_mixed_device",
+                    kind: "device-sync.wake",
+                    lane: "system",
+                    laneSeq: "2",
+                  }),
+                );
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const result = await withRealTimeout(
+        resultPromise,
+        2_000,
+        () => events.join(","),
+      );
+
+      const idleCheckpointIndex = requireEventIndex(events, "snapshot:idle_shutdown");
+      assert.ok(
+        idleCheckpointIndex < requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
+        ),
+        events.join(","),
+      );
+      assert.ok(
+        idleCheckpointIndex < requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_device",
+        ),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("emits metadata-only phase boundary logs for runtime failures", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;

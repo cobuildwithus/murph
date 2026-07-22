@@ -187,18 +187,19 @@ export async function collectHostedAssistantDeliverySideEffects(
   const approvalReconciledIntents: AssistantOutboxIntent[] = storedIntents.map(
     (intent) => reconciliationByIntentId.get(intent.intentId)?.intent ?? intent,
   );
-  const blockedNewsletterRecipientIntentIds =
-    await reconcileHostedNewsletterRecipientParents({
-      intents: approvalReconciledIntents,
-      vaultRoot: request.vaultRoot,
-    });
+  const causalOnly = request.preferredEffectIds.length > 0;
+  const blockedNewsletterRecipientIntentIds = causalOnly
+    ? new Set<string>()
+    : await reconcileHostedNewsletterRecipientParents({
+        intents: approvalReconciledIntents,
+        vaultRoot: request.vaultRoot,
+      });
   const intents = approvalReconciledIntents;
   const approvalBlockedIntentIds = new Set<string>(
     Array.from(reconciliationByIntentId.values())
       .filter((reconciliation) => reconciliation.blocked)
       .map((reconciliation) => reconciliation.intent.intentId),
   );
-  const causalOnly = request.preferredEffectIds.length > 0;
   const preferredIntentIds = [
     ...new Set([
       ...(causalOnly ? reconcileTargets.keys() : []),

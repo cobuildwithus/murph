@@ -515,13 +515,16 @@ export async function sendLinqMessage(
     input.media ?? [],
     dependencies,
   )
+  const message = (input.media ?? []).some((item) => item.kind === 'vault_file')
+    ? ''
+    : input.message
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
       {
         from: participantFromPhoneNumber,
         idempotencyKey: input.idempotencyKey ?? null,
-        message: input.message,
+        message,
         ...(media.length > 0 ? { media } : {}),
         to: [target],
       },
@@ -543,7 +546,7 @@ export async function sendLinqMessage(
     {
       chatId: target,
       idempotencyKey: input.idempotencyKey ?? null,
-      message: input.message,
+      message,
       ...(media.length > 0 ? { media } : {}),
       ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
       replyToMessageId: input.replyToMessageId ?? null,
