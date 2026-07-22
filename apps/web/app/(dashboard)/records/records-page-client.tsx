@@ -200,7 +200,7 @@ export function RecordsPageClient({
       <PageHeader
         eyebrow="Private vault"
         title="Medical records"
-        description="Bring lab results and report summaries into Murph, so they can inform future conversations without becoming another portal to manage."
+        description="Bring lab results and report summaries into Murph, so they can inform future conversations."
       >
         <div className="mt-5">
           <Button
@@ -661,13 +661,13 @@ function describeRun(run: ClinicalRecordConnectionContract["latestRun"]): {
 }
 
 function describeCallback(marker: ClinicalRecordCallbackMarker | null): {
-  kind: "error" | "neutral" | "success";
+  kind: "error" | "neutral";
   message: string;
   title: string;
 } | null {
   switch (marker) {
     case "connected":
-      return { kind: "success", message: "Your patient portal is connected and Murph has started copying records.", title: "Records connected" };
+      return null;
     case "auth-required":
       return { kind: "error", message: "Sign in to Murph before connecting medical records.", title: "Murph sign-in required" };
     case "declined":
