@@ -74,10 +74,11 @@ Audit interaction economy and craft:
 - For rendered UI, judge whether hierarchy and state feedback make the purpose,
   primary action, continuation, completion, and recovery immediately legible.
   Reject generic dashboard clutter and ornamental work that competes with the
-  feature's purpose. Defer token-level spacing, typography, motion, responsive
-  behavior, accessibility, and design-system execution to `frontend-review`.
-- Use established product and design-system primitives when they express the
-  outcome cleanly. Do not preserve a weaker experience merely because it is an
+  feature's purpose. Defer component and token implementation, spacing,
+  typography, motion, responsive behavior, accessibility, and design-system
+  execution to `frontend-review`.
+- Prefer the smallest established product interaction when it expresses the
+  outcome cleanly. Do not preserve a weaker journey merely because it is an
   existing pattern.
 
 Evidence rules:

@@ -1459,7 +1459,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('sole cross-cutting audit')
     expect(prReviewGptLoop).toContain('Never run both for the same completed')
     expect(prReviewGptLoop).toMatch(
-      /specialist `prompt-review`,\s+`frontend-review`, or write-capable `coverage-write`/u,
+      /specialist `prompt-review`,\s+`product-experience-review`, `frontend-review`, or write-capable\s+`coverage-write`/u,
     )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
@@ -1495,6 +1495,7 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
+      'product-experience-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1511,7 +1512,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
-    expect(completionAuditPrompts[2]).toContain('completion-workflow.md` § Audit Worker Rules')
+    expect(completionAuditPrompts[3]).toContain('completion-workflow.md` § Audit Worker Rules')
     expect(
       existsSync(
         path.join(
@@ -1526,6 +1527,45 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it('keeps product-experience decisions separate from rendered frontend review', () => {
+    const productExperienceReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
+      'utf8',
+    )
+    const frontendReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
+      'utf8',
+    )
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+
+    expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productExperienceReview).toMatch(
+      /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
+    )
+    expect(productExperienceReview).toMatch(
+      /waits behind unrelated idle or\s+maintenance work/u,
+    )
+    expect(productExperienceReview).toContain(
+      'Defer component and token implementation',
+    )
+    expect(frontendReview).toMatch(
+      /do not\s+duplicate subjective product-taste findings or decide the copy, state selection,\s+action count, or whether an element exists/u,
+    )
+    expect(frontendReview).toContain(
+      'visual treatment that obscures or conflicts with the declared hierarchy',
+    )
+    expect(frontendReview).not.toContain('unrelated rendered elements')
+    expect(completionWorkflow).toContain(
+      'rendered fidelity to the declared states and hierarchy, responsive behavior, accessibility, and design-system execution',
+    )
+    expect(completionWorkflow).not.toContain(
+      'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
+    )
   })
 
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
