@@ -8657,6 +8657,221 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("rechecks ChatGPT auth before a late-input chained foreground rerun", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-chained-auth-rerun-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const firstPhaseStarted = createDeferred<void>();
+    const releaseFirstPhase = createDeferred<void>();
+    const lateImportObserved = createDeferred<void>();
+    const firstItem = createMailboxItem({
+      id: "mailbox_item_chained_auth_rerun_first",
+      laneSeq: "1",
+    });
+    const lateItem = createMailboxItem({
+      createdAt: "2026-04-27T00:00:01.000Z",
+      id: "mailbox_item_chained_auth_rerun_late",
+      laneSeq: "2",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+    });
+    const mailboxItems = [firstItem];
+    const externalConnectionVersion = `hca_${"7".repeat(16)}`;
+    let currentSeed: HostedCodexAuthSeedResponse = {
+      connectionVersion: null,
+      reason: "unconfigured",
+      schemaVersion: 1,
+      status: "unavailable",
+    };
+    let firstPhaseActive = false;
+    let assistantPhaseCalls = 0;
+    let lateWakeProbeCount = 0;
+    let invocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const readAccessSeed = vi.fn(async (request: HostedCodexAuthSeedRequest) => {
+        if (firstPhaseActive) {
+          lateWakeProbeCount += 1;
+          events.push(`auth.probe:late-wake:${lateWakeProbeCount}`);
+        } else if (currentSeed.status === "available") {
+          events.push("auth.probe:chained-rerun");
+        }
+        return projectHostedCodexAuthSeedForTestRequest(currentSeed, request);
+      });
+      const workspacePort = createWorkspacePort({
+        checkpointRequests,
+        events,
+        workspace: createWorkspaceState({ version: "4" }),
+      });
+      const workspaceCheckpoint = vi.fn(workspacePort.checkpoint.bind(workspacePort));
+      const stopWarmCallCountBefore = mocks.stopWarmCodexAppServer.mock.calls.length;
+
+      invocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_chained_auth_rerun",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "2".repeat(64),
+                key: "users/bundles/member-synthetic/chained-auth-rerun.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            const assistantInputId = await stagePendingLinqAssistantInputForMailboxItem({
+              item: item.item,
+              threadId: `thread_${item.item.laneSeq}`,
+              vaultRoot,
+            });
+            if (item.item.id === lateItem.id) {
+              // Resolve on the next task so the importer has consumed this
+              // returned assistantInputId into latestAssistantInputBatch.
+              REAL_SET_TIMEOUT(() => lateImportObserved.resolve(), 0);
+            }
+            return {
+              assistantInputId,
+              linqDeliveryContext: {
+                directRecipientPhoneNumber: "+15550000001",
+                fromPhoneNumber: null,
+                replyToMessageId: `msg_${item.item.id}`,
+                routeAuthority: {
+                  accountLookupKey: `hbidx:${item.item.laneSeq}`,
+                  channel: "linq" as const,
+                  containerMemberId: `member_${item.item.laneSeq}`,
+                  threadId: `thread_${item.item.laneSeq}`,
+                },
+                service: "iMessage",
+                target: `thread_${item.item.laneSeq}`,
+                threadIsDirect: true,
+              },
+              status: "imported" as const,
+            };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              readAccessSeed,
+              async update() {
+                throw new Error("The metadata-only rollover must not update auth state.");
+              },
+            },
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: {
+              ...workspacePort,
+              checkpoint: workspaceCheckpoint,
+            },
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            assert.equal(input.codexChatGptAuthResolver, null);
+            assert.equal(
+              input.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+              "hosted-openai",
+            );
+            if (assistantPhaseCalls === 1) {
+              firstPhaseActive = true;
+              firstPhaseStarted.resolve();
+              await releaseFirstPhase.promise;
+              firstPhaseActive = false;
+            } else {
+              // Bound the known-bad head after it admits the stale phase. The
+              // desired path never reaches this harness-only shutdown.
+              shutdownController.abort();
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true as const,
+            };
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+      void invocationPromise.catch(() => undefined);
+
+      await withRealTimeout(firstPhaseStarted.promise, 15_000, () => events.join(","));
+      mailboxItems.push(lateItem);
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+      await withRealTimeout(lateImportObserved.promise, 15_000, () => events.join(","));
+
+      // The late-input import was admitted by a metadata read that still saw
+      // managed mode. Change durable authority without supplying a second
+      // local wake; the chained provider admission itself must recheck.
+      assert.equal(lateWakeProbeCount, 1);
+      currentSeed = {
+        accessToken: "fixture-chained-auth-rerun-access",
+        chatgptAccountId: "account_chained_auth_rerun",
+        connectionVersion: externalConnectionVersion,
+        expiresAt: "2026-04-27T01:00:00.000Z",
+        schemaVersion: 1,
+        status: "available",
+      };
+      releaseFirstPhase.resolve();
+
+      const result = await withRealTimeout(
+        invocationPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        [
+          `mailbox.importItem:${firstItem.id}`,
+          `mailbox.importItem:${lateItem.id}`,
+        ],
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.ok(
+        requireEventIndex(events, `mailbox.importItem:${lateItem.id}`)
+          < requireEventIndex(events, "auth.probe:chained-rerun"),
+      );
+      assert.ok(
+        requireEventIndex(events, "auth.probe:chained-rerun")
+          < requireEventIndex(events, "workspace.checkpoint"),
+      );
+      expect(
+        mocks.stopWarmCodexAppServer.mock.calls.slice(stopWarmCallCountBefore),
+      ).toEqual([["chatgpt-auth-mode-changed"]]);
+      const checkpointCallOrder = workspaceCheckpoint.mock.invocationCallOrder[0];
+      const stopWarmCallOrder =
+        mocks.stopWarmCodexAppServer.mock.invocationCallOrder[stopWarmCallCountBefore];
+      assert.ok(checkpointCallOrder !== undefined);
+      assert.ok(stopWarmCallOrder !== undefined);
+      assert.ok(checkpointCallOrder < stopWarmCallOrder);
+      expect(readAccessSeed.mock.calls.every(([request]) =>
+        request.includeCredentials === false
+        && request.knownConnectionVersion === null
+        && request.schemaVersion === 1
+      )).toBe(true);
+    } finally {
+      releaseFirstPhase.resolve();
+      shutdownController.abort();
+      await invocationPromise?.catch(() => undefined);
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("fences an active foreground import before a ChatGPT disconnect restart", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-active-turn-auth-restart-"));
     const events: string[] = [];

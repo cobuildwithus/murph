@@ -2683,6 +2683,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // irreducible: "late foreground input during system work runs before idle checkpointing" fails without this.
         let rerunAssistantInputBatch = resolveForegroundRerunAssistantInputBatch(passResult);
         while (rerunAssistantInputBatch) {
+          // The previous pass can stage late input after its caller's auth-mode
+          // probe. Recheck the frozen process mode before admitting that batch
+          // to another provider phase.
+          if (
+            await requestCodexChatGptAuthModeRestartIfChanged(
+              wakeInput.signal ?? runtimeAbortController.signal,
+            )
+          ) {
+            break;
+          }
           passResult = await runSingleForegroundPass({
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
