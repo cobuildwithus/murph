@@ -74,6 +74,8 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
+import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
+import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -155,6 +157,7 @@ export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -620,6 +623,74 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Hosted Family Manager">
+          <p className="text-sm text-muted-foreground">
+            Family members and pending invites use cards under 768px and the
+            compact table layout above it. This fixture keeps all contact details
+            synthetic and does not submit settings mutations.
+          </p>
+          <div
+            aria-label="Read-only hosted Family preview"
+            className="rounded-xl border border-border bg-card p-5"
+            inert
+          >
+            <HostedFamilyManager
+              billingActive
+              invites={[
+                {
+                  acceptUrl: "/family/accept/design-preview",
+                  channel: "family",
+                  expiresAtIso: "2026-08-05T00:00:00.000Z",
+                  id: "design-invite",
+                  planCode: "edge",
+                  targetEmail: null,
+                  targetLabel: "Parent",
+                  targetPhoneHint: "•••• 1234",
+                  targetTelegramUsername: null,
+                  telegramInviteUrl: null,
+                },
+              ]}
+              members={[
+                {
+                  isOwner: true,
+                  joinedAtIso: "2026-07-01T00:00:00.000Z",
+                  label: null,
+                  memberId: "design-owner",
+                  pendingPlanCode: null,
+                  planCode: "pulse",
+                },
+                {
+                  isOwner: false,
+                  joinedAtIso: "2026-07-07T00:00:00.000Z",
+                  label: "Partner",
+                  memberId: "design-member",
+                  pendingPlanCode: null,
+                  planCode: "edge",
+                },
+              ]}
+              plans={{
+                edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
+              }}
+              seats={{
+                active: 2,
+                billed: 3,
+                invited: 1,
+                max: 6,
+                min: 2,
+                remaining: 0,
+                used: 3,
+              }}
+              tiers={[
+                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
+                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+              ]}
+            />
+          </div>
+        </Section>
+
+        <Separator />
+
         <Section title="Assistant Style Picker">
           <p className="text-sm text-muted-foreground">
             Tone and voice pickers used in onboarding (chained) and settings
@@ -651,6 +722,30 @@ export function ComponentsContent() {
               })}
             />
           ) : null}
+        </Section>
+
+        <Separator />
+
+        <Section title="Personality Settings">
+          <p className="text-sm text-muted-foreground">
+            Private Humor, Push, and Detail controls. The mobile preview uses a
+            full-height drawer with a safe-area footer; desktop uses a dialog.
+          </p>
+          <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
+            <Button onClick={() => setPersonalitySettingsOpen(true)}>
+              Preview personality settings
+            </Button>
+          </div>
+          <MurphPersonalitySettingsDialog
+            onOpenChange={setPersonalitySettingsOpen}
+            open={personalitySettingsOpen}
+            personality={{ detail: 5, humor: 7, push: 8 }}
+            savePersonality={async (changedDials) => ({
+              detail: changedDials.detail ?? 5,
+              humor: changedDials.humor ?? 7,
+              push: changedDials.push ?? 8,
+            })}
+          />
         </Section>
 
         <Separator />

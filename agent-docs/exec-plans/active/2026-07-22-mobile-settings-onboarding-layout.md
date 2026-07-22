@@ -48,8 +48,10 @@ Updated: 2026-07-22
 - Reuse the semantic table rows as CSS grid cards below `md` instead of adding a duplicate mobile renderer.
 - Keep the voice player's existing default everywhere else and add a narrow opt-out for this picker.
 - Preserve the already-landed left-alignment in both voice and personality headers without adding redundant layout code.
+- Add read-only Family and non-persisting Personality fixtures to the existing design component catalog, as required by the frontend design-proof gate.
 
 ## Verification
 
 - Commands to run: focused Vitest files for Family, voice player, style picker, contact-card picker, and personality picker; `pnpm test:diff`; responsive in-app browser checks; applicable completion review commands; PR CI and merge-tree proof.
 - Expected outcomes: mobile controls fit the viewport without horizontal scrolling or duration overflow; desktop presentation and all settings mutations remain unchanged; all required checks and reviews pass.
+- Current evidence gaps: no browser backend is attached to this session, so required design-page screenshots remain blocked; the Fable UI review was attempted and reported exhausted usage credits.
