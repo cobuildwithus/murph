@@ -14,6 +14,7 @@ import {
 import type { AssistantSession } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
+  HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
   type HostedExecutionAssistantAskCompletedWake,
 } from "@murphai/hosted-execution";
@@ -33,6 +34,10 @@ export const HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
 const HOSTED_ASSISTANT_ASK_REVIEWED_EXACT_INSTRUCTIONS =
   "Queue the already-reviewed exact response for the bound group conversation.";
+const HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
+  "assistant-ask-completion:";
+const HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_DIGEST_PATTERN =
+  /^[0-9a-f]{48}$/u;
 
 export async function executeHostedAssistantAskCompletedWake(input: {
   executionContext: AssistantExecutionContext;
@@ -322,7 +327,27 @@ export function buildHostedAssistantAskCompletionDeliveryKey(input: {
     .update(input.eventId)
     .digest("hex")
     .slice(0, 48);
-  return `assistant-ask-completion:${digest}`;
+  return `${HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX}${digest}`;
+}
+
+export function isHostedAssistantAskCompletionDeliveryKey(
+  value: string | null | undefined,
+): boolean {
+  const key = value?.trim() ?? "";
+  for (const prefix of [
+    HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+    HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  ]) {
+    if (
+      key.startsWith(prefix)
+      && HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_DIGEST_PATTERN.test(
+        key.slice(prefix.length),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class HostedAssistantAskCompletionPreemptedError extends Error {

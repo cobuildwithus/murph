@@ -81,6 +81,7 @@ import type {
 import {
   HOSTED_MAILBOX_ITEM_BUDGET_REASON_CODE,
   prefetchHostedMailboxPrefix,
+  type HostedMailboxItemPrefixPredicate,
   type HostedMailboxItemImportOutcome,
   type HostedMailboxImportLoopResult,
   type HostedMailboxPrefixPrefetch,
@@ -488,20 +489,22 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
-async function hasPrefetchedAssistantAskRequest(
+async function hasPrefetchedAssistantAskRequestPrefix(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<boolean> {
   try {
     const response = await prefetch.response;
-    return response.items.some((item) =>
-      item.lane === "system" && item.kind === "assistant.ask.requested"
-    );
+    const firstSystemItem = response.items.find((item) => item.lane === "system");
+    return firstSystemItem?.kind === "assistant.ask.requested";
   } catch {
     // The ordinary lane import owns retry/fallback behavior for a failed
     // prefetch. A failed optimization must not broaden pre-checkpoint work.
     return false;
   }
 }
+
+const isAssistantAskRequestMailboxItem: HostedMailboxItemPrefixPredicate =
+  (item) => item.lane === "system" && item.kind === "assistant.ask.requested";
 
 function isHostedInitialBootstrapPending(input: {
   bootstrapRequired: boolean;
@@ -539,6 +542,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantAskRequestTargetKind?: "joined_group";
   onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
@@ -1008,6 +1012,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      ...(context?.assistantAskRequestTargetKind
+        ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
+        : {}),
       recordMessagingReturnTarget: (target) => {
         deviceSyncMessagingReturnTarget = target;
       },
@@ -2634,6 +2641,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const importMailboxLanes = async (
           lanes: readonly ("conversation" | "system")[],
           importItem: HostedWorkspaceRunnerInput["importItem"],
+          options?: {
+            importContext?: HostedWorkspaceRunnerMailboxImportContext;
+            itemPrefix?: HostedMailboxItemPrefixPredicate;
+          },
         ): Promise<HostedMailboxImportCheckpointResult> => {
           idleWakeOrdinal += 1;
           const previousPendingWake = pendingWake;
@@ -2645,7 +2656,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ...baseRunnerInput,
             deferInitialMailboxPostCheckpointEffects: true,
             importItem,
-            initialMailboxImportContext,
+            initialMailboxImportContext:
+              options?.importContext ?? initialMailboxImportContext,
+            initialMailboxItemPrefix: options?.itemPrefix ?? null,
             initialMailboxImportLanes: lanes,
             initialMailboxPrefetch,
             requestId:
@@ -2707,7 +2720,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return true;
         }
         const prefetchedAssistantAskRequest = input.systemMailboxMode === "assistant-ask-request"
-          ? await hasPrefetchedAssistantAskRequest(initialMailboxPrefetch)
+          ? await hasPrefetchedAssistantAskRequestPrefix(initialMailboxPrefetch)
           : false;
         if (
           input.systemMailboxMode === "assistant-ask-request"
@@ -2724,6 +2737,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input.systemMailboxMode === "assistant-ask-request"
             ? importForegroundMailboxItem
             : importMailboxItem,
+          input.systemMailboxMode === "assistant-ask-request"
+            ? {
+                importContext: {
+                  ...initialMailboxImportContext,
+                  assistantAskRequestTargetKind: "joined_group",
+                },
+                itemPrefix: isAssistantAskRequestMailboxItem,
+              }
+            : undefined,
         );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);

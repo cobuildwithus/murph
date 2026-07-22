@@ -2152,6 +2152,102 @@ describe("hosted mailbox import loop", () => {
     assert.equal(result.state.watermarks.conversation, "0");
   });
 
+  test("does not cross a non-matching system item to import a later ask", async () => {
+    const unrelated = createMailboxItem({
+      id: "mailbox_item_system_before_ask",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const ask = createMailboxItem({
+      id: "mailbox_item_system_ask_after_unrelated",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const { mailboxPort, payloadFetchRequests } = createMailboxPort({
+      items: [unrelated, ask],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      itemPrefix: (item) => item.kind === "assistant.ask.requested",
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_system_ask_prefix_starts_with_unrelated",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, []);
+    assert.deepEqual(payloadFetchRequests, []);
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(result.state.recentStatuses, []);
+    assert.equal(result.importedCount, 0);
+    assert.equal(result.state.watermarks.system, "0");
+  });
+
+  test("imports only the contiguous leading system ask prefix", async () => {
+    const firstAsk = createMailboxItem({
+      id: "mailbox_item_system_ask_prefix_first",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const secondAsk = createMailboxItem({
+      id: "mailbox_item_system_ask_prefix_second",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const unrelated = createMailboxItem({
+      id: "mailbox_item_system_ask_prefix_boundary",
+      kind: "runtime.manual-requested",
+      lane: "system",
+      laneSeq: "3",
+    });
+    const laterAsk = createMailboxItem({
+      id: "mailbox_item_system_ask_prefix_later",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "4",
+    });
+    const { mailboxPort } = createMailboxPort({
+      items: [firstAsk, secondAsk, unrelated, laterAsk],
+    });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      itemPrefix: (item) => item.kind === "assistant.ask.requested",
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_system_leading_ask_prefix",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(imported, [firstAsk.id, secondAsk.id]);
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(result.importedSystemMailboxItemIds, [
+      firstAsk.id,
+      secondAsk.id,
+    ]);
+    assert.equal(result.importedCount, 2);
+    assert.equal(result.state.watermarks.system, "2");
+  });
+
   test("rejects mailbox fetch responses for another user before import", async () => {
     const item = createMailboxItem();
     const { mailboxPort, payloadFetchRequests } = createMailboxPort({

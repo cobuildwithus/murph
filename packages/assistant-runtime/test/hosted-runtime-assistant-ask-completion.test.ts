@@ -38,6 +38,7 @@ import {
   buildHostedAssistantAskContinuationInstructions,
   executeHostedAssistantAskCompletedWake,
   isAuthorizedHostedAssistantAskCompletionOrigin,
+  isHostedAssistantAskCompletionDeliveryKey,
   isHostedAssistantAskCompletionExpired,
   isHostedAssistantAskAutomationCompletedWake,
   resolveHostedAssistantAskReviewedExactResponse,
@@ -65,6 +66,14 @@ describe("hosted assistant ask completion", () => {
     expect(reviewed).not.toBe(legacy);
     expect(reviewed).toMatch(/^reviewed-assistant-ask-completion:/u);
     expect(legacy).toMatch(/^assistant-ask-completion:/u);
+    expect(isHostedAssistantAskCompletionDeliveryKey(reviewed)).toBe(true);
+    expect(isHostedAssistantAskCompletionDeliveryKey(legacy)).toBe(true);
+    expect(
+      isHostedAssistantAskCompletionDeliveryKey(
+        "assistant-ask-completion:not-a-completion-digest",
+      ),
+    ).toBe(false);
+    expect(isHostedAssistantAskCompletionDeliveryKey(null)).toBe(false);
   });
 
   it("quotes the correlated group question and answer as structurally bounded untrusted data", () => {

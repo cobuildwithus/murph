@@ -56,8 +56,11 @@ const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
 
 export {
+  readHostedSystemMailboxState,
+  removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
+  updateHostedSystemMailboxPendingItem,
 } from "./system-mailbox-state.ts";
 export type {
   HostedSystemMailboxPendingItem,
@@ -229,6 +232,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 }
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+  allowedItemIds?: readonly string[] | null;
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   executionContext?: AssistantExecutionContext | null;
@@ -236,6 +240,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
+  retainProcessedItem?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
@@ -249,6 +254,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
+          )
+          && (
+            input.allowedItemIds == null
+            || input.allowedItemIds.includes(item.itemId)
           )
           && (
             input.allowedWakeKinds == null
@@ -315,6 +324,21 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
         postCheckpointRecord,
+        status: "recording",
+      };
+      await updateHostedSystemMailboxPendingItem({
+        item: processedItem,
+        vaultRoot: input.vaultRoot,
+      });
+      return {
+        item: processedItem,
+        itemId: prepared.itemId,
+        metrics,
+        status: "processed",
+      };
+    } else if (input.retainProcessedItem === true) {
+      const processedItem: HostedSystemMailboxPendingItem = {
+        ...prepared,
         status: "recording",
       };
       await updateHostedSystemMailboxPendingItem({

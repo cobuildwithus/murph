@@ -302,6 +302,104 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("retains the exact completed ask until its delivery is terminal", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const unrelatedWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:before-ask-completion",
+      memberId: "member_123",
+      notification: {
+        instructions: "Keep this unrelated item pending.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const completionWake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        originSessionId: "session_private",
+        question: "What is the synthetic group plan?",
+        requestId: "aask_req_retained_completion",
+        result: {
+          answer: "The synthetic plan is ready.",
+          outcome: "answered",
+        },
+        targetLabel: "Synthetic group",
+      },
+      eventId: "aask_done_retained_completion",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+    });
+    const completionItem = createResolvedAssistantAskCompletionItem();
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          id: "mailbox_item_unrelated_before_ask_completion",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: unrelatedWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: completionItem,
+        vaultRoot: workspace.vaultRoot,
+        wake: completionWake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedItemIds: [completionItem.item.id],
+        allowedRouteActions: ["continue-assistant-ask"],
+        allowedWakeKinds: ["assistant.ask.completed"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        retainProcessedItem: true,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toEqual(expect.objectContaining({
+        item: expect.objectContaining({
+          attemptCount: 1,
+          itemId: completionItem.item.id,
+          status: "recording",
+        }),
+        status: "processed",
+      }));
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sourceMailboxItemId: completionItem.item.id,
+        }),
+      );
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [
+          expect.objectContaining({
+            itemId: "mailbox_item_unrelated_before_ask_completion",
+            status: "pending",
+          }),
+          expect.objectContaining({
+            itemId: completionItem.item.id,
+            status: "recording",
+          }),
+        ],
+      });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("rollback discards only failed imported system items and preserves concurrent enqueues", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
