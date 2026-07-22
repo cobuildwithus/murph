@@ -664,7 +664,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
   })
 
-  it('creates hosted overnight memory consolidation through the canonical automation registry', async () => {
+  it('creates hosted overnight maintenance through the canonical automation registry', async () => {
     const vaultRoot = await createVaultRoot()
 
     await expect(applyMurphManagedAutomations({
@@ -701,7 +701,7 @@ describe('applyMurphManagedAutomations core integration', () => {
         'murph-managed:overnight-memory-consolidation',
         'runtime-maintenance',
       ]),
-      title: 'Overnight memory consolidation',
+      title: 'Overnight memory and vault maintenance',
     })
     const automation = await showAutomation({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -720,6 +720,12 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(automation.instructions).toContain('supplied conversation evidence')
     expect(automation.instructions).toContain('Do not read transcript files or session storage')
     expect(automation.instructions).toContain('Do not save assistant speculation')
+    expect(automation.instructions).toContain(
+      'vault-cli vault repair-junction-evidence-duplicates --dry-run --format json',
+    )
+    expect(automation.instructions).toContain(
+      'vault-cli vault repair-junction-evidence-duplicates --apply --format json',
+    )
   })
 
   it('creates managed health automations for hosted email targets without a local sender identity', async () => {

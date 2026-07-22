@@ -500,9 +500,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
   {
     automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
     slug: 'overnight-memory-consolidation',
-    title: 'Overnight memory consolidation',
+    title: 'Overnight memory and vault maintenance',
     summary:
-      'A hosted-only app-server maintenance wake for canonical vault memory.',
+      'A hosted-only app-server wake for canonical memory and approved deterministic vault maintenance.',
     schedule: {
       kind: 'cron',
       // Alternating nights via day-of-month steps ('*/2') is wrong at month
@@ -520,13 +520,17 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'runtime-maintenance',
     ],
     instructions: [
-      'Goal: consolidate durable user context from recent assistant/user conversation history into the canonical vault memory surface.',
+      'Goal: consolidate durable user context from recent assistant/user conversation history, then run approved deterministic vault maintenance.',
       '',
       'Read existing saved context with `vault-cli memory show --format json` first. Existing memory is for deduplication and update targeting only; it is never an independent source for new writes.',
       'Retrieval budget: use only the engine-supplied "Conversation evidence" section appended to this prompt. It already contains the bounded committed user and assistant conversation messages from the last 7 days; count assistant messages as support only when they record a completed user-approved action or directly clarify user context. If that section reports no messages, do not write any new memory.',
       'Write durable memory only with `vault-cli memory upsert` or `vault-cli memory update` when a concise, user-useful fact is clearly supported by the supplied conversation evidence and is not already represented.',
       'Before returning, validate each proposed write against existing memory and the supplied conversation evidence. Skip anything uncertain, duplicated, sensitive, or merely transient task detail.',
-      'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or vault health data. Do not call external services or send the user a message.',
+      '',
+      'After the memory pass, run `vault-cli vault repair-junction-evidence-duplicates --dry-run --format json`. This command is the only approved non-memory vault inspection.',
+      'Run `vault-cli vault repair-junction-evidence-duplicates --apply --format json` only when that same-turn dry-run succeeds, reports `blockedReason: null`, and reports `hasWork: true`. The CLI owns eligibility, proof, mutation, validation, and audit; never reinterpret its candidates or edit vault files yourself.',
+      'If dry-run fails, reports a blocker, or reports no work, do not apply. Do not run any other maintenance command.',
+      'Do not read transcript files or session storage, hidden Codex memory state, assistant runtime logs, unbounded filesystem trees, or any other vault health data. Do not call external services or send the user a message.',
       'Do not save assistant speculation, generic advice, transient task details, credentials, payment details, contact details, identifiers of any kind, or medical or health details from conversation text.',
       `Return exactly \`{"kind":"skip","privateSummary":"${MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY}"}\`.`,
     ].join('\n'),

@@ -33,6 +33,10 @@
       "type": "string",
       "minLength": 1
     },
+    "evidenceRetention": {
+      "type": "string",
+      "const": "filtered"
+    },
     "receipt": {
       "type": "object",
       "properties": {

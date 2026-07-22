@@ -47,6 +47,7 @@ export interface BuildIntegrationIngestRecordInput {
   accountId?: string;
   source: "manual" | "import" | "device" | "derived";
   importedAt: string;
+  evidenceRetention?: "filtered";
   receipt?: unknown;
   parts: readonly IntegrationEvidencePart[];
   eventOutputs: readonly IntegrationIngestEventOutput[];
@@ -268,6 +269,9 @@ export function buildIntegrationIngestRecord(
     ...(input.accountId ? { accountId: input.accountId } : {}),
     source: input.source,
     importedAt: input.importedAt,
+    ...(input.evidenceRetention === undefined
+      ? {}
+      : { evidenceRetention: input.evidenceRetention }),
     ...(input.receipt ? { receipt: compactIntegrationIngestReceipt(input.receipt) } : {}),
     parts: [...input.parts],
     outputs: {
@@ -333,7 +337,7 @@ export async function readIntegrationIngestEntries(
   );
 }
 
-function integrationEvidenceFingerprint(
+export function integrationEvidenceFingerprint(
   part: Pick<IntegrationEvidencePart, "role" | "sha256" | "mediaType" | "metadata">,
 ): string {
   return JSON.stringify([

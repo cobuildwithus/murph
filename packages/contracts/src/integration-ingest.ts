@@ -101,6 +101,7 @@ export const integrationIngestRecordSchema = withContractMetadata(
     accountId: z.string().trim().min(1).max(512).optional(),
     source: z.enum(["manual", "import", "device", "derived"]),
     importedAt: isoTimestampSchema(),
+    evidenceRetention: z.literal("filtered").optional(),
     receipt: integrationIngestReceiptSchema.optional(),
     parts: z.array(integrationEvidencePartSchema).max(MAX_INGEST_PARTS),
     outputs: integrationIngestOutputsSchema,

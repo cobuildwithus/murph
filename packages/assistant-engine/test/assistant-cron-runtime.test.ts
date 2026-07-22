@@ -9518,7 +9518,7 @@ function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
       'murph-managed:overnight-memory-consolidation',
       'runtime-maintenance',
     ],
-    title: 'Overnight memory consolidation',
+    title: 'Overnight memory and vault maintenance',
     updatedAt: '2026-04-08T08:00:00.000Z',
   })
 }

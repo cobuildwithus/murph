@@ -23,6 +23,7 @@ function createCoreRuntimeStub() {
     validateVault: vi.fn(async () => ({ valid: true, issues: [] })),
     repairVault: vi.fn(async () => ({ updated: false, createdDirectories: [] })),
     repairExperimentMedia: vi.fn(async () => ({ mutated: false })),
+    repairJunctionEvidenceDuplicates: vi.fn(async () => ({ mutated: false })),
     repairJunctionWorkoutHeartRateZones: vi.fn(async () => ({ mutated: false })),
     runIntegrationIngestMigration: vi.fn(async () => ({
       mode: "dry-run",

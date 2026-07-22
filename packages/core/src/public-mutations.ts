@@ -76,6 +76,9 @@ import {
   repairJunctionWorkoutHeartRateZones as repairJunctionWorkoutHeartRateZonesInternal,
 } from "./junction-hr-zone-repair.ts";
 import {
+  repairJunctionEvidenceDuplicates as repairJunctionEvidenceDuplicatesInternal,
+} from "./junction-evidence-repair.ts";
+import {
   repairExperimentMediaInternal,
 } from "./experiment-media-repair.ts";
 import {
@@ -593,6 +596,12 @@ export async function repairJunctionWorkoutHeartRateZones(
   input: Parameters<typeof repairJunctionWorkoutHeartRateZonesInternal>[0],
 ): ReturnType<typeof repairJunctionWorkoutHeartRateZonesInternal> {
   return withCanonicalInputWriteLock(input, repairJunctionWorkoutHeartRateZonesInternal);
+}
+
+export async function repairJunctionEvidenceDuplicates(
+  input: Parameters<typeof repairJunctionEvidenceDuplicatesInternal>[0],
+): ReturnType<typeof repairJunctionEvidenceDuplicatesInternal> {
+  return withCanonicalInputWriteLock(input, repairJunctionEvidenceDuplicatesInternal);
 }
 
 export async function repairExperimentMedia(

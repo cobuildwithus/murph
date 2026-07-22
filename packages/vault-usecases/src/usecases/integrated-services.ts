@@ -479,6 +479,36 @@ function createIntegratedCoreServices(): CoreWriteServices {
         vaultRoot: vault,
       })
     },
+    async repairJunctionEvidenceDuplicates(input) {
+      const { vault } = input
+      const core = await loadCoreRuntime()
+      const result = await core.repairJunctionEvidenceDuplicates({
+        apply: input.apply,
+        maxEventRows: input.maxEventRows,
+        maxIngestBytes: input.maxIngestBytes,
+        maxIngestShards: input.maxIngestShards,
+        vaultRoot: vault,
+      })
+
+      return {
+        mode: result.mode,
+        hasWork: result.hasWork,
+        mutated: result.mutated,
+        blockedReason: result.blockedReason,
+        scannedIngestShardCount: result.scannedIngestShardCount,
+        scannedIngestRowCount: result.scannedIngestRowCount,
+        scannedIngestBytes: result.scannedIngestBytes,
+        scannedEventRowCount: result.scannedEventRowCount,
+        candidateShardCount: result.candidateShardCount,
+        candidateRowCount: result.candidateRowCount,
+        candidatePartCount: result.candidatePartCount,
+        candidateEvidenceBytes: result.candidateEvidenceBytes,
+        revisionProtectedPartCount: result.revisionProtectedPartCount,
+        skippedArchivedShardCount: result.skippedArchivedShardCount,
+        touchedPathCount: result.touchedPaths.length,
+        auditPath: result.auditPath,
+      }
+    },
     async repairJunctionWorkoutHeartRateZones(input) {
       const { vault } = input
       const core = await loadCoreRuntime()

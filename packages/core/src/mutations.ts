@@ -4664,17 +4664,24 @@ export async function importDeviceBatch({
     .filter((record): record is IntegrationIngestRecord =>
       record !== undefined
       && record.id !== incrementalEvidenceImportId
+      && record.evidenceRetention !== "filtered"
       && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
     );
   const matchingStoredDeliveries = () => candidateStoredDeliveries().filter((record) =>
     storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
   );
-  const partialStoredDelivery = () => {
-    const record = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
-    return record && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
-      ? record
-      : undefined;
-  };
+  const partialStoredDelivery = () => orderedCandidateImportIds
+    .map((id) => ingestIdInspection.invalidIds.has(id)
+      ? undefined
+      : ingestIdInspection.entriesById.get(id))
+    .find((record): record is IntegrationIngestRecord =>
+      record !== undefined
+      && (
+        record.id === incrementalEvidenceImportId
+        || record.evidenceRetention === "filtered"
+      )
+      && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
+    );
   const storedDeliveryRetainsCurrentOutputs = (
     storedDelivery: IntegrationIngestRecord,
   ): boolean =>
@@ -5304,6 +5311,7 @@ export async function importDeviceBatch({
     accountId: deviceBatchPlan.accountId,
     source: deviceBatchPlan.source,
     importedAt: deviceBatchPlan.importedAt,
+    evidenceRetention: evidenceWasFiltered ? "filtered" : undefined,
     receipt: deviceBatchPlan.ingestReceipt,
     parts: retainedEvidenceParts,
     eventOutputs,

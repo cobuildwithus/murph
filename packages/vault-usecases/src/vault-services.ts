@@ -34,6 +34,7 @@ const coreServiceMethodNames = [
   "validate",
   "repairVault",
   "repairExperimentMedia",
+  "repairJunctionEvidenceDuplicates",
   "repairJunctionWorkoutHeartRateZones",
   "repairIntegrationIngests",
   "repairWearableStorage",

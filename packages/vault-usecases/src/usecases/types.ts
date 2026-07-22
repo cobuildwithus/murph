@@ -752,6 +752,13 @@ export interface JunctionWorkoutHeartRateZoneRepairInput extends CommandContext 
   apply?: boolean
 }
 
+export interface JunctionEvidenceDuplicateRepairInput extends CommandContext {
+  apply?: boolean
+  maxEventRows?: number
+  maxIngestBytes?: number
+  maxIngestShards?: number
+}
+
 export interface ExperimentMediaRepairInput extends CommandContext {
   apply?: boolean
 }
@@ -790,6 +797,25 @@ export interface JunctionWorkoutHeartRateZoneRepairResult {
   candidateCount: number
   unverifiedCandidateCount: number
   repairedCount: number
+  touchedPathCount: number
+  auditPath: string | null
+}
+
+export interface JunctionEvidenceDuplicateRepairResult {
+  mode: "dry-run" | "apply"
+  hasWork: boolean
+  mutated: boolean
+  blockedReason: "event_bounds_exceeded" | "ingest_bounds_exceeded" | null
+  scannedIngestShardCount: number
+  scannedIngestRowCount: number
+  scannedIngestBytes: number
+  scannedEventRowCount: number
+  candidateShardCount: number
+  candidateRowCount: number
+  candidatePartCount: number
+  candidateEvidenceBytes: number
+  revisionProtectedPartCount: number
+  skippedArchivedShardCount: number
   touchedPathCount: number
   auditPath: string | null
 }
@@ -1168,6 +1194,9 @@ export interface CoreWriteServices extends HealthCoreServiceMethods {
     },
   ): Promise<VaultUpdateResult>
   repairVault(input: CommandContext): Promise<VaultRepairResult>
+  repairJunctionEvidenceDuplicates(
+    input: JunctionEvidenceDuplicateRepairInput,
+  ): Promise<JunctionEvidenceDuplicateRepairResult>
   repairJunctionWorkoutHeartRateZones(
     input: JunctionWorkoutHeartRateZoneRepairInput,
   ): Promise<JunctionWorkoutHeartRateZoneRepairResult>
@@ -1560,6 +1589,31 @@ export interface CoreRuntimeModule extends HealthCoreRuntimeMethods {
     timezone: string
     createdDirectories: string[]
     updated: boolean
+    auditPath: string | null
+  }>
+  repairJunctionEvidenceDuplicates(input: {
+    vaultRoot: string
+    apply?: boolean
+    maxEventRows?: number
+    maxIngestBytes?: number
+    maxIngestShards?: number
+    now?: Date
+  }): Promise<{
+    mode: "dry-run" | "apply"
+    hasWork: boolean
+    mutated: boolean
+    blockedReason: "event_bounds_exceeded" | "ingest_bounds_exceeded" | null
+    scannedIngestShardCount: number
+    scannedIngestRowCount: number
+    scannedIngestBytes: number
+    scannedEventRowCount: number
+    candidateShardCount: number
+    candidateRowCount: number
+    candidatePartCount: number
+    candidateEvidenceBytes: number
+    revisionProtectedPartCount: number
+    skippedArchivedShardCount: number
+    touchedPaths: string[]
     auditPath: string | null
   }>
   repairJunctionWorkoutHeartRateZones(input: {

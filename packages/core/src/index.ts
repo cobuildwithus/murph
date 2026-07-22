@@ -73,6 +73,10 @@ export type {
   WearableStorageMigrationResult,
 } from "./wearable-storage-migration.ts";
 export type {
+  JunctionEvidenceDuplicateRepairResult,
+  RepairJunctionEvidenceDuplicatesInput,
+} from "./junction-evidence-repair.ts";
+export type {
   JunctionWorkoutHeartRateZoneRepairResult,
   RepairJunctionWorkoutHeartRateZonesInput,
 } from "./junction-hr-zone-repair.ts";
@@ -141,6 +145,7 @@ export {
   linkJournalStreams,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  repairJunctionEvidenceDuplicates,
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
   repairVault,
@@ -356,6 +361,7 @@ export {
   buildIntegrationIngestAppendPlan,
   buildIntegrationIngestRecord,
   compactIntegrationIngestReceipt,
+  integrationEvidenceFingerprint,
   integrationIngestShardPath,
   listIntegrationIngestsForEvent,
   parseIntegrationIngestAppendPayload,

@@ -2353,6 +2353,52 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
       ...createProviderResult({
         rawEvents: [
           createCodexCommandCompletedEvent(
+            'vault-cli vault repair-junction-evidence-duplicates --apply --vault "$VAULT" --format json',
+          ),
+        ],
+        response: JSON.stringify({
+          kind: 'send_message',
+          privateSummary: 'Should not send.',
+          text: 'Visible maintenance message.',
+        }),
+        session: providerSession,
+      }),
+      additionalUsages: [],
+    },
+  })
+
+  let invalidRepairMaintenanceError: unknown
+  try {
+    await sendAssistantNotificationLocal({
+      instructions: 'Run overnight memory and vault maintenance.',
+      turnPolicy: {
+        kind: 'maintenance-exact-skip',
+        privateSummary: 'No notification required.',
+      },
+      vault: '/vaults/skip',
+    })
+  } catch (error) {
+    invalidRepairMaintenanceError = error
+  }
+  expect(invalidRepairMaintenanceError).toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_MAINTENANCE_DECISION_INVALID',
+  })
+  expect((invalidRepairMaintenanceError as Error & {
+    details?: Record<string, unknown>
+  }).details).toMatchObject({
+    assistantNotificationProviderNonReplayableWork: true,
+    assistantNotificationStage: 'provider',
+  })
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
+
+  vi.clearAllMocks()
+  mocks.executeCodexTurnWithRecovery.mockResolvedValueOnce({
+    kind: 'succeeded',
+    providerTurn: {
+      ...createProviderResult({
+        rawEvents: [
+          createCodexCommandCompletedEvent(
             'vault-cli memory show --vault "$VAULT" --format json',
           ),
         ],

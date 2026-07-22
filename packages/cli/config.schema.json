@@ -311,6 +311,52 @@
                     }
                   }
                 },
+                "repair-junction-evidence-duplicates": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "dryRun": {
+                          "default": false,
+                          "description": "Show proven redundant evidence without mutating the vault. This is also the default when --apply is omitted.",
+                          "type": "boolean"
+                        },
+                        "apply": {
+                          "default": false,
+                          "description": "Atomically filter proven redundant evidence and mark affected rows as partial evidence.",
+                          "type": "boolean"
+                        },
+                        "maxIngestShards": {
+                          "description": "Maximum integration-ingest shards to inspect.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 120
+                        },
+                        "maxIngestBytes": {
+                          "description": "Maximum integration-ingest bytes to inspect.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 536870912
+                        },
+                        "maxEventRows": {
+                          "description": "Maximum event rows to inspect for revision proof.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 2000000
+                        }
+                      }
+                    }
+                  }
+                },
                 "repair-integration-ingests": {
                   "type": "object",
                   "additionalProperties": false,

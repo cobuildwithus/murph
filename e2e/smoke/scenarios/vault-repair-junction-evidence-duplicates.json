@@ -1,0 +1,11 @@
+{
+  "id": "vault-repair-junction-evidence-duplicates",
+  "command": "vault-cli vault repair-junction-evidence-duplicates --vault <path> [--dry-run] [--apply] [--max-ingest-shards <count>] [--max-ingest-bytes <bytes>] [--max-event-rows <count>] [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [
+    "fixtures/minimal-vault/CORE.md",
+    "fixtures/minimal-vault/ledger/events/README.md"
+  ],
+  "goldenOutput": "fixtures/golden-outputs/validate",
+  "purpose": "Covers the bounded, dry-run-first Junction evidence repair surface so historical duplicates are removed only through explicit apply authority."
+}

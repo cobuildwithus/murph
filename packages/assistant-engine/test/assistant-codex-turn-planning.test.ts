@@ -423,6 +423,15 @@ describe('assistant Codex turn planning', () => {
     expect(maintenancePlan.systemPrompt).toContain(
       'deduplication and update targeting only',
     )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'vault-cli vault repair-junction-evidence-duplicates',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'same-turn dry-run succeeds and explicitly reports work with no blocker',
+    )
+    expect(maintenancePlan.systemPrompt).toContain(
+      'never edit vault files directly or infer additional deletion authority',
+    )
     expect(maintenancePlan.systemPrompt).not.toContain('meals')
     expect(maintenancePlan.systemPrompt).not.toContain('Health Commons')
     expect(maintenancePlan.systemPrompt).not.toContain(

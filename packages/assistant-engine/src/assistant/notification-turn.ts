@@ -1481,17 +1481,17 @@ function resolveAssistantNotificationTurnProfile(
 }
 
 // Only maintenance turns consume this signal (to decide whether a failed run
-// already performed non-replayable memory writes); it is derived from the
+// already performed an approved non-replayable mutation); it is derived from
 // committed provider events rather than trusted from provider metadata.
 function resolveAssistantNotificationProviderNonReplayableWork(input: {
   input: AssistantNotificationInput
   rawEvents: readonly unknown[]
 }): boolean {
   return isAssistantNotificationMaintenanceExactSkip(input.input) &&
-    assistantMaintenanceRawEventsIncludeMemoryMutation(input.rawEvents)
+    assistantMaintenanceRawEventsIncludeMutation(input.rawEvents)
 }
 
-function assistantMaintenanceRawEventsIncludeMemoryMutation(
+function assistantMaintenanceRawEventsIncludeMutation(
   rawEvents: readonly unknown[],
 ): boolean {
   return rawEvents.some((rawEvent) => {
@@ -1501,18 +1501,21 @@ function assistantMaintenanceRawEventsIncludeMemoryMutation(
       event.itemType === 'command.execution' &&
       event.itemState === 'completed' &&
       event.exitCode === 0 &&
-      isAssistantMaintenanceMemoryMutationCommand(event.commandLabel)
+      isAssistantMaintenanceMutationCommand(event.commandLabel)
     )
   })
 }
 
-function isAssistantMaintenanceMemoryMutationCommand(
+function isAssistantMaintenanceMutationCommand(
   commandLabel: string | null,
 ): boolean {
   const normalized = normalizeNullableString(commandLabel)
   return (
     normalized !== null &&
-    /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+    (
+      /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+      || /\bvault-cli\b[\s\S]*\bvault\s+repair-junction-evidence-duplicates\b[\s\S]*--apply\b/u.test(normalized)
+    )
   )
 }
 

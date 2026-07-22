@@ -145,6 +145,25 @@ const junctionWorkoutHeartRateZoneRepairResultSchema = z.object({
   auditPath: pathSchema.nullable(),
 })
 
+const junctionEvidenceDuplicateRepairResultSchema = z.object({
+  mode: z.enum(['dry-run', 'apply']),
+  hasWork: z.boolean(),
+  mutated: z.boolean(),
+  blockedReason: z.enum(['event_bounds_exceeded', 'ingest_bounds_exceeded']).nullable(),
+  scannedIngestShardCount: z.number().int().nonnegative(),
+  scannedIngestRowCount: z.number().int().nonnegative(),
+  scannedIngestBytes: z.number().int().nonnegative(),
+  scannedEventRowCount: z.number().int().nonnegative(),
+  candidateShardCount: z.number().int().nonnegative(),
+  candidateRowCount: z.number().int().nonnegative(),
+  candidatePartCount: z.number().int().nonnegative(),
+  candidateEvidenceBytes: z.number().int().nonnegative(),
+  revisionProtectedPartCount: z.number().int().nonnegative(),
+  skippedArchivedShardCount: z.number().int().nonnegative(),
+  touchedPathCount: z.number().int().nonnegative(),
+  auditPath: pathSchema.nullable(),
+})
+
 const integrationIngestRepairResultSchema = z.object({
   mode: z.enum(['dry-run', 'apply']),
   storedFormatVersion: z.number().int().nonnegative(),
@@ -506,6 +525,46 @@ export function registerVaultCommands(
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         apply: options.apply,
+      })
+    },
+  })
+
+  vaultGroup.command('repair-junction-evidence-duplicates', {
+    description:
+      'Dry-run or apply conservative historical evidence filtering for duplicate Junction device ingests.',
+    args: emptyArgsSchema,
+    options: withBaseOptions({
+      dryRun: z.boolean().default(false).describe('Show proven redundant evidence without mutating the vault. This is also the default when --apply is omitted.'),
+      apply: z.boolean().default(false).describe('Atomically filter proven redundant evidence and mark affected rows as partial evidence.'),
+      maxIngestShards: z.number().int().positive().max(120).optional().describe('Maximum integration-ingest shards to inspect.'),
+      maxIngestBytes: z.number().int().positive().max(512 * 1024 * 1024).optional().describe('Maximum integration-ingest bytes to inspect.'),
+      maxEventRows: z.number().int().positive().max(2_000_000).optional().describe('Maximum event rows to inspect for revision proof.'),
+    }),
+    output: junctionEvidenceDuplicateRepairResultSchema,
+    async run({ options }) {
+      const applyWasExplicit = currentCommandIncludesFlag('--apply')
+
+      if (options.apply && !applyWasExplicit) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Junction evidence duplicate repair apply mode must be requested with --apply on the command line.',
+        )
+      }
+      if (options.apply && options.dryRun) {
+        throw new VaultCliError(
+          'invalid_options',
+          'Use either --apply or --dry-run for Junction evidence duplicate repair, not both.',
+        )
+      }
+
+      await assertInitializedVaultRoot(options.vault)
+      return services.core.repairJunctionEvidenceDuplicates({
+        apply: options.apply,
+        maxEventRows: options.maxEventRows,
+        maxIngestBytes: options.maxIngestBytes,
+        maxIngestShards: options.maxIngestShards,
+        requestId: requestIdFromOptions(options),
+        vault: options.vault,
       })
     },
   })

@@ -107,6 +107,17 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    evidence-role mapping needed to reject ambiguity. Evidence for a newly
    appended event revision is always retained even when identical evidence
    bytes were seen before. An
+   explicit `evidenceRetention: "filtered"` marker gives current and historical
+   filtered rows the same partial-evidence replay semantics; the original row
+   id alone can never prove that the complete delivery remains stored. The
+   bounded `vault repair-junction-evidence-duplicates` owner may mark historical
+   live rows only after the same provider/account/month evidence fingerprint
+   and every event association already exist earlier in valid history. Event
+   spines that are missing, malformed, repeated, or revised protect their
+   evidence. The repair preserves row ids, receipts, provenance, canonical
+   output ids, counts, changed evidence, and new associations; archived shards
+   are reported and skipped rather than rewritten through a generic path.
+   An
    integrity-invalid exact row repairs once under the deterministic
    association-revision id. A live shard whose
    final complete row lost only its newline receives exactly one delimiter

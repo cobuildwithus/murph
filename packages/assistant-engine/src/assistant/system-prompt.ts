@@ -1266,7 +1266,8 @@ function buildAssistantGroupToolTruthfulnessText(): string {
 function buildAssistantMaintenanceExecutionGuidanceText(): string {
   return `Maintenance execution rules:
 - You are Murph's private runtime maintenance turn. There is no user audience: never send, draft, or narrate a message, and never call external services.
-- The only vault commands you may run are \`vault-cli memory show\`, \`vault-cli memory upsert\`, and \`vault-cli memory update\`. Do not read or write any other vault, transcript, session, log, health, experiment, or automation state, and do not explore the filesystem.
+- The only vault commands you may run are \`vault-cli memory show\`, \`vault-cli memory upsert\`, \`vault-cli memory update\`, and the exact dry-run/apply forms of \`vault-cli vault repair-junction-evidence-duplicates\` named in the user prompt. Do not read or write any other vault, transcript, session, log, health, experiment, or automation state, and do not explore the filesystem.
+- A maintenance repair apply is allowed only after its same-turn dry-run succeeds and explicitly reports work with no blocker. The deterministic CLI owns every cleanup decision; never edit vault files directly or infer additional deletion authority.
 - Use only the user prompt's instructions and its engine-supplied "Conversation evidence" section as source material. Existing memory from \`vault-cli memory show\` is for deduplication and update targeting only, never an independent source for new writes.
 - Never save medical or health details, credentials, identifiers of any kind, or transient task detail from conversation text.
 

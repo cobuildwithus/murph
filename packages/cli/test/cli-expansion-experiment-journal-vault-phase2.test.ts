@@ -16,6 +16,7 @@ import { commonsProtocolRefSchema } from '@murphai/contracts'
 import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
 import {
   CURRENT_VAULT_FORMAT_VERSION,
+  deterministicContractId,
   importDeviceBatch,
   readJsonlRecords,
   VAULT_LAYOUT,
@@ -3874,6 +3875,122 @@ test.sequential(
 )
 
 test.sequential(
+  'vault repair-junction-evidence-duplicates dry-runs and applies proven duplicate evidence',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-evidence-repair-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      const imported = await importDeviceBatch({
+        vaultRoot,
+        provider: 'junction',
+        accountId: 'jxn_cli_evidence_repair',
+        importedAt: '2026-06-03T21:00:00.000Z',
+        evidenceParts: [{
+          role: 'junction-summary-activity',
+          fileName: 'junction-summary-activity.json',
+          content: { date: '2026-06-03', steps: 8_000 },
+        }],
+      })
+      assert.ok(imported.ingestShardPath)
+      const [current] = await readJsonlRecords({
+        vaultRoot,
+        relativePath: imported.ingestShardPath,
+      }) as Array<Record<string, unknown>>
+      assert.ok(current)
+      const proof = {
+        ...current,
+        id: deterministicContractId('xfm', `cli-historical-proof:${String(current.id)}`),
+      }
+      await writeFile(
+        path.join(vaultRoot, imported.ingestShardPath),
+        `${JSON.stringify(proof)}\n${JSON.stringify(current)}\n`,
+        'utf8',
+      )
+
+      const defaultDryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        mutated: boolean
+      }>([
+        'vault',
+        'repair-junction-evidence-duplicates',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(defaultDryRun.ok, true)
+      assert.equal(requireData(defaultDryRun).mode, 'dry-run')
+      assert.equal(requireData(defaultDryRun).hasWork, true)
+      assert.equal(requireData(defaultDryRun).mutated, false)
+
+      const dryRun = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        hasWork: boolean
+        mutated: boolean
+        blockedReason: string | null
+        candidatePartCount: number
+        skippedArchivedShardCount: number
+      }>([
+        'vault',
+        'repair-junction-evidence-duplicates',
+        '--vault',
+        vaultRoot,
+        '--dry-run',
+      ])
+      assert.equal(dryRun.ok, true)
+      assert.equal(dryRun.meta?.command, 'vault repair-junction-evidence-duplicates')
+      assert.equal(requireData(dryRun).mode, 'dry-run')
+      assert.equal(requireData(dryRun).hasWork, true)
+      assert.equal(requireData(dryRun).mutated, false)
+      assert.equal(requireData(dryRun).blockedReason, null)
+      assert.equal(requireData(dryRun).candidatePartCount, 1)
+      assert.equal(requireData(dryRun).skippedArchivedShardCount, 0)
+
+      const conflictingModes = await runSliceCli([
+        'vault',
+        'repair-junction-evidence-duplicates',
+        '--vault',
+        vaultRoot,
+        '--apply',
+        '--dry-run',
+      ])
+      assert.equal(conflictingModes.ok, false)
+      if (!conflictingModes.ok) {
+        assert.equal(conflictingModes.error.code, 'invalid_options')
+      }
+
+      const applied = await runSliceCli<{
+        mode: 'dry-run' | 'apply'
+        mutated: boolean
+        candidatePartCount: number
+        touchedPathCount: number
+      }>([
+        'vault',
+        'repair-junction-evidence-duplicates',
+        '--vault',
+        vaultRoot,
+        '--apply',
+      ])
+      assert.equal(applied.ok, true)
+      assert.equal(requireData(applied).mode, 'apply')
+      assert.equal(requireData(applied).mutated, true)
+      assert.equal(requireData(applied).candidatePartCount, 1)
+      assert.equal(requireData(applied).touchedPathCount, 1)
+
+      const rows = await readJsonlRecords({
+        vaultRoot,
+        relativePath: imported.ingestShardPath,
+      }) as Array<{ evidenceRetention?: string; parts?: unknown[] }>
+      assert.equal(rows.length, 2)
+      assert.equal(rows[1]?.evidenceRetention, 'filtered')
+      assert.deepEqual(rows[1]?.parts, [])
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
   'vault repair-wearable-storage reports sample shards without selected hasMore work',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-wearable-storage-repair-samples-'))
@@ -3940,6 +4057,49 @@ test.sequential(
         configPath,
       ], { config: true })
 
+      assert.equal(result.ok, false)
+      if (!result.ok) {
+        assert.equal(result.error.code, 'invalid_options')
+        assert.match(result.error.message ?? '', /--apply/u)
+      }
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'vault repair-junction-evidence-duplicates rejects apply loaded only from config',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-junction-evidence-repair-config-'))
+    const configPath = path.join(vaultRoot, 'config.json')
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      await writeFile(
+        configPath,
+        `${JSON.stringify({
+          commands: {
+            vault: {
+              commands: {
+                'repair-junction-evidence-duplicates': {
+                  options: { apply: true },
+                },
+              },
+            },
+          },
+        }, null, 2)}\n`,
+        'utf8',
+      )
+
+      const result = await runSliceCli([
+        'vault',
+        'repair-junction-evidence-duplicates',
+        '--vault',
+        vaultRoot,
+        '--config',
+        configPath,
+      ], { config: true })
       assert.equal(result.ok, false)
       if (!result.ok) {
         assert.equal(result.error.code, 'invalid_options')

@@ -289,6 +289,7 @@ declare module 'incur' {
       'vault repair-experiment-media': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-inbox-envelopes': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; maxFiles?: number } }
       'vault repair-integration-ingests': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; finalize: boolean; maxBundles?: number; maxBytes?: number } }
+      'vault repair-junction-evidence-duplicates': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; maxIngestShards?: number; maxIngestBytes?: number; maxEventRows?: number } }
       'vault repair-junction-hr-zones': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean } }
       'vault repair-wearable-storage': { args: {}; options: { requestId?: string; dryRun: boolean; apply: boolean; pruneDenseRaw: boolean; includeRecentDenseRaw: boolean; maxFiles?: number; maxBytes?: number } }
       'vault show': { args: {}; options: { requestId?: string } }

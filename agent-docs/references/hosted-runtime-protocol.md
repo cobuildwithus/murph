@@ -1068,6 +1068,15 @@ labels require a connected source. Empty, incomplete-setup, failed, or preempted
 reads produce no device context and must not be interpreted as proof that the
 user has no connection.
 
+The hosted-only overnight memory automation also owns one narrow deterministic
+vault-maintenance phase after its memory pass. It may run only the named
+`vault-cli vault repair-junction-evidence-duplicates` dry-run and may run the
+matching `--apply` form only when that same turn reports work with no blocker.
+The CLI owns eligibility, proof, locking, mutation, validation, and audit; the
+assistant must not inspect other vault state, reinterpret candidates, edit
+JSONL directly, or discover additional maintenance commands. A completed apply
+is non-replayable provider work for maintenance retry classification.
+
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the
 minimal `HostedStripeEvent` receipt and starts a Stripe-specific Vercel Workflow
