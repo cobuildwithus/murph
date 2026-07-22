@@ -378,6 +378,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
     ],
     [
+      "staged contract examples",
+      ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
+      /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
+    ],
+    [
       "workspace Murph Age query runtime",
       "packages/query/dist/murph-age.js",
       /packages\/query\/dist\/murph-age\.js/,
@@ -527,15 +532,15 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ]);
   });
 
-  it("resolves the production budgets with shared operational headroom", () => {
+  it("resolves the production budgets from measured baselines and jitter tolerances", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Mirror the production baselines plus their variance and operational
-    // allowances so budget-policy changes remain explicit and reviewed.
+    // Mirror the production baselines plus their variance allowances so
+    // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_500_000 + 96_000 + 250_000,
-      totalBytes: 9_484_284,
+      entryBytes: 1_591_691 + 48_000,
+      staticClosureBytes: 7_641_831 + 96_000,
+      totalBytes: 9_414_908,
     });
   });
 
@@ -579,13 +584,13 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ).toThrow(/static boot closure .* exceeds budget/);
   });
 
-  it("gates the total bundle at the production ratchet boundary", () => {
+  it("gates total output at the production ratchet boundary", () => {
     const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
-    const dynamicChunkBytes = totalBytes - 1_000;
+    const dynamicChunkBytesAtBudget = totalBytes - 1_000;
 
     expect(
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget),
       ),
     ).toEqual({
       entryBytes: 1_000,
@@ -595,7 +600,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
 
     expect(() =>
       assertRunnerEntrypointBundleWithinBudgets(
-        dynamicOnlyChunkMetafile(dynamicChunkBytes + 1),
+        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget + 1),
       ),
     ).toThrow(/total output .* exceeds budget/);
   });
