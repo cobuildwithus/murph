@@ -2017,6 +2017,12 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('### 5. Resolve the foundation checkpoints')
     expect(raw).toContain('1. **Data sources and wearables.**')
+    expect(compact).toContain(
+      'Frame that handoff naturally in Murph\'s own words: connect it there, then come back and let Murph know when the setup is finished.',
+    )
+    expect(compact).toContain(
+      'Never instruct the user to say a quoted exact word or phrase such as “done.”',
+    )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
     expect(compact).toContain(
