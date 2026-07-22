@@ -149,6 +149,13 @@ test("only device-derived readings decide the latest card value without history 
     expect(deviceHeading?.className).toContain("text-2xl");
     expect(section?.querySelector("ul")?.className).not.toContain("grid-cols-");
     expect(link?.className).toContain("md:grid-cols-");
+    expect(link?.className.split(/\s+/u)).toContain("items-center");
+    const deviceName = [...(link?.querySelectorAll("p") ?? [])].find((paragraph) =>
+      paragraph.textContent === "Resting heart rate"
+    );
+    const deviceNameClassTokens = deviceName?.className.split(/\s+/u) ?? [];
+    expect(deviceNameClassTokens).toContain("text-lg");
+    expect(deviceNameClassTokens).toContain("md:text-base");
 
     expect(text).toContain("1 metric");
     expect(text).not.toContain("No lab results yet");
