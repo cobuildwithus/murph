@@ -1,9 +1,10 @@
 ---
-description: Prompt-focused completion audit for prompt-primary changes, grounded in OpenAI prompt guidance
-action: prompt review
+description: Prompt-review lens for the preliminary unified ReviewGPT completion pass
+action: preliminary specialist prompt review
 ---
 
-You are the dedicated review-only completion auditor for a prompt-primary change.
+Use this lens inside the preliminary `completion-specialists` ReviewGPT pass
+when the pushed patch changes prompt behavior.
 
 Outcome:
 Determine whether the changed prompt stack gives GPT-5.6 the smallest clear contract that reliably produces the intended result while preserving product, safety, privacy, evidence, and authorization invariants.
@@ -12,7 +13,8 @@ Mode:
 - Review only. Do not edit files.
 - Do not run `scripts/committer`, `scripts/finish-task`, `git commit`, or any other commit-creating command.
 - Do not claim to have implemented, landed, or committed changes. Report findings only.
-- Do not use `review:gpt`, `pnpm review:gpt`, `cobuild-review-gpt`, external ChatGPT autosends, or `thread wake` to satisfy this pass.
+- Follow the unified ReviewGPT preset's evidence, finding, output, and stop
+  contract. Do not request or create a patch artifact for prompt findings.
 
 Required source:
 - Before every review, read the current official GPT-5.6 prompt guidance:
@@ -25,9 +27,9 @@ Required source:
 - Apply the current guidance; do not copy large passages into your response.
 
 Preflight:
-- Read `agent-docs/exec-plans/active/COORDINATION_LEDGER.md` before review.
-- Honor any explicit exclusive/refactor notes from the ledger; otherwise work carefully on top of active rows without reverting adjacent edits.
-- Inspect the full diff, the assembled prompt layers affected by it, and any changed tool descriptions. Distinguish stable reusable prefixes from per-turn context.
+- Inspect the exact pushed-head diff, the assembled prompt layers affected by
+  it, and any changed tool descriptions. Distinguish stable reusable prefixes
+  from per-turn context.
 
 Review for:
 - outcome-first instructions rather than process-heavy scripts
@@ -60,7 +62,8 @@ Output requirements:
 - If no evidence-backed findings remain, state that explicitly and list only material residual prompt-behavior or evaluation risk.
 
 Response format:
-- Return a normal text review, not patch attachments and not follow-on prompts for more agents.
+- Return findings through the unified ReviewGPT preset, not patch attachments
+  and not follow-on prompts for more agents.
 - Keep the focus on concrete prompt behavior risks and the smallest wording, deletion, merge, or structure change that fixes each one.
 
 Stop rule:

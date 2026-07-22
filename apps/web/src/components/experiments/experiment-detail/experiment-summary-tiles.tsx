@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 
 import type {
   ExperimentNextStep,
+  ExperimentRunProjection,
   ExperimentSchedule,
 } from "@/src/types/experiments";
 
@@ -16,6 +17,10 @@ interface ExperimentSummaryTilesExperiment {
   day?: number;
   durationDays?: number;
   nextStep?: ExperimentNextStep;
+  privateRun?: Pick<
+    ExperimentRunProjection,
+    "baselineDays" | "durationDays" | "timingKnown"
+  >;
   schedule?: ExperimentSchedule;
 }
 
@@ -50,9 +55,41 @@ export function ExperimentSummaryTiles({ experiment }: ExperimentSummaryTilesPro
 }
 
 function getSummaryData(experiment: ExperimentSummaryTilesExperiment): SummaryDatum[] {
-  const { baselineDays, durationDays, day, dateRange, nextStep, schedule } = experiment;
+  const { day, dateRange, nextStep, schedule } = experiment;
+  const hasSavedTiming = experiment.privateRun?.timingKnown === true;
+  const baselineDays = hasSavedTiming
+    ? experiment.privateRun?.baselineDays ?? 0
+    : experiment.baselineDays;
+  const durationDays = hasSavedTiming
+    ? experiment.privateRun?.durationDays
+    : experiment.durationDays;
   const inBaseline = baselineDays > 0 && day != null && day <= baselineDays;
   const tallies = tallySchedule(schedule);
+
+  if (experiment.privateRun?.timingKnown === false) {
+    return [
+      {
+        key: "experiment",
+        label: "Experiment",
+        value: "Timing unavailable",
+        detail: "Original phase timing is incomplete",
+      },
+      {
+        key: "next",
+        label: "Next target",
+        value: nextStep?.when ?? "—",
+        detail: nextStep ? nextStep.title : "No upcoming target",
+      },
+      {
+        key: "adherence",
+        label: "Adherence",
+        value: tallies && tallies.total > 0
+          ? `${tallies.done} of ${tallies.total} done`
+          : "—",
+        detail: renderAdherenceDetail(tallies),
+      },
+    ];
+  }
 
   const baselineCompleted = day != null && day > baselineDays;
 

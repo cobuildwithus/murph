@@ -1,6 +1,6 @@
 # Murph Contact Card Picker
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, and initial-visit handoff); persisted avatar choice not started
 
 ## Why
@@ -12,7 +12,7 @@ Murph's contact card ships with one canonical headshot (the hooded character). S
 The contact-card picker remains available immediately after website signup:
 
 1. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
-2. `/home?initialVisit=true` resolves the member's contact channel. Members with a text contact see the contact-card picker first; adding the card, skipping, or dismissing advances to the Murph personality picker. Members without a text contact start directly at the personality picker.
+2. `/home?initialVisit=true` resolves the member's contact channel. Members with a text contact see the contact-card picker first; adding the card, skipping, or dismissing advances to the Murph personality picker. Members without a text contact start directly at the personality picker. Saving the personality opens the final Welcome to Murph dialog with the resolved messaging action; skipping or dismissing the personality picker ends the handoff without it.
 
 The signup and design-system surfaces reuse `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
 

@@ -1,7 +1,7 @@
 # Measured Biomarker Index
 
 Status: Implemented
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Purpose
 
@@ -54,18 +54,22 @@ member-facing biomarker.
 
 ## Result detail contract
 
-- Lead with the exact latest result, source status, collection date, reported
-  source/lab, and source-specific reference range. Do not substitute Commons
-  guidance for the result's own range or flag.
+- Lead with the exact latest result, source status, and collection date. Keep
+  source/lab and source-specific reference range provenance in the chart context
+  and complete result ledger rather than repeating it beside the latest value.
+  Do not substitute Commons guidance for the result's own range or flag.
 - When an authored Health Commons page maps to the canonical lab identity, use
   its one-sentence summary below the title and keep saved-history count/date
   context as secondary metadata.
 - Plot only exact numeric results that the query owner has already established
   as comparable. Comparator and qualitative results stay exact in the ledger
   and never become invented points.
-- Show a reference band or limit only when every plotted result has the same
-  normalized numeric range and unit. Otherwise omit it without implying that
-  the result lacks source context in the ledger.
+- When the latest result belongs to the normalized comparable series and has an
+  unqualified numeric range, show that range as quiet dashed boundary rules
+  labeled `Latest lab range`. Clip the rules to the data-focused vertical scale
+  rather than compressing the historical trend, and do not imply that older
+  labs used the same range. Keep qualified or non-comparable ranges exact in the
+  ledger.
 - Keep the result ledger available at every viewport. The full four-column
   layout starts only when it fits; smaller screens use one accessible stacked
   representation rather than duplicated desktop/mobile markup.
@@ -177,8 +181,9 @@ interchangeable assays, or shared reference guidance.
 - UI tests cover device-first ordering, initially expanded disclosures, search,
   status filters, flagged-first ordering, the one-row notebook shape,
   full-row links, the absence of `Other`, and the saved-but-unclassified empty
-  state. Detail tests cover exact comparators, qualitative history, reference
-  band eligibility, responsive ledger structure, and Commons summary fallback.
+  state. Detail tests cover exact comparators, qualitative history, latest-range
+  band eligibility, missing or qualified range withholding, responsive ledger
+  structure, and Commons summary fallback.
 - Health Commons coverage tests resolve every requested lab and device identity,
   enforce the deliberate aliases and non-equivalences, validate one-sentence
   summaries and source locators, and lock the guidance-classification counts.

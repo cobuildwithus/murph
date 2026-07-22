@@ -1307,7 +1307,7 @@ test.sequential('experiment start uses typed protocol defaults and supports dry-
       'protocol_variant:dry-sauna/murph-finnish-standard-3x-week',
     )
     assert.match(String(effectiveProtocolSnapshot.doseSignature), /^3x\/week/u)
-    assert.equal(runPlan.baselineStart, '2026-04-24')
+    assert.equal(runPlan.baselineStart, '2026-04-17')
     assert.equal(runPlan.baselineEnd, '2026-04-30')
     assert.equal(runPlan.interventionStart, '2026-05-01')
     assert.equal(runPlan.interventionEnd, '2026-05-14')

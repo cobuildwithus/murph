@@ -14,6 +14,10 @@ import {
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
+import {
+  BiomarkerIndexPlaceholder,
+  type BiomarkerIndexPlaceholderVariant,
+} from "@/src/components/biomarkers/biomarker-index-placeholder";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
@@ -125,6 +129,13 @@ export function BiomarkersPageClient({
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
   const preparing = authenticated && refreshPending;
   const totalCount = biomarkers.length + deviceMetrics.length;
+  const canShowResolvedEmptyState = status === "empty" || status === "ready";
+  const showUnclassifiedLabNotice = authenticated
+    && !authRequired
+    && canShowResolvedEmptyState
+    && deviceMetrics.length > 0
+    && biomarkers.length === 0
+    && savedLabResultCount > 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -191,10 +202,9 @@ export function BiomarkersPageClient({
         </section>
       ) : null}
 
-      {(authRequired || status === "empty" || status === "ready")
-        && (!authenticated
-          || totalCount === 0
-          || (biomarkers.length === 0 && savedLabResultCount > 0)) ? (
+      {showUnclassifiedLabNotice ? <UnclassifiedLabsNotice /> : null}
+
+      {authRequired || (canShowResolvedEmptyState && totalCount === 0) ? (
         <EmptyBiomarkersState
           authRequired={authRequired}
           hasSavedLabResults={savedLabResultCount > 0}
@@ -205,6 +215,19 @@ export function BiomarkersPageClient({
       ) : null}
 
     </div>
+  );
+}
+
+function UnclassifiedLabsNotice() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>No recognized lab biomarkers yet</CardTitle>
+        <CardDescription>
+          Your saved lab records remain available, but none are recognized as biomarkers yet.
+        </CardDescription>
+      </CardHeader>
+    </Card>
   );
 }
 
@@ -239,8 +262,8 @@ function countSavedLabResults(client: BrowserVaultQueryClient): number {
 
 function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   return (
-    <section aria-labelledby="biomarker-devices-heading" className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
-      <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+    <section aria-labelledby="biomarker-devices-heading" className="border-y border-border/70">
+      <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
         <h2
           className="font-serif text-2xl font-semibold tracking-tight text-foreground"
           id="biomarker-devices-heading"
@@ -270,7 +293,7 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
 
   return (
     <Link
-      className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+      className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:gap-5"
       href={`/biomarkers/${entry.routeId}`}
     >
       <BiomarkerIcon className="size-9" routeId={entry.routeId} />
@@ -278,7 +301,7 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
         <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
           {category}
         </p>
-        <p className="text-base font-semibold text-foreground md:mt-1">{entry.shortName}</p>
+        <p className="text-lg font-semibold text-foreground md:mt-1 md:text-base">{entry.shortName}</p>
       </div>
       <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
         {entry.summary ?? "A device-derived health metric from your connected data."}
@@ -430,7 +453,7 @@ function MeasuredBiomarkerRow({
         <span
           aria-hidden="true"
           className={cn(
-            "h-8 w-1 shrink-0 rounded-full",
+            "h-12 w-1 shrink-0 rounded-full",
             status === "review" && "bg-destructive",
             status === "in-range" && "bg-primary",
             status === "reported" && "bg-muted-foreground/50",
@@ -473,50 +496,39 @@ function EmptyBiomarkersState({
   stale: boolean;
   uploadLabsAction: ReactNode;
 }) {
+  if (!authRequired) {
+    const variant: BiomarkerIndexPlaceholderVariant = preparing
+      ? "preparing"
+      : hasSavedLabResults
+        ? "saved"
+        : stale
+          ? "stale"
+          : "empty";
+
+    return (
+      <BiomarkerIndexPlaceholder
+        action={preparing ? null : uploadLabsAction}
+        variant={variant}
+      />
+    );
+  }
+
   return (
-    <Card aria-live={preparing ? "polite" : undefined} role={preparing ? "status" : undefined}>
+    <Card>
       <CardHeader>
-        <CardTitle>
-          {preparing
-            ? "Preparing your lab history"
-            : authRequired
-              ? "Sign in to see your biomarkers"
-              : hasSavedLabResults
-                ? "No recognized lab biomarkers yet"
-              : stale
-                ? "No saved lab results in this view"
-                : "No lab results yet"}
-        </CardTitle>
+        <CardTitle>Sign in to see your biomarkers</CardTitle>
         <CardDescription>
-          {preparing
-            ? "Murph is preparing your saved lab results."
-            : authRequired
-              ? "Your biomarker history is private and only appears after you sign in."
-              : hasSavedLabResults
-                ? "Your saved lab records remain available, but none are classified for this index yet."
-              : stale
-                ? "Murph checks for newer data in the background. You can also send Murph a lab report."
-                : "Send Murph a lab report to start building your history."}
+          Your biomarker history is private and only appears after you sign in.
         </CardDescription>
       </CardHeader>
-      {!preparing ? (
-        <>
-          <CardContent>
-            <p className="max-w-xl text-sm text-muted-foreground">
-              {authRequired
-                ? "Sign in before viewing or adding private health information."
-                : "Murph will keep each measured biomarker together so future results can be compared over time."}
-            </p>
-          </CardContent>
-          {authRequired ? (
-            <CardFooter>
-              <AuthButton>Sign in</AuthButton>
-            </CardFooter>
-          ) : uploadLabsAction ? (
-            <CardFooter>{uploadLabsAction}</CardFooter>
-          ) : null}
-        </>
-      ) : null}
+      <CardContent>
+        <p className="max-w-xl text-sm text-muted-foreground">
+          Sign in before viewing or adding private health information.
+        </p>
+      </CardContent>
+      <CardFooter>
+        <AuthButton>Sign in</AuthButton>
+      </CardFooter>
     </Card>
   );
 }

@@ -260,27 +260,6 @@ function BiomarkerDetailContent({
             >
               {formatLabDate(detail.latest.date)}
             </time>
-
-            <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">Lab range</dt>
-                <dd className="break-words font-medium text-foreground">
-                  {latestReferenceRange ?? "Not listed"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">Source</dt>
-                <dd className="break-words font-medium text-foreground">
-                  {latestSource ?? "Not listed"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">History</dt>
-                <dd className="font-medium text-foreground">
-                  {detail.rows.length} {detail.rows.length === 1 ? "result" : "results"}
-                </dd>
-              </div>
-            </dl>
           </div>
 
           {chartPoints.length > 0 ? (
@@ -293,6 +272,8 @@ function BiomarkerDetailContent({
                   displayName={detail.displayName}
                   points={chartPoints}
                   referenceRange={chartRange}
+                  referenceRangeLabel={latestReferenceRange}
+                  referenceRangeSourceLabel={latestSource}
                   unit={detail.comparableUnit}
                 />
               </div>
@@ -583,54 +564,32 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
 }
 
 /**
- * The chart plots normalized comparable values, so a reference band is only
- * truthful when every charted row has the same normalized numeric bounds.
- * Any disagreement or missing numeric range means no band.
+ * The chart overlays the latest lab-reported range as current context. It is
+ * deliberately labeled as latest because older results may have come from a
+ * different lab or range. Only use it when the latest row is itself part of
+ * the normalized comparable series; qualified ranges stay exact in the ledger.
  */
 function resolveChartedReferenceRange(
   detail: BrowserVaultLabBiomarkerDetail,
 ): LabBiomarkerChartRange | null {
-  if (detail.chartSeries.length === 0) {
+  const latestPoint = detail.chartSeries.find((point) => point.rowId === detail.latest.id);
+  if (
+    !latestPoint
+    || detail.latest.normalizedValue !== latestPoint.value
+    || formatLabUnit(detail.latest.normalizedUnit ?? "")
+      !== formatLabUnit(detail.comparableUnit ?? "")
+  ) {
     return null;
   }
 
-  const plottedValueByRowId = new Map(
-    detail.chartSeries.map((point) => [point.rowId, point.value]),
-  );
-  let range: LabBiomarkerChartRange | null = null;
-
-  for (const row of detail.rows) {
-    const plottedValue = plottedValueByRowId.get(row.id);
-    if (plottedValue === undefined) {
-      continue;
-    }
-    if (
-      row.normalizedValue !== plottedValue
-      || formatLabUnit(row.normalizedUnit ?? "") !== formatLabUnit(detail.comparableUnit ?? "")
-    ) {
-      return null;
-    }
-
-    const normalizedRange = row.normalizedReferenceRange;
-    if (normalizedRange?.lowComparator || normalizedRange?.highComparator) {
-      return null;
-    }
-
-    const low = normalizedRange?.low ?? null;
-    const high = normalizedRange?.high ?? null;
-    if (low === null && high === null) {
-      return null;
-    }
-    if (range === null) {
-      range = { high, low };
-      continue;
-    }
-    if (range.low !== low || range.high !== high) {
-      return null;
-    }
+  const normalizedRange = detail.latest.normalizedReferenceRange;
+  if (normalizedRange?.lowComparator || normalizedRange?.highComparator) {
+    return null;
   }
 
-  return range;
+  const low = normalizedRange?.low ?? null;
+  const high = normalizedRange?.high ?? null;
+  return low === null && high === null ? null : { high, low };
 }
 
 function isAuthRequiredBrowserVaultError(error: string | null): boolean {

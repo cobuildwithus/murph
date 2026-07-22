@@ -97,7 +97,7 @@ describe("sleep complaint workflow publishing journeys", () => {
       expect(runSpec?.revision.runSpecRevisionId).toMatch(/^sha256:[a-f0-9]{64}$/u);
       expect(runSpec?.testPlans).toEqual([
         expect.objectContaining({
-          baselineDays: 7,
+          baselineDays: 14,
           interventionDays: 14,
           primaryBiomarkerKey,
         }),

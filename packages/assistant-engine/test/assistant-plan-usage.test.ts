@@ -11,6 +11,30 @@ import type {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant plan usage tool", () => {
+  it("allows one trusted low-usage check without turning it into a watcher", () => {
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "including one trusted low-usage turn",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "relevant to the member's request or trusted low-usage heads-up",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "Never call it automatically during onboarding or as a watcher",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "When answering an explicit numerical usage question",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "do not volunteer percentages or forecast",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "the first assistant-initiated mention remains link-free",
+    );
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "Only after the member asks for the link or accepts that initial offer",
+    );
+  });
+
   it("exposes the tool only when the hosted read port is available", () => {
     expect(resolveMurphDynamicTools({ planUsageAvailable: true }))
       .toContain(MURPH_PLAN_USAGE_TOOL);

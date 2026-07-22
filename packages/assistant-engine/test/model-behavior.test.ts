@@ -695,13 +695,19 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'For reply-critical long research, multiple substantive tool calls, long parsing/scans, or content inspection, send an update before slow work.',
+      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+    )
+    expect(prompt).toContain(
+      'Before the first read in that pass, orient the member even when each lookup is routine',
+    )
+    expect(prompt).toContain(
+      'Do not wait until the work is done or the member asks about the delay.',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns.',
+      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
@@ -719,7 +725,7 @@ describe('assistant execution prompt contract', () => {
       'Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics.',
     )
     expect(prompt).toContain(
-      '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
+      '3. Follow the progress-update rules in the execution behavior guidance before multi-source context checks or genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
     )
     expect(
       prompt.match(
@@ -1721,7 +1727,7 @@ describe('assistant system prompt cache stability', () => {
     expect(openStablePrefix).toEqual(closedStablePrefix)
     expect(openStablePrefix).toContain('Murph skill router:')
     expect(openStablePrefix).toContain(
-      'Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.',
     )
     expect(openStablePrefix).not.toContain('Murph onboarding:')
     expect(openDynamicSuffix).toContain('Murph onboarding:')
@@ -2017,7 +2023,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain(
       'Do not preload skills or call a discovery CLI just to route.',
     )
-    expect(prompt).toContain('Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.')
+    expect(prompt).toContain('Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
@@ -2165,7 +2171,7 @@ describe('assistant Murph onboarding guidance', () => {
     }))
 
     expect(prompt).toContain(
-      'Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.',
+      'Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.',
     )
     expect(prompt).toContain('Murph skill router:')
     expect(prompt).not.toContain('Murph onboarding:')
@@ -2220,6 +2226,12 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('The room container is not a person')
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
+    expect(prompt).toContain(
+      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` after the group asks',
+    )
+    expect(prompt).toContain(
+      'Never describe the group funding link as a personal billing or account-management page.',
+    )
 
     // This is a private, explicitly per-person enrollment reminder owned by
     // the group newsletter workflow, not a room-settings destination.

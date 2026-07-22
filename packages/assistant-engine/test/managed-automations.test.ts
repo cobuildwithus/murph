@@ -865,8 +865,43 @@ describe('applyMurphManagedAutomations', () => {
       'knowledge append-section improvement-opportunities YYYY-MM-DD',
     )
     expect(seed.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar and no open check-in was due."}',
     )
+    expect(seed.instructions).toContain('Every completed run must leave one compact private decision record')
+    expect(seed.instructions).toContain('only run and outreach ledger')
+    expect(seed.instructions).toContain('at most once in any 14-day window')
+    expect(seed.instructions).toContain(
+      'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
+    )
+    expect(seed.instructions).toContain(
+      'platform context affirmatively proves that request never entered dispatch',
+    )
+    expect(seed.instructions).toContain('An unrelated inbound does not close it')
+    expect(seed.instructions).toContain(
+      'answered, declined, acknowledged, or otherwise closed that coach question',
+    )
+    expect(seed.instructions).toContain('outreach: delivery_requested')
+    expect(seed.instructions).toContain(
+      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
+    )
+    expect(seed.instructions).toContain('the later-occurrence closure gate does not apply')
+    expect(seed.instructions).toContain('engine-described valid delivery retry')
+    expect(seed.instructions).toContain(
+      'stable labels for `outcome`, `evidence_window`, `checked`, `decision`, and `outreach`',
+    )
+    expect(seed.instructions).toContain('record that exact text under `outbound_text`')
+    expect(seed.instructions).toContain('return the exact same text byte-for-byte')
+    expect(seed.instructions).toContain('Use `delivery_requested`, never `sent` or `delivered`')
+    expect(seed.instructions).toContain(
+      'an active health concern, an unanswered proactive health question, a decline, or a request for less outreach',
+    )
+    expect(seed.instructions).toContain(
+      'If the section cannot be appended and read back, send nothing',
+    )
+    expect(seed.instructions).toContain(
+      'Keep the body factual and compact, not a scratchpad or hidden chain of thought',
+    )
+    expect(seed.instructions).not.toContain('do not append to the ledger')
     expect(seed.instructions).toContain(
       'Never infer absence of a behavior from absence of data',
     )
@@ -1191,7 +1226,35 @@ describe('applyMurphManagedAutomations', () => {
       'knowledge append-section improvement-opportunities YYYY-MM-DD',
     )
     expect(improvementCoachRecord?.instructions).toContain(
-      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar."}',
+      '{"kind":"skip","privateSummary":"No improvement opportunity cleared the evidence bar and no open check-in was due."}',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'Every completed run must leave one compact private decision record',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'at most once in any 14-day window',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'If no earlier record has `outreach: delivery_requested`, the unanswered-question gate does not block outreach',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'An unrelated inbound does not close it',
+    )
+    expect(improvementCoachRecord?.instructions).toContain('outreach: delivery_requested')
+    expect(improvementCoachRecord?.instructions).toContain(
+      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'the later-occurrence closure gate does not apply',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'record that exact text under `outbound_text`',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'an active health concern, an unanswered proactive health question, a decline, or a request for less outreach',
+    )
+    expect(improvementCoachRecord?.instructions).toContain(
+      'If the section cannot be appended and read back, send nothing',
     )
     expect(improvementCoachRecord?.instructions).toContain(
       'Never infer absence of a behavior from absence of data',

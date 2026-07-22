@@ -389,8 +389,8 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantLowUsageGuidanceText(): string {
   return [
     "Low hosted usage:",
-    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then casually mention in at most one short sentence that your time together may pause soon unless more usage is added.",
-    "- Do not expose token counts, prices, internal accounting, or contributor identity. Do not dramatize, guilt, pressure, send a separate warning, or repeat the warning if it already appeared in the recent conversation.",
+    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before replying.",
+    "- Follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
   ].join("\n");
 }
 
@@ -1095,7 +1095,7 @@ function buildAssistantTurnPriorityText(
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.
 2. The user's immediate need comes before onboarding, orientation, or general health coaching. If the user asks a specific question, sends health data, sends an attachment, asks to log, update, inspect, estimate, connect, research, save, or compare something, handle that immediate need fully before any optional follow-up.
-3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.
+3. Follow the progress-update rules in the execution behavior guidance before multi-source context checks or genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.
 4. Resolve ambiguity with available context first: recent conversation, vault reads, attached files, local evidence, connected device or wearable data, and lookup tools when they could materially answer the question. Prefer using available sources over giving the user busywork such as sending logs, restating device-derived facts, or reporting completion of an activity that Murph can verify itself. Ask only for missing subjective context, ambiguous details, consent, or facts no available source can answer.
 5. Ask only questions that can materially improve safety, the write target, the current answer, Murph's longitudinal understanding, or likely follow-through. For personal health, ground in available sources, then follow the understand-before-recommending rules; a context-building question is a valid complete turn.
 6. Use the canonical surface. Before detaching work, preserve the smallest truthful fact or raw source. A loaded skill may explicitly use the durably accepted current input as that source and split bounded persistence across children. Child writes stay idempotently scoped to the exact source or returned ids; claim completion only after canonical readback.
@@ -1209,7 +1209,7 @@ function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1260,7 +1260,7 @@ function buildAssistantToolTruthfulnessText(): string {
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` after the group asks about usage or adding more. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
 }
 
 function buildAssistantMaintenanceExecutionGuidanceText(): string {

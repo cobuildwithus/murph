@@ -151,7 +151,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 - **Headline** (Fraunces, 600, 2rem, leading 1.15, tracking -0.02em): section titles inside a surface (Protocol, Your Results, Conclusions).
 - **Stat** (Fraunces, 600, 2rem+, leading 1, tracking -0.02em): the large numbers on signal cards — HRV up 12%, sleep +38min. Data as poetry.
 - **Body** (DM Sans, 400, 14–16px, leading 1.55): running prose. Cap body columns at 65–75ch.
-- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 7d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
+- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 14d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
 
 ### Named Rules
 
@@ -177,7 +177,7 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 
 ### Buttons
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.
-- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("7-day baseline · 14-day protocol").
+- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("14-day baseline · 14-day protocol").
 - **Secondary:** slate (`#2d3436`) background, white text, 10px 18px padding. Used for header actions and neutral affordances.
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
@@ -194,12 +194,16 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
 ### Measured Biomarker Index
-On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
-native `<details>` disclosures, expanded by default, with a Fraunces area name
-and one rotating chevron in the summary. Search and `All` / `Review` / `In
-range` filters apply only to saved lab biomarkers. The opened contents are one
+On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
+band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
+or give it a contrasting card background. Lab health areas follow as native
+`<details>` disclosures, expanded by default, with a Fraunces area name and one
+rotating chevron in the summary. Search and `All` / `Review` / `In range`
+filters apply only to saved lab biomarkers. The opened contents are one
 partitioned notebook surface rather than a stack of nested cards: one column on
 every viewport, with one full-width biomarker row between warm one-pixel seams.
+Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
+name; length supplies rhythm while color carries the source-reported status.
 On phones the name and result stack; from `sm` the name sits left and the
 status/value sits right. Each row is one full-size link showing only the
 biomarker name, source status, and latest value; flagged results sort before
@@ -218,11 +222,15 @@ sienna for flags that need review, and slate for an unflagged reported result.
 Keep the complete result ledger below the chart, including the date, exact
 reported value, source reference range, and lab/source label. Comparator,
 qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger; a concise caption names the plotted result count and unit, plus any
-shaded two-sided lab range or dashed one-sided lab limit. Simplifying the
-hierarchy must not imply that excluded values were plotted. The loading skeleton
-mirrors the same latest-result, chart, and ledger structure rather than
-substituting a generic card grid.
+the ledger. When the latest comparable result has an unqualified normalized lab
+range, place one quiet `Latest lab range` legend above dashed boundary rules for
+its two-sided band or one-sided limit. Clip those rules to the data-focused
+vertical scale rather than flattening the historical trend to fit a wide range,
+and label it as latest so it does not imply that older labs shared the same
+range. Qualified ranges remain ledger-only. Simplifying the hierarchy must not
+imply that excluded values were plotted. The loading skeleton mirrors the same
+latest-result, chart, and ledger structure rather than substituting a generic
+card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
@@ -249,7 +257,7 @@ For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker
 The shape compresses gracefully: before `md:` only title + fit label stay; at `md:` the full grid expands. This is the standard answer to "we have 14+ items to show on one page" — an identical card grid is the lazy alternative and is banned.
 
 ### Progress Bar (Experiment Phases)
-Three phases: **Baseline · 7d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
+Three phases: **Baseline · 14d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
 
 ### Next Step Card (Active State)
 Sage-green 3px left accent bar + session title (Headline) + when/context (Body) + "Next session: Friday" right-aligned (DM Mono). Only visible while experiment is active.

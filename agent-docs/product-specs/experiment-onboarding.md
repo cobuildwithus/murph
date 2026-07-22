@@ -44,6 +44,13 @@ It may include:
 
 The onboarding block must not duplicate fields already owned by canonical protocol structures. Do not add protocol-specific vault command read hints, generic assistant policy, duplicated session fields, duplicated test-plan durations, duplicated adherence targets, or copied safety inheritance flags. If a fact affects the runnable protocol generally, put it in `protocol`, `testPlans`, or `safety`; if it only affects setup, keep it in the compact onboarding delta.
 
+## Baseline Duration Policy
+
+- Use a 14-day prospective baseline for the normal repeated-measurement experiment plan. A longer baseline is appropriate when the outcome or known variability requires it.
+- A shorter or absent prospective baseline requires a concrete protocol-specific reason, such as a point-in-time lab anchor, acute safety or tolerability measurement, or disproportionate observation burden. Record the chosen duration in the canonical `testPlan`; do not add a second onboarding or runtime default.
+- Preserve the intervention window when changing baseline length. For every authored test plan, `durationDays` must equal `baselineDays + interventionDays`.
+- Already-saved private runs keep their saved windows. Run projections derive phase timing only from those persisted windows, and every saved-run representation—including generated or shareable result cards—uses that projection instead of the mutable current catalog. An incomplete legacy record reports timing as unknown. New protocol-backed runs use the exact current test plan and run-spec revision.
+
 ## Start Drafts Today, Start Intents Later
 
 - Today, a hosted `Run Experiment` click opens channel-specific draft/contact options for the user to send, such as text, email, or Telegram.
