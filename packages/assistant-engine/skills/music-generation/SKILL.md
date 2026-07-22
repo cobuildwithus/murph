@@ -36,8 +36,7 @@ Constraints to plan around:
   memo). The song is the reply's only media item, but it may accompany text.
 - It is available only on a deliverable iMessage/Linq or Telegram reply. If the
   user asked for only the song, attach it and leave the reply text empty unless
-  an owning flow requires accompanying text. An onboarding launch song always
-  retains its mandatory text close.
+  an owning flow requires accompanying text.
 - Generation can take up to a few minutes.
 - Generated audio cannot be re-sent later. If a song may be replayed (a repeat
   challenge dispatch), save the full lyrics and prompt in your durable notes so
@@ -89,9 +88,7 @@ Count the words in your lyrics before calling the tool. If they run over
 budget, fix it from either side: trim the lyric, or ask for a longer track —
 both are fine, as long as words and seconds match. Reminder songs stay short
 and tight. When the song itself is the user-requested main event, give the lyric
-the 45, 60, or 90 seconds it actually needs rather than squeezing it down. The
-mandatory first-onboarding launch song accompanies the text close and stays
-within its owning skill's 15–20 second limit.
+the 45, 60, or 90 seconds it actually needs rather than squeezing it down.
 
 For reminder songs specifically, name the action to do now, say
 why it matters to this person, fold in at most two non-sensitive personal
@@ -105,11 +102,10 @@ instruments, tempo, key, mood — still belongs in the prompt.
 
 ## Duration
 
-`durationSeconds` is 3-300. Reminder songs are 15-30s; the mandatory
-first-onboarding launch song is 15–20s; and a song that is the user-requested
-main event can comfortably run 45-90s. Pick the duration and the lyric together:
-the track is exactly as long as you ask for, so words beyond the budget in the
-Lyrics section get rushed, not dropped.
+`durationSeconds` is 3-300. Reminder songs are 15-30s, and a song that is the
+user-requested main event can comfortably run 45-90s. Pick the duration and the
+lyric together: the track is exactly as long as you ask for, so words beyond
+the budget in the Lyrics section get rushed, not dropped.
 
 ## House style and preferences
 
@@ -118,13 +114,9 @@ better, default to a light, upbeat reggae groove — Murph's house style. An
 explicit or learned preference (a genre they love, a vibe they asked for)
 always overrides the default.
 
-For the mandatory first-onboarding launch song, tone changes the arrangement
-and lyric register, not whether the song is generated. Formal users get a
-polished, warm, restrained celebration; casual users may get a more playful
-one. Quiet reminder support and low humor are not no-music preferences. An
-explicit no-music or no-audio preference still wins. When the launch is
-eligible but the safest personal detail is uncertain, use the preferred name
-when known and a generic share-safe celebration rather than skipping.
+Onboarding does not automatically trigger music. Use this skill during
+onboarding only when the user explicitly asks for a song; that current request
+does not become an onboarding requirement or completion criterion.
 
 ## Copyright and safety (hard limits)
 

@@ -402,7 +402,7 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 
 ### Don't:
 - **Don't** use ring charts, gamification, or "great job!" messages — these are the generic-health-app tell Murph explicitly rejects.
-- **Don't** use gray boxes, corporate tables, or hero-metric templates — these are the SaaS-dashboard cliché.
+- **Don't** use gray boxes, gray-gridded corporate data tables, or hero-metric templates — these are the SaaS-dashboard cliché. A warm, purposeful comparison IS allowed when it genuinely clarifies a choice (e.g. Murph vs a general chatbot): keep it on cream/sand paper surfaces, use serif + mono type with hairline `#c4a882` dividers instead of a gray grid, and let one side carry the sage affirmative treatment.
 - **Don't** use blue, teal, purple, or neon as UI accent color. Sage is the only affirmative accent.
 - **Don't** use `#000`, `#fff`, or untinted gray. Every neutral is tinted warm.
 - **Don't** cast drop shadows on cards. Flat-paper rule.

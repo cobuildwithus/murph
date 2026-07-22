@@ -53,15 +53,15 @@ context exists, and the current exchange is clearly resuming foundation or the
 contextual return, continue from the next unresolved step instead of replaying
 the park. Existing records alone do not prove that onboarding began.
 
-That forward-progress inference does not invent a missing reason for a desired
-change. If an earlier turn already parked a change thread and started the
-foundation without learning why it matters to the user, do not replay the park.
-Ask one light motivation question before advancing to another foundation
-checkpoint, then resume from the next unresolved step. If the user does not
-know or declines to answer, record the reason as unknown rather than asking
-again. This one post-park legacy-recovery question satisfies aspiration
-readiness for that already-open flow; do not require the impossible historical
-ordering or replay the park.
+That forward-progress inference does not invent a missing progress signal or
+reason for a desired change. If an earlier turn already parked a change thread
+and started the foundation without learning either one, do not replay the
+park. Ask each still-missing clarifier once, one per message, before advancing
+to another foundation checkpoint, then resume from the next unresolved step.
+If the user does not know or declines to answer, record that field as unknown
+rather than asking again. These bounded post-park recovery clarifiers satisfy
+aspiration readiness for that already-open flow; do not require the impossible
+historical ordering or replay the park.
 
 Do not fan the snapshot out into separate memory, goal, regimen, supplement,
 condition, allergy, experiment, or device commands. Make one targeted owning
@@ -273,15 +273,20 @@ does not consume the clarification budget. After it, ask up to three short
 clarifiers total, one per message.
 
 **Parking readiness for change:** clarify only enough to name one or two
-threads. Use the follow-up budget to learn the desired outcome and one reason
-it matters when those are not already clear. A list of desired
-outcomes is not a reason, and Murph must not infer one from the outcome. Ask the
-light motivation question once. If the user says they do not know, gives no
-reason, or declines, accept that answer without pressure or repetition and park
-the thread with motivation explicitly unknown. When several threads are named,
-keep them all without asking the user to rank them. Do not ask which is the
-bigger priority or which to start with; which thread to work on first is
-chosen together later at the return step.
+threads and distinguish three fields: the desired outcome, what would tell the
+user it is getting better, and one reason it matters. The user's own wording
+may supply more than one field or cover several named threads when it clearly
+does. A list of desired outcomes supplies neither a progress signal nor a
+reason, and Murph must not infer either one. Ask each missing clarifier once. If
+the user does not know, gives no answer, or declines, accept that field as
+explicitly unknown without pressure or repetition. Park only when the outcome
+is known and both clarifier fields are known or explicitly unknown. “I want to
+get stronger because it would build confidence” still lacks a progress signal;
+“I want to deadlift 315 pounds because it would build confidence” supplies all
+three fields, so do not re-ask either clarifier.
+When several threads are named, keep them all without asking the user to rank
+them. Do not ask which is the bigger priority or which to start with; which
+thread to work on first is chosen together later at the return step.
 
 For **change**, the useful clarifiers when the answers are not already known
 are:
@@ -289,10 +294,11 @@ are:
 1. What would tell you this is getting better?
 2. Why do you want that?
 
-Do not ask both by default or repeat what the user already supplied. Stop
-as soon as the missing outcome and motivation fields are answered or
-explicitly unknown. Ask these the way a friend would: plain words, about the
-concrete thing the user named, easy to shrug off. Never send the bare abstract
+Ask only the missing field, one per message, and never repeat what the user
+already supplied. Stop as soon as the desired outcome is known and the progress
+signal and reason are each known or explicitly unknown or declined. Ask these
+the way a friend would: plain words, about the concrete thing the user named,
+easy to shrug off. Never send the bare abstract
 question "What would success look or feel like?" Name the actual thread or
 threads and offer two to four brief, concrete examples spanning them, then
 leave room for a different answer. For example:
@@ -325,13 +331,13 @@ problem; follow the skip and overall-decline rules below.
 
 ### 4. Reflect, save, and park the threads
 
-Once one or two threads can be named and each attempted clarifier is answered
-or explicitly unknown, reflect the actual threads back in one short sentence
-using the user's own language. Name the threads again in this reply instead of
-making the user recover them from earlier messages. When the reason is known,
-keep it clearly subordinate to the threads rather than turning it into another
-thread. Never rely on “both,” “those,” or “them” to carry the aspiration across
-messages.
+Once one or two threads can be named, the outcome is known, and both the
+progress-signal and reason fields are answered or explicitly unknown, reflect
+the actual threads back in one short sentence using the user's own language.
+Name the threads again in this reply instead of making the user recover them
+from earlier messages. When the reason is known, keep it clearly subordinate
+to the threads rather than turning it into another thread. Never rely on
+“both,” “those,” or “them” to carry the aspiration across messages.
 
 Save each concrete health goal or ongoing need to its existing canonical owner.
 Before the visible reply, also save the confirmed definition of progress and
@@ -348,15 +354,21 @@ energy as the reason, and has not resolved the data-source checkpoint, a
 complete reply can be:
 
 ```text
-got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app—like Apple Health or an Apple Watch, WHOOP, Oura, Garmin, or Fitbit?
+got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?
 ```
 
 Treat this as a worked example, not fixed copy. Substitute the user's actual
 threads and reason, match their register, and ask the first unresolved
 foundation question rather than repeating the wearable question when that
-checkpoint is already known. For data-source examples, use only Apple Health
-or choices the current prompt says are supported; shorten the list when fewer
-choices are available.
+checkpoint is already known. Before sending the data-source question, make it
+concrete from live capability guidance. The current prompt's “Hosted wearable
+connection links are available for …” line is the sole source of provider
+examples. Append a short “like …” clause using only labels from that line: one
+when only one is available and a few when more are available. If the line is
+absent, omit provider examples rather than inventing or recalling names. Keep
+Apple Health out of this provider-example clause; it is offered only through
+the separate native-app relay after a clear “none,” never as a `murph.device`
+provider.
 
 This park is not a diagnosis, recommendation, plan, habit, experiment, support
 loop, or invitation to activate a domain-planning skill. Do not provide any of
@@ -445,15 +457,22 @@ the supplied facts before replying and leaves optional label details unknown.
    not use the device CLI as fallback. Otherwise continue from visible and
    saved evidence without pretending a device action is available. Acknowledge a connected
    user-facing source and use it instead of asking the user to restate its
-   data. If none is visible, ask whether they use a wearable or health app,
-   include a few representative examples from the current supported choices,
-   and explain that connecting one can reduce manual reporting and improve
-   later interpretation. If they name a supported provider, use
+   data. If none is visible, ask whether they use a wearable or health app and
+   explain that connecting one can reduce manual reporting and improve later
+   interpretation. Build its example clause only from labels on the current
+   prompt's hosted wearable connection line: one label when only one exists and
+   a few when several do. If that line is absent, omit provider examples; never
+   supply remembered names. Keep Apple Health separate for the post-“none”
+   relay below. If they name a supported provider, use
    `murph.device` with `action: connect` when available. Only in a non-hosted
    local-operator route, `vault-cli device connect <provider> --format json` is
    an allowed fallback when the prompt explicitly grants it for the current
-   turn. Send only a real
-   returned connection link. A clear “none,” “not relevant,” or skip resolves
+   turn. Send only a real returned connection link. After a real link is
+   returned, send one short handoff by itself in Murph's own words, inviting
+   the user to connect there and let Murph know afterward. Do not call it
+   setup, prescribe or quote an exact response, or advance to another
+   checkpoint until the user returns or the connection is visible. A clear
+   “none,” “not relevant,” or skip resolves
    the checkpoint. After a clear “none,” when the current prompt includes the
    Apple Health relay, make one optional conditional offer unless context
    already rules out an iPhone or the user declined connection help:
@@ -463,9 +482,12 @@ the supplied facts before replying and leaves optional label details unknown.
    ```
 
    Do not infer that an iMessage user owns an iPhone. If they want the link,
-   follow the current Apple Health relay guidance: send the canonical App Store
-   listing alone on the final line, then let the iOS app own sign-in, Apple
-   Health connection, and operating-system permission. Do not call
+   send one short handoff in Murph's own words, invite them to connect and let
+   Murph know afterward, and put the canonical App Store listing alone on the
+   final line. Do not call it setup, prescribe an exact response, or advance to
+   another checkpoint until the user returns or the connection is visible. Let
+   the iOS app own sign-in, Apple Health connection, and operating-system
+   permission. Do not call
    `murph.device` to connect Apple Health, claim permission was granted, or say
    steps are syncing until live evidence proves it. Declining this optional
    offer leaves the checkpoint resolved. Choosing to connect later does not
@@ -726,24 +748,13 @@ and leave onboarding open for repair. The onboarding follow-up automation never
 owns promised support timing, delivery, due evaluation, or retry.
 
 After the first repeated behavior or bounded experiment and its support are
-successfully saved, always follow `behavior-followthrough`'s first-launch
-delight rule. Its text close is mandatory: celebrate the start, say Murph is
+successfully saved, always follow `behavior-followthrough`'s first-launch close.
+Its text close is mandatory: celebrate the start, say Murph is
 excited to work with the user, name the exact next scheduled touchpoint and
 early review, then ask one broad question about anything else Murph can help
-with. For every low-risk, non-sensitive launch eligible under
-`behavior-followthrough`'s route/media/latency rule and with `generate_song`,
-the song is mandatory too. Formal tone, low humor, or quiet reminder support
-changes its register, not whether it is generated. Read `music-generation` and call
-`generate_song` before finishing the launch turn; do not merely offer a song or
-defer it. An explicit no-music/no-audio preference, the owning skill's
-safety/privacy exclusion, or time-sensitive help that must be delivered first
-makes the launch ineligible for music and need not be announced as a song
-omission. For an otherwise-eligible launch, only an unavailable or failed
-tool/route, response-media conflict, or generation failure may omit the song;
-state a plain user-facing blocker without provider or configuration details.
-This is reply-time delight, not an onboarding automation; plan and support
-writes happen first, and the song remains part of the same launch reply without
-replacing the useful setup confirmation or delaying time-sensitive help.
+with. Follow `behavior-followthrough`'s text-only launch close after the plan
+and support writes succeed. Do not add automatic launch media or make media an
+onboarding completion requirement.
 
 ## Context persistence
 
@@ -809,11 +820,14 @@ Onboarding is complete with `user_answered` only when all of these are true:
 1. The broad role, private default, and context-compounding value were delivered.
 2. Minimal identity is known or explicitly skipped.
 3. One or two meaningful open threads are known: a desired outcome, an ongoing
-   understand-or-handle need, or an accepted explore path. Murph asked once for
-   a missing reason a desired change matters; that reason is known from the
-   user's own words or is explicitly unknown or declined. For a legacy flow
-   already parked and in the foundation, the one recovery question above
-   satisfies this criterion.
+   understand-or-handle need, or an accepted explore path. For each change
+   thread, Murph asked once for each missing progress signal and reason; both
+   are known from the user's own words or explicitly unknown or declined.
+   Before claiming the thread is saved, Murph durably associated both fields
+   with the named goal or goals and read back the Goal and Context owners under
+   the persistence rule above. For a legacy flow already parked and in the
+   foundation, the bounded recovery rule above satisfies this criterion without
+   replaying the park.
 4. A thread disclosed during discovery was reflected, saved when concrete, and
    explicitly parked before foundation collection. Later foundation or return
    evidence may establish that this transition already occurred when its exact
@@ -834,11 +848,7 @@ Onboarding is complete with `user_answered` only when all of these are true:
    confirmed, not decision-changing, or handled in the parent before use. For
    an activated repeated behavior or experiment, the named support writes
    succeeded or an explicit opt-out or real blocker is recorded, and the
-   mandatory text launch close was delivered. For a first launch, the song was
-   generated in that turn; an explicit no-music/no-audio preference,
-   safety/privacy exclusion, or time-sensitive help made it ineligible; or an
-   otherwise-eligible tool/route/media/generation blocker was stated in plain
-   user-facing language.
+   mandatory text launch close was delivered.
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required. The checkpoint is required; the
