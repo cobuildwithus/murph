@@ -5102,9 +5102,29 @@ export async function importDeviceBatch({
       || novelty.parts.length > 0
       || novelty.receiptIsNovel
       || evidenceRepairRequired;
-    const retainedEvidenceParts = shouldPersistDelivery
+    const acceptedEvidenceRoles = new Set(
+      [...persistenceEvidenceRolesByPreparedRecordId.values()].flat(),
+    );
+    const hasUnassociatedNovelEvidence = persistencePreparedEvents.length > 0
+      && novelty.parts.some((part) => !acceptedEvidenceRoles.has(part.role));
+    const preparedCanonicalEventIds = deviceBatchPlan.preparedEvents.map((entry) =>
+      canonicalIdByPreparedId.get(entry.record.id) ?? entry.record.id
+    );
+    const hasSharedCanonicalEventOwner = new Set(preparedCanonicalEventIds).size
+      !== preparedCanonicalEventIds.length;
+    const appendedEventEvidenceRoles = new Set(
+      [...appendedPreparedEventIds].flatMap((preparedId) =>
+        persistenceEvidenceRolesByPreparedRecordId.get(preparedId) ?? []
+      ),
+    );
+    const novelEvidenceParts = new Set(novelty.parts);
+    const retainedEvidenceParts = evidenceRepairRequired
+      || hasUnassociatedNovelEvidence
+      || hasSharedCanonicalEventOwner
       ? deviceBatchPlan.preparedEvidenceParts
-      : [];
+      : deviceBatchPlan.preparedEvidenceParts.filter((part) =>
+          novelEvidenceParts.has(part) || appendedEventEvidenceRoles.has(part.role)
+        );
     const retainedEvidenceRoles = new Set(retainedEvidenceParts.map((part) => part.role));
     const retainedEvidenceRolesByPreparedRecordId = new Map<string, readonly string[]>();
     for (const entry of deviceBatchPlan.preparedEvents) {
@@ -5203,9 +5223,22 @@ export async function importDeviceBatch({
   const currentImportIdOccupied = ingestIdInspection.entriesById.has(deviceBatchPlan.importId)
     || ingestIdInspection.invalidIds.has(deviceBatchPlan.importId);
   const finalAssociationImportId = buildAssociationImportId(eventOutputs);
-  const persistedImportId = currentImportIdOccupied
-    ? finalAssociationImportId
-    : deviceBatchPlan.importId;
+  const evidenceWasFiltered = retainedEvidenceParts.length
+    !== deviceBatchPlan.preparedEvidenceParts.length;
+  const incrementalEvidenceImportId = deterministicContractId(
+    ID_PREFIXES.transform,
+    stableStringify({
+      incrementalEvidenceOfDeviceImportId: deviceBatchPlan.importId,
+      eventOutputs,
+      parts: retainedEvidenceParts.map(integrationEvidencePartIdentity),
+      sampleIds: sampleRecords.map((record) => record.id).sort(),
+    }),
+  );
+  const persistedImportId = evidenceWasFiltered
+    ? incrementalEvidenceImportId
+    : currentImportIdOccupied
+      ? finalAssociationImportId
+      : deviceBatchPlan.importId;
   const ingestRecord = buildIntegrationIngestRecord({
     id: persistedImportId,
     provider: deviceBatchPlan.provider,
