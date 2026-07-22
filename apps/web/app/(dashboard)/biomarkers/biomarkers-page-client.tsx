@@ -239,7 +239,7 @@ function countSavedLabResults(client: BrowserVaultQueryClient): number {
 
 function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   return (
-    <section aria-labelledby="biomarker-devices-heading" className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
+    <section aria-labelledby="biomarker-devices-heading" className="border-y border-border/70">
       <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
         <h2
           className="font-serif text-2xl font-semibold tracking-tight text-foreground"
@@ -430,7 +430,7 @@ function MeasuredBiomarkerRow({
         <span
           aria-hidden="true"
           className={cn(
-            "h-8 w-1 shrink-0 rounded-full",
+            "h-12 w-1 shrink-0 rounded-full",
             status === "review" && "bg-destructive",
             status === "in-range" && "bg-primary",
             status === "reported" && "bg-muted-foreground/50",

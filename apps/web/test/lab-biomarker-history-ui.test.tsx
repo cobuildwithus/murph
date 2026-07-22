@@ -153,6 +153,11 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(hba1cLink?.querySelector('[aria-hidden="true"]')?.className).toContain(
       "bg-destructive",
     );
+    const statusRailClassTokens = hba1cLink
+      ?.querySelector('[aria-hidden="true"]')
+      ?.className.split(/\s+/u) ?? [];
+    expect(statusRailClassTokens).toContain("h-12");
+    expect(statusRailClassTokens).not.toContain("h-8");
     expect(hba1cLink?.getAttribute("role")).toBeNull();
     expect(hba1cLink?.parentElement).toBe(firstList);
     expect(hba1cLink?.className).toContain("cursor-pointer");

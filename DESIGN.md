@@ -194,12 +194,16 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
 ### Measured Biomarker Index
-On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
-native `<details>` disclosures, expanded by default, with a Fraunces area name
-and one rotating chevron in the summary. Search and `All` / `Review` / `In
-range` filters apply only to saved lab biomarkers. The opened contents are one
+On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
+band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
+or give it a contrasting card background. Lab health areas follow as native
+`<details>` disclosures, expanded by default, with a Fraunces area name and one
+rotating chevron in the summary. Search and `All` / `Review` / `In range`
+filters apply only to saved lab biomarkers. The opened contents are one
 partitioned notebook surface rather than a stack of nested cards: one column on
 every viewport, with one full-width biomarker row between warm one-pixel seams.
+Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
+name; length supplies rhythm while color carries the source-reported status.
 On phones the name and result stack; from `sm` the name sits left and the
 status/value sits right. Each row is one full-size link showing only the
 biomarker name, source status, and latest value; flagged results sort before

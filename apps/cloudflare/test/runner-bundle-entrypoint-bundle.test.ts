@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -161,6 +161,10 @@ const ROOMY_TEST_BUDGETS = {
   staticClosureBytes: 10_000,
   totalBytes: 10_000,
 };
+const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
+  ["@murphai/contracts", "packages/contracts/package.json"],
+  ["@murphai/query", "packages/query/package.json"],
+] as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -217,6 +221,26 @@ async function createFakeRunnerBundle(): Promise<string> {
 }
 
 describe("runner bundle container-entrypoint esbuild step", () => {
+  it.each(RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS)(
+    "requires %s to declare side-effect-free modules for tree shaking",
+    async (packageName, manifestPath) => {
+      const manifest: unknown = JSON.parse(
+        await readFile(
+          path.resolve(import.meta.dirname, "../../..", manifestPath),
+          "utf8",
+        ),
+      );
+      if (typeof manifest !== "object" || manifest === null) {
+        throw new Error(`${manifestPath} must contain a JSON object.`);
+      }
+
+      expect(
+        "sideEffects" in manifest ? manifest.sideEffects : undefined,
+        `${packageName} must declare \"sideEffects\": false so the runner bundle can remove unused exports.`,
+      ).toBe(false);
+    },
+  );
+
   it("bundles the staged entrypoint, resolves externals at boot, and passes the boot probe", async () => {
     const bundleDir = await createFakeRunnerBundle();
 
@@ -378,6 +402,11 @@ describe("runner bundle container-entrypoint esbuild step", () => {
       /node_modules\/@murphai\/health-metrics\/dist\/murph-age-source-routes\.js/,
     ],
     [
+      "staged contract examples",
+      ".deploy/runner-bundle/node_modules/@murphai/contracts/dist/examples.js",
+      /node_modules\/@murphai\/contracts\/dist\/examples\.js/,
+    ],
+    [
       "workspace Murph Age query runtime",
       "packages/query/dist/murph-age.js",
       /packages\/query\/dist\/murph-age\.js/,
@@ -527,15 +556,15 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     ]);
   });
 
-  it("resolves the production budgets with shared operational headroom", () => {
+  it("resolves the production budgets from measured baselines and jitter tolerances", () => {
     const budgets = resolveRunnerEntrypointBundleBudgets();
 
-    // Mirror the production baselines plus their variance and operational
-    // allowances so budget-policy changes remain explicit and reviewed.
+    // Mirror the production baselines plus their variance allowances so
+    // budget-policy changes remain explicit and reviewed.
     expect(budgets).toEqual({
-      entryBytes: 1_450_742 + 48_000 + 250_000,
-      staticClosureBytes: 7_500_000 + 96_000 + 250_000,
-      totalBytes: 9_465_301,
+      entryBytes: 1_591_691 + 48_000,
+      staticClosureBytes: 7_641_831 + 96_000,
+      totalBytes: 9_414_908,
     });
   });
 
@@ -577,6 +606,27 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         staticBootClosureBytesMetafile(staticClosureBytes + 1),
       ),
     ).toThrow(/static boot closure .* exceeds budget/);
+  });
+
+  it("gates total output at the production ratchet boundary", () => {
+    const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytesAtBudget = totalBytes - 1_000;
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      totalBytes,
+    });
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytesAtBudget + 1),
+      ),
+    ).toThrow(/total output .* exceeds budget/);
   });
 
   it("does not count dynamic-only chunks toward the static boot closure budget", () => {

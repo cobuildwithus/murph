@@ -29,94 +29,17 @@ import {
 // (e.g. vault-cli PATH candidates) keeps landing on `<bundle>/node_modules`.
 export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
-// Byte budgets over the esbuild metafile so import-graph creep in the boot
-// surface fails the assembly instead of silently regressing cold start.
-// Latest ratcheted baselines come from reviewed bundle measurements:
-// - entry container-entrypoint.js: 1,423,217B on CI Linux after the
-//   2026-07-13 mainline integration;
-// - static boot closure: 7,059,427B on CI Linux for the exact PR 608 head
-//   after the generic group newsletter reader and native-memory isolation.
-//   The forbidden-input guard below keeps clinical intake and other
-//   turn-scoped importer code out of this closure.
-// The tolerances below cover local emit jitter.
-//
-// The entry chunk gates cold-start parse, so its measured baseline stays
-// explicit. The guard combines the original emit-jitter tolerance with a
-// deliberate operational headroom allowance; growth past that combined cap
-// still fails assembly, and the fixed total-bundle ceiling remains a separate
-// backstop.
-//
-// Node parses the entry chunk plus every statically reachable chunk before
-// HTTP listen, so the static boot closure is ratcheted with the same reviewed
-// baseline discipline as the entry chunk. Its tolerance is wider than the
-// entry tolerance because the closure spans ~5x more bytes and many more
-// chunks, so path comments, content hashes, and platform-specific emit jitter
-// have more surface.
-//
-// PR #813's reviewed route-authority boundary, after merging current main,
-// measured 9,314,428B on CI Linux and 9,369,574B on local macOS after the
-// scheduled Telegram redirect authority correction. PR #750's
-// consented group-to-member ask path measures 9,402,536B on that merged base;
-// the scheduled-authority remediation measures 9,402,701B, and the combined
-// post-#827 head measures 9,405,369B. After merging current main's biomarker
-// unit normalization, the combined head measures 9,410,180B. Current main's
-// persona redesign adds 10,122B, producing 9,420,302B. PR #824's Epic query
-// expansion measures 9,388,733B on that mainline; the exact combined graph
-// measures 9,424,514B. PR #838's reviewed biomarker catalog produces
-// 9,424,731B on CI Linux (+217B) and 9,460,571B on local macOS. Ratchet the
-// fixed total backstop to the larger exact measurement. PR #841's automatic
-// approved-file continuation adds 2,752B, and its exact-owner review
-// remediation adds another 491B, and the final delivery-context ownership
-// correction adds 397B. The round-five consolidated outcome correction adds
-// 1,090B, producing 9,465,301B on local macOS; ratchet by those exact measured
-// increases;
-// dynamic chunk jitter still receives no extra margin or platform-specific
-// branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_465_301;
-// The exact PR #626 head after current-main exact-target reply handling adds
-// reviewed boot-critical batching recovery logic. Assembly measured
-// 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
-// macOS (+7,706B); advance only by the larger entry overage and preserve the
-// noise band. PR #678 then added 633B for runtime-owned approval-link delivery.
-// Post-delivery foreground release, mutation-scoped maintenance,
-// and indexed cron reconciliation on that merged base measure 1,497,825B on
-// local macOS, 4,351B over the resulting budget. Advance by that exact overage;
-// the review remediation deletes foreground terminal-evidence inspection and
-// leaves exact replyability policy with maintenance. Preserving the merged
-// base's precomputed boundary-tail retry added 233B; making the phase wake
-// authoritative across the complete local tail drain removes 179B. Explicit
-// invocation-local wake provenance adds 230B while preventing an inherited
-// reminder from suppressing pending-index repair.
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_450_742;
-// PR #631 added 913B for its reviewed Clinical Records crypto-lane labels and
-// another 872B for bounded checkpoint/resume handling. The exact PR #626 head
-// then measured a 7,190,569B local macOS closure (+33,357B over the prior
-// budget); advance only by that measured overage and preserve the separate
-// 96KB noise band.
-// On that merged base, indexed cron search, purpose-correlated artifact reads,
-// foreground cancellation, and delayed index repair measure a 7,192,498B local
-// static boot closure, 1,929B over the resulting budget. Advance by that exact
-// overage; boundary-tail retry preservation added the same measured 233B, and
-// complete-tail wake ownership later removes 179B. Explicit invocation-local
-// wake provenance adds 230B. Preserve the separate 96KB noise band.
-// The July 16 main merge (through PR #772) measured a 7,467,190B local macOS
-// closure; through the July 17 merges (Epic clinical records beta, onboarding
-// clarifiers, four-child hosted concurrency) it grew to ~7,489,000B local.
-// Rather than keep ratcheting this baseline by a few KB per merge on a
-// fast-moving shared main — which broke local dev:reset repeatedly because
-// local macOS runs ~40 KB heavier than the CI Linux measurement — use a round
-// 7.5 MB baseline. The variance tolerance and operational allowance below
-// provide the headroom. This intentionally loosens the boot-surface creep
-// guard; the forbidden-input markers below and fixed 9.3 MB total ceiling
-// remain the hard backstops. Re-tighten to a measured value if boot-closure
-// creep needs active policing again.
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_500_000;
-// Preserve the original emit-jitter bands and add one shared operational
-// allowance to both coupled boot-path caps. The static closure contains the
-// entry chunk, so applying the headroom to only one cap would be misleading.
+// Byte budgets over the esbuild metafile make import-graph growth fail the
+// assembly instead of silently regressing cold start. The baselines are the
+// clean packaged measurements after unused contracts and query exports became
+// tree-shakeable. Entry and static-closure caps retain their platform-jitter
+// tolerances; the total cap leaves 32KB for small reviewed additions without
+// restoring the former 250KB operational growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_414_908;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_641_831;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
-const RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES = 250_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
 // workspace package inputs appear as `node_modules/@murphai/*/dist/...` in
 // the staged production assembly but as `packages/*/dist/...` when bundling
@@ -134,6 +57,7 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "node_modules/@junction-api/sdk/",
   "/health-metrics/dist/murph-age.js",
   "/health-metrics/dist/murph-age-source-routes.js",
+  "/contracts/dist/examples.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
 ] as const;
@@ -179,7 +103,7 @@ export async function bundleRunnerContainerEntrypoint(
     buildResult.metafile,
   );
   console.log(
-    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance + ${RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES}B headroom), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance + ${RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES}B headroom), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
+    `runner entrypoint bundle size: entry ${bundleBytes.entryBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES}B tolerance), static boot closure ${bundleBytes.staticClosureBytes}B (baseline ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES}B + ${RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES}B tolerance), total ${bundleBytes.totalBytes}B of ${RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET}B budget`,
   );
   assertRunnerEntrypointBundleBoots({
     bundleDir,
@@ -192,8 +116,8 @@ export async function bundleRunnerContainerEntrypoint(
 }
 
 // Single source of truth for the production budgets: both boot-path caps use
-// their ratcheted baseline, emit-jitter tolerance, and shared operational
-// headroom; the total remains a fixed ceiling.
+// their measured baseline plus emit-jitter tolerance; the total remains a
+// fixed ceiling.
 // Exported so a unit test can lock these values (the assembly path calls
 // assertRunnerEntrypointBundleWithinBudgets with this as the default).
 export function resolveRunnerEntrypointBundleBudgets(): {
@@ -204,12 +128,10 @@ export function resolveRunnerEntrypointBundleBudgets(): {
   return {
     entryBytes:
       RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES,
+      + RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES,
     staticClosureBytes:
       RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES
-      + RUNNER_ENTRYPOINT_BUNDLE_OPERATIONAL_HEADROOM_BYTES,
+      + RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES,
     totalBytes: RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET,
   };
 }

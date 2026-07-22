@@ -389,8 +389,8 @@ function buildStableRouteCapabilityPrompt(
 function buildAssistantLowUsageGuidanceText(): string {
   return [
     "Low hosted usage:",
-    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then casually mention in at most one short sentence that your time together may pause soon unless more usage is added.",
-    "- Do not expose token counts, prices, internal accounting, or contributor identity. Do not dramatize, guilt, pressure, send a separate warning, or repeat the warning if it already appeared in the recent conversation.",
+    "- Only when trusted turn context says this conversation's Murph usage is running low, complete the user's current request first, then read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before replying.",
+    "- Follow that skill's single final usage-segment contract, using the `---` delimiter only when the channel reply-style guidance supports bubbles. Do not send a separate warning or repeat one already visible in the recent conversation.",
   ].join("\n");
 }
 
@@ -1209,7 +1209,7 @@ function buildAssistantSkillRouteHintText(): string {
   return [
     "Murph skill router:",
     "- Specialized skills live at `$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md`. Route by the user's visible outcome and read the primary owner. If routing is ambiguous, inspect at most two candidates; this cap is discovery-only. Then follow explicit handoffs and load every distinct safety or execution owner. Do not preload skills or call a discovery CLI just to route.",
-    "- Setup/support: murph-onboarding, experiment-onboarding, behavior-followthrough, self-management-experiments.",
+    "- Setup/support: murph-onboarding, hosted-low-usage, experiment-onboarding, behavior-followthrough, self-management-experiments.",
     "- Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.",
     "- Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.",
     "- Sleep safety outranks fatigue/clock routing: snoring/gasping, unrefreshing sleep with enough opportunity, unexplained awakenings, morning headache, sleep attacks, or dangerous daytime sleepiness -> sleep-improvement. If driving/work safety is affected, give immediate safety guidance before coaching.",
@@ -1260,7 +1260,7 @@ function buildAssistantToolTruthfulnessText(): string {
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
-  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room, except when an owning group workflow explicitly provides a clearly labeled per-person enrollment link. Describe that exception as changing only that participant's account, never the room settings.";
+  return "Never claim you searched, read, wrote, logged, updated, or inspected something unless a real group-authorized command or runtime action happened. Never invent or guess join, share, enrollment, or authorization URLs. Do not send personal settings, wearable-connect, OAuth, billing, account, or browser-handoff links from this room. Two narrow group-owned exceptions are allowed: a clearly labeled per-person enrollment link explicitly provided by its owning workflow, and a same-turn first-party group funding URL returned by `murph.group action=\"read_usage\"` after the group asks about usage or adding more. Describe a per-person enrollment link as changing only that participant's account, never the room settings. Never describe the group funding link as a personal billing or account-management page.";
 }
 
 function buildAssistantMaintenanceExecutionGuidanceText(): string {
