@@ -270,10 +270,34 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   });
 
   test.each([
-    { foregroundReplyFailed: 0, retryKind: "bootstrap gap" },
-    { foregroundReplyFailed: 1, retryKind: "reply failure" },
+    {
+      foregroundReplyFailed: 0,
+      nextWakeAt: "2026-04-26T00:00:30.000Z",
+      nextWakeReason: "assistant",
+      retryKind: "bootstrap gap",
+    },
+    {
+      foregroundReplyFailed: 1,
+      nextWakeAt: "2026-04-26T00:00:30.000Z",
+      nextWakeReason: "assistant",
+      retryKind: "reply failure",
+    },
+    {
+      foregroundReplyFailed: undefined,
+      nextWakeAt: "2026-04-26T00:00:30.000Z",
+      nextWakeReason: "assistant",
+      retryKind: "future pre-reply assistant work",
+    },
+    {
+      foregroundReplyFailed: undefined,
+      nextWakeAt: TEST_NOW,
+      nextWakeReason: "mailbox",
+      retryKind: "immediate pre-reply mailbox work",
+    },
   ])("does not locally rerun a retryable selected initial input ahead of a distinct remainder ($retryKind)", async ({
     foregroundReplyFailed,
+    nextWakeAt,
+    nextWakeReason,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-retryable-input-tail-"));
     const olderItem = createMailboxItem({
@@ -367,8 +391,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             return {
               checkpointReason: "assistant_runtime_commit",
               foregroundReplyFailed,
-              nextWakeAt: "2026-04-26T00:00:30.000Z",
-              nextWakeReason: "assistant",
+              nextWakeAt,
+              nextWakeReason,
               progressed: true,
             };
           }
@@ -416,6 +440,107 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         olderInputId,
         newerInputId,
       ]);
+      assert.deepEqual(checkpointRequests, []);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("restores a pre-reply selected input ahead of its existing boundary tail", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-pre-reply-input-tail-"));
+    const olderItem = createMailboxItem({
+      id: "mailbox_pre_reply_input_tail_older",
+      laneSeq: "1",
+      occurredAt: "2026-04-26T00:00:01.000Z",
+    });
+    const newerItem = createMailboxItem({
+      id: "mailbox_pre_reply_input_tail_newer",
+      laneSeq: "2",
+      occurredAt: "2026-04-26T00:00:02.000Z",
+    });
+    const importedInputIds: string[] = [];
+    const importedInputs: Array<Awaited<ReturnType<typeof upsertAssistantInputEvent>>> = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const selectedInputIdsByPass: string[][] = [];
+    const { mailboxPort } = createMailboxPort({ items: [olderItem, newerItem] });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_pre_reply_input_tail",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem(item) {
+          const stored = await upsertAssistantInputEvent({
+            event: createStoredAssistantInputEventForMailboxItem(
+              item.item,
+              `pre-reply input ${item.item.laneSeq}`,
+            ),
+            vault: vaultRoot,
+          });
+          importedInputIds.push(stored.inputId);
+          importedInputs.push(stored);
+          await enqueueHostedPendingAssistantInputId({
+            inputId: stored.inputId,
+            vaultRoot,
+          });
+          return {
+            assistantInputId: stored.inputId,
+            status: "imported",
+          };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests }),
+        }),
+        requestId: "request_synthetic_pre_reply_input_tail",
+        async runAssistantPhase(phaseInput) {
+          const selection = await selectHostedAssistantInputIds({
+            freshAssistantInputIds:
+              phaseInput.initialMailboxImport.importResult.assistantInputIds ?? [],
+            mode: "foreground",
+            vaultRoot,
+          });
+          selectedInputIdsByPass.push(selection.inputIds);
+          const selected = importedInputs[0];
+          assert.ok(selected);
+          await saveAssistantAutomationState(vaultRoot, {
+            autoReply: [{
+              channel: "linq",
+              eligibleAfter: selected.cursor,
+              enabledAt: TEST_NOW,
+            }],
+            updatedAt: TEST_NOW,
+            version: 1,
+          });
+          return {
+            checkpointReason: "system_mailbox_receipt",
+            nextWakeAt: TEST_NOW,
+            nextWakeReason: "assistant",
+            progressed: true,
+          };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(selectedInputIdsByPass, [[importedInputIds[0]]]);
+      assert.deepEqual(
+        await readExistingHostedPendingAssistantInputIds({ vaultRoot }),
+        importedInputIds,
+      );
+      assert.deepEqual(
+        result.latestAssistantInputBatch?.assistantInputIds,
+        importedInputIds,
+      );
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });

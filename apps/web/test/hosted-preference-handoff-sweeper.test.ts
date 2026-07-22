@@ -258,6 +258,56 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
+  it("retries an exact current Clinical Records wake after a hung shared handoff", async () => {
+    const store = buildStore([{
+      mailboxItemId: "mailbox_clinical_hung_retry",
+      userId: "member_clinical_hung_retry",
+    }]);
+    let handoffCalls = 0;
+    const requestHandoff = vi.fn(() => {
+      handoffCalls += 1;
+      return handoffCalls === 1
+        ? new Promise<never>(() => {})
+        : Promise.resolve({
+            signalAccepted: true as const,
+            workflowId: "hosted-user-runtime:synthetic",
+          });
+    });
+
+    await expect(runHostedPreferenceHandoffSweeper({
+      handoffTimeoutMs: 1,
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+      store,
+    })).resolves.toMatchObject({
+      handoffAccepted: 0,
+      handoffFailed: 1,
+    });
+    await expect(runHostedPreferenceHandoffSweeper({
+      handoffTimeoutMs: 1,
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+      requestHandoff,
+      store,
+    })).resolves.toMatchObject({
+      handoffAccepted: 1,
+      handoffFailed: 0,
+    });
+
+    expect(requestHandoff).toHaveBeenCalledTimes(2);
+    expect(requestHandoff).toHaveBeenNthCalledWith(1, {
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_clinical_hung_retry",
+      mailboxItemId: "mailbox_clinical_hung_retry",
+    });
+    expect(requestHandoff).toHaveBeenNthCalledWith(2, {
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_clinical_hung_retry",
+      mailboxItemId: "mailbox_clinical_hung_retry",
+    });
+  });
+
   it("requests one wake per user when multiple pending mailbox kinds exist", async () => {
     const requestHandoff = vi.fn(async () => ({
       signalAccepted: true as const,
