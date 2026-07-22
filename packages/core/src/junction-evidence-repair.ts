@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 
 import {
+  FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION,
   eventRecordSchema,
   integrationIngestRecordSchema,
   type IntegrationIngestRecord,
@@ -483,6 +484,7 @@ function planShard(
     candidateRowCount += 1;
     const rewritten = integrationIngestRecordSchema.parse({
       ...record,
+      schemaVersion: FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION,
       evidenceRetention: "filtered",
       parts: retainedParts,
       outputs: {

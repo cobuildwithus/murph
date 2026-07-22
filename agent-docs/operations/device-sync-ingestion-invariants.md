@@ -87,8 +87,10 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    tail and ordinarily stops after 8 MiB or 64 complete rows. If the newest row
    itself crosses 8 MiB, the reader may finish only that row, bounded by the 128
    MiB journal-row limit plus its preceding delimiter. A tail miss may perform
-   one authoritative target-shard scan whose result is reused by append
-   planning; it never performs a second full id scan. Core separately
+   one authoritative target-shard scan that derives both candidate ingest ids
+   and the incoming evidence, receipt, event-link, and sample-link proof. Append
+   planning reuses that result and never performs a second full target-shard
+   scan. Core separately
    suppresses a repeated row and audit when the same provider account has no
    new canonical output, receipt state, or evidence identity. When a repeated
    multi-part delivery changes only some evidence, the new ingest row retains
@@ -107,12 +109,15 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    evidence-role mapping needed to reject ambiguity. Evidence for a newly
    appended event revision is always retained even when identical evidence
    bytes were seen before. An
-   explicit `evidenceRetention: "filtered"` marker gives current and historical
-   filtered rows the same partial-evidence replay semantics; the original row
-   id alone can never prove that the complete delivery remains stored. The
-   bounded `vault repair-junction-evidence-duplicates` owner may mark historical
-   live rows only after the same provider/account/month evidence fingerprint
-   and every event association already exist earlier in valid history. Event
+   current filtered delivery stays on `murph.integration-ingest.v1` and is
+   identified by its deterministic incremental-evidence id. Historical rows
+   rewritten by the repair use `murph.integration-ingest.v2` with the required
+   `evidenceRetention: "filtered"` marker. Both receive the same
+   partial-evidence replay semantics, but neither the marker nor the row id
+   alone can prove that the complete delivery remains stored. The bounded
+   `vault repair-junction-evidence-duplicates` owner may rewrite historical live
+   rows only after the same provider/account/month evidence fingerprint and
+   every event association already exist earlier in valid history. Event
    spines that are missing, malformed, repeated, or revised protect their
    evidence. The repair preserves row ids, receipts, provenance, canonical
    output ids, counts, changed evidence, and new associations; archived shards

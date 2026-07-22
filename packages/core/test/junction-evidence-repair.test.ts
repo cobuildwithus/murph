@@ -5,9 +5,16 @@ import { promises as fs } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { test } from "vitest";
 
-import type { AuditRecord, EventRecord, IntegrationIngestRecord } from "@murphai/contracts";
+import {
+  FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION,
+  integrationIngestRecordSchema,
+  type AuditRecord,
+  type EventRecord,
+  type IntegrationIngestRecord,
+} from "@murphai/contracts";
 
 import {
+  buildIntegrationEvidencePart,
   deterministicContractId,
   importDeviceBatch,
   initializeVault,
@@ -122,13 +129,21 @@ test("historical Junction evidence repair filters proven duplicate parts and exa
   }) as IntegrationIngestRecord[];
   assert.equal(rows.length, 2);
   assert.deepEqual(rows[0], proof);
-  assert.equal(rows[1]?.id, current.id);
-  assert.equal(rows[1]?.evidenceRetention, "filtered");
-  assert.deepEqual(rows[1]?.parts, []);
-  assert.deepEqual(rows[1]?.outputs.events, [{ id: imported.events[0]?.id, roles: [] }]);
-  assert.deepEqual(rows[1]?.receipt, current.receipt);
-  assert.deepEqual(rows[1]?.provenance, current.provenance);
-  assert.deepEqual(rows[1]?.counts, current.counts);
+  const filteredRow = rows[1];
+  assert.ok(filteredRow);
+  assert.equal(filteredRow.id, current.id);
+  if (filteredRow.schemaVersion !== FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION) {
+    assert.fail("Historical repair must write the explicit filtered ingest version.");
+  }
+  assert.equal(filteredRow.evidenceRetention, "filtered");
+  assert.deepEqual(filteredRow.parts, []);
+  assert.deepEqual(filteredRow.outputs.events, [{ id: imported.events[0]?.id, roles: [] }]);
+  assert.deepEqual(filteredRow.receipt, current.receipt);
+  assert.deepEqual(filteredRow.provenance, current.provenance);
+  assert.deepEqual(filteredRow.counts, current.counts);
+  assert.equal(integrationIngestRecordSchema.safeParse(filteredRow).success, true);
+  const { evidenceRetention: _evidenceRetention, ...unmarkedFilteredRow } = filteredRow;
+  assert.equal(integrationIngestRecordSchema.safeParse(unmarkedFilteredRow).success, false);
 
   const repairAudits = await readJsonlRecords({
     vaultRoot,
@@ -156,6 +171,101 @@ test("historical Junction evidence repair filters proven duplicate parts and exa
   assert.equal(rerun.hasWork, false);
   assert.equal(rerun.mutated, false);
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeNoWorkApply);
+});
+
+test("historical Junction evidence repair converges when proof is beyond the live novelty row budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-evidence-repair-deep-proof");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const deviceInput = buildInput(vaultRoot);
+  const imported = await importDeviceBatch(deviceInput);
+  assert.ok(imported.ingestShardPath);
+  const [current] = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.ingestShardPath,
+  }) as IntegrationIngestRecord[];
+  assert.ok(current);
+  const proof: IntegrationIngestRecord = {
+    ...current,
+    id: deterministicContractId("xfm", `deep-proof:${current.id}`),
+  };
+  const fillerRows = Array.from({ length: 65 }, (_, index): IntegrationIngestRecord => ({
+    ...current,
+    id: deterministicContractId("xfm", `deep-proof-filler:${index}:${current.id}`),
+  }));
+  await fs.writeFile(
+    path.join(vaultRoot, imported.ingestShardPath),
+    `${[proof, ...fillerRows, current].map((row) => JSON.stringify(row)).join("\n")}\n`,
+    "utf8",
+  );
+
+  const firstRepair = await repairJunctionEvidenceDuplicates({ apply: true, vaultRoot });
+  assert.equal(firstRepair.mutated, true);
+  const firstReplay = await importDeviceBatch(deviceInput);
+  assert.equal(firstReplay.applied, false);
+  assert.equal(firstReplay.ingestId, null);
+
+  const secondRepair = await repairJunctionEvidenceDuplicates({ apply: true, vaultRoot });
+  assert.equal(secondRepair.mutated, false);
+  const secondReplay = await importDeviceBatch(deviceInput);
+  assert.equal(secondReplay.applied, false);
+  assert.equal(secondReplay.ingestId, null);
+});
+
+test("historical Junction evidence repair converges when proof is beyond the live novelty byte budget", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-evidence-repair-large-proof-gap");
+  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+  const deviceInput = buildInput(vaultRoot);
+  const imported = await importDeviceBatch(deviceInput);
+  assert.ok(imported.ingestShardPath);
+  const [current] = await readJsonlRecords({
+    vaultRoot,
+    relativePath: imported.ingestShardPath,
+  }) as IntegrationIngestRecord[];
+  assert.ok(current);
+  assert.ok(current.accountId);
+  const proof: IntegrationIngestRecord = {
+    ...current,
+    id: deterministicContractId("xfm", `large-gap-proof:${current.id}`),
+  };
+  const fillerPart = buildIntegrationEvidencePart({
+    role: "large-gap",
+    fileName: "large-gap.json",
+    mediaType: "application/json",
+    content: "x".repeat(8 * 1024 * 1024 + 1024),
+  });
+  const filler: IntegrationIngestRecord = {
+    schemaVersion: "murph.integration-ingest.v1",
+    id: deterministicContractId("xfm", `large-gap-filler:${current.id}`),
+    provider: "other-provider",
+    accountId: current.accountId,
+    source: "device",
+    importedAt: current.importedAt,
+    parts: [fillerPart],
+    outputs: {
+      events: [],
+      eventIdsComplete: true,
+      sampleIds: [],
+      sampleIdsComplete: true,
+    },
+    counts: { eventCount: 0, sampleCount: 0 },
+  };
+  await fs.writeFile(
+    path.join(vaultRoot, imported.ingestShardPath),
+    `${[proof, filler, current].map((row) => JSON.stringify(row)).join("\n")}\n`,
+    "utf8",
+  );
+
+  const firstRepair = await repairJunctionEvidenceDuplicates({ apply: true, vaultRoot });
+  assert.equal(firstRepair.mutated, true);
+  const firstReplay = await importDeviceBatch(deviceInput);
+  assert.equal(firstReplay.applied, false);
+  assert.equal(firstReplay.ingestId, null);
+
+  const secondRepair = await repairJunctionEvidenceDuplicates({ apply: true, vaultRoot });
+  assert.equal(secondRepair.mutated, false);
+  const secondReplay = await importDeviceBatch(deviceInput);
+  assert.equal(secondReplay.applied, false);
+  assert.equal(secondReplay.ingestId, null);
 });
 
 test("historical Junction evidence repair preserves an exact part with a novel event link", async () => {
@@ -303,56 +413,90 @@ test("historical Junction evidence repair preserves evidence linked to a multi-r
   assert.equal(result.revisionProtectedPartCount, 1);
 });
 
-test("current filtered device ingests carry explicit partial-evidence semantics", async () => {
-  const vaultRoot = await makeTempDirectory("murph-junction-evidence-current-marker");
+test("historical Junction evidence repair preserves evidence linked to a malformed event spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-evidence-malformed-event");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
-  const firstInput = buildInput(vaultRoot);
-  const first = await importDeviceBatch(firstInput);
-  const changedInput = {
-    ...firstInput,
-    importedAt: "2026-06-04T21:00:00.000Z",
-    events: [
-      ...firstInput.events,
-      {
-        kind: "observation" as const,
-        occurredAt: "2026-06-03T22:00:00.000Z",
-        recordedAt: "2026-06-04T21:00:00.000Z",
-        title: "Daily sleep",
-        externalRef: {
-          system: "junction",
-          resourceType: "daily-sleep",
-          resourceId: "sleep-2026-06-03",
-        },
-        fields: {
-          metric: "sleep-score",
-          observationGrain: "summary" as const,
-          unit: "%",
-          value: 90,
-        },
-        evidenceRoles: ["junction-summary-sleep"],
-      },
-    ],
-    evidenceParts: [
-      ...firstInput.evidenceParts,
-      {
-        role: "junction-summary-sleep",
-        fileName: "junction-summary-sleep.json",
-        content: { date: "2026-06-03", score: 90 },
-      },
-    ],
-  };
-  const changed = await importDeviceBatch(changedInput);
-  assert.ok(first.applied);
-  assert.ok(changed.applied);
-  assert.ok(changed.ingestId);
-  const rows = await readJsonlRecords({
-    vaultRoot,
-    relativePath: changed.ingestShardPath as string,
-  }) as IntegrationIngestRecord[];
-  const stored = rows.find((row) => row.id === changed.ingestId);
-  assert.equal(stored?.evidenceRetention, "filtered");
-  assert.equal(stored?.parts.length, 1);
+  const imported = await importDeviceBatch(buildInput(vaultRoot));
+  assert.ok(imported.ingestShardPath);
+  await prependHistoricalProofRow({ ingestPath: imported.ingestShardPath, vaultRoot });
+  const eventPath = imported.eventShardPaths[0];
+  assert.ok(eventPath);
+  const [event] = await readJsonlRecords({ vaultRoot, relativePath: eventPath }) as EventRecord[];
+  assert.ok(event);
+  await fs.writeFile(
+    path.join(vaultRoot, eventPath),
+    `${JSON.stringify({ ...event, unsupportedField: true })}\n`,
+    "utf8",
+  );
+
+  const result = await repairJunctionEvidenceDuplicates({ vaultRoot });
+  assert.equal(result.hasWork, false);
+  assert.equal(result.candidatePartCount, 0);
+  assert.equal(result.revisionProtectedPartCount, 1);
 });
+
+test.each(["junction", "other-provider"] as const)(
+  "current %s filtered device ingests keep v1 incremental-id semantics",
+  async (provider) => {
+    const vaultRoot = await makeTempDirectory("murph-junction-evidence-current-marker");
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const firstInput = { ...buildInput(vaultRoot), provider };
+    const first = await importDeviceBatch(firstInput);
+    const changedInput = {
+      ...firstInput,
+      importedAt: "2026-06-04T21:00:00.000Z",
+      events: [
+        ...firstInput.events,
+        {
+          kind: "observation" as const,
+          occurredAt: "2026-06-03T22:00:00.000Z",
+          recordedAt: "2026-06-04T21:00:00.000Z",
+          title: "Daily sleep",
+          externalRef: {
+            system: "junction",
+            resourceType: "daily-sleep",
+            resourceId: "sleep-2026-06-03",
+          },
+          fields: {
+            metric: "sleep-score",
+            observationGrain: "summary" as const,
+            unit: "%",
+            value: 90,
+          },
+          evidenceRoles: ["junction-summary-sleep"],
+        },
+      ],
+      evidenceParts: [
+        ...firstInput.evidenceParts,
+        {
+          role: "junction-summary-sleep",
+          fileName: "junction-summary-sleep.json",
+          content: { date: "2026-06-03", score: 90 },
+        },
+      ],
+    };
+    const changed = await importDeviceBatch(changedInput);
+    assert.ok(first.applied);
+    assert.ok(changed.applied);
+    assert.ok(changed.ingestId);
+    const rows = await readJsonlRecords({
+      vaultRoot,
+      relativePath: changed.ingestShardPath as string,
+    }) as IntegrationIngestRecord[];
+    const stored = rows.find((row) => row.id === changed.ingestId);
+    assert.equal(stored?.schemaVersion, "murph.integration-ingest.v1");
+    assert.equal(stored ? "evidenceRetention" in stored : true, false);
+    assert.equal(stored?.parts.length, 1);
+    assert.ok(stored);
+    assert.equal(
+      integrationIngestRecordSchema.safeParse({ ...stored, evidenceRetention: "filtered" }).success,
+      false,
+    );
+    const replay = await importDeviceBatch(changedInput);
+    assert.equal(replay.applied, false);
+    assert.equal(replay.ingestId, null);
+  },
+);
 
 test("historical Junction evidence repair preserves later changed evidence and event revisions", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-evidence-later-revision");
@@ -386,7 +530,7 @@ test("historical Junction evidence repair preserves later changed evidence and e
     relativePath: changed.ingestShardPath as string,
   }) as IntegrationIngestRecord[];
   const changedRow = rows.find((row) => row.id === changed.ingestId);
-  assert.equal(changedRow?.evidenceRetention, undefined);
+  assert.equal(changedRow ? "evidenceRetention" in changedRow : true, false);
   assert.equal(changedRow?.parts.length, 1);
 
   const eventPath = changed.eventShardPaths[0];

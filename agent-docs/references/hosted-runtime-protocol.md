@@ -1076,6 +1076,11 @@ The CLI owns eligibility, proof, locking, mutation, validation, and audit; the
 assistant must not inspect other vault state, reinterpret candidates, edit
 JSONL directly, or discover additional maintenance commands. A completed apply
 is non-replayable provider work for maintenance retry classification.
+Historical rows changed by that apply use the strict
+`murph.integration-ingest.v2` filtered-row shape. The first hosted release that
+can apply the repair therefore requires an immediate runner rollout and exact
+managed-container bundle-fingerprint proof before the automation may run; once
+any v2 row exists, the v2-capable bundle is the restore rollback floor.
 
 Hosted Stripe webhook routes keep raw request bodies and Stripe signatures in
 the route/service verification path only. After verification, web stores the

@@ -47,7 +47,6 @@ export interface BuildIntegrationIngestRecordInput {
   accountId?: string;
   source: "manual" | "import" | "device" | "derived";
   importedAt: string;
-  evidenceRetention?: "filtered";
   receipt?: unknown;
   parts: readonly IntegrationEvidencePart[];
   eventOutputs: readonly IntegrationIngestEventOutput[];
@@ -79,6 +78,7 @@ export interface IntegrationIngestIdInspection {
   historyComplete: boolean;
   invalidIds: ReadonlySet<string>;
   logicalPath: string;
+  noveltySelection: NovelIntegrationIngestEvidenceSelection | null;
   requestedIds: ReadonlySet<string>;
   unsafe: boolean;
 }
@@ -125,6 +125,11 @@ export interface SelectNovelIntegrationIngestEvidenceInput {
 export interface NovelIntegrationIngestEvidenceSelection {
   parts: IntegrationEvidencePart[];
   receiptIsNovel: boolean;
+}
+
+interface InspectIntegrationIngestIdsOptions {
+  fullScan?: boolean;
+  novelty?: SelectNovelIntegrationIngestEvidenceInput;
 }
 
 interface RawIntegrationIngestJsonlRow {
@@ -269,9 +274,6 @@ export function buildIntegrationIngestRecord(
     ...(input.accountId ? { accountId: input.accountId } : {}),
     source: input.source,
     importedAt: input.importedAt,
-    ...(input.evidenceRetention === undefined
-      ? {}
-      : { evidenceRetention: input.evidenceRetention }),
     ...(input.receipt ? { receipt: compactIntegrationIngestReceipt(input.receipt) } : {}),
     parts: [...input.parts],
     outputs: {
@@ -611,13 +613,152 @@ async function scanIntegrationIngestNoveltyTail(
   }
 }
 
+interface IntegrationIngestNoveltyAccumulator {
+  buildSelection(): NovelIntegrationIngestEvidenceSelection;
+  failOpenSelection(): NovelIntegrationIngestEvidenceSelection;
+  visitRaw(raw: unknown, sourcePath: string): IntegrationIngestNoveltyTailDecision;
+}
+
+function buildFailOpenNoveltySelection(
+  input: SelectNovelIntegrationIngestEvidenceInput,
+): NovelIntegrationIngestEvidenceSelection {
+  return {
+    parts: [...input.parts],
+    receiptIsNovel: input.receipt !== undefined,
+  };
+}
+
+function createIntegrationIngestNoveltyAccumulator(
+  input: SelectNovelIntegrationIngestEvidenceInput,
+  logicalPath: string,
+): IntegrationIngestNoveltyAccumulator {
+  const requestedFingerprints = new Set(input.parts.map(integrationEvidenceFingerprint));
+  const existingFingerprints = new Set<string>();
+  const requestedEventIdsByFingerprint = new Map<string, ReadonlySet<string>>(
+    input.parts.map((part) => [
+      integrationEvidenceFingerprint(part),
+      input.eventIdsByRole?.get(part.role) ?? new Set<string>(),
+    ]),
+  );
+  const existingEventLinks = new Set<string>();
+  const existingSampleLinks = new Set<string>();
+  const receiptRequiresPayloadIdentity = input.parts.length === 0;
+  const requestedReceiptFingerprint = input.receipt
+    ? integrationIngestReceiptFingerprint(input.receipt, receiptRequiresPayloadIdentity)
+    : null;
+  let receiptIsNovel = requestedReceiptFingerprint !== null;
+
+  const selectionIsComplete = (): boolean =>
+    existingFingerprints.size === requestedFingerprints.size
+    && [...requestedEventIdsByFingerprint.entries()].every(([fingerprint, eventIds]) =>
+      [...eventIds].every((eventId) => existingEventLinks.has(`${fingerprint}\u0000${eventId}`))
+    )
+    && [...requestedFingerprints].every((fingerprint) =>
+      [...(input.sampleIds ?? [])].every((sampleId) =>
+        existingSampleLinks.has(`${fingerprint}\u0000${sampleId}`)
+      )
+    )
+    && !receiptIsNovel;
+
+  return {
+    buildSelection: () => ({
+      parts: input.parts.filter((part) =>
+        !existingFingerprints.has(integrationEvidenceFingerprint(part))
+        || [...(input.eventIdsByRole?.get(part.role) ?? [])].some((eventId) =>
+          !existingEventLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${eventId}`)
+        )
+        || [...(input.sampleIds ?? [])].some((sampleId) =>
+          !existingSampleLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${sampleId}`)
+        )
+      ),
+      receiptIsNovel,
+    }),
+    failOpenSelection: () => buildFailOpenNoveltySelection(input),
+    visitRaw(raw, sourcePath) {
+      if (!isRecord(raw) || raw.provider !== input.provider) {
+        return "continue";
+      }
+      const rawAccountId = typeof raw.accountId === "string" ? raw.accountId : undefined;
+      if ((rawAccountId ?? null) !== (input.accountId ?? null)) {
+        return "continue";
+      }
+      if (!rawIntegrationIngestCouldProveNovelty({
+        raw,
+        receiptRequiresPayloadIdentity,
+        requestedFingerprints,
+        requestedReceiptFingerprint,
+      })) {
+        return "continue";
+      }
+
+      let record: IntegrationIngestRecord;
+      try {
+        record = parseIntegrationIngestRecord(raw, sourcePath);
+        assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
+        assertIntegrationIngestRecordIntegrity(record);
+      } catch {
+        return "unsafe";
+      }
+      if (!integrationIngestAccountMatches(record, input.accountId)) {
+        return "continue";
+      }
+
+      for (const part of record.parts) {
+        const fingerprint = integrationEvidenceFingerprint(part);
+        if (!requestedFingerprints.has(fingerprint)) {
+          continue;
+        }
+        existingFingerprints.add(fingerprint);
+        const requestedEventIds = requestedEventIdsByFingerprint.get(fingerprint);
+        if (requestedEventIds && requestedEventIds.size > 0) {
+          for (const output of record.outputs.events) {
+            if (requestedEventIds.has(output.id) && output.roles.includes(part.role)) {
+              existingEventLinks.add(`${fingerprint}\u0000${output.id}`);
+            }
+          }
+        }
+        for (const sampleId of record.outputs.sampleIds) {
+          if (input.sampleIds?.has(sampleId)) {
+            existingSampleLinks.add(`${fingerprint}\u0000${sampleId}`);
+          }
+        }
+      }
+      if (
+        requestedReceiptFingerprint
+        && record.receipt
+        && integrationIngestReceiptFingerprint(
+          record.receipt,
+          receiptRequiresPayloadIdentity,
+        ) === requestedReceiptFingerprint
+      ) {
+        receiptIsNovel = false;
+      }
+
+      return selectionIsComplete() ? "complete" : "continue";
+    },
+  };
+}
+
 export async function inspectIntegrationIngestIdsForImportedAt(
   vaultRoot: string,
   importedAt: string,
   requestedIds: ReadonlySet<string>,
-  options: { fullScan?: boolean } = {},
+  options: InspectIntegrationIngestIdsOptions = {},
 ): Promise<IntegrationIngestIdInspection> {
   const logicalPath = integrationIngestShardPath(importedAt);
+  if (
+    options.novelty
+    && (
+      !options.fullScan
+      || options.novelty.vaultRoot !== vaultRoot
+      || options.novelty.importedAt !== importedAt
+    )
+  ) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_INVALID",
+      "Authoritative evidence selection requires the matching full ingest-shard inspection.",
+    );
+  }
   const sources = await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, [logicalPath]);
   const source = sources.length === 1 ? sources[0] : undefined;
   const archivedLogicalPaths = new Set(
@@ -626,6 +767,19 @@ export async function inspectIntegrationIngestIdsForImportedAt(
   const entriesById = new Map<string, IntegrationIngestRecord>();
   const invalidIds = new Set<string>();
   let unsafe = sources.length > 1;
+  let noveltyUnsafe = sources.length > 1;
+  const noveltyAccumulator = options.novelty?.accountId
+    ? createIntegrationIngestNoveltyAccumulator(options.novelty, logicalPath)
+    : null;
+  const resolveNoveltySelection = (): NovelIntegrationIngestEvidenceSelection | null => {
+    if (!options.novelty) {
+      return null;
+    }
+    if (!noveltyAccumulator || unsafe || noveltyUnsafe) {
+      return buildFailOpenNoveltySelection(options.novelty);
+    }
+    return noveltyAccumulator.buildSelection();
+  };
 
   const visitRaw = (raw: unknown, sourcePath: string): void => {
     if (!isRecord(raw) || typeof raw.id !== "string" || !requestedIds.has(raw.id)) {
@@ -654,6 +808,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
       historyComplete: !unsafe,
       invalidIds,
       logicalPath,
+      noveltySelection: resolveNoveltySelection(),
       requestedIds: new Set(requestedIds),
       unsafe,
     };
@@ -689,6 +844,9 @@ export async function inspectIntegrationIngestIdsForImportedAt(
           continue;
         }
         visitRaw(raw, source.sourcePath);
+        if (noveltyAccumulator?.visitRaw(raw, source.sourcePath) === "unsafe") {
+          noveltyUnsafe = true;
+        }
         if (unsafe) {
           break;
         }
@@ -710,6 +868,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
       historyComplete: !unsafe,
       invalidIds,
       logicalPath,
+      noveltySelection: resolveNoveltySelection(),
       requestedIds: new Set(requestedIds),
       unsafe,
     };
@@ -719,6 +878,9 @@ export async function inspectIntegrationIngestIdsForImportedAt(
     try {
       for await (const row of readIntegrationIngestJsonlRows(vaultRoot, [source])) {
         visitRaw(row.raw, row.sourcePath);
+        if (noveltyAccumulator?.visitRaw(row.raw, row.sourcePath) === "unsafe") {
+          noveltyUnsafe = true;
+        }
       }
     } catch {
       unsafe = true;
@@ -731,6 +893,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
       historyComplete: !unsafe,
       invalidIds,
       logicalPath,
+      noveltySelection: resolveNoveltySelection(),
       requestedIds: new Set(requestedIds),
       unsafe,
     };
@@ -763,6 +926,7 @@ export async function inspectIntegrationIngestIdsForImportedAt(
     historyComplete: scan.historyComplete,
     invalidIds,
     logicalPath,
+    noveltySelection: null,
     requestedIds: new Set(requestedIds),
     unsafe: scan.unsafe || unsafe,
   };
@@ -784,152 +948,43 @@ export async function selectNovelIntegrationIngestEvidence(
     };
   }
 
-  const requestedFingerprints = new Set(input.parts.map(integrationEvidenceFingerprint));
-  const existingFingerprints = new Set<string>();
-  const requestedEventIdsByFingerprint = new Map<string, ReadonlySet<string>>(
-    input.parts.map((part) => [
-      integrationEvidenceFingerprint(part),
-      input.eventIdsByRole?.get(part.role) ?? new Set<string>(),
-    ]),
-  );
-  const existingEventLinks = new Set<string>();
-  const existingSampleLinks = new Set<string>();
-  const receiptRequiresPayloadIdentity = input.parts.length === 0;
-  const requestedReceiptFingerprint = input.receipt
-    ? integrationIngestReceiptFingerprint(input.receipt, receiptRequiresPayloadIdentity)
-    : null;
-  let receiptIsNovel = requestedReceiptFingerprint !== null;
-  const failOpenSelection = (): NovelIntegrationIngestEvidenceSelection => ({
-    parts: [...input.parts],
-    receiptIsNovel: requestedReceiptFingerprint !== null,
-  });
-  const buildSelection = (): NovelIntegrationIngestEvidenceSelection => ({
-    parts: input.parts.filter((part) =>
-      !existingFingerprints.has(integrationEvidenceFingerprint(part))
-      || [...(input.eventIdsByRole?.get(part.role) ?? [])].some((eventId) =>
-        !existingEventLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${eventId}`)
-      )
-      || [...(input.sampleIds ?? [])].some((sampleId) =>
-        !existingSampleLinks.has(`${integrationEvidenceFingerprint(part)}\u0000${sampleId}`)
-      )
-    ),
-    receiptIsNovel,
-  });
-  const selectionIsComplete = (): boolean =>
-    existingFingerprints.size === requestedFingerprints.size
-    && [...requestedEventIdsByFingerprint.entries()].every(([fingerprint, eventIds]) =>
-      [...eventIds].every((eventId) => existingEventLinks.has(`${fingerprint}\u0000${eventId}`))
-    )
-    && [...requestedFingerprints].every((fingerprint) =>
-      [...(input.sampleIds ?? [])].every((sampleId) =>
-        existingSampleLinks.has(`${fingerprint}\u0000${sampleId}`)
-      )
-    )
-    && !receiptIsNovel;
-
-  if (requestedFingerprints.size === 0 && !receiptIsNovel) {
+  if (input.parts.length === 0 && input.receipt === undefined) {
     return { parts: [], receiptIsNovel: false };
   }
+
+  const logicalPath = integrationIngestShardPath(input.importedAt);
+  const novelty = createIntegrationIngestNoveltyAccumulator(input, logicalPath);
 
   let sources: IntegrationIngestRowSource[];
   try {
     sources = await listIntegrationIngestRowSourcesForLogicalPaths(
       input.vaultRoot,
-      [integrationIngestShardPath(input.importedAt)],
+      [logicalPath],
     );
   } catch {
-    return failOpenSelection();
+    return novelty.failOpenSelection();
   }
 
   const source = sources.length === 1 ? sources[0] : undefined;
   if (!source) {
-    return failOpenSelection();
+    return novelty.failOpenSelection();
   }
-  const visitRaw = (
-    raw: unknown,
-    sourcePath: string,
-    logicalPath: string,
-  ): IntegrationIngestNoveltyTailDecision => {
-    if (!isRecord(raw) || raw.provider !== input.provider) {
-      return "continue";
-    }
-    const rawAccountId = typeof raw.accountId === "string" ? raw.accountId : undefined;
-    if ((rawAccountId ?? null) !== (input.accountId ?? null)) {
-      return "continue";
-    }
-    if (!rawIntegrationIngestCouldProveNovelty({
-      raw,
-      receiptRequiresPayloadIdentity,
-      requestedFingerprints,
-      requestedReceiptFingerprint,
-    })) {
-      return "continue";
-    }
-
-    let record: IntegrationIngestRecord;
-    try {
-      record = parseIntegrationIngestRecord(raw, sourcePath);
-      assertIntegrationIngestShard(record.id, record.importedAt, logicalPath);
-      assertIntegrationIngestRecordIntegrity(record);
-    } catch {
-      return "unsafe";
-    }
-    if (!integrationIngestAccountMatches(record, input.accountId)) {
-      return "continue";
-    }
-
-    for (const part of record.parts) {
-      const fingerprint = integrationEvidenceFingerprint(part);
-      if (!requestedFingerprints.has(fingerprint)) {
-        continue;
-      }
-      existingFingerprints.add(fingerprint);
-      const requestedEventIds = requestedEventIdsByFingerprint.get(fingerprint);
-      if (requestedEventIds && requestedEventIds.size > 0) {
-        for (const output of record.outputs.events) {
-          if (
-            requestedEventIds.has(output.id)
-            && output.roles.includes(part.role)
-          ) {
-            existingEventLinks.add(`${fingerprint}\u0000${output.id}`);
-          }
-        }
-      }
-      for (const sampleId of record.outputs.sampleIds) {
-        if (input.sampleIds?.has(sampleId)) {
-          existingSampleLinks.add(`${fingerprint}\u0000${sampleId}`);
-        }
-      }
-    }
-    if (
-      requestedReceiptFingerprint
-      && record.receipt
-      && integrationIngestReceiptFingerprint(
-        record.receipt,
-        receiptRequiresPayloadIdentity,
-      ) === requestedReceiptFingerprint
-    ) {
-      receiptIsNovel = false;
-    }
-
-    return selectionIsComplete() ? "complete" : "continue";
-  };
 
   if (source.kind !== "jsonl") {
     try {
       for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source])) {
-        const decision = visitRaw(row.raw, row.sourcePath, row.relativePath);
+        const decision = novelty.visitRaw(row.raw, row.sourcePath);
         if (decision === "unsafe") {
-          return failOpenSelection();
+          return novelty.failOpenSelection();
         }
         if (decision === "complete") {
           return { parts: [], receiptIsNovel: false };
         }
       }
     } catch {
-      return failOpenSelection();
+      return novelty.failOpenSelection();
     }
-    return buildSelection();
+    return novelty.buildSelection();
   }
 
   // Live shards use a bounded reverse-tail scan. Archived shards above use
@@ -937,7 +992,7 @@ export async function selectNovelIntegrationIngestEvidence(
   // archived and cannot create a future live-tail proof.
   const absolutePath = resolveVaultPath(input.vaultRoot, source.sourcePath).absolutePath;
   if (!(await pathExists(absolutePath))) {
-    return failOpenSelection();
+    return novelty.failOpenSelection();
   }
 
   let scan: IntegrationIngestNoveltyTailScanResult;
@@ -949,20 +1004,20 @@ export async function selectNovelIntegrationIngestEvidence(
       } catch {
         return "unsafe";
       }
-      return visitRaw(raw, source.sourcePath, source.logicalPath);
+      return novelty.visitRaw(raw, source.sourcePath);
     });
   } catch {
-    return failOpenSelection();
+    return novelty.failOpenSelection();
   }
 
   if (scan.selectionComplete) {
     return { parts: [], receiptIsNovel: false };
   }
   if (scan.unsafe || !scan.historyComplete) {
-    return failOpenSelection();
+    return novelty.failOpenSelection();
   }
 
-  return buildSelection();
+  return novelty.buildSelection();
 }
 
 async function readIntegrationIngestEntriesFromSources(

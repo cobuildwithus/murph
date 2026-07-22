@@ -31,6 +31,7 @@ import {
   eventRecordSchema,
   eventImportDecisionSchema,
   isWritableIsoDateTime,
+  isFilteredIntegrationIngestRecord,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -4622,6 +4623,24 @@ export async function importDeviceBatch({
     currentEventOwners.canonicalIdByPreparedId,
     associationEvidenceRolesByPreparedRecordId,
   );
+  const currentEventIdsByEvidenceRole = new Map<string, Set<string>>();
+  for (const output of currentEventOutputs) {
+    for (const role of output.roles) {
+      const eventIds = currentEventIdsByEvidenceRole.get(role) ?? new Set<string>();
+      eventIds.add(output.id);
+      currentEventIdsByEvidenceRole.set(role, eventIds);
+    }
+  }
+  const authoritativeNoveltyInput = {
+    vaultRoot,
+    provider: deviceBatchPlan.provider,
+    accountId: deviceBatchPlan.accountId,
+    importedAt: deviceBatchPlan.importedAt,
+    parts: deviceBatchPlan.preparedEvidenceParts,
+    receipt: deviceBatchPlan.ingestReceipt,
+    eventIdsByRole: currentEventIdsByEvidenceRole,
+    sampleIds: new Set(sampleRecords.map((record) => record.id)),
+  };
   const buildAssociationImportId = (
     eventOutputs: readonly IntegrationIngestEventOutput[],
   ): string =>
@@ -4664,7 +4683,7 @@ export async function importDeviceBatch({
     .filter((record): record is IntegrationIngestRecord =>
       record !== undefined
       && record.id !== incrementalEvidenceImportId
-      && record.evidenceRetention !== "filtered"
+      && !isFilteredIntegrationIngestRecord(record)
       && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
     );
   const matchingStoredDeliveries = () => candidateStoredDeliveries().filter((record) =>
@@ -4678,7 +4697,7 @@ export async function importDeviceBatch({
       record !== undefined
       && (
         record.id === incrementalEvidenceImportId
-        || record.evidenceRetention === "filtered"
+        || isFilteredIntegrationIngestRecord(record)
       )
       && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
     );
@@ -4761,7 +4780,7 @@ export async function importDeviceBatch({
       vaultRoot,
       deviceBatchPlan.importedAt,
       candidateImportIds,
-      { fullScan: true },
+      { fullScan: true, novelty: authoritativeNoveltyInput },
     );
   };
   type ExactDeliveryState = {
@@ -5156,20 +5175,25 @@ export async function importDeviceBatch({
       }
     }
     const shouldCheckReceiptNovelty = !hasAppendedOutputs;
-    const novelty = deviceBatchPlan.preparedEvidenceParts.length > 0 || (
+    const authoritativeNovelty = !hasAppendedOutputs && partialStoredDelivery() !== undefined
+      ? ingestIdInspection.noveltySelection
+      : null;
+    const novelty = authoritativeNovelty ?? (
+      deviceBatchPlan.preparedEvidenceParts.length > 0 || (
         shouldCheckReceiptNovelty && deviceBatchPlan.ingestReceipt
       )
-      ? await selectNovelIntegrationIngestEvidence({
-          vaultRoot,
-          provider: deviceBatchPlan.provider,
-          accountId: deviceBatchPlan.accountId,
-          importedAt: deviceBatchPlan.importedAt,
-          parts: deviceBatchPlan.preparedEvidenceParts,
-          receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
-          eventIdsByRole: eventIdsByEvidenceRole,
-          sampleIds: new Set(sampleRecords.map((record) => record.id)),
-        })
-      : { parts: [], receiptIsNovel: false };
+        ? await selectNovelIntegrationIngestEvidence({
+            vaultRoot,
+            provider: deviceBatchPlan.provider,
+            accountId: deviceBatchPlan.accountId,
+            importedAt: deviceBatchPlan.importedAt,
+            parts: deviceBatchPlan.preparedEvidenceParts,
+            receipt: shouldCheckReceiptNovelty ? deviceBatchPlan.ingestReceipt : undefined,
+            eventIdsByRole: eventIdsByEvidenceRole,
+            sampleIds: new Set(sampleRecords.map((record) => record.id)),
+          })
+        : { parts: [], receiptIsNovel: false }
+    );
     const partialMarkerNeedsEvidenceRepair = partialStoredDelivery() !== undefined
       && (novelty.parts.length > 0 || novelty.receiptIsNovel);
     const shouldPersistDelivery = hasAppendedOutputs
@@ -5311,7 +5335,6 @@ export async function importDeviceBatch({
     accountId: deviceBatchPlan.accountId,
     source: deviceBatchPlan.source,
     importedAt: deviceBatchPlan.importedAt,
-    evidenceRetention: evidenceWasFiltered ? "filtered" : undefined,
     receipt: deviceBatchPlan.ingestReceipt,
     parts: retainedEvidenceParts,
     eventOutputs,

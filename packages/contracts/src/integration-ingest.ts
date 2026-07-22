@@ -11,6 +11,9 @@ const EVENT_ID_PATTERN = new RegExp(`^${ID_PREFIXES.event}_[0-9A-Za-z]+$`, "u");
 const SAMPLE_ID_PATTERN = new RegExp(`^${ID_PREFIXES.sample}_[0-9A-Za-z]+$`, "u");
 const MAX_INGEST_PARTS = 10_000;
 
+export const FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION =
+  "murph.integration-ingest.v2" as const;
+
 const jsonPrimitiveSchema = z.union([z.null(), z.boolean(), z.number().finite(), z.string()]);
 const jsonValueSchema: z.ZodType<unknown> = z.lazy(() =>
   z.union([
@@ -93,105 +96,129 @@ export const integrationIngestOutputsSchema = z
   })
   .strict();
 
-export const integrationIngestRecordSchema = withContractMetadata(
-  z.object({
+const integrationIngestRecordFields = {
+  id: z.string().regex(XFM_ID_PATTERN),
+  provider: z.string().trim().min(1).max(120),
+  accountId: z.string().trim().min(1).max(512).optional(),
+  source: z.enum(["manual", "import", "device", "derived"]),
+  importedAt: isoTimestampSchema(),
+  receipt: integrationIngestReceiptSchema.optional(),
+  parts: z.array(integrationEvidencePartSchema).max(MAX_INGEST_PARTS),
+  outputs: integrationIngestOutputsSchema,
+  counts: z
+    .object({
+      eventCount: z.number().int().safe().nonnegative(),
+      sampleCount: z.number().int().safe().nonnegative(),
+    })
+    .strict(),
+  provenance: jsonObjectSchema.optional(),
+} as const;
+
+const integrationIngestRecordV1Schema = z
+  .object({
     schemaVersion: z.literal(CONTRACT_SCHEMA_VERSION.integrationIngest),
-    id: z.string().regex(XFM_ID_PATTERN),
-    provider: z.string().trim().min(1).max(120),
-    accountId: z.string().trim().min(1).max(512).optional(),
-    source: z.enum(["manual", "import", "device", "derived"]),
-    importedAt: isoTimestampSchema(),
-    evidenceRetention: z.literal("filtered").optional(),
-    receipt: integrationIngestReceiptSchema.optional(),
-    parts: z.array(integrationEvidencePartSchema).max(MAX_INGEST_PARTS),
-    outputs: integrationIngestOutputsSchema,
-    counts: z
-      .object({
-        eventCount: z.number().int().safe().nonnegative(),
-        sampleCount: z.number().int().safe().nonnegative(),
-      })
-      .strict(),
-    provenance: jsonObjectSchema.optional(),
+    ...integrationIngestRecordFields,
   })
-  .strict()
-  .superRefine((record, context) => {
-    const partRoles = new Set<string>();
-    for (const [index, part] of record.parts.entries()) {
-      if (partRoles.has(part.role)) {
-        context.addIssue({
-          code: "custom",
-          path: ["parts", index, "role"],
-          message: `Evidence role "${part.role}" must be unique within an ingest.`,
-        });
-      }
-      partRoles.add(part.role);
-    }
+  .strict();
 
-    const eventIds = new Set<string>();
-    for (const [eventIndex, event] of record.outputs.events.entries()) {
-      if (eventIds.has(event.id)) {
-        context.addIssue({
-          code: "custom",
-          path: ["outputs", "events", eventIndex, "id"],
-          message: `Event output "${event.id}" must be unique within an ingest.`,
-        });
-      }
-      eventIds.add(event.id);
+const filteredIntegrationIngestRecordSchema = z
+  .object({
+    schemaVersion: z.literal(FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION),
+    ...integrationIngestRecordFields,
+    evidenceRetention: z.literal("filtered"),
+  })
+  .strict();
 
-      const roles = new Set<string>();
-      for (const [roleIndex, role] of event.roles.entries()) {
-        if (roles.has(role)) {
+export const integrationIngestRecordSchema = withContractMetadata(
+  z
+    .discriminatedUnion("schemaVersion", [
+      integrationIngestRecordV1Schema,
+      filteredIntegrationIngestRecordSchema,
+    ])
+    .superRefine((record, context) => {
+      const partRoles = new Set<string>();
+      for (const [index, part] of record.parts.entries()) {
+        if (partRoles.has(part.role)) {
           context.addIssue({
             code: "custom",
-            path: ["outputs", "events", eventIndex, "roles", roleIndex],
-            message: `Event evidence role "${role}" must be unique.`,
+            path: ["parts", index, "role"],
+            message: `Evidence role "${part.role}" must be unique within an ingest.`,
           });
         }
-        roles.add(role);
-        if (!partRoles.has(role)) {
+        partRoles.add(part.role);
+      }
+
+      const eventIds = new Set<string>();
+      for (const [eventIndex, event] of record.outputs.events.entries()) {
+        if (eventIds.has(event.id)) {
           context.addIssue({
             code: "custom",
-            path: ["outputs", "events", eventIndex, "roles", roleIndex],
-            message: `Event evidence role "${role}" does not exist in parts.`,
+            path: ["outputs", "events", eventIndex, "id"],
+            message: `Event output "${event.id}" must be unique within an ingest.`,
           });
         }
-      }
-    }
+        eventIds.add(event.id);
 
-    const sampleIds = new Set<string>();
-    for (const [index, sampleId] of record.outputs.sampleIds.entries()) {
-      if (sampleIds.has(sampleId)) {
+        const roles = new Set<string>();
+        for (const [roleIndex, role] of event.roles.entries()) {
+          if (roles.has(role)) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs", "events", eventIndex, "roles", roleIndex],
+              message: `Event evidence role "${role}" must be unique.`,
+            });
+          }
+          roles.add(role);
+          if (!partRoles.has(role)) {
+            context.addIssue({
+              code: "custom",
+              path: ["outputs", "events", eventIndex, "roles", roleIndex],
+              message: `Event evidence role "${role}" does not exist in parts.`,
+            });
+          }
+        }
+      }
+
+      const sampleIds = new Set<string>();
+      for (const [index, sampleId] of record.outputs.sampleIds.entries()) {
+        if (sampleIds.has(sampleId)) {
+          context.addIssue({
+            code: "custom",
+            path: ["outputs", "sampleIds", index],
+            message: `Sample output "${sampleId}" must be unique within an ingest.`,
+          });
+        }
+        sampleIds.add(sampleId);
+      }
+
+      if (
+        record.outputs.eventIdsComplete
+        && record.outputs.events.length !== record.counts.eventCount
+      ) {
         context.addIssue({
           code: "custom",
-          path: ["outputs", "sampleIds", index],
-          message: `Sample output "${sampleId}" must be unique within an ingest.`,
+          path: ["counts", "eventCount"],
+          message: "eventCount must equal outputs.events length when eventIdsComplete is true.",
         });
       }
-      sampleIds.add(sampleId);
-    }
-
-    if (record.outputs.eventIdsComplete && record.outputs.events.length !== record.counts.eventCount) {
-      context.addIssue({
-        code: "custom",
-        path: ["counts", "eventCount"],
-        message: "eventCount must equal outputs.events length when eventIdsComplete is true.",
-      });
-    }
-    if (record.outputs.sampleIdsComplete && record.outputs.sampleIds.length !== record.counts.sampleCount) {
-      context.addIssue({
-        code: "custom",
-        path: ["counts", "sampleCount"],
-        message: "sampleCount must equal outputs.sampleIds length when sampleIdsComplete is true.",
-      });
-    }
-    if (record.receipt && record.receipt.provider !== record.provider) {
-      context.addIssue({
-        code: "custom",
-        path: ["receipt", "provider"],
-        message: "Receipt provider must equal ingest provider.",
-      });
-    }
-  }),
+      if (
+        record.outputs.sampleIdsComplete
+        && record.outputs.sampleIds.length !== record.counts.sampleCount
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["counts", "sampleCount"],
+          message: "sampleCount must equal outputs.sampleIds length when sampleIdsComplete is true.",
+        });
+      }
+      if (record.receipt && record.receipt.provider !== record.provider) {
+        context.addIssue({
+          code: "custom",
+          path: ["receipt", "provider"],
+          message: "Receipt provider must equal ingest provider.",
+        });
+      }
+    }),
   "@murphai/contracts/integration-ingest-record.schema.json",
   "Murph Integration Ingest Record",
 );
@@ -201,3 +228,12 @@ export type IntegrationIngestReceipt = z.infer<typeof integrationIngestReceiptSc
 export type IntegrationIngestEventOutput = z.infer<typeof integrationIngestEventOutputSchema>;
 export type IntegrationIngestOutputs = z.infer<typeof integrationIngestOutputsSchema>;
 export type IntegrationIngestRecord = z.infer<typeof integrationIngestRecordSchema>;
+
+export function isFilteredIntegrationIngestRecord(
+  record: IntegrationIngestRecord,
+): record is Extract<
+  IntegrationIngestRecord,
+  { schemaVersion: typeof FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION }
+> {
+  return record.schemaVersion === FILTERED_INTEGRATION_INGEST_SCHEMA_VERSION;
+}

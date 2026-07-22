@@ -617,6 +617,19 @@ That command:
 The gradual container rollout keeps `rollout_active_grace_period` at 300 seconds and rolls runner instances through `10`, `25`, `50`, then `100` percent. The manual workflow exposes a `container_rollout` input; its production default is currently `immediate` because selector-scoped vault-share deliveries are unsafe under gradual runner rollout. Selecting `immediate` passes Wrangler's `--containers-rollout=immediate` flag and can interrupt active runner containers.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The first overnight Junction evidence-maintenance release is a hard-cut vault
+format change. Deploy Cloudflare and its runner bundle with
+`container_rollout=immediate`, then require
+`pnpm --dir apps/cloudflare deploy:smoke` to report the exact new runner-bundle
+fingerprint and the CLI surface containing
+`vault repair-junction-evidence-duplicates` before allowing the overnight
+automation to apply it. Vercel/web has no ordering dependency. The repair can
+rewrite a historical ingest row to strict `murph.integration-ingest.v2`; after
+the first such row exists, the v2-capable runner bundle is the hard restore
+rollback floor and rollback requires a separate reverse migration, so prefer a
+forward fix. Post-deploy, confirm dry-run/apply/replay convergence and inspect
+hosted vault parse and restore logs for integration-ingest schema failures.
+
 The scheduled Linq authority release has a Web-first hard gate. Deploy and
 verify Web's concrete-target/directness response before deploying Cloudflare
 with `container_rollout=immediate`. After that deploy, runner admission rejects

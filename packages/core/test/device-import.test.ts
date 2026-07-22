@@ -4259,7 +4259,7 @@ test("concatenated malformed ingest rows cannot hide current or legacy delivery 
   }
 });
 
-test("importDeviceBatch fails open when an incremental marker is beyond the row budget", async () => {
+test("importDeviceBatch reuses authoritative proof when an incremental marker is beyond the row budget", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-partial-retention-retry");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const partA = {
@@ -4297,20 +4297,17 @@ test("importDeviceBatch fails open when an incremental marker is beyond the row 
     provider: "unrelated-provider",
     accountId: "unrelated-account",
   })}\n`;
-  await fs.appendFile(path.join(vaultRoot, filtered.ingestShardPath), unrelatedRow.repeat(65), "utf8");
+  const ingestPath = path.join(vaultRoot, filtered.ingestShardPath);
+  await fs.appendFile(ingestPath, unrelatedRow.repeat(65), "utf8");
+  const beforeReplay = await fs.readFile(ingestPath);
   const replay = await importDeviceBatch(input);
   const convergedReplay = await importDeviceBatch(input);
 
-  assert.ok(replay.applied);
-  assert.equal(replay.persistedEvidencePartCount, 2);
-  assert.ok(replay.ingestId);
-  const replayRecord = await readRequiredIntegrationIngest(vaultRoot, replay.ingestId);
-  assert.deepEqual(
-    replayRecord.parts.map((part) => part.role),
-    [partA.role, partB.role],
-  );
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
   assert.equal(convergedReplay.applied, false);
   assert.equal(convergedReplay.ingestId, null);
+  assert.deepEqual(await fs.readFile(ingestPath), beforeReplay);
 });
 
 test.each([
