@@ -1001,13 +1001,20 @@ export function shouldAdvanceReferencedExperimentOutcome(input: {
   referencedOutcome: ExperimentOutcome;
   requestedAsOf: string;
 }): boolean {
-  const interventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  const currentInterventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  const savedInterventionEnd = input.referencedOutcome.windows.interventionEnd;
   if (
-    interventionEnd === undefined ||
+    currentInterventionEnd === undefined ||
     input.referencedOutcome.experiment.status !== "active" ||
-    input.requestedAsOf < interventionEnd ||
     input.requestedAsOf <= input.referencedOutcome.asOf
   ) {
+    return false;
+  }
+  const interventionEnd =
+    savedInterventionEnd !== null && savedInterventionEnd > currentInterventionEnd
+      ? savedInterventionEnd
+      : currentInterventionEnd;
+  if (input.requestedAsOf < interventionEnd) {
     return false;
   }
 
