@@ -1800,6 +1800,7 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
+  vaultFileSendOwnsResponseMedia?: boolean
 }
 
 interface ParsedDynamicToolCallRequest {
@@ -2680,6 +2681,7 @@ export async function executeMurphDynamicToolRequest(input: {
                 }),
               ),
               finalActionPatch: { kind: 'none' },
+              vaultFileSendOwnsResponseMedia: true,
             }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
@@ -2696,11 +2698,10 @@ export async function executeMurphDynamicToolRequest(input: {
               true,
               JSON.stringify({
                 note:
-                  'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+                  'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
                 status: 'already_in_progress',
               }),
             ),
-            finalActionPatch: { kind: 'none' },
           }
         }
         return toolTextResult(false, 'secure vault-file approval could not be prepared')

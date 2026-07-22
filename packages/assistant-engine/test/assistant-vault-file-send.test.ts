@@ -1133,11 +1133,12 @@ describe('assistant vault-file send', () => {
 
     expect(result.requiredVaultFileApprovalUrl).toBeUndefined()
     expect(result.responseMediaPatch).toBeUndefined()
-    expect(result.finalActionPatch).toEqual({ kind: 'none' })
+    expect(result.finalActionPatch).toBeUndefined()
+    expect(result.vaultFileSendOwnsResponseMedia).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       note:
-        'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+        'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
       status: 'already_in_progress',
     }))
   })
@@ -1169,6 +1170,7 @@ describe('assistant vault-file send', () => {
 
     expect(result.finalActionPatch).toEqual({ kind: 'none' })
     expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.vaultFileSendOwnsResponseMedia).toBe(true)
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       filename: 'report.pdf',

@@ -22,6 +22,7 @@ import {
   type HostedCanonicalWritePort,
 } from '@murphai/core'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const codexMocks = vi.hoisted(() => ({
@@ -84,6 +85,9 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from '../src/assistant/generated-delivery-files.ts'
 import {
   CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS,
   extractAssistantMessageFallback,
@@ -2655,6 +2659,19 @@ describe('assistant codex runtime', () => {
       expectedFinalMessage: `Approval is required.\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
       expectedTranscriptMessage: 'Approval is required.',
       name: 'appends the exact owner URL outside model context',
+      noReplyBeforeApproval: 'none',
+    },
+    {
+      expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      expectedTranscriptMessage: null,
+      name: 'overrides an earlier no-reply selection',
+      noReplyBeforeApproval: 'applied',
+    },
+    {
+      expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
+      expectedTranscriptMessage: null,
+      name: 'overrides an in-flight no-reply reservation',
+      noReplyBeforeApproval: 'reserved',
     },
     {
       approvalCount: 2,
@@ -2665,6 +2682,7 @@ describe('assistant codex runtime', () => {
       ].join('\n\n'),
       expectedTranscriptMessage: 'Approval is required.',
       name: 'preserves every exact owner URL when multiple vault approvals are pending',
+      noReplyBeforeApproval: 'none',
     },
   ] as const
 
@@ -2719,6 +2737,27 @@ describe('assistant codex runtime', () => {
             result: { turn: { id: 'turn-vault-approval-url' } },
           }))
 
+          let pendingNoReplyResponse: Promise<unknown> | null = null
+          if (scenario.noReplyBeforeApproval !== 'none') {
+            child.stdout.write(jsonLine({
+              id: 70,
+              method: 'item/tool/call',
+              params: {
+                arguments: {},
+                namespace: 'murph',
+                tool: 'finish_without_reply',
+              },
+            }))
+            pendingNoReplyResponse = waitForRpcResponse(child, 70)
+            if (scenario.noReplyBeforeApproval === 'applied') {
+              await expect(pendingNoReplyResponse).resolves.toMatchObject({
+                id: 70,
+                result: { success: true },
+              })
+              pendingNoReplyResponse = null
+            }
+          }
+
           for (let approvalIndex = 0; approvalIndex < approvalCount; approvalIndex += 1) {
             const requestId = 71 + approvalIndex
             child.stdout.write(jsonLine({
@@ -2743,6 +2782,13 @@ describe('assistant codex runtime', () => {
                 }],
                 success: true,
               },
+            })
+          }
+
+          if (pendingNoReplyResponse) {
+            await expect(pendingNoReplyResponse).resolves.toMatchObject({
+              id: 70,
+              result: { success: true },
             })
           }
 
@@ -2920,7 +2966,7 @@ describe('assistant codex runtime', () => {
             id: 94,
             result: {
               contentItems: [{
-                text: 'response media unavailable after finish_without_reply',
+                text: 'response media cannot be changed after a vault-file send',
                 type: 'inputText',
               }],
               success: false,
@@ -3099,7 +3145,7 @@ describe('assistant codex runtime', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
 
-  it('does not settle no-reply when the provider fails after creating a vault approval', async () => {
+  it('leaves an earlier no-reply unsettled when the provider fails after creating a vault approval', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-approval-failure-work-',
     )
@@ -3132,6 +3178,19 @@ describe('assistant codex runtime', () => {
             turnId: 'turn-vault-approval-failure',
           })
           child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
+            id: 81,
+            result: { success: true },
+          })
+          child.stdout.write(jsonLine({
             id: 82,
             method: 'item/tool/call',
             params: {
@@ -3151,25 +3210,6 @@ describe('assistant codex runtime', () => {
                 type: 'inputText',
               }],
               success: true,
-            },
-          })
-          child.stdout.write(jsonLine({
-            id: 81,
-            method: 'item/tool/call',
-            params: {
-              arguments: {},
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
-            id: 81,
-            result: {
-              contentItems: [{
-                text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
-                type: 'inputText',
-              }],
-              success: false,
             },
           })
           child.stdout.write(jsonLine({
@@ -17559,6 +17599,13 @@ describe('steered final segments', () => {
         expectedSuccess?: boolean
         expectedText: string
         id: number
+        kind: 'send-vault-file'
+        ref: string
+      }
+    | {
+        expectedSuccess?: boolean
+        expectedText: string
+        id: number
         kind: 'react-to-message'
         messageRef: string
         reaction: 'heart' | 'thumbs_up' | 'laugh'
@@ -17592,6 +17639,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'list-memberships' }> {
     return 'kind' in step && step.kind === 'list-memberships'
+  }
+
+  function isSendVaultFileStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'send-vault-file' }> {
+    return 'kind' in step && step.kind === 'send-vault-file'
   }
 
   function isReactToMessageStep(
@@ -17723,6 +17776,31 @@ describe('steered final segments', () => {
                       text: step.expectedText,
                     },
                   ],
+                },
+              })
+              continue
+            }
+
+            if (isSendVaultFileStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  arguments: { ref: step.ref },
+                  callId: `call-steered-vault-${step.id}`,
+                  namespace: 'murph',
+                  tool: 'send_vault_file',
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  contentItems: [{
+                    text: step.expectedText,
+                    type: 'inputText',
+                  }],
+                  success: step.expectedSuccess ?? true,
                 },
               })
               continue
@@ -18540,6 +18618,62 @@ describe('steered final segments', () => {
     expect(result.finalMessage).toBe('This final text should be delivered.')
     expect(result.responseMedia).toEqual([media])
     expect(result.precedingAgentMessageSegments).toEqual([])
+  })
+
+  it('keeps a different generated-file request replyable while a prior send is active', async () => {
+    const media = {
+      alt: 'Explanation attachment',
+      kind: 'image' as const,
+      source: 'active-vault-send-explanation',
+      url: 'https://cdn.example.test/assistant/active-vault-send.png',
+    }
+    const sendVaultFile = vi.fn(async () => {
+      throw new VaultCliError(
+        'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE',
+        'A prior generated file remains active.',
+      )
+    })
+    const note =
+      'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.'
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: JSON.stringify({
+          note,
+          status: 'already_in_progress',
+        }),
+        id: 76,
+        kind: 'send-vault-file',
+        ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/file-b.pdf`,
+      },
+      {
+        expectedText: '1 response image attached',
+        id: 77,
+        kind: 'attach-response-media',
+        media: [media],
+      },
+      completedItemEvent({
+        id: 'assistant-active-vault-send',
+        message: 'The earlier file must finish before I can retry this one.',
+        type: 'assistant_message',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({
+        computerToolsAvailable: false,
+        sendVaultFile,
+        vaultFileSendAvailable: true,
+      }),
+    })
+
+    expect(sendVaultFile).toHaveBeenCalledWith(
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/file-b.pdf`,
+      'call-steered-vault-76',
+    )
+    expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe(
+      'The earlier file must finish before I can retry this one.',
+    )
+    expect(result.responseMedia).toEqual([media])
   })
 
   it('rejects response media after finish_without_reply selects no final response', async () => {

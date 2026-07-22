@@ -66,11 +66,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // 9,424,731B on CI Linux (+217B) and 9,460,571B on local macOS. Ratchet the
 // fixed total backstop to the larger exact measurement. PR #841's automatic
 // approved-file continuation adds 2,752B, and its exact-owner review
-// remediation adds another 491B, producing 9,463,814B on local macOS;
-// ratchet by those exact measured increases;
+// remediation adds another 491B, and the final delivery-context ownership
+// correction adds 397B, producing 9,464,211B on local macOS; ratchet by those
+// exact measured increases;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_463_814;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_464_211;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

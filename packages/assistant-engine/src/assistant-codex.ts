@@ -2780,6 +2780,7 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolReplyTargetPatch
   }> = []
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
+  const vaultFileResponseMediaOwnerDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -3813,7 +3814,9 @@ async function runCodexAppServerTurnOnProcess(
       hostedCanonicalWritePort,
       async () => {
         if (
-          shouldSuppressDeliveryContext(dynamicToolRequestDeliveryContextOrdinal) &&
+          vaultFileResponseMediaOwnerDeliveryContextOrdinals.has(
+            dynamicToolRequestDeliveryContextOrdinal,
+          ) &&
           isResponseMediaDynamicToolRequest(dynamicToolRequest)
         ) {
           return {
@@ -3821,7 +3824,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [{
                 text: dynamicToolRequest.kind === 'send-vault-file'
                   ? 'vault-file sending cannot be combined with other response media'
-                  : 'response media unavailable after finish_without_reply',
+                  : 'response media cannot be changed after a vault-file send',
                 type: 'inputText' as const,
               }],
               success: false,
@@ -3881,6 +3884,14 @@ async function runCodexAppServerTurnOnProcess(
         !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
       ) {
         requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
+      }
+      if (
+        dynamicToolRequest.kind === 'send-vault-file' &&
+        result.vaultFileSendOwnsResponseMedia === true
+      ) {
+        vaultFileResponseMediaOwnerDeliveryContextOrdinals.add(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
       }
       if (result.responseMediaPatch) {
         try {
