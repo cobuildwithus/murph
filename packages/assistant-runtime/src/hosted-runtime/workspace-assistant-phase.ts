@@ -3948,13 +3948,25 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
     return null;
   }
 
+  return await runAssistantAskCompletionMailboxLane({
+    beforeAt: pendingInputAt,
+    executionContext: input.executionContext,
+    input: phaseInput,
+  });
+}
+
+async function runAssistantAskCompletionMailboxLane(input: {
+  beforeAt: string | null;
+  executionContext: AssistantExecutionContext;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
   for (;;) {
     const systemMailboxState = await readHostedSystemMailboxState(
-      phaseInput.restored.vaultRoot,
+      input.input.restored.vaultRoot,
     );
     const completionItem = findOldestAssistantAskCompletionMailboxItem({
+      beforeAt: input.beforeAt,
       items: systemMailboxState.pending,
-      pendingInputAt,
     });
     if (!completionItem) {
       return null;
@@ -3963,7 +3975,7 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
     const result = await runAssistantAskCompletionBarrierItem({
       completionItem,
       executionContext: input.executionContext,
-      input: phaseInput,
+      input: input.input,
     });
     if (result) {
       return result;
@@ -3972,14 +3984,17 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
 }
 
 function findOldestAssistantAskCompletionMailboxItem(input: {
+  beforeAt: string | null;
   items: readonly HostedSystemMailboxPendingItem[];
-  pendingInputAt: string;
 }): HostedSystemMailboxPendingItem | null {
   return input.items.reduce<HostedSystemMailboxPendingItem | null>((oldest, item) => {
     if (
       item.routeAction !== "continue-assistant-ask"
       || item.wake.kind !== "assistant.ask.completed"
-      || !hostedTimestampPrecedes(item.occurredAt, input.pendingInputAt)
+      || (
+        input.beforeAt !== null
+        && !hostedTimestampPrecedes(item.occurredAt, input.beforeAt)
+      )
     ) {
       return oldest;
     }
@@ -4450,6 +4465,28 @@ async function runSystemMailboxMaintenancePhase(input: {
       initialProviderCleanupCheckpoint,
       pendingAssistantInputWakeAt,
       result: memberPreferencesPrePlanning.result,
+    };
+  }
+
+  const assistantAskCompletionWithoutPendingInput =
+    pendingAssistantInputWakeAt === null
+    && !foregroundPendingEffectsAttempted
+      ? await runAssistantAskCompletionMailboxLane({
+          beforeAt: null,
+          executionContext: input.executionContext,
+          input: phaseInput,
+        })
+      : null;
+  if (assistantAskCompletionWithoutPendingInput) {
+    return {
+      backgroundMaintenanceYielded: false,
+      continueAssistantLane: false,
+      deviceSyncMaintenanceRan: false,
+      initialProviderCleanupCheckpoint,
+      pendingAssistantInputWakeAt,
+      result: mergeMemberPreferencesPrePlanningResult(
+        assistantAskCompletionWithoutPendingInput,
+      ),
     };
   }
 

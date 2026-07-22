@@ -1641,6 +1641,7 @@ describe("hosted workspace runtime entrypoint", () => {
           < requireEventIndex(events, "snapshot.started"),
       );
       assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
       assert.ok(result.status === "idle" || result.status === "scheduled");
     } finally {
       shutdownController.abort(new Error("Test cleanup."));

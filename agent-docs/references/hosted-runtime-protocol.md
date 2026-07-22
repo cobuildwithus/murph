@@ -417,11 +417,14 @@ or invoke side-effecting tools. When personal input is already pending, its
 pre-assistant barrier repeatedly selects the exact oldest completion that
 precedes the oldest pending personal input. Invalid or already-terminal work is
 discharged and the remaining older set is checked before personal work may
-start. Once a completion creates its stable-key outbox intent, the retained
-mailbox item remains the occurrence and ordering anchor while the outbox alone
-owns delivery state and retry timing. Automatically actionable pending,
-retryable, or in-flight delivery blocks the personal input and uses the
-outbox-owned wake, including non-idempotent confirmation grace and stale
+start. A completion imported before any personal input exists is materialized
+through the same exact retained-row lane instead of the generic mailbox
+consumer, so a retry or in-flight restart cannot lose its later ordering
+prerequisite. Once a completion creates its stable-key outbox intent, the
+retained mailbox item remains the occurrence and ordering anchor while the
+outbox alone owns delivery state and retry timing. Automatically actionable
+pending, retryable, or in-flight delivery blocks the personal input and uses
+the outbox-owned wake, including non-idempotent confirmation grace and stale
 reconciliation. A non-idempotent confirmation-pending intent is deliberately
 parked without automatic resend; its mailbox ordering anchor is discharged so
 later accepted input cannot be stranded, while the outbox record remains for
