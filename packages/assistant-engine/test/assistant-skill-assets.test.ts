@@ -2018,10 +2018,10 @@ How old are you and what's your gender?
     expect(raw).toContain('### 5. Resolve the foundation checkpoints')
     expect(raw).toContain('1. **Data sources and wearables.**')
     expect(compact).toContain(
-      'Frame that handoff naturally in Murph\'s own words: connect it there, then come back and let Murph know when the setup is finished.',
+      'After a real link is returned, send one short handoff by itself in Murph\'s own words, inviting the user to connect there and let Murph know afterward.',
     )
     expect(compact).toContain(
-      'Never instruct the user to say a quoted exact word or phrase such as “done.”',
+      'Do not call it setup, prescribe or quote an exact response, or advance to another checkpoint until the user returns or the connection is visible.',
     )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
