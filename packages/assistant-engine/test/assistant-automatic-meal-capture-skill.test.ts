@@ -37,6 +37,8 @@ describe('assistant automatic meal capture skill', () => {
     expect(matches).toHaveLength(1)
     expect(matches[0]?.triggerHint).toContain('Full Photos permission')
     expect(matches[0]?.triggerHint).toContain('missing or delayed photo imports')
+    expect(matches[0]?.triggerHint).toContain('managed 9pm calorie/macro closeout')
+    expect(matches[0]?.triggerHint).toContain('retained-photo privacy cleanup')
     expect(matches[0]?.triggerHint).toContain('without duplicate logging')
     expect(matches[0]?.triggerHint).toContain('Always co-load with food-journal')
 
@@ -70,6 +72,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('age out after 14 days')
     expect(skill).toContain('24-item limit')
     expect(skill).toContain('`source: device`')
+    expect(skill).toContain('managed daily\n  closeout at 9:00pm')
     expect(skill).toContain(
       'The original capture instant—not upload or import time—owns meal timing.',
     )
@@ -88,6 +91,14 @@ describe('assistant automatic meal capture skill', () => {
       'Suggest resending only after later evidence shows the upload failed.',
     )
     expect(skill).toContain('vault-cli meal edit <meal-id>')
+    expect(skill).toContain('## Run the managed 9pm closeout')
+    expect(skill).toContain('bounded 31-day lookback')
+    expect(skill).toContain('`externalRef.system: meal-photo-capture`')
+    expect(skill).toContain('vault-cli meal remove-photo <meal-id>')
+    expect(skill).toContain('Label totals partial')
+    expect(skill).toContain('Do not silently\n   double count')
+    expect(skill).toContain('never roll them into today\'s totals')
+    expect(skill).toContain('preserves the meal\'s structured')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')
     expect(skill).toContain('likely manual,\n   conversation, provider')

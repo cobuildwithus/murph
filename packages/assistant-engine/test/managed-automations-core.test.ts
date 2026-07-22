@@ -13,6 +13,7 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -22,6 +23,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  ensureAutomaticMealCloseoutAutomation,
   type MurphManagedAutomationDiagnosticStage,
 } from '../src/assistant/managed-automations.ts'
 import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
@@ -79,6 +81,43 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it('persists one opt-in automatic meal closeout through the canonical automation registry', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-07-22T14:00:00.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+
+    const first = await ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T14:01:00.000Z'),
+      vaultRoot,
+    })
+    const replay = await ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T14:02:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(first).toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+    })
+    expect(replay).toEqual(first)
+  })
+
   it('keeps diagnostic stage reporting best-effort', async () => {
     const vaultRoot = await createVaultRoot()
 
@@ -116,8 +155,8 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(diagnosticStages).toEqual([
       { stage: 'experiment_lifecycle' },
       { stage: 'seed_composition' },
-      ...Array.from({ length: 5 }, (_value, seedIndex) => ({
-        seedCount: 5,
+      ...Array.from({ length: 6 }, (_value, seedIndex) => ({
+        seedCount: 6,
         seedPosition: seedIndex + 1,
         stage: 'managed_seed' as const,
       })),

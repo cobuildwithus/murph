@@ -48,6 +48,7 @@ export interface MurphManagedAutomationSeed {
   automationId: string
   assistantTargetOverride?: AutomationAssistantTargetOverride | null
   continuityPolicy?: AutomationContinuityPolicy
+  createWhenMissing?: boolean
   excludeFromGroupChatRoutes?: boolean
   hostedRuntimeOnly?: boolean
   instructions: string
@@ -108,6 +109,50 @@ export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
   'Overnight memory consolidation maintenance wake completed.'
+export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
+  'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
+
+export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
+  automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  slug: 'automatic-meal-daily-closeout',
+  title: 'Automatic meal daily closeout',
+  summary: 'A 9pm calorie and macro closeout for automatically captured meals.',
+  schedule: {
+    kind: 'dailyLocal',
+    localTime: '21:00',
+  },
+  continuityPolicy: 'fresh',
+  createWhenMissing: false,
+  excludeFromGroupChatRoutes: true,
+  hostedRuntimeOnly: false,
+  assistantTargetOverride: {
+    reasoningEffort: 'high',
+  },
+  tags: [
+    'murph-managed:automatic-meal-daily-closeout',
+    'automatic-meal-capture',
+  ],
+  instructions: [
+    'Goal: at 9:00pm in the member\'s vault timezone, close out automatically captured meal photos with one useful calorie and macro summary, while minimizing retained image data.',
+    '',
+    'Read the automatic-meal-capture and food-journal skills before doing nutrition work. Use the current local date supplied by the runtime; do not derive the member\'s day by slicing UTC.',
+    '',
+    'Discovery and cleanup:',
+    '- List meals for the current local day and a bounded 31-day lookback. Inspect at most the 100 most recent records. An automatic-capture meal is identified by `externalRef.system: meal-photo-capture` and `externalRef.resourceType: photo`; `source: device` alone is not enough.',
+    '- The current local day owns the outbound closeout. The lookback exists only to finish unresolved image processing and cleanup for captures that arrived after a prior 9pm run or were delayed; never roll an older meal into today\'s totals.',
+    '- For each automatic-capture meal that still has a photo attachment, inspect the actual attachment. Compare nearby meals before counting so a manual log or second photo of the same eating occasion is not silently counted twice. Do not delete or merge the meal record.',
+    '- If identified foods or supported nutrition are missing, enrich that same meal with `vault-cli meal edit <meal-id>` using repeated ingredients, calories, protein, carbs, fat, optional fiber, evidence-dependent provenance, honest confidence, and a short source detail. Never create a replacement meal. Read the edited meal back before relying on it.',
+    '- If the image cannot support a responsible estimate, keep unknown fields unknown. Do not invent numbers merely to complete the closeout.',
+    '- After inspecting the attachment and saving any supported structure, run `vault-cli meal remove-photo <meal-id>` and read the meal back to confirm that no photo attachment remains. This command removes the retained image bytes while preserving the canonical meal and structured fields. Apply it to older lookback meals too. Treat a removal failure as a failed run: do not claim cleanup or send the closeout.',
+    '',
+    'Current-day summary:',
+    '- Include each distinct automatic-capture eating occasion from today once. Sum only stored, supported values from the final readbacks; do not use all-meal totals when they would include manual or duplicate records.',
+    '- State calorie, protein, carbohydrate, and fat totals compactly. Mention coverage or uncertainty when any included meal lacks a supported value. A partial total must be labeled partial rather than presented as the day\'s complete intake.',
+    '- Then add one short high-level observation grounded in the captured meals, such as protein distribution or where uncertainty is concentrated. Avoid judgment, generic coaching, diagnosis, or a long report.',
+    '- If there were no automatic-capture meals on the current local day, finish any older cleanup and return `{"kind":"skip","privateSummary":"No automatic meals were captured for today\'s closeout."}`. Do not send a process note or a zero-total message.',
+    '- Otherwise send exactly one concise in-chat closeout. Do not attach meal images, expose vault paths or internal automation details, or ask the member to confirm every estimate.',
+  ].join('\n'),
+} satisfies MurphManagedAutomationSeed
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -183,6 +228,7 @@ const LEGACY_ONBOARDING_FOLLOWUP_AUTOMATION_TAGS = [
 ] as const
 
 export const MURPH_MANAGED_AUTOMATIONS = [
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   {
     automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     slug: 'weekly-health-digest',
@@ -647,6 +693,10 @@ export async function applyMurphManagedAutomations(
     }
 
     if (!existing) {
+      if (rawSeed.createWhenMissing === false) {
+        // Update-only seeds remain absent until their owning product flow opts in.
+        continue
+      }
       let stableKey: string | null = null
       if (shouldSpreadMurphManagedAutomationSchedule(rawSeed)) {
         if (scheduleStableKeyUnavailable) {
@@ -882,6 +932,30 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+export async function ensureAutomaticMealCloseoutAutomation(
+  input: Omit<ApplyMurphManagedAutomationsInput, 'seeds'>,
+): Promise<AutomationRecord> {
+  await applyMurphManagedAutomations({
+    ...input,
+    seeds: [
+      {
+        ...MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+        createWhenMissing: true,
+      },
+    ],
+  })
+
+  const automation = await showAutomation({
+    automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!automation) {
+    throw new Error('Automatic meal closeout automation could not be persisted.')
+  }
+
+  return automation
 }
 
 function reportMurphManagedAutomationDiagnosticStage(

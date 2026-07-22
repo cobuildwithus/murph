@@ -161,7 +161,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'automatic-meal-capture',
     name: 'automatic-meal-capture',
     triggerHint:
-      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive nutrition turns when calorie or macro tracking is explicitly active.',
+      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the managed 9pm calorie/macro closeout, retained-photo privacy cleanup, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive nutrition turns when calorie or macro tracking is explicitly active.',
   },
   {
     slug: 'food-journal',

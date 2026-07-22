@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { ensureAutomaticMealCloseoutAutomation } from "@murphai/assistant-engine";
 import {
   ID_PREFIXES,
   addMeal,
@@ -26,6 +27,7 @@ const MEAL_PHOTO_EXTERNAL_RESOURCE_TYPE = "photo";
 export async function importHostedMealPhotoCapturedMailboxItem(input: {
   effectsPort: HostedRuntimeEffectsPort;
   item: HostedMailboxResolvedImportItem;
+  operatorHomeRoot: string;
   vaultRoot: string;
   wake: HostedExecutionMealPhotoCapturedWake;
 }): Promise<HostedMailboxItemImportOutcome> {
@@ -67,6 +69,12 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   if (existing) {
     if (existing.externalRef?.version !== input.wake.mealPhoto.sha256) {
       return blockedMealPhotoImport("meal_photo.capture_conflict", false);
+    }
+    if (!(await automaticMealCloseoutIsReady({
+      operatorHomeRoot: input.operatorHomeRoot,
+      vaultRoot: input.vaultRoot,
+    }))) {
+      return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
     }
     return importedMealPhotoOutcome(input.effectsPort, input.wake.mealPhoto.mealPhotoKey);
   }
@@ -125,7 +133,30 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
     await rm(temporaryDirectory, { force: true, recursive: true }).catch(() => undefined);
   }
 
+  if (!(await automaticMealCloseoutIsReady({
+    operatorHomeRoot: input.operatorHomeRoot,
+    vaultRoot: input.vaultRoot,
+  }))) {
+    return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
+  }
+
   return importedMealPhotoOutcome(input.effectsPort, input.wake.mealPhoto.mealPhotoKey);
+}
+
+async function automaticMealCloseoutIsReady(input: {
+  operatorHomeRoot: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  try {
+    await ensureAutomaticMealCloseoutAutomation({
+      operatorHomeRoot: input.operatorHomeRoot,
+      routeValidationProfile: "hosted",
+      vaultRoot: input.vaultRoot,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateMealPhotoBytes(input: {

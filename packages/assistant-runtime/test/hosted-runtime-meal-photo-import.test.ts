@@ -5,6 +5,17 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const mealPhotoImportMocks = vi.hoisted(() => ({
+  ensureAutomaticMealCloseoutAutomation: vi.fn(async () => ({
+    automationId: "automation_synthetic_meal_closeout",
+  })),
+}));
+
+vi.mock("@murphai/assistant-engine", () => ({
+  ensureAutomaticMealCloseoutAutomation:
+    mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
+}));
+
 import {
   ID_PREFIXES,
   deterministicContractId,
@@ -23,6 +34,10 @@ const JPEG_SHA256 = createHash("sha256").update(JPEG_BYTES).digest("hex");
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
+  mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation.mockReset();
+  mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation.mockResolvedValue({
+    automationId: "automation_synthetic_meal_closeout",
+  });
   await Promise.all(
     cleanupPaths.splice(0).map((targetPath) =>
       rm(targetPath, { force: true, recursive: true })
@@ -33,6 +48,7 @@ afterEach(async () => {
 describe("hosted meal photo mailbox import", () => {
   it("imports one canonical meal idempotently and deletes staging only after checkpoint", async () => {
     const vaultRoot = await createTestVault();
+    const operatorHomeRoot = path.join(path.dirname(vaultRoot), "operator-home");
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);
     const deleteMealPhoto = vi.fn(async () => undefined);
     const effectsPort = createEffectsPort({ deleteMealPhoto, readMealPhoto });
@@ -42,6 +58,7 @@ describe("hosted meal photo mailbox import", () => {
     const first = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item,
+      operatorHomeRoot,
       vaultRoot,
       wake,
     });
@@ -63,11 +80,22 @@ describe("hosted meal photo mailbox import", () => {
     const replay = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item,
+      operatorHomeRoot,
       vaultRoot,
       wake,
     });
     expect(replay.status).toBe("imported");
     expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    expect(
+      mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
+    ).toHaveBeenCalledWith({
+      operatorHomeRoot,
+      routeValidationProfile: "hosted",
+      vaultRoot,
+    });
 
     if (first.status !== "imported" || !first.afterCheckpoint) {
       throw new Error("Expected an after-checkpoint meal photo cleanup effect.");
@@ -93,6 +121,7 @@ describe("hosted meal photo mailbox import", () => {
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item: createMealPhotoMailboxItem(),
+      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -116,6 +145,7 @@ describe("hosted meal photo mailbox import", () => {
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort: createEffectsPort(),
       item: createMealPhotoMailboxItem(),
+      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -125,6 +155,52 @@ describe("hosted meal photo mailbox import", () => {
       retryable: true,
       status: "blocked",
     });
+  });
+
+  it("keeps the mailbox item retryable until the closeout automation is durable", async () => {
+    const vaultRoot = await createTestVault();
+    const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+    const deleteMealPhoto = vi.fn(async () => undefined);
+    const effectsPort = createEffectsPort({ deleteMealPhoto, readMealPhoto });
+    mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation.mockRejectedValueOnce(
+      new Error("route unavailable"),
+    );
+
+    const first = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort,
+      item: createMealPhotoMailboxItem(),
+      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    });
+
+    expect(first).toEqual({
+      reasonCode: "meal_photo.closeout_automation_failed",
+      retryable: true,
+      status: "blocked",
+    });
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    expect(deleteMealPhoto).not.toHaveBeenCalled();
+    await expect(findEventByExternalRef({
+      resourceId: CAPTURE_ID,
+      resourceType: "photo",
+      system: "meal-photo-capture",
+      vaultRoot,
+    })).resolves.not.toBeNull();
+
+    const retry = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort,
+      item: createMealPhotoMailboxItem(),
+      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    });
+
+    expect(retry.status).toBe("imported");
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    expect(
+      mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
+    ).toHaveBeenCalledTimes(2);
   });
 });
 
