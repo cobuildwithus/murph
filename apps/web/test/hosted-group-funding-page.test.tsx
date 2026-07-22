@@ -31,14 +31,10 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
   HostedUsageTopUpDialog: mocks.HostedUsageTopUpDialog,
 }));
 
-vi.mock("@/src/components/ui/badge", () => ({
-  Badge: (props: { children?: React.ReactNode }) =>
-    React.createElement("span", null, props.children),
-}));
-
 vi.mock("@/src/components/ui/button", () => ({
   Button: (props: { children?: React.ReactNode }) =>
     React.createElement("button", null, props.children),
+  buttonVariants: () => "button-variant",
 }));
 
 vi.mock("@/src/components/ui/card", () => ({
@@ -52,6 +48,8 @@ vi.mock("@/src/components/ui/card", () => ({
     React.createElement("footer", null, props.children),
   CardHeader: (props: { children?: React.ReactNode }) =>
     React.createElement("header", null, props.children),
+  CardTitle: (props: { children?: React.ReactNode }) =>
+    React.createElement("div", null, props.children),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
@@ -116,15 +114,15 @@ describe("hosted group funding page", () => {
       }),
     }));
 
-    assert.match(markup, /<h1[^>]*>Add usage to Sunday sleep crew<\/h1>/u);
+    assert.match(markup, /Sunday sleep crew/u);
+    assert.match(markup, /<h1[^>]*>Add group credit<\/h1>/u);
     assert.match(
       markup,
-      /Choose a one-time usage-credit amount for this group\./u,
+      /One-time credit belongs to this group\. Personal plans stay unchanged\./u,
     );
-    assert.match(
-      markup,
-      /The credit belongs to the group and is used only after its included usage\./u,
-    );
+    assert.doesNotMatch(markup, /Group usage|Running low/u);
+    assert.match(markup, /top-up:group/u);
+    assert.match(markup, /href="\/home"[^>]*>Open Murph<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: "member_payer",

@@ -1528,14 +1528,9 @@ describe('assistant skill assets', () => {
       'do not attach exercise-catalog images, cards, or carousels',
     )
     expect(compact).toContain(
-      'one original 15–20 second standalone launch song',
+      'The onboarding launch close is text-only.',
     )
-    expect(compact).toContain(
-      'This is reply-time media, never a scheduled onboarding automation.',
-    )
-    expect(compact).toContain(
-      'Delight marks real value; it never substitutes for the launch offer, working support, or mandatory text close.',
-    )
+    expect(compact).not.toContain('automatic launch-song eligibility')
     expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
@@ -2203,10 +2198,10 @@ How old are you and what's your gender?
       'the compact launch offer contains the proposed schedule, actionable reminder package, and early review.',
     )
     expect(compact).toContain(
-      "always follow `behavior-followthrough`'s first-launch delight rule",
+      "always follow `behavior-followthrough`'s first-launch close",
     )
     expect(compact).toContain(
-      'This is reply-time delight, not an onboarding automation',
+      'Do not add automatic launch media or make media an onboarding completion requirement.',
     )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
