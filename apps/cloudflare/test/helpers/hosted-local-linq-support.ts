@@ -338,7 +338,7 @@ export async function startHostedLocalLinqStub(input: {
     ) {
       if (!isObservedLinqMessagePayload(parseObservedLinqJson(body))) {
         writeJsonResponse(response, 400, {
-          error: "Expected a Linq send-message payload with a text message.",
+          error: "Expected a Linq send-message payload with a valid text or media part.",
         });
         return;
       }
@@ -963,17 +963,28 @@ function isObservedLinqMessagePayload(payload: Record<string, unknown> | null): 
     return false;
   }
 
-  return parts.some((part) =>
-    Boolean(
-      part
-      && typeof part === "object"
-      && "type" in part
-      && "value" in part
-      && part.type === "text"
-      && typeof part.value === "string"
-      && part.value.trim().length > 0,
-    )
-  );
+  return parts.some((part) => {
+    if (!part || typeof part !== "object" || !("type" in part)) {
+      return false;
+    }
+    if (part.type === "text") {
+      return "value" in part
+        && typeof part.value === "string"
+        && part.value.trim().length > 0;
+    }
+    if (part.type !== "media") {
+      return false;
+    }
+    return (
+      "attachment_id" in part
+      && typeof part.attachment_id === "string"
+      && part.attachment_id.trim().length > 0
+    ) || (
+      "url" in part
+      && typeof part.url === "string"
+      && part.url.trim().length > 0
+    );
+  });
 }
 
 function readObservedLinqMessageText(request: ObservedLinqRequest): string | null {

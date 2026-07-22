@@ -3494,19 +3494,40 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
+    const existingPatch = resolveFinalActionPatch(deliveryContextOrdinal)
+    if (patch.kind === 'reply-required') {
+      finalActionPatches = [
+        ...finalActionPatches.filter(
+          (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+        ),
+        { deliveryContextOrdinal, patch },
+      ]
+      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      return true
+    }
+    if (patch.owner !== 'vault-file' && existingPatch?.kind === 'reply-required') {
+      return false
+    }
     if (
-      patch.kind === 'none' &&
       (computerToolsLockedAfterUserPause ||
         !canApplyNoReplyPatch(deliveryContextOrdinal))
     ) {
       return false
     }
 
-    if (
-      finalActionPatches.some(
-        (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
-      )
-    ) {
+    if (existingPatch) {
+      if (patch.owner === 'vault-file') {
+        finalActionPatches = [
+          ...finalActionPatches.filter(
+            (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+          ),
+          { deliveryContextOrdinal, patch },
+        ]
+        replyTargetPatches = replyTargetPatches.filter(
+          (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+        )
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
       return true
     }
 
@@ -3517,12 +3538,10 @@ async function runCodexAppServerTurnOnProcess(
         patch,
       },
     ]
-    if (patch.kind === 'none') {
-      replyTargetPatches = replyTargetPatches.filter(
-        (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
-      )
-      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-    }
+    replyTargetPatches = replyTargetPatches.filter(
+      (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+    )
+    reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     return true
   }
 
@@ -3812,9 +3831,39 @@ async function runCodexAppServerTurnOnProcess(
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
+        const existingFinalAction = resolveFinalActionPatch(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
+        const vaultFileOwnsFinalAction =
+          existingFinalAction?.kind === 'none' &&
+          existingFinalAction.owner === 'vault-file'
+        const vaultFileMayClassifyAfterGenericNoReply =
+          dynamicToolRequest.kind === 'send-vault-file' &&
+          !vaultFileOwnsFinalAction
+        if (
+          shouldSuppressDeliveryContext(
+            dynamicToolRequestDeliveryContextOrdinal,
+          ) &&
+          !vaultFileMayClassifyAfterGenericNoReply &&
+          isResponseMediaDynamicToolRequest(dynamicToolRequest)
+        ) {
+          return {
+            rpcResult: {
+              contentItems: [{
+                text: dynamicToolRequest.kind === 'send-vault-file'
+                  ? 'vault-file sending cannot be combined with other response media'
+                  : vaultFileOwnsFinalAction
+                    ? 'response media cannot be changed after a vault-file send'
+                    : 'response media unavailable after finish_without_reply',
+                type: 'inputText' as const,
+              }],
+              success: false,
+            },
+          }
+        }
         const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
         await hostedToolContext?.beforeToolExecution?.()
-        return await executeMurphDynamicToolRequest({
+        const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
@@ -3851,6 +3900,7 @@ async function runCodexAppServerTurnOnProcess(
               ? input.voiceMemoRuntime ?? null
               : null,
         })
+        return result
       },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
@@ -3894,7 +3944,7 @@ async function runCodexAppServerTurnOnProcess(
       if (result.finalActionPatch) {
         const applied = await applyFinalActionPatch(
           result.finalActionPatch,
-          dynamicToolDeliveryContextOrdinal ?? 0,
+          dynamicToolRequestDeliveryContextOrdinal,
         )
         if (!applied) {
           void tryWriteRpcMessage({
@@ -4799,7 +4849,7 @@ async function runCodexAppServerTurnOnProcess(
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredUserVisibleOutput,
+      finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
     transcriptMessage:
       normalizeNullableString(modelFinalMessage) ??
@@ -4989,6 +5039,16 @@ function isSerializedDynamicToolRequest(
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     isComputerDynamicToolRequest(request)
+}
+
+function isResponseMediaDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'attach-response-media' ||
+    request.kind === 'generate-image' ||
+    request.kind === 'generate-song' ||
+    request.kind === 'generate-voice-memo' ||
+    request.kind === 'send-vault-file'
 }
 
 function isInvocationScopedRootToolRequest(

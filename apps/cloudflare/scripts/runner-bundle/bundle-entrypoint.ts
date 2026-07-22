@@ -64,10 +64,15 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // expansion measures 9,388,733B on that mainline; the exact combined graph
 // measures 9,424,514B. PR #838's reviewed biomarker catalog produces
 // 9,424,731B on CI Linux (+217B) and 9,460,571B on local macOS. Ratchet the
-// fixed total backstop to the larger exact measurement;
+// fixed total backstop to the larger exact measurement. PR #841's automatic
+// approved-file continuation adds 2,752B, and its exact-owner review
+// remediation adds another 491B, and the final delivery-context ownership
+// correction adds 397B. The round-five consolidated outcome correction adds
+// 1,090B, producing 9,465,301B on local macOS; ratchet by those exact measured
+// increases;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_460_571;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_465_301;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

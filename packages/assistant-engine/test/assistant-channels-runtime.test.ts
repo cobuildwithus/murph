@@ -1434,7 +1434,7 @@ describe('assistant channels runtime seam', () => {
     )
   })
 
-  it('uploads trusted vault-file bytes and sends the resulting Linq attachment id', async () => {
+  it('uploads trusted vault-file bytes and sends the attachment without a caption', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4])
     const loadVaultFile = vi.fn().mockResolvedValue(bytes)
     const providerFetch = vi.fn()
@@ -1484,7 +1484,7 @@ describe('assistant channels runtime seam', () => {
       chatId: 'chat_123',
       idempotencyKey: 'delivery_123',
       media: [{ attachmentId: 'attachment_123' }],
-      message: 'Attached: report.pdf',
+      message: '',
       replyToMessageId: null,
     }, expect.any(Object))
     expect(loadVaultFile.mock.invocationCallOrder[0]).toBeLessThan(
