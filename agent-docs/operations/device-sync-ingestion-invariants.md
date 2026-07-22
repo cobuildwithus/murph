@@ -90,10 +90,25 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    one authoritative target-shard scan whose result is reused by append
    planning; it never performs a second full id scan. Core separately
    suppresses a repeated row and audit when the same provider account has no
-   new canonical output, receipt state, or evidence identity. Each written
-   device delivery retains its complete received evidence set, so its validity
-   never depends on an older novelty row. An integrity-invalid exact row repairs
-   once under the deterministic association-revision id. A live shard whose
+   new canonical output, receipt state, or evidence identity. When a repeated
+   multi-part delivery changes only some evidence, the new ingest row retains
+   only those novel parts and only their output-role links under a distinct
+   per-delivery incremental-evidence marker inspected with the original
+   delivery ids. The marker is only a locator: it cannot authorize a no-op or
+   repair from incomplete proof. Missing canonical outputs fail closed before
+   reconciliation; otherwise the existing novelty owner proves every incoming
+   evidence fingerprint, receipt, and output link. When that proof is missing
+   or unsafe, ingestion fails open by retaining one complete received evidence
+   set, after which the next replay converges. A repair delivery also
+   retains the complete received evidence set rather than trusting damaged
+   historical proof. A batch whose novel evidence cannot be associated with
+   its accepted prepared event, or whose prepared events share one canonical
+   owner, likewise remains complete so later repair cannot lose the
+   evidence-role mapping needed to reject ambiguity. Evidence for a newly
+   appended event revision is always retained even when identical evidence
+   bytes were seen before. An
+   integrity-invalid exact row repairs once under the deterministic
+   association-revision id. A live shard whose
    final complete row lost only its newline receives exactly one delimiter
    before the new row; an incomplete final row rejects the append. Malformed
    newline-framed history may retain one novel delivery only after a tolerant
