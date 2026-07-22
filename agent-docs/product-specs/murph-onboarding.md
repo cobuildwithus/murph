@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 
 ## Product Decision
 
@@ -10,8 +10,8 @@ Murph first establishes a private relationship with a broad personal health
 assistant. It briefly learns what the member most wants from their health and
 asks only enough to name one or two open threads, then reflects, saves, and
 explicitly parks those threads. Murph asks once for a missing motivation and
-priority rather than inferring them; if the member does not know or declines,
-those fields remain explicitly unknown and onboarding continues. Murph gathers a
+does not infer it; if the member does not know or declines, the motivation
+remains explicitly unknown and onboarding continues. Murph gathers a
 finite health-context foundation over separate turns, returns to the earlier
 thread with that context, and collaborates on the first step.
 
@@ -137,15 +137,14 @@ A useful default is:
 
 Do not bundle this with additional intake questions. The broad anchor does not
 consume the clarification budget. After it, ask no more than three short
-clarifiers, one per message. Stop early when the outcome, motivation, and
-priority are known or explicitly unknown. Ask a missing motivation or priority
-question once, accept “I don't know” or a decline without pressure, and never
-infer an answer. The available
-clarifiers are:
+clarifiers, one per message. Stop early when the outcome and motivation are
+known or explicitly unknown. Ask a missing motivation once, accept “I don't
+know” or a decline without pressure, and never infer an answer. When the member
+names several threads, keep them all without asking which is the main priority;
+that choice belongs to the return step. The available clarifiers are:
 
 1. What would success look or feel like?
 2. Why would that matter?
-3. Is this the main priority or one of several?
 
 Keep the motivation question light. Do not excavate obstacles, failed attempts,
 diagnoses, baselines, schedules, equipment, treatment, or intervention design
@@ -165,15 +164,29 @@ who already feels healthy and has no goal is not a failed onboarding case.
 ### 4. Reflect, save, and park the threads
 
 Once one or two threads can be named and each attempted clarifier is answered
-or explicitly unknown, reflect them in the member's words and save each concrete goal or
-ongoing need to its existing canonical owner. Say naturally that Murph will
-keep the thread open. Do not label it as a permanent main direction or announce
-internal storage mechanics.
+or explicitly unknown, reflect the actual threads in the member's words and
+name them again in the parking reply. Keep a known motivation clearly
+subordinate to those threads instead of presenting it as another goal. Do not
+make the member recover the referent of “both,” “those,” or “them” from earlier
+messages.
 
-Then explain the ordering explicitly. The default meaning is:
+Save each concrete goal or ongoing need to its existing canonical owner. Say
+naturally that Murph will keep the thread open. Do not label it as a permanent
+main direction or announce internal storage mechanics.
 
-> I'm not going to jump into solving that yet. I want to learn enough about you
-> that when we return to it, the help actually fits.
+Then explain the ordering explicitly without foregrounding a refusal to help.
+For a casual member who named strength and sleep as the threads, confidence and
+energy as the reason, and has not resolved the data-source checkpoint, the
+complete reply may be:
+
+> got it — stronger and sleeping better, mainly for more confidence and energy.
+> before we decide where to start, i want to understand a bit more about what's
+> going on around your health so the advice actually fits. do you use a wearable
+> or health app?
+
+This is a worked example, not fixed copy. Murph substitutes the member's actual
+threads and reason, matches their register, and asks the first unresolved
+foundation question.
 
 This is not permission to diagnose, recommend, prescribe, design a plan, start
 an experiment, or create a support loop. Bridge directly into the first short

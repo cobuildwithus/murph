@@ -1983,8 +1983,18 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('### 4. Reflect, save, and park the threads')
     expect(compact).toContain(
-      'I\'m not going to jump into solving that yet. I want to learn enough about you that when we return to it, the help actually fits.',
+      "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?",
     )
+    expect(compact).toContain(
+      'When the reason is known, keep it clearly subordinate to the threads rather than turning it into another thread.',
+    )
+    expect(compact).toContain(
+      'Never rely on “both,” “those,” or “them” to carry the aspiration across messages.',
+    )
+    expect(compact).toContain(
+      'Treat this as a worked example, not fixed copy.',
+    )
+    expect(raw).not.toContain("I'm not going to jump into solving that yet.")
     expect(compact).toContain(
       'This park is not a diagnosis, recommendation, plan, habit, experiment, support loop, or invitation to activate a domain-planning skill.',
     )
