@@ -64,6 +64,7 @@ describe("hosted usage-limit notice claim authority", () => {
         await input.assertDispatchAuthority?.(input.prisma);
         return {
           idempotencyKey: "usage_notice_claim_1",
+          providerIdempotencyKey: "usage_notice_provider_attempt_1",
           status: "claimed",
         };
       },
@@ -92,6 +93,7 @@ describe("hosted usage-limit notice claim authority", () => {
       usageCreditLedgerVersion: 4n,
     })).resolves.toEqual({
       idempotencyKey: "usage_notice_claim_1",
+      providerIdempotencyKey: "usage_notice_provider_attempt_1",
       status: "claimed",
     });
 
@@ -244,6 +246,7 @@ describe("hosted usage-limit notice claim authority", () => {
       usageCreditLedgerVersion: 6n,
     })).resolves.toEqual({
       idempotencyKey: "usage_notice_claim_1",
+      providerIdempotencyKey: "usage_notice_provider_attempt_1",
       status: "claimed",
     });
   });
