@@ -1,16 +1,19 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { gzipSync } from "node:zlib";
 
 import {
   CURRENT_VAULT_FORMAT_VERSION,
   HOSTED_CANONICAL_WRITE_RECEIPT_SCHEMA_VERSION,
+  buildIntegrationEvidencePart,
+  buildIntegrationIngestRecord,
   initializeVault,
   runCanonicalWrite,
 } from "@murphai/core";
@@ -1703,6 +1706,94 @@ describe("hosted workspace runtime entrypoint", () => {
       const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
       const migratedMetadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
       assert.equal(migratedMetadata.formatVersion, CURRENT_VAULT_FORMAT_VERSION);
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("repairs an exact interrupted integration ingest archive before serving the restored vault", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const snapshotRef = createWorkspaceSnapshotV2Ref("snapshot-interrupted-ingest-archive");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const logicalPath = "ledger/integration-ingests/2026/2026-03.jsonl";
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId: "attempt_synthetic_interrupted_ingest_archive",
+          leaseGeneration: "8",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      }), {
+        async createCheckpointSnapshot() {
+          await assert.rejects(access(path.join(vaultRoot, logicalPath)));
+          await access(path.join(vaultRoot, `${logicalPath}.gz`));
+          return {
+            snapshotRef: createWorkspaceSnapshotV2Ref(
+              "snapshot-interrupted-ingest-archive-checkpoint",
+            ),
+          };
+        },
+        async importItem() {
+          throw new Error("Interrupted archive recovery test should not import mailbox items.");
+        },
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events: [],
+            workspace: createWorkspaceState({ snapshotRef, version: "0" }),
+          }),
+          workspaceSnapshotPort: {
+            async abortSnapshotSession() {
+              throw new Error("Interrupted archive recovery test should not abort snapshots.");
+            },
+            async completeSnapshotSession() {
+              throw new Error("Interrupted archive recovery test should not complete snapshots.");
+            },
+            async putSnapshotObjectDirect() {
+              throw new Error("Interrupted archive recovery test should not upload snapshots.");
+            },
+            async restoreWorkspaceSnapshot(input) {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot: input.durableRoot });
+              const part = buildIntegrationEvidencePart({
+                content: JSON.stringify({ meal: "synthetic" }),
+                fileName: "synthetic-meal.json",
+                mediaType: "application/json",
+                role: "meal-summary",
+              });
+              const record = buildIntegrationIngestRecord({
+                eventCount: 0,
+                eventIdsComplete: true,
+                eventOutputs: [],
+                id: "xfm_11111111111111111111111111",
+                importedAt: "2026-03-12T09:00:00.000Z",
+                parts: [part],
+                provider: "ios-meals",
+                sampleCount: 0,
+                sampleIds: [],
+                sampleIdsComplete: true,
+                source: "import",
+              });
+              const content = `${JSON.stringify(record)}\n`;
+              const rawPath = path.join(input.durableRoot, logicalPath);
+              await mkdir(path.dirname(rawPath), { recursive: true });
+              await writeFile(rawPath, content, "utf8");
+              await writeFile(`${rawPath}.gz`, gzipSync(content));
+            },
+            async startSnapshotSession() {
+              throw new Error("Interrupted archive recovery test should not start snapshots.");
+            },
+          },
+        }),
+        vaultRoot,
+      });
+
+      await assert.rejects(access(path.join(vaultRoot, logicalPath)));
+      await access(path.join(vaultRoot, `${logicalPath}.gz`));
       assert.equal(checkpointRequests.length, 1);
       assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
     } finally {

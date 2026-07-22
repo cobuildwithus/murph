@@ -11,14 +11,15 @@ The separate `product-experience-review` owns the irreducible purpose, complete
 cross-surface journey, timing and delivery, and whether words, actions, choices,
 or screens can be removed. This pass owns rendered implementation quality,
 responsive behavior, accessibility, and design-system execution; do not
-duplicate subjective product-taste findings.
+duplicate subjective product-taste findings or decide the copy, state selection,
+action count, or whether an element exists.
 
 Outcome:
-Determine whether the changed experience is product-correct, visually coherent, responsive, accessible, and ready to ship without avoidable UI complexity or drift.
+Determine whether the declared product experience renders faithfully, visually coherently, responsively, accessibly, and with a maintainable frontend implementation.
 
 Success criteria:
 - Every finding is tied to reachable rendered or code evidence and user impact.
-- Recommendations preserve product intent and reuse established primitives where possible.
+- Recommendations preserve the declared experience and reuse established primitives where possible.
 - Missing rendered evidence is reported as a gap rather than replaced by source-only inference.
 
 Mode:
@@ -30,20 +31,19 @@ Mode:
 
 Preflight (required):
 - Read `agent-docs/FRONTEND.md` before reviewing the diff.
-- Read the product intent and inspect the existing tokens, shared components, and nearby patterns before judging the change.
+- Read the declared experience and inspect the existing tokens, shared components, and nearby patterns before judging the change.
 
 Review for:
-- drift from documented frontend guidance, product intent, shared primitives, tokens, spacing, typography, and established interaction patterns
-- user-facing regressions, confusing flows, weak hierarchy, misleading copy, and missing or broken loading, empty, error, hover, focus, disabled, or success states touched by the diff
+- drift from the declared experience, documented frontend guidance, shared primitives, tokens, spacing, typography, and established visual or interaction implementation patterns
+- missing or broken rendering of declared loading, empty, error, hover, focus, disabled, or success states touched by the diff
 - desktop and mobile responsiveness, clipping, overflow, missing content, keyboard/focus behavior, contrast, and other reachable accessibility failures
-- visual churn, one-off styling, decorative additions, unrelated features, or interaction changes not required by the stated outcome
-- frontend changes that solve a product problem in a way that clashes with `agent-docs/PRODUCT_SENSE.md` or `agent-docs/PRODUCT_CONSTITUTION.md`
-- unnecessary complexity, speculative abstractions, or local styling hacks that make future UI work harder
+- visual treatment that obscures or conflicts with the declared hierarchy, including one-off styling or decorative additions
+- unnecessary frontend implementation complexity, speculative component abstractions, or local styling hacks that make future UI work harder
 
 Rendered evidence:
 - When visual behavior changed, render and inspect the affected experience at relevant desktop and mobile viewports after reading the code. Exercise the touched states when practical.
 - If browser or rendered inspection is unavailable, report the exact verification gap. Do not infer visual quality from source alone.
-- Tiny static copy-only changes that meet the completion workflow fast path do not require a full visual pass.
+- Meaning-preserving tiny static-copy corrections that meet the completion workflow fast path do not require a full visual pass.
 
 Output requirements:
 - Return findings ordered by severity (`high`, `medium`, `low`).
@@ -53,7 +53,7 @@ Output requirements:
 
 Response format:
 - Return a normal text review, not patch attachments and not follow-on prompts for more agents.
-- Keep the focus on concrete design-system, UX, accessibility, and product-alignment failures rather than subjective preference.
+- Keep the focus on concrete rendered-fidelity, design-system, accessibility, and maintainability failures rather than subjective preference.
 
 Stop rule:
 - Stop after the changed surfaces and relevant states have been inspected and every credible issue has evidence. Zero findings is valid; do not invent polish work to fill the report.

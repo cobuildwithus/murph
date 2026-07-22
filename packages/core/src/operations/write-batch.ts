@@ -31,9 +31,10 @@ import {
   assertAuthorizedIntegrationIngestAppendPlan,
   appendArchivedIntegrationIngestShard,
   buildIntegrationIngestAppendPlan,
+  createArchivedIntegrationIngestShardContentReceipt,
+  inspectArchivedIntegrationIngestShardAppend,
   parseIntegrationIngestAppendPayload,
   prepareLiveIntegrationIngestAppendPayload,
-  readArchivedIntegrationIngestShardText,
   truncateArchivedIntegrationIngestShard,
   type IntegrationIngestAppendPlan,
 } from "../integration-ingests.ts";
@@ -3146,43 +3147,17 @@ export class WriteBatch {
 
         const baseContentReceipt = this.getPreparedJsonlBaseReceipt(action);
         if (action.allowArchivedIntegrationIngestAmendment) {
-          const archived = await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath);
-          if (archived) {
-            const targetContent = Buffer.from(archived.content, "utf8");
-            if (targetContent.byteLength < action.originalSize) {
-              throw this.buildResumeConflictError(
-                action,
-                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
-              );
-            }
-
-            const actualBaseReceipt = createCommittedPayloadReceipt(targetContent.subarray(0, action.originalSize));
-            if (!receiptsMatch(actualBaseReceipt, baseContentReceipt)) {
-              throw this.buildResumeConflictError(
-                action,
-                `Archived append target "${action.targetRelativePath}" base content changed while resuming the write batch.`,
-              );
-            }
-
-            if (targetContent.byteLength === action.originalSize) {
-              return undefined;
-            }
-
-            const expectedSize = action.originalSize + payloadBytes.byteLength;
-            if (targetContent.byteLength !== expectedSize) {
-              throw this.buildResumeConflictError(
-                action,
-                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
-              );
-            }
-
-            if (!targetContent.subarray(action.originalSize).equals(payloadBytes)) {
-              throw this.buildResumeConflictError(
-                action,
-                `Archived append target "${action.targetRelativePath}" changed unexpectedly while resuming the write batch.`,
-              );
-            }
-
+          const archivedState = await inspectArchivedIntegrationIngestShardAppend({
+            expectedBaseByteLength: action.originalSize,
+            expectedBaseSha256: baseContentReceipt.sha256,
+            payload: payloadBytes,
+            targetRelativePath: action.targetRelativePath,
+            vaultRoot: this.vaultRoot,
+          });
+          if (archivedState === "base") {
+            return undefined;
+          }
+          if (archivedState === "applied") {
             return {
               effect: "append",
               existedBefore: true,
@@ -3281,12 +3256,14 @@ export class WriteBatch {
       },
       prepareMutation: async (target) => {
         if (action.allowArchivedIntegrationIngestAmendment) {
-          const archived = await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath);
-          if (archived) {
-            const archivedContent = Buffer.from(archived.content, "utf8");
-            const originalSize = action.originalSize ?? archivedContent.byteLength;
+          const archivedReceipt = await createArchivedIntegrationIngestShardContentReceipt(
+            this.vaultRoot,
+            action.targetRelativePath,
+          );
+          if (archivedReceipt) {
+            const originalSize = action.originalSize ?? archivedReceipt.byteLength;
             const baseContentReceipt = action.baseContentReceipt ??
-              createCommittedPayloadReceipt(archivedContent);
+              archivedReceipt;
             if (baseContentReceipt.byteLength !== originalSize) {
               throw this.buildResumeConflictError(
                 action,
@@ -3505,7 +3482,10 @@ export class WriteBatch {
           action.allowArchivedIntegrationIngestAmendment &&
           action.baseContentReceipt &&
           action.originalSize !== undefined &&
-          await readArchivedIntegrationIngestShardText(this.vaultRoot, action.targetRelativePath)
+          await createArchivedIntegrationIngestShardContentReceipt(
+            this.vaultRoot,
+            action.targetRelativePath,
+          )
         ) {
           await truncateArchivedIntegrationIngestShard({
             expectedBaseByteLength: action.originalSize,

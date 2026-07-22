@@ -1268,6 +1268,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).toContain(
+      'review_gpt_browser_lanes=(eragon phlebas hercules mountain)',
+    )
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1429,9 +1434,13 @@ describe('monorepo release flow coverage audit', () => {
       'The `pr-review` prompt lives at',
     )
     expect(prReviewGptLoop).toContain(
-      'Both stages use the managed Eragon, Phlebas, and Mountain browser lanes',
+      'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
+    expect(prReviewGptLoop).toContain('`Hercules.app` on `9444`')
+    expect(prReviewGptLoop).toContain(
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+    )
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
@@ -1500,6 +1509,17 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const verificationAndRuntime = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
+      'utf8',
+    )
+    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
+    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
+    expect(verificationAndRuntime).toContain(
+      'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
+    )
+    expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
@@ -1529,6 +1549,7 @@ describe('monorepo release flow coverage audit', () => {
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
+      'product-experience-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1545,8 +1566,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
-    expect(completionAuditPrompts[2]).toContain('Optional patch artifact:')
-    expect(completionAuditPrompts[2]).toContain('`reviewgpt-coverage.patch`')
+    expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
+    expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
     expect(
       existsSync(
         path.join(
@@ -1561,6 +1582,142 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it('keeps product-experience decisions separate from rendered frontend review', () => {
+    const prDeepReview = readFileSync(
+      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
+      'utf8',
+    )
+    const completionSpecialists = readFileSync(
+      path.join(
+        repoRoot,
+        'scripts',
+        'chatgpt-review-presets',
+        'completion-specialists.md',
+      ),
+      'utf8',
+    )
+    const productExperienceReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
+      'utf8',
+    )
+    const frontendReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
+      'utf8',
+    )
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+    const agentWorkflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
+      'utf8',
+    )
+
+    expect(prDeepReview).toContain('## Product experience audit')
+    expect(prDeepReview).toMatch(
+      /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
+    )
+    expect(prDeepReview).toMatch(
+      /work waits behind\s+unrelated idle or maintenance activity/u,
+    )
+    expect(prDeepReview).toContain(
+      'result without requiring an unrelated new inbound action',
+    )
+    expect(prDeepReview).toContain(
+      'Make every word, click, field, choice,',
+    )
+    expect(completionSpecialists).toContain(
+      "repository's meaning-preserving tiny static-copy fast path",
+    )
+    expect(completionSpecialists).toContain(
+      'rendered fidelity to the declared',
+    )
+    expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
+    expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productExperienceReview).toContain(
+      'audit for changed user-facing product decisions',
+    )
+    expect(productExperienceReview).not.toContain(
+      'audit for materially changed user-facing behavior',
+    )
+    expect(productExperienceReview).toMatch(
+      /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
+    )
+    expect(productExperienceReview).toMatch(
+      /waits behind unrelated idle or\s+maintenance work/u,
+    )
+    expect(productExperienceReview).toContain(
+      'Defer component and token implementation',
+    )
+    expect(frontendReview).toMatch(
+      /do not\s+duplicate subjective product-taste findings or decide the copy, state selection,\s+action count, or whether an element exists/u,
+    )
+    expect(frontendReview).toContain(
+      'visual treatment that obscures or conflicts with the declared hierarchy',
+    )
+    expect(frontendReview).not.toContain('unrelated rendered elements')
+    expect(completionWorkflow).toContain(
+      'rendered fidelity to the declared states and hierarchy, responsive behavior, accessibility, and design-system execution',
+    )
+    expect(completionWorkflow).not.toContain(
+      'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
+    )
+    expect(completionWorkflow).toContain('## Product and Rendered Review Admission')
+    expect(completionWorkflow).toContain(
+      'user-visible action purpose, count, or priority; required interaction steps;',
+    )
+    expect(completionWorkflow).toContain(
+      'asynchronous continuation or wake ownership;',
+    )
+    expect(completionWorkflow).toContain(
+      '| Any product-owned dimension, including one changed through a prompt | Run local `product-experience-review` |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Meaning-preserving tiny static-copy correction | No product-decision review |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Implementation-only presentation with no product-owned dimension | No product-decision review |',
+    )
+    expect(completionWorkflow).toContain(
+      'An\nexemption never waives an applicable preliminary lens or local specialist.',
+    )
+    expect(completionWorkflow).not.toContain('explicit credit exhaustion uses `frontend-review`')
+    expect(completionWorkflow).toContain(
+      'Semantic copy—including CTA, helper, onboarding,',
+    )
+    expect(completionWorkflow).toMatch(
+      /a prompt that changes a product-owned dimension also runs local\s+`product-experience-review`/u,
+    )
+    expect(agentWorkflowRouting).toContain(
+      'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'asynchronous continuation or wake ownership;',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'only for a meaning-preserving typo, punctuation, grammar, or equivalent localization correction',
+    )
+    expect(agentWorkflowRouting).toContain(
+      '`agent-docs/operations/completion-workflow.md` § Product and Rendered Review Admission',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'trivial copy-only `apps/web` edits that change static text only',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      '`product-experience-review` for materially changed user-facing behavior',
+    )
+    expect(agentWorkflowRouting).not.toContain('trivial static copy')
+    expect(completionWorkflow).toContain(
+      'repo code/test/config changes whose verification lane includes owner-level coverage',
+    )
+    expect(frontendReview).toContain(
+      'Meaning-preserving tiny static-copy corrections',
+    )
   })
 
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {

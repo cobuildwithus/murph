@@ -1407,6 +1407,20 @@ snapshot planning, diagnostics, and mailbox-import policy; Cloudflare supplies
 only explicit platform capabilities such as mailbox payload decode, direct-R2
 ports, and the local encrypted archive writer.
 
+True idle-shutdown maintenance also compacts closed
+`ledger/integration-ingests/YYYY/YYYY-MM.jsonl` shards in place before snapshot
+planning. The core owner streams each raw shard into deterministic level-6
+gzip, validates all rows and the exact decompressed byte receipt, publishes the
+archive exclusively, and only then removes the raw representation. Pending
+foreground work skips this pass, and a runner wake, shutdown, or 30-second pass
+budget aborts it. A timeout or ordinary compaction failure is logged in
+aggregate and does not suppress the checkpoint; remaining raw months are the
+next pass's durable worklist. If interruption lands after archive publication
+but before raw removal, startup removes the raw copy only after independently
+validating an exact, newline-terminated raw/gzip match. A conflicting closed
+pair fails closed before mailbox or assistant work. No compaction queue,
+marker, or second persistence owner is introduced.
+
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
