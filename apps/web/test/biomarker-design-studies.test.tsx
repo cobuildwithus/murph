@@ -117,17 +117,17 @@ test("biomarker preparing study reassures members and previews the index structu
   const markup = renderToStaticMarkup(createElement(BiomarkerPreparingStateStudy));
 
   expect(markup).toContain('data-design-study="biomarker-preparing"');
-  expect(markup).toContain("Your records are in. Murph is organizing them.");
-  expect(markup).toContain("appear together here in one private index");
-  expect(markup).toContain("Future results update the same index");
+  expect(markup).toContain("Murph is organizing your health records.");
+  expect(markup).toContain("This page will update when your biomarkers are ready.");
   expect(markup).not.toContain("one history");
-  expect(markup).toContain("Updating your biomarker index");
+  expect(markup).toContain("Updating your biomarkers");
   expect(markup).toContain('aria-live="polite"');
   expect(markup).toContain('role="status"');
   expect(markup).toContain("What appears next");
   expect(markup).toContain("From your devices");
   expect(markup).toContain("From the lab");
-  expect(markup).toContain("Index preview");
+  expect(markup).toContain(">Biomarkers<");
+  expect(markup).not.toContain("Future results update the same index");
   expect(markup).toContain("motion-reduce:animate-none");
   expect(markup).toContain("lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]");
   expect(markup).not.toContain("Preparing your lab history");

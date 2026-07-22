@@ -14,6 +14,10 @@ import {
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
+import {
+  BiomarkerIndexPlaceholder,
+  type BiomarkerIndexPlaceholderVariant,
+} from "@/src/components/biomarkers/biomarker-index-placeholder";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
@@ -125,6 +129,13 @@ export function BiomarkersPageClient({
     || (status === "error" && isAuthRequiredBrowserVaultError(error));
   const preparing = authenticated && refreshPending;
   const totalCount = biomarkers.length + deviceMetrics.length;
+  const canShowResolvedEmptyState = status === "empty" || status === "ready";
+  const showUnclassifiedLabNotice = authenticated
+    && !authRequired
+    && canShowResolvedEmptyState
+    && deviceMetrics.length > 0
+    && biomarkers.length === 0
+    && savedLabResultCount > 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -191,10 +202,9 @@ export function BiomarkersPageClient({
         </section>
       ) : null}
 
-      {(authRequired || status === "empty" || status === "ready")
-        && (!authenticated
-          || totalCount === 0
-          || (biomarkers.length === 0 && savedLabResultCount > 0)) ? (
+      {showUnclassifiedLabNotice ? <UnclassifiedLabsNotice /> : null}
+
+      {authRequired || (canShowResolvedEmptyState && totalCount === 0) ? (
         <EmptyBiomarkersState
           authRequired={authRequired}
           hasSavedLabResults={savedLabResultCount > 0}
@@ -205,6 +215,19 @@ export function BiomarkersPageClient({
       ) : null}
 
     </div>
+  );
+}
+
+function UnclassifiedLabsNotice() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>No recognized lab biomarkers yet</CardTitle>
+        <CardDescription>
+          Your saved lab records remain available, but none are recognized as biomarkers yet.
+        </CardDescription>
+      </CardHeader>
+    </Card>
   );
 }
 
@@ -473,50 +496,39 @@ function EmptyBiomarkersState({
   stale: boolean;
   uploadLabsAction: ReactNode;
 }) {
+  if (!authRequired) {
+    const variant: BiomarkerIndexPlaceholderVariant = preparing
+      ? "preparing"
+      : hasSavedLabResults
+        ? "saved"
+        : stale
+          ? "stale"
+          : "empty";
+
+    return (
+      <BiomarkerIndexPlaceholder
+        action={preparing ? null : uploadLabsAction}
+        variant={variant}
+      />
+    );
+  }
+
   return (
-    <Card aria-live={preparing ? "polite" : undefined} role={preparing ? "status" : undefined}>
+    <Card>
       <CardHeader>
-        <CardTitle>
-          {preparing
-            ? "Preparing your lab history"
-            : authRequired
-              ? "Sign in to see your biomarkers"
-              : hasSavedLabResults
-                ? "No recognized lab biomarkers yet"
-              : stale
-                ? "No saved lab results in this view"
-                : "No lab results yet"}
-        </CardTitle>
+        <CardTitle>Sign in to see your biomarkers</CardTitle>
         <CardDescription>
-          {preparing
-            ? "Murph is preparing your saved lab results."
-            : authRequired
-              ? "Your biomarker history is private and only appears after you sign in."
-              : hasSavedLabResults
-                ? "Your saved lab records remain available, but none are classified for this index yet."
-              : stale
-                ? "Murph checks for newer data in the background. You can also send Murph a lab report."
-                : "Send Murph a lab report to start building your history."}
+          Your biomarker history is private and only appears after you sign in.
         </CardDescription>
       </CardHeader>
-      {!preparing ? (
-        <>
-          <CardContent>
-            <p className="max-w-xl text-sm text-muted-foreground">
-              {authRequired
-                ? "Sign in before viewing or adding private health information."
-                : "Murph will keep each measured biomarker together so future results can be compared over time."}
-            </p>
-          </CardContent>
-          {authRequired ? (
-            <CardFooter>
-              <AuthButton>Sign in</AuthButton>
-            </CardFooter>
-          ) : uploadLabsAction ? (
-            <CardFooter>{uploadLabsAction}</CardFooter>
-          ) : null}
-        </>
-      ) : null}
+      <CardContent>
+        <p className="max-w-xl text-sm text-muted-foreground">
+          Sign in before viewing or adding private health information.
+        </p>
+      </CardContent>
+      <CardFooter>
+        <AuthButton>Sign in</AuthButton>
+      </CardFooter>
     </Card>
   );
 }
