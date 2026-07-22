@@ -244,7 +244,7 @@ test("resolveDeviceSyncCompletionDialogModel owns the WHOOP action contract", as
   });
 
   expect(model?.setupGuide?.downloadAction).toEqual({
-    ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+    ariaLabel: "Download App to sync WHOOP through Apple Health",
     href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
     label: "Download App",
     rel: "noopener noreferrer",

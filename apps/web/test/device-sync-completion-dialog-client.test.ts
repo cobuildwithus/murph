@@ -139,7 +139,7 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
       actionLabel: "Get full sync",
       detail: "Two quick steps and Murph sees everything WHOOP tracks.",
       downloadAction: {
-        ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+        ariaLabel: "Download App to sync WHOOP through Apple Health",
         href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
         label: "Download App",
         rel: "noopener noreferrer",
@@ -183,6 +183,11 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.innerHTML).toContain(
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
+  const downloadLink = render.container.querySelector(
+    'a[href="https://apps.apple.com/us/app/murph-ai/id6786145859"]',
+  );
+  expect(downloadLink?.textContent).toContain("Download App");
+  expect(downloadLink?.getAttribute("aria-label")?.startsWith("Download App")).toBe(true);
   expect(render.container.textContent).toContain("Download App");
   const continueLink = render.container.querySelector(
     'a[aria-label="Continue with Murph in Telegram (opens in a new tab)"]',
