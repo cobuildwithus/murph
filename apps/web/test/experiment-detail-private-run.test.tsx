@@ -259,7 +259,7 @@ describe("experiment detail private-run composition", () => {
     });
 
     expect(privateRun).toEqual(expect.objectContaining({
-      completionPercent: 14,
+      completionPercent: 11,
       day: 3,
       id: "exp_sauna_01",
       slug: "finnish-sauna",
@@ -268,7 +268,7 @@ describe("experiment detail private-run composition", () => {
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
       title: "Keep the baseline clean",
-      when: "Baseline day 3 of 7",
+      when: "Baseline day 3 of 14",
     }));
     expect(privateRun?.timeline).toEqual(expect.arrayContaining([
       expect.objectContaining({ title: "Baseline started" }),
@@ -429,7 +429,7 @@ describe("experiment detail private-run composition", () => {
     }));
     expect(privateRun?.nextStep).toEqual(expect.objectContaining({
       title: "Keep the baseline clean",
-      when: "Baseline day 3 of 7",
+      when: "Baseline day 3 of 14",
     }));
   });
 
@@ -634,7 +634,7 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(baselineMarkup).toContain("running this experiment");
-    expect(baselineMarkup).toContain("Starts day 8");
+    expect(baselineMarkup).toContain("Starts day 15");
     expect(baselineMarkup).toContain("Keep the baseline clean");
     expect(baselineMarkup).not.toContain("Active · Day 1");
   });
@@ -2175,8 +2175,8 @@ describe("experiment detail private-run composition", () => {
     );
 
     expect(pausedMarkup).toContain("Your experiment is paused");
-    expect(pausedMarkup).toContain("Paused on day 4");
-    expect(pausedMarkup).toContain("Resume the protocol");
+    expect(pausedMarkup).toContain("Paused during baseline day 11 of 14");
+    expect(pausedMarkup).toContain("Resume when ready");
     expect(pausedMarkup).not.toContain("Continue the protocol");
   });
 

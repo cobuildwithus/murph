@@ -176,12 +176,12 @@ describe("experiment page projections", () => {
 
     expect(mocks.getHostedDashboardPageAuthSnapshot).toHaveBeenCalled();
     expect(protocol).toEqual(expect.objectContaining({
-      baselineDays: 7,
+      baselineDays: 14,
       commons: expect.objectContaining({
         key: "protocol_variant:dry-sauna/murph-finnish-standard-3x-week",
         routeId: "finnish-sauna",
       }),
-      durationDays: 21,
+      durationDays: 28,
       id: "finnish-sauna",
       title: "Finnish Dry Sauna",
     }));

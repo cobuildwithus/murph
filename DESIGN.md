@@ -151,7 +151,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 - **Headline** (Fraunces, 600, 2rem, leading 1.15, tracking -0.02em): section titles inside a surface (Protocol, Your Results, Conclusions).
 - **Stat** (Fraunces, 600, 2rem+, leading 1, tracking -0.02em): the large numbers on signal cards — HRV up 12%, sleep +38min. Data as poetry.
 - **Body** (DM Sans, 400, 14–16px, leading 1.55): running prose. Cap body columns at 65–75ch.
-- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 7d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
+- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 14d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
 
 ### Named Rules
 
@@ -177,7 +177,7 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 
 ### Buttons
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.
-- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("7-day baseline · 14-day protocol").
+- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("14-day baseline · 14-day protocol").
 - **Secondary:** slate (`#2d3436`) background, white text, 10px 18px padding. Used for header actions and neutral affordances.
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
@@ -249,7 +249,7 @@ For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker
 The shape compresses gracefully: before `md:` only title + fit label stay; at `md:` the full grid expands. This is the standard answer to "we have 14+ items to show on one page" — an identical card grid is the lazy alternative and is banned.
 
 ### Progress Bar (Experiment Phases)
-Three phases: **Baseline · 7d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
+Three phases: **Baseline · 14d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
 
 ### Next Step Card (Active State)
 Sage-green 3px left accent bar + session title (Headline) + when/context (Body) + "Next session: Friday" right-aligned (DM Mono). Only visible while experiment is active.

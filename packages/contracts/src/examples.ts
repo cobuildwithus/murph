@@ -828,12 +828,12 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
         mode: "prospective",
         source: "manual_measurements",
         start: "2026-03-12",
-        end: "2026-03-18",
+        end: "2026-03-25",
       },
       baselineStart: "2026-03-12",
-      baselineEnd: "2026-03-18",
-      interventionStart: "2026-03-19",
-      interventionEnd: "2026-04-01",
+      baselineEnd: "2026-03-25",
+      interventionStart: "2026-03-26",
+      interventionEnd: "2026-04-08",
       modality: "magnesium",
       schedule: {
         kind: "dailyLocal",
@@ -858,7 +858,7 @@ export const exampleFrontmatterObjects: Readonly<FrontmatterExamples> = Object.f
         { biomarkerKey: "biomarker:sleep-efficiency", direction: "increase" },
         { biomarkerKey: "biomarker:resting-heart-rate", direction: "decrease" },
       ],
-      notes: ["Compare the 7-day baseline against the 14-day intervention window."],
+      notes: ["Compare the 14-day baseline against the 14-day intervention window."],
     },
     onboarding: {
       completedAt: "2026-03-12T18:00:00Z",
@@ -1309,11 +1309,11 @@ runPlan:
     mode: prospective
     source: manual_measurements
     start: 2026-03-12
-    end: 2026-03-18
+    end: 2026-03-25
   baselineStart: 2026-03-12
-  baselineEnd: 2026-03-18
-  interventionStart: 2026-03-19
-  interventionEnd: 2026-04-01
+  baselineEnd: 2026-03-25
+  interventionStart: 2026-03-26
+  interventionEnd: 2026-04-08
   modality: magnesium
   schedule:
     kind: dailyLocal
@@ -1347,7 +1347,7 @@ analysisPlan:
     - biomarkerKey: biomarker:resting-heart-rate
       direction: decrease
   notes:
-    - Compare the 7-day baseline against the 14-day intervention window.
+    - Compare the 14-day baseline against the 14-day intervention window.
 onboarding:
   completedAt: 2026-03-12T18:00:00Z
   setupAnswers:
