@@ -30,6 +30,7 @@ vi.mock("next/link", () => ({
 vi.mock("@/src/components/ui/button", () => ({
   Button: ({
     children,
+    className,
     size,
     variant,
     ...props
@@ -39,8 +40,12 @@ vi.mock("@/src/components/ui/button", () => ({
     variant?: string;
   }) => {
     void size;
-    void variant;
-    return createElement("button", props, children);
+    return createElement("button", {
+      ...props,
+      className: [className, variant ? `variant-${variant}` : null]
+        .filter(Boolean)
+        .join(" "),
+    }, children);
   },
   buttonVariants: ({
     className,
@@ -208,6 +213,72 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.querySelector('[data-dialog="open"]')).toBeNull();
 
   await render.cleanup();
+
+  const messagesRender = await renderDeviceSyncCompletionDialog({
+    ...model,
+    contactAction: {
+      href: "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
+      kind: "imessage",
+      label: "Text Murph",
+    },
+  });
+  await act(async () => {});
+  const messagesGuideButton = messagesRender.container.querySelector(
+    'button[aria-label="See how to sync all of your WHOOP data"]',
+  );
+  await act(async () => {
+    messagesGuideButton?.dispatchEvent(
+      new messagesRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  const messagesLink = messagesRender.container.querySelector(
+    'a[aria-label="Continue with Murph in Messages"]',
+  );
+  expect(messagesLink).not.toBeNull();
+  expect(messagesLink?.classList.contains("variant-outline")).toBe(true);
+  expect(messagesLink?.getAttribute("href")).toBe(
+    "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
+  );
+  expect(messagesLink?.getAttribute("rel")).toBeNull();
+  expect(messagesLink?.getAttribute("target")).toBeNull();
+  messagesLink?.addEventListener("click", (event) => event.preventDefault());
+  await act(async () => {
+    messagesLink?.dispatchEvent(new messagesRender.window.Event("click", {
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  expect(messagesRender.container.querySelector('[data-dialog="open"]')).toBeNull();
+  await messagesRender.cleanup();
+
+  const noContactRender = await renderDeviceSyncCompletionDialog({
+    ...model,
+    contactAction: null,
+  });
+  await act(async () => {});
+  const noContactGuideButton = noContactRender.container.querySelector(
+    'button[aria-label="See how to sync all of your WHOOP data"]',
+  );
+  await act(async () => {
+    noContactGuideButton?.dispatchEvent(
+      new noContactRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  const noContactButton = noContactRender.container.querySelector(
+    "button.variant-outline",
+  );
+  expect(noContactButton).not.toBeNull();
+  expect(noContactButton?.textContent).toContain("Continue with Murph");
+  expect(
+    noContactRender.container.querySelector('a[aria-label^="Continue with Murph in"]'),
+  ).toBeNull();
+  await act(async () => {
+    noContactButton?.dispatchEvent(
+      new noContactRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  expect(noContactRender.container.querySelector('[data-dialog="open"]')).toBeNull();
+  await noContactRender.cleanup();
 });
 
 function buildCompletionDialogModel(

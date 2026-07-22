@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { HostedBillingStatus } from "@prisma/client";
 import { createElement, type AnchorHTMLAttributes, type HTMLAttributes, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -164,7 +165,7 @@ vi.mock("@/src/lib/prisma", () => ({
 }));
 
 const MEMBER = {
-  billingStatus: "active",
+  billingStatus: HostedBillingStatus.active,
   createdAt: new Date("2026-05-01T00:00:00.000Z"),
   id: "member_123",
   suspendedAt: null,
@@ -226,6 +227,33 @@ test("DeviceSyncConnectCompletePage redirects callbacks to the home completion d
   expect(mocks.redirect).toHaveBeenCalledWith(
     "/home?deviceSyncCompletion=1&source=connect&connectSource=oura&connectTarget=oura&deviceSyncStatus=connected&deviceSyncProvider=junction",
   );
+});
+
+test("resolveDeviceSyncCompletionDialogModel owns the WHOOP action contract", async () => {
+  const { resolveDeviceSyncCompletionDialogModel } = await import(
+    "@/src/lib/device-sync/connect-completion"
+  );
+
+  const model = await resolveDeviceSyncCompletionDialogModel({
+    member: MEMBER,
+    searchParams: {
+      deviceSyncCompletion: "1",
+      deviceSyncProvider: "whoop",
+      deviceSyncStatus: "connected",
+    },
+  });
+
+  expect(model?.setupGuide?.downloadAction).toEqual({
+    ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+    href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+    label: "Download App",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  });
+  expect(model?.contactAction).toMatchObject({
+    href: "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
+    kind: "imessage",
+  });
 });
 
 test("HomePage shows the connected dialog with the signed-in member's assigned Messages line", async () => {

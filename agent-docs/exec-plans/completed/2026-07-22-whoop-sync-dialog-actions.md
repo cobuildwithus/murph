@@ -1,6 +1,6 @@
 # Refine WHOOP full-sync dialog actions
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -34,15 +34,17 @@ Updated: 2026-07-22
 ## Tasks
 
 1. Update the setup-guide CTA copy and reuse the contact action in the expanded view.
-2. Add focused regression proof for visible labels and contact routing.
+2. Add focused regression proof for the production action model, visible labels, and contact routing.
 3. Capture desktop/mobile rendered evidence and complete the routed review, verification, PR, CI, and mergeability gates.
 
 ## Decisions
 
 - Use the existing outline contact-link treatment already shown beneath `Get full sync`; do not introduce another contact component or adapter.
 - Keep an outline `Continue with Murph` close action when no contact destination exists so the visual hierarchy stays stable without inventing a route.
+- Accept the preliminary specialist's test-only coverage patch after full inspection; it adds production-model, Messages, and no-contact proof without changing runtime code.
 
 ## Verification
 
-- Commands to run: focused Vitest for `device-sync-completion-dialog-client.test.ts`, `pnpm test:diff` for the touched app files, and `git diff --check`.
+- Commands to run: focused Vitest for `device-sync-completion-dialog-client.test.ts` and `device-sync-connect-complete-page.test.ts`, `pnpm test:diff` for the touched app files, and `git diff --check`.
 - Expected outcomes: all checks pass; desktop and mobile show one filled download CTA above one outline contact CTA with the requested labels.
+Completed: 2026-07-22
