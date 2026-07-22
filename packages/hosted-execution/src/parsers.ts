@@ -9,10 +9,10 @@ import {
 import {
   assistantPersonalitySettingIds,
   isAssistantPersonalityScore,
-  isAssistantPersonaId,
   isAssistantPersonalitySettingId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
+  normalizeStoredAssistantPersonaId,
   normalizeIanaTimeZone,
 } from "@murphai/contracts";
 
@@ -1548,10 +1548,11 @@ function parseHostedExecutionAssistantPersonaPreference(
   label: string,
 ): HostedExecutionMemberPreferences["persona"] {
   const persona = requireString(value, label);
-  if (!isAssistantPersonaId(persona)) {
+  const normalizedPersona = normalizeStoredAssistantPersonaId(persona);
+  if (!normalizedPersona) {
     throw new TypeError(`${label} is invalid.`);
   }
-  return persona;
+  return normalizedPersona;
 }
 
 function parseHostedExecutionAssistantTonePreference(
