@@ -835,6 +835,13 @@ describe("HostedUserRunner execution coordination", () => {
     await runner.bindUser(TEST_USER_ID);
 
     const accepted = runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        freshStartContainerReadyAtEpochMs: 999_995,
+        freshStartInvocationPreparedAtEpochMs: 999_996,
+        runtimeInvocationPreparationElapsedMs: 999_997,
+        runtimeStoreEnsureElapsedMs: 999_998,
+        workspaceReadElapsedMs: 999_999,
+      },
       orchestrationAttemptId: "test-orchestration-attempt",
       userId: TEST_USER_ID,
     });
@@ -859,6 +866,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(workspaceReadTimeouts).toHaveLength(1);
     expect(workspaceReadTimeouts[0]).toBeGreaterThan(8_000);
     expect(workspaceReadTimeouts[0]).toBeLessThanOrEqual(9_000);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toHaveLength(0);
 
     workspaceRead.resolve();
 
@@ -868,6 +878,27 @@ describe("HostedUserRunner execution coordination", () => {
       runtimeAttemptId: expect.stringMatching(/^runtime-write-/u),
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toHaveLength(1);
+    const invocationOrchestration = invoke.mock.calls[0]?.[0].orchestration;
+    expect(invocationOrchestration).toMatchObject({
+      freshStartContainerReadyAtEpochMs: expect.any(Number),
+      freshStartInvocationPreparedAtEpochMs: expect.any(Number),
+      runtimeInvocationPreparationElapsedMs: expect.any(Number),
+      runtimeStoreEnsureElapsedMs: expect.any(Number),
+      workspaceReadElapsedMs: expect.any(Number),
+    });
+    expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
+      .not.toBe(999_995);
+    expect(invocationOrchestration?.freshStartInvocationPreparedAtEpochMs)
+      .not.toBe(999_996);
+    expect(invocationOrchestration?.runtimeInvocationPreparationElapsedMs)
+      .not.toBe(999_997);
+    expect(invocationOrchestration?.runtimeStoreEnsureElapsedMs)
+      .not.toBe(999_998);
+    expect(invocationOrchestration?.workspaceReadElapsedMs)
+      .not.toBe(999_999);
     const preparedLog = mocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([entry]) => entry)
       .find((entry) => entry.message === "Hosted runner prepared workspace invocation.");
@@ -996,6 +1027,11 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(workspaceReadTimeouts).toEqual([4_000]);
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toEqual([
+      [expect.objectContaining({ timeoutMs: 4_000 })],
+    ]);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
       timeoutMs: 4_000,
       userId: TEST_USER_ID,
@@ -1374,6 +1410,9 @@ describe("HostedUserRunner execution coordination", () => {
       failure_count: 1,
       wake_at: null,
     });
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
+      ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
+    )).toHaveLength(0);
     expect(invoke).not.toHaveBeenCalled();
 
     readiness.reject(createRuntimeStartupTimeoutError());
@@ -1785,6 +1824,7 @@ describe("HostedUserRunner execution coordination", () => {
         leaseGeneration: String(token.generation),
         orchestration: {
           activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
+          activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },
@@ -1835,6 +1875,7 @@ describe("HostedUserRunner execution coordination", () => {
       leaseGeneration: String(token.generation),
       orchestration: {
         activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
+        activeFenceTargetWasPriorVersion: false,
         activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
         userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
       },
@@ -2767,6 +2808,17 @@ describe("HostedUserRunner execution coordination", () => {
     expect(runnerContainerNames[0]).toBe(priorRunnerContainerName);
     expect(runnerContainerNames).toContain(currentRunnerContainerName);
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      activeFenceTargetWasPriorVersion: true,
+      activeWakeAccepted: false,
+      activeWakeElapsedMs: expect.any(Number),
+      activeWakeFoundNoActiveChild: true,
+      replacementFenceClearElapsedMs: expect.any(Number),
+      replacedStaleFence: true,
+      runtimeInvocationPreparationElapsedMs: expect.any(Number),
+      runtimeStoreEnsureElapsedMs: expect.any(Number),
+      workspaceReadElapsedMs: expect.any(Number),
+    });
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -2784,6 +2836,50 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
+  });
+
+  it("replaces a recent legacy-container fence when the versioned target reports no active child", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
+      async () => ({
+        kind: "start-required" as const,
+        reason: "no-active-child" as const,
+      }),
+    );
+    const currentRunnerContainerName = `${TEST_USER_ID}--v-current`;
+    const { invoke, runner, runnerContainerNames, sql } = createRunnerHarness({
+      ensureProcessing,
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
+      workspace: createWorkspaceState({ version: "7" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const token = writeRuntimeFenceForTest(sql, {
+      runnerContainerName: null,
+      startedAt: FIXED_NOW,
+      workspaceVersion: "7",
+    });
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt-replace-legacy-container",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "replaced",
+      kind: "runtime_processing_accepted",
+      runtimeAttemptId: expect.not.stringMatching(token.attemptId),
+    });
+
+    expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(runnerContainerNames[0]).toBe(TEST_USER_ID);
+    expect(runnerContainerNames).toContain(currentRunnerContainerName);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+      activeFenceTargetWasPriorVersion: true,
+      replacedStaleFence: true,
+    });
   });
 
   it("returns retry_later for a fresh same-version non-wakeable startup fence", async () => {
@@ -2818,6 +2914,8 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureProcessing).toHaveBeenCalledOnce();
+    expect(ensureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration)
+      .toMatchObject({ activeFenceTargetWasPriorVersion: false });
     expect(invoke).not.toHaveBeenCalled();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: token.attemptId,
@@ -3773,6 +3871,7 @@ describe("HostedUserRunner execution coordination", () => {
         leaseGeneration: String(token.generation),
         orchestration: {
           activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW),
+          activeFenceTargetWasPriorVersion: false,
           activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW),
           userRunnerEnsureStartedAtEpochMs: Date.parse(FIXED_NOW),
         },

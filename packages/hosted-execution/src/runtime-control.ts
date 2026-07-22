@@ -1642,17 +1642,24 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     triggeredByWebDirect?: boolean;
     userRunnerEnsureStartedAtEpochMs?: number;
     activeFenceObservedAtEpochMs?: number;
+    activeFenceTargetWasPriorVersion?: boolean;
     activeWakeStartedAtEpochMs?: number;
     activeWakeFinishedAtEpochMs?: number;
+    activeWakeElapsedMs?: number;
     activeWakeAccepted?: boolean;
+    activeWakeFoundNoActiveChild?: boolean;
     replacementFenceClearStartedAtEpochMs?: number;
     replacementFenceClearedAtEpochMs?: number;
+    replacementFenceClearElapsedMs?: number;
     replacedStaleFence?: boolean;
     freshStartRequestedAtEpochMs?: number;
     freshStartFenceBoundAtEpochMs?: number;
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    workspaceReadElapsedMs?: number;
+    runtimeStoreEnsureElapsedMs?: number;
+    runtimeInvocationPreparationElapsedMs?: number;
   };
   // Durable Object dispatch stamps (DO-side Date.now() epoch ms), diagnostics
   // only. invokeReceivedAtEpochMs is stamped when the DO invoke handler starts;
@@ -1778,17 +1785,24 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "triggeredByWebDirect",
     "userRunnerEnsureStartedAtEpochMs",
     "activeFenceObservedAtEpochMs",
+    "activeFenceTargetWasPriorVersion",
     "activeWakeStartedAtEpochMs",
     "activeWakeFinishedAtEpochMs",
+    "activeWakeElapsedMs",
     "activeWakeAccepted",
+    "activeWakeFoundNoActiveChild",
     "replacementFenceClearStartedAtEpochMs",
     "replacementFenceClearedAtEpochMs",
+    "replacementFenceClearElapsedMs",
     "replacedStaleFence",
     "freshStartRequestedAtEpochMs",
     "freshStartFenceBoundAtEpochMs",
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "workspaceReadElapsedMs",
+    "runtimeStoreEnsureElapsedMs",
+    "runtimeInvocationPreparationElapsedMs",
   ],
   dispatch: [
     "invokeReceivedAtEpochMs",
@@ -1863,7 +1877,9 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
 
 export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
   [
+    "orchestration.activeFenceTargetWasPriorVersion",
     "orchestration.activeWakeAccepted",
+    "orchestration.activeWakeFoundNoActiveChild",
     "orchestration.replacedStaleFence",
     "orchestration.triggeredByWebDirect",
     "wake.activeRuntimePassForeground",

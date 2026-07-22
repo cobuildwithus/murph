@@ -263,7 +263,15 @@ export class RuntimeProcessingController {
     }
 
     const activeWakeStartedAtEpochMs = Date.now();
+    const activeFenceTargetWasPriorVersion =
+      this.readActiveRuntimeFenceTargetWasPriorVersion({
+        activeFence,
+        record,
+      });
     const inputAtActiveWakeStart = withRuntimeProcessingOrchestration(input.input, {
+      ...(activeFenceTargetWasPriorVersion === null ? {} : {
+        activeFenceTargetWasPriorVersion,
+      }),
       activeWakeStartedAtEpochMs,
     });
     const containerResult = await ensureActiveRuntimeProcessing({
@@ -282,9 +290,13 @@ export class RuntimeProcessingController {
       runnerContainerNamespace: this.input.runnerContainerNamespace,
       runnerRuntimeEnvSource: this.input.runnerRuntimeEnvSource,
     });
+    const activeWakeFinishedAtEpochMs = Date.now();
     const inputAfterActiveWake = withRuntimeProcessingOrchestration(inputAtActiveWakeStart, {
       activeWakeAccepted: containerResult.kind === "accepted",
-      activeWakeFinishedAtEpochMs: Date.now(),
+      activeWakeElapsedMs:
+        Math.max(0, activeWakeFinishedAtEpochMs - activeWakeStartedAtEpochMs),
+      activeWakeFinishedAtEpochMs,
+      activeWakeFoundNoActiveChild: containerResult.kind === "start-required",
     });
 
     if (containerResult.kind === "accepted") {
@@ -356,8 +368,9 @@ export class RuntimeProcessingController {
       });
     }
 
+    const replacementFenceClearStartedAtEpochMs = Date.now();
     const inputAtClearStart = withRuntimeProcessingOrchestration(input.input, {
-      replacementFenceClearStartedAtEpochMs: Date.now(),
+      replacementFenceClearStartedAtEpochMs,
     });
     const cleared = await this.input.stateStore.clearWriteFenceForReplacement({
       attemptId: activeFence.attemptId,
@@ -380,9 +393,14 @@ export class RuntimeProcessingController {
       });
     }
 
+    const replacementFenceClearedAtEpochMs = Date.now();
     const replacementInput = withRuntimeProcessingOrchestration(inputAtClearStart, {
       replacedStaleFence: true,
-      replacementFenceClearedAtEpochMs: Date.now(),
+      replacementFenceClearElapsedMs: Math.max(
+        0,
+        replacementFenceClearedAtEpochMs - replacementFenceClearStartedAtEpochMs,
+      ),
+      replacementFenceClearedAtEpochMs,
     });
     return await this.startRuntimeProcessing({
       action: "replaced",
@@ -596,11 +614,18 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     record: RunnerStateRecord;
   }): boolean {
+    return this.readActiveRuntimeFenceTargetWasPriorVersion(input) !== true;
+  }
+
+  private readActiveRuntimeFenceTargetWasPriorVersion(input: {
+    activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
+    record: RunnerStateRecord;
+  }): boolean | null {
     const activeContainerName = this.readActiveRuntimeFenceContainerName(input);
     if (!activeContainerName) {
-      return true;
+      return null;
     }
-    return activeContainerName === resolveHostedExecutionRunnerContainerName({
+    return activeContainerName !== resolveHostedExecutionRunnerContainerName({
       source: this.input.runnerRuntimeEnvSource,
       userId: input.record.userId,
     });
@@ -682,9 +707,31 @@ export class RuntimeProcessingController {
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
     });
+    const preparationOrchestration =
+      preparation.prepared.input.orchestration ?? {};
+    const {
+      runtimeInvocationPreparationElapsedMs,
+      runtimeStoreEnsureElapsedMs,
+      workspaceReadElapsedMs,
+    } = preparationOrchestration;
     const prepared: PreparedRuntimeInvocation = {
       ...preparation.prepared,
-      input: toRuntimeInvocationInput(processingInput),
+      input: {
+        ...toRuntimeInvocationInput(processingInput),
+        orchestration: {
+          ...preparationOrchestration,
+          ...(processingInput.orchestration ?? {}),
+          ...(runtimeInvocationPreparationElapsedMs === undefined ? {} : {
+            runtimeInvocationPreparationElapsedMs,
+          }),
+          ...(runtimeStoreEnsureElapsedMs === undefined ? {} : {
+            runtimeStoreEnsureElapsedMs,
+          }),
+          ...(workspaceReadElapsedMs === undefined ? {} : {
+            workspaceReadElapsedMs,
+          }),
+        },
+      },
     };
 
     const stillOwnsPreparedFence = await this.confirmPreparedRuntimeWriteFenceIsActive({
