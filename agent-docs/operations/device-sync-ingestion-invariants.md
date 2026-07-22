@@ -92,11 +92,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    suppresses a repeated row and audit when the same provider account has no
    new canonical output, receipt state, or evidence identity. When a repeated
    multi-part delivery changes only some evidence, the new ingest row retains
-   only those novel parts and only their output-role links under a distinct,
-   content-derived incremental-evidence id. It cannot masquerade as a complete
-   exact-delivery row or authorize repair from older state. Missing, corrupt,
-   or out-of-budget novelty proof fails open by retaining one complete received
-   evidence set, after which the next replay converges. A repair delivery also
+   only those novel parts and only their output-role links under a distinct
+   per-delivery incremental-evidence marker inspected with the original
+   delivery ids. It can authorize an intact no-op when every current output
+   still exists, but it cannot masquerade as a complete row or authorize repair
+   from incomplete proof. When neither an exact partial marker nor bounded
+   novelty can be proved, ingestion fails open by retaining one complete
+   received evidence set, after which the next replay converges. A repair
+   delivery also
    retains the complete received evidence set rather than trusting damaged
    historical proof. A batch whose novel evidence cannot be associated with
    its accepted prepared event, or whose prepared events share one canonical

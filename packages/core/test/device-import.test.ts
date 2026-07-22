@@ -2229,6 +2229,101 @@ test("importDeviceBatch retains unchanged evidence for a newly appended event re
   }]);
 });
 
+test.each(["earlier-shard", "complete-spine"] as const)(
+  "filtered incremental replay fails closed after %s loss",
+  async (lossMode) => {
+    const vaultRoot = await makeTempDirectory(
+      `murph-device-import-filtered-replay-${lossMode}`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
+    const contextRole = "junction-summary-activity";
+    const eventRole = "junction-summary-workouts";
+    const evidenceParts = [
+      {
+        role: contextRole,
+        fileName: "junction-summary-activity.json",
+        content: { date: "2026-01-03", steps: 8_000 },
+      },
+      {
+        role: eventRole,
+        fileName: "junction-summary-workouts.json",
+        content: { id: "filtered-replay-workout", sport: "running" },
+      },
+    ];
+    const buildInput = (input: {
+      durationMinutes: number;
+      importedAt: string;
+      occurredAt: string;
+    }) => ({
+      vaultRoot,
+      provider: "junction",
+      accountId: "jxn_acct_filtered_replay",
+      importedAt: input.importedAt,
+      events: [{
+        ...buildJunctionStyleWorkoutEvent({
+          durationMinutes: input.durationMinutes,
+          occurredAt: input.occurredAt,
+          recordedAt: input.occurredAt,
+          resourceId: "filtered-replay-workout",
+        }),
+        evidenceRoles: [eventRole],
+      }],
+      evidenceParts,
+    });
+
+    const first = await importDeviceBatch(buildInput({
+      durationMinutes: 34,
+      importedAt: "2026-06-03T21:00:00.000Z",
+      occurredAt: "2026-01-03T19:55:00.000Z",
+    }));
+    const filteredInput = buildInput({
+      durationMinutes: 35,
+      importedAt: "2026-06-04T21:00:00.000Z",
+      occurredAt: "2026-02-03T19:55:00.000Z",
+    });
+    const filtered = await importDeviceBatch(filteredInput);
+    const later = await importDeviceBatch(buildInput({
+      durationMinutes: 36,
+      importedAt: "2026-06-05T21:00:00.000Z",
+      occurredAt: "2026-03-03T19:55:00.000Z",
+    }));
+
+    assert.equal(filtered.events[0]?.id, first.events[0]?.id);
+    assert.equal(later.events[0]?.id, first.events[0]?.id);
+    assert.equal(filtered.persistedEvidencePartCount, 1);
+    assert.ok(filtered.ingestId);
+    const filteredIngest = await readRequiredIntegrationIngest(vaultRoot, filtered.ingestId);
+    assert.deepEqual(filteredIngest.parts.map((part) => part.role), [eventRole]);
+    const beforeIntactReplay = await snapshotVaultFiles(vaultRoot);
+    const intactReplay = await importDeviceBatch(filteredInput);
+    assert.equal(intactReplay.applied, false);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeIntactReplay);
+
+    const filteredEventShardPath = filtered.eventShardPaths[0];
+    assert.ok(filteredEventShardPath);
+    if (lossMode === "earlier-shard") {
+      await fs.unlink(path.join(vaultRoot, filteredEventShardPath));
+    } else {
+      for (const eventShardPath of new Set([
+        ...first.eventShardPaths,
+        ...filtered.eventShardPaths,
+        ...later.eventShardPaths,
+      ])) {
+        await fs.unlink(path.join(vaultRoot, eventShardPath));
+      }
+    }
+    const beforeRejectedReplay = await snapshotVaultFiles(vaultRoot);
+
+    await assert.rejects(
+      importDeviceBatch(filteredInput),
+      (error) =>
+        error instanceof VaultError
+        && error.code === "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+    );
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedReplay);
+  },
+);
+
 test("importDeviceBatch retains complete evidence when novel evidence has no event association", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-unassociated-evidence");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
@@ -4147,7 +4242,7 @@ test("concatenated malformed ingest rows cannot hide current or legacy delivery 
   }
 });
 
-test("importDeviceBatch fails open when incremental evidence falls beyond the row budget", async () => {
+test("importDeviceBatch recognizes an incremental marker beyond the row budget", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-partial-retention-retry");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const partA = {
@@ -4186,13 +4281,12 @@ test("importDeviceBatch fails open when incremental evidence falls beyond the ro
     accountId: "unrelated-account",
   })}\n`;
   await fs.appendFile(path.join(vaultRoot, filtered.ingestShardPath), unrelatedRow.repeat(65), "utf8");
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
   const replay = await importDeviceBatch(input);
-  const convergedReplay = await importDeviceBatch(input);
 
-  assert.ok(replay.applied);
-  assert.equal(replay.persistedEvidencePartCount, 2);
-  assert.equal(convergedReplay.applied, false);
-  assert.equal(convergedReplay.ingestId, null);
+  assert.equal(replay.applied, false);
+  assert.equal(replay.ingestId, null);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
 });
 
 test("importDeviceBatch repairs a valid historical partial exact row with one self-contained delivery", async () => {

@@ -4618,10 +4618,17 @@ export async function importDeviceBatch({
       }),
     );
   const associationImportId = buildAssociationImportId(currentEventOutputs);
+  const incrementalEvidenceImportId = deterministicContractId(
+    ID_PREFIXES.transform,
+    stableStringify({
+      incrementalEvidenceOfDeviceImportId: deviceBatchPlan.importId,
+    }),
+  );
   const candidateImportIds = new Set([
     deviceBatchPlan.importId,
     deviceBatchPlan.legacyImportId,
     associationImportId,
+    incrementalEvidenceImportId,
   ]);
   let ingestIdInspection = await inspectIntegrationIngestIdsForImportedAt(
     vaultRoot,
@@ -4632,6 +4639,7 @@ export async function importDeviceBatch({
     deviceBatchPlan.importId,
     associationImportId,
     deviceBatchPlan.legacyImportId,
+    incrementalEvidenceImportId,
   ];
   const candidateStoredDeliveries = () => orderedCandidateImportIds
     .map((id) => ingestIdInspection.invalidIds.has(id)
@@ -4641,26 +4649,41 @@ export async function importDeviceBatch({
       record !== undefined && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
     );
   const matchingStoredDeliveries = () => candidateStoredDeliveries().filter((record) =>
-    storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
+    record.id !== incrementalEvidenceImportId
+    && storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
   );
-  const authorizedStoredDelivery = () =>
-    ingestIdInspection.unsafe
-      ? undefined
-      : matchingStoredDeliveries().find((storedDelivery) =>
-          (currentEventOwners.allExist || storedDelivery.outputs.events.length === 0)
-          &&
-          storedIntegrationIngestRetainsCurrentOutputs({
-            allSamplesExist: sampleAppendPlan.appendedRecordIds.length === 0,
-            associationEvidenceRolesByPreparedRecordId,
-            baselineRetainedPreparedIds,
-            currentEventOwners,
-            deviceBatchPlan,
-            preparedEventOutputOwners,
-            replayRetainedPreparedIds,
-            sampleRecords,
-            storedDelivery,
-          })
-        );
+  const partialStoredDelivery = () => {
+    const record = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
+    return record && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
+      ? record
+      : undefined;
+  };
+  const storedDeliveryRetainsCurrentOutputs = (
+    storedDelivery: IntegrationIngestRecord,
+  ): boolean =>
+    (currentEventOwners.allExist || storedDelivery.outputs.events.length === 0)
+    && storedIntegrationIngestRetainsCurrentOutputs({
+      allSamplesExist: sampleAppendPlan.appendedRecordIds.length === 0,
+      associationEvidenceRolesByPreparedRecordId,
+      baselineRetainedPreparedIds,
+      currentEventOwners,
+      deviceBatchPlan,
+      preparedEventOutputOwners,
+      replayRetainedPreparedIds,
+      sampleRecords,
+      storedDelivery,
+    });
+  const authorizedStoredDelivery = () => {
+    if (ingestIdInspection.unsafe) {
+      return undefined;
+    }
+    const exact = matchingStoredDeliveries().find(storedDeliveryRetainsCurrentOutputs);
+    if (exact) {
+      return exact;
+    }
+    const partial = partialStoredDelivery();
+    return partial && storedDeliveryRetainsCurrentOutputs(partial) ? partial : undefined;
+  };
   const hasInvalidCandidateId = () => orderedCandidateImportIds.some((id) =>
     ingestIdInspection.invalidIds.has(id)
   );
@@ -4671,6 +4694,14 @@ export async function importDeviceBatch({
         "INTEGRATION_INGEST_ID_CONFLICT",
         `Device ingest id "${deviceBatchPlan.importId}" already belongs to a different delivery.`,
         { ingestId: deviceBatchPlan.importId },
+      );
+    }
+    const partial = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
+    if (partial && !storedIntegrationIngestIsDeviceDeliveryCandidate(partial, deviceBatchPlan)) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_ID_CONFLICT",
+        `Device ingest id "${incrementalEvidenceImportId}" already belongs to a different delivery.`,
+        { ingestId: incrementalEvidenceImportId },
       );
     }
   };
@@ -5225,15 +5256,6 @@ export async function importDeviceBatch({
   const finalAssociationImportId = buildAssociationImportId(eventOutputs);
   const evidenceWasFiltered = retainedEvidenceParts.length
     !== deviceBatchPlan.preparedEvidenceParts.length;
-  const incrementalEvidenceImportId = deterministicContractId(
-    ID_PREFIXES.transform,
-    stableStringify({
-      incrementalEvidenceOfDeviceImportId: deviceBatchPlan.importId,
-      eventOutputs,
-      parts: retainedEvidenceParts.map(integrationEvidencePartIdentity),
-      sampleIds: sampleRecords.map((record) => record.id).sort(),
-    }),
-  );
   const persistedImportId = evidenceWasFiltered
     ? incrementalEvidenceImportId
     : currentImportIdOccupied
