@@ -223,6 +223,8 @@ function resolveSavedRunTiming(
     experiment.windows.interventionStart !== null &&
     experiment.windows.interventionEnd !== null;
   const hasExplicitZeroBaseline =
+    baselineStart === null &&
+    baselineEnd === null &&
     hasInterventionWindow &&
     experiment.startedOn === experiment.windows.interventionStart;
   const baselineDays = hasBaselineWindow

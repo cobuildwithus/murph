@@ -348,6 +348,100 @@ describe("experiment detail private-run composition", () => {
     expect(partialMarkup).toContain("Original phase timing is incomplete");
   });
 
+  it.each([
+    {
+      label: "baseline end missing",
+      partialBaselineWindow: { baselineStart: "2026-04-01" },
+    },
+    {
+      label: "baseline start missing",
+      partialBaselineWindow: { baselineEnd: "2026-04-07" },
+    },
+  ])("keeps a partial baseline window unknown even when the run starts with intervention ($label)", async ({
+    partialBaselineWindow,
+  }) => {
+    const client = await createClient({
+      generatedAt: "2026-04-10T08:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          id: "exp_partial_baseline_window",
+          runPlan: {
+            ...partialBaselineWindow,
+            interventionEnd: "2026-04-21",
+            interventionStart: "2026-04-08",
+          },
+          slug: "partial-baseline-window",
+          startedOn: "2026-04-08",
+          status: "active",
+          title: "Partial baseline window",
+        }),
+        id: "exp_partial_baseline_window",
+        slug: "partial-baseline-window",
+        startedOn: "2026-04-08",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Partial baseline window",
+      }],
+    });
+
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client,
+      experimentId: "exp_partial_baseline_window",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: undefined,
+      completionPercent: undefined,
+      day: undefined,
+      durationDays: undefined,
+      timingKnown: false,
+    }));
+    expect(privateRun?.nextStep).toEqual(expect.objectContaining({
+      title: "Continue your saved plan",
+      when: "Timing unavailable",
+    }));
+    expect(privateRun?.timeline).toEqual([]);
+  });
+
+  it("recognizes a fully persisted intervention-only run as a genuine zero baseline", async () => {
+    const client = await createClient({
+      generatedAt: "2026-04-10T08:00:00.000Z",
+      trackedExperiments: [{
+        frontmatter: createExperimentFrontmatter({
+          id: "exp_zero_baseline",
+          runPlan: {
+            interventionEnd: "2026-04-21",
+            interventionStart: "2026-04-08",
+          },
+          slug: "zero-baseline",
+          startedOn: "2026-04-08",
+          status: "active",
+          title: "Zero-baseline run",
+        }),
+        id: "exp_zero_baseline",
+        slug: "zero-baseline",
+        startedOn: "2026-04-08",
+        status: "active",
+        summary: null,
+        tags: [],
+        title: "Zero-baseline run",
+      }],
+    });
+
+    const privateRun = resolveBrowserVaultExperimentRunById({
+      client,
+      experimentId: "exp_zero_baseline",
+    });
+
+    expect(privateRun).toEqual(expect.objectContaining({
+      baselineDays: 0,
+      day: 3,
+      durationDays: 14,
+      timingKnown: true,
+    }));
+  });
+
   it("does not bind a private run on title-only collisions", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
