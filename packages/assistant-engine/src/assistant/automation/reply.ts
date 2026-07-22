@@ -3846,7 +3846,10 @@ async function isRecentSelfAuthoredAssistantEcho(input: {
 
   textCandidates.push(
     ...matchingDeliveries
-      .filter((delivery) =>
+      .filter((delivery): delivery is AssistantAutoReplyMatchingOutboxDelivery & {
+        message: string
+      } =>
+        delivery.message !== null &&
         delivery.sentAtMs <= causalUpperBoundMs &&
         (
           inputProviderMessageId === null ||
@@ -3917,12 +3920,15 @@ async function resolveAssistantAutoReplyLatestCrossSessionDelivery(input: {
     }
   }
 
-  const matchingDeliveries =
+  const matchingDeliveries = (
     await listAssistantAutoReplyMatchingOutboxDeliveries({
       deliveryTarget,
       historyReader: input.historyReader,
       input: input.input,
     })
+  ).filter((delivery): delivery is AssistantAutoReplyMatchingOutboxDelivery & {
+    message: string
+  } => delivery.message !== null)
   const replyToMessageId = input.replyToMessageId
   const replyTargetDelivery = replyToMessageId === null
     ? null
@@ -4030,7 +4036,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
-  message: string
+  message: string | null
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
@@ -4079,7 +4085,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
 
     const message = normalizeNullableString(intent.message)
     const sentAtMs = Date.parse(delivery.sentAt)
-    if (!message || !Number.isFinite(sentAtMs)) {
+    if (!Number.isFinite(sentAtMs)) {
       return []
     }
 
