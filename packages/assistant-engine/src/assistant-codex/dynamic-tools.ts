@@ -214,7 +214,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   namespace: 'murph',
   name: 'send_progress_update',
   description:
-    'Send a brief, natural user-visible progress update to the current conversation when genuinely reply-critical work would otherwise leave the user waiting. Use it before long tasks with multiple substantive tool steps, research, long vault scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, large pasted text, meal/product/supplement labels, workout exports, wearable exports, or health documents. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not trigger an update by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
+    'Send a brief, natural user-visible progress update to the current conversation when reply-critical work would otherwise leave the user waiting without knowing why. Use it before a multi-source or cross-owner evidence pass, several substantive tool steps, long research or scans, or substantial recovery from PDFs, lab reports, images, screenshots, CSVs, pasted text, meal/product/supplement labels, workout or wearable exports, or health documents. A pass across separate areas such as labs, supplements, conditions or injuries, and wearable data gets one update before the first read in that pass even when each lookup is routine; name the areas and why they matter to the next decision. Do not wait until work is done or the user asks about the delay. If the answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Optional background work does not trigger an update unless an active skill requires a receipt or start acknowledgement. Do not leave the user silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update. For work likely to finish in about a minute or less, send at most one update. If the turn runs unusually long after substantial tool work, send up to two more at real milestones; never a fourth. Report only real progress. Skip automatically transcribed voice memo or audio content unless manual media tools or broader long-running work are needed. Do not use for individual tool loops, searches, reads, page checks, clicks, status churn, skill-file reads alone, setup checks, routine single-command vault reads, quick single-step replies, one-shot logging/capture/memory saves that only need a straightforward write, or final conclusions.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -223,7 +223,7 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
         type: 'string',
         minLength: 1,
         description:
-          'Prefer one short conversational first-person sentence about the immediate next step; use two only when needed to keep the quick note clear. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. Write it the way a person would text: everyday words about what the user cares about, never internal mechanics or instruction vocabulary such as "preserving the source", "structured import", "parse", "canonical records", or "delegating" — "Got your labs, pulling the numbers in now" beats "starting the structured lab import". No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
+          'Prefer one short conversational first-person sentence about the immediate next step; use two only when needed to keep the quick note clear. Use contractions when natural. Avoid stiff plan-recitation wording like "I\'m going to..." when a shorter "I\'ll..." or "Taking a look..." works. Write it the way a person would text: everyday words about what the user cares about, never internal mechanics or instruction vocabulary such as "preserving the source", "structured import", "parse", "canonical records", or "delegating" — "Got your labs — I\'m making sure the original is kept safely now" beats "starting the structured lab import". No markdown links, final answers, lab interpretations, abnormalities, diagnoses, treatment recommendations, or claims not yet verified.',
       },
     },
     required: ['text'],
@@ -435,7 +435,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
 } as const
 
 const MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY =
-  'On an assistant-initiated first commercial mention, ask one short reply-oriented question and include no URL. For a trial decision, wording may naturally include “should we part ways?” as an optional off-ramp; never use it as fixed copy or pressure. If a manual plan check finds no action is needed and the member did not ask about billing, say nothing.'
+  'On an assistant-initiated first commercial mention, ask one short reply-oriented question and include no URL. For a trial decision, wording may naturally include “should we part ways?” as an optional off-ramp; never use it as fixed copy or pressure. If a manual plan check finds no action is needed and neither the member nor trusted low-usage context calls for a billing mention, say nothing.'
 const MURPH_USAGE_SAVING_MODEL_COPY_POLICY =
   'When offering a usage-saving option, describe it as “a less capable model that uses less of your included usage.” Do not assume the member knows Luna, Terra, or Sol; name a model only if they ask. Never switch models automatically.'
 
@@ -443,7 +443,7 @@ export const MURPH_PLAN_USAGE_TOOL = {
   namespace: 'murph',
   name: 'plan_usage',
   description:
-    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. Communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start, upgrade, or add-usage suggestion only when recommendedAction is non-null and relevant to the member's request. When recommendedAction.kind is add_usage, explain that its personal Settings handoff lets the member choose a one-time usage-credit amount and provide ${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription. Do not select an amount, invoke murph.subscription, initiate Checkout, or claim that payment or credit completed; recommendedAction authorizes only that first-party browser handoff. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool changes neither billing nor usage credit. It exposes only the server-authorized personal add-usage handoff; it is not a group balance, group-funding, Checkout, or payment surface. Never ask a group for money, claim a shared balance, or name a payer.`,
+    `Read the current hosted member's cost-weighted included usage, reset or trial-end date, any thresholded recommendation, and an optional explicit-request subscription quote. Use only for an explicit plan/included-usage question, an explicit request to manage billing or an unsupported Family account change, or a manual 1:1 check including one trusted low-usage turn. Never call it automatically during onboarding or as a watcher. Cost-weighted included usage is not a literal token count or cash balance. When answering an explicit numerical usage question, communicate usage only through usedPercent and remainingPercent; never expose, infer, or format internal currency amounts as usage progress. For a trusted first low-usage heads-up, follow the hosted-low-usage skill instead and do not volunteer percentages or forecast. Percentages, dates, and forecasts are approximate; if forecast is null, invent no estimate, precision, scarcity, or urgency. Never plead, imply Murph will die, use existential guilt, shame, or pressure. Mention a usage-triggered start, upgrade, or add-usage suggestion only when recommendedAction is non-null and relevant to the member's request or trusted low-usage heads-up. When recommendedAction.kind is add_usage, the first assistant-initiated mention remains link-free. Only after the member asks for the link or accepts that initial offer, explain that the personal Settings handoff lets them choose a one-time usage-credit amount and provide ${MURPH_PRODUCT_ORIGIN}/settings?addUsage=true#subscription. Do not select an amount, invoke murph.subscription, initiate Checkout, or claim that payment or credit completed; recommendedAction authorizes only that first-party browser handoff. subscriptionActionQuote is current server-owned terms for an explicit request, not a recommendation or consent. Before seeking confirmation for start_pulse_now or upgrade_edge, require a subscriptionActionQuote whose action exactly matches, state its label and terms, and never invent or cache plan terms. If that quote is absent or null, do not invoke the action; use the neutral Settings handoff. Treat continue_pulse as non-charging continuation only when this current read confirms an active trial. If the read reports trial_conversion_pending or an ended trial, treat recovery as start-now: state the current terms and get explicit confirmation, normally for start_pulse_now. ${MURPH_CONVERSATIONAL_COMMERCIAL_MENTION_POLICY} ${MURPH_USAGE_SAVING_MODEL_COPY_POLICY} Use murph.subscription only after the current user explicitly and unambiguously chooses an exact supported action; a bare “yes” after multiple choices is insufficient. For an explicit billing-management or unsupported Family-management request, direct the member to ${MURPH_PRODUCT_ORIGIN}/settings#subscription only after a private result whose status is active or exhausted, or whose reason is trial_conversion_pending; make clear that this tool only read status and made no billing or Family change. Describe this as a neutral Settings browser handoff, not a plan recommendation or billing action. Do not provide that private account-management link for group_not_supported or hosted_access_inactive. This read-only tool changes neither billing nor usage credit. It exposes only the server-authorized personal add-usage handoff; it is not a group balance, group-funding, Checkout, or payment surface. Never ask a group for money, claim a shared balance, or name a payer.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -896,7 +896,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1763,9 +1763,14 @@ export type MurphDynamicToolResponseMediaPatch = {
   op: 'append' | 'replace'
 }
 
-export type MurphDynamicToolFinalActionPatch = {
-  kind: 'none'
-}
+export type MurphDynamicToolFinalActionPatch =
+  | {
+      kind: 'none'
+      owner?: 'vault-file'
+    }
+  | {
+      kind: 'reply-required'
+    }
 
 export type MurphDynamicToolReactionPatch = {
   reaction: AssistantMessageReaction
@@ -2557,12 +2562,6 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'response media cannot be changed after an approved vault file is attached',
-        )
-      }
       return {
         ...toolTextResult(
           true,
@@ -2638,19 +2637,26 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
     case 'send-vault-file': {
+      const replyRequiredResult = (
+        success: boolean,
+        text: string,
+      ): MurphDynamicToolExecutionResult => ({
+        ...toolTextResult(success, text),
+        finalActionPatch: { kind: 'reply-required' },
+      })
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
       if (
         !hostedToolContext?.vaultFileSendAvailable
         || typeof sendVaultFile !== 'function'
       ) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'secure vault-file approval is unavailable for this conversation',
         )
       }
       if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'vault-file sending cannot be combined with other response media',
         )
@@ -2679,38 +2685,40 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
-                  deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
                   note:
-                    'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
+                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
                   status: result.status,
                 }),
               ),
-              responseMediaPatch: {
-                media: [result.file],
-                op: 'append' as const,
-              },
+              finalActionPatch: { kind: 'none', owner: 'vault-file' },
             }
           case 'denied':
-            return toolTextResult(false, 'vault-file delivery was denied')
+            return replyRequiredResult(false, 'vault-file delivery was denied')
           case 'expired':
-            return toolTextResult(false, 'vault-file delivery approval expired')
+            return replyRequiredResult(
+              false,
+              'vault-file delivery approval expired',
+            )
         }
       } catch (error) {
         if (
           error instanceof VaultCliError
           && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
         ) {
-          return toolTextResult(
+          return replyRequiredResult(
             true,
             JSON.stringify({
               note:
-                'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+                'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
               status: 'already_in_progress',
             }),
           )
         }
-        return toolTextResult(false, 'secure vault-file approval could not be prepared')
+        return replyRequiredResult(
+          false,
+          'secure vault-file approval could not be prepared',
+        )
       }
     }
     case 'create-phone-call': {
@@ -2882,12 +2890,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }
       }
     case 'generate-image': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'image generation cannot be combined with an approved vault file',
-        )
-      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
@@ -3043,12 +3045,6 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
-}
-
-function hasVaultFileResponseMedia(
-  media: readonly AssistantResponseMedia[],
-): boolean {
-  return media.some((item) => item.kind === 'vault_file')
 }
 
 async function executeSubmitProductFeedbackTool(input: {

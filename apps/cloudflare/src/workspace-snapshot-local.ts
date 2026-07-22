@@ -30,7 +30,7 @@ import {
 
 const HOSTED_WORKSPACE_SNAPSHOT_AUTH_TAG_BYTES = 16;
 const HOSTED_WORKSPACE_SNAPSHOT_ZSTD_ARGS = [
-  "-1",
+  "-3",
   "--no-progress",
   "-T2",
 ] as const;

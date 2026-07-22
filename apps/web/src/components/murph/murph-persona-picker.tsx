@@ -574,7 +574,7 @@ function PersonaMatchCard({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-inset"
       >
         <span className="sr-only">Select {option.label}</span>
       </label>
@@ -650,7 +650,7 @@ function SupportingPersonaChoice({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-inset"
       >
         <span className="sr-only">Select {label}</span>
       </label>
@@ -726,7 +726,7 @@ function ToneChoiceCard({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-inset"
       >
         <span className="sr-only">Select {label}</span>
       </label>
@@ -797,7 +797,7 @@ function PersonaVoiceChoice({
       />
       <label
         htmlFor={inputId}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-inset"
       >
         <span className="sr-only">Select {option.label}</span>
       </label>

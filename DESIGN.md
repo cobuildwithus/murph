@@ -194,12 +194,16 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
 ### Measured Biomarker Index
-On `/biomarkers`, device-derived reading cards lead. Lab health areas follow as
-native `<details>` disclosures, expanded by default, with a Fraunces area name
-and one rotating chevron in the summary. Search and `All` / `Review` / `In
-range` filters apply only to saved lab biomarkers. The opened contents are one
+On `/biomarkers`, device-derived reading rows lead in a flat full-width notebook
+band bracketed by warm one-pixel rules. Do not wrap that band in a rounded card
+or give it a contrasting card background. Lab health areas follow as native
+`<details>` disclosures, expanded by default, with a Fraunces area name and one
+rotating chevron in the summary. Search and `All` / `Review` / `In range`
+filters apply only to saved lab biomarkers. The opened contents are one
 partitioned notebook surface rather than a stack of nested cards: one column on
 every viewport, with one full-width biomarker row between warm one-pixel seams.
+Each lab row uses a narrow 48px-tall semantic status rail beside the biomarker
+name; length supplies rhythm while color carries the source-reported status.
 On phones the name and result stack; from `sm` the name sits left and the
 status/value sits right. Each row is one full-size link showing only the
 biomarker name, source status, and latest value; flagged results sort before
@@ -218,11 +222,15 @@ sienna for flags that need review, and slate for an unflagged reported result.
 Keep the complete result ledger below the chart, including the date, exact
 reported value, source reference range, and lab/source label. Comparator,
 qualitative, and incompatible-unit context stays explicit near the chart or in
-the ledger; a concise caption names the plotted result count and unit, plus any
-shaded two-sided lab range or dashed one-sided lab limit. Simplifying the
-hierarchy must not imply that excluded values were plotted. The loading skeleton
-mirrors the same latest-result, chart, and ledger structure rather than
-substituting a generic card grid.
+the ledger. When the latest comparable result has an unqualified normalized lab
+range, place one quiet `Latest lab range` legend above its shaded two-sided band
+or dashed one-sided limit. Clip that overlay to the data-focused vertical scale
+rather than flattening the historical trend to fit a wide range, and label it as
+latest so it does not imply that older labs shared the same range. Qualified
+ranges remain ledger-only. Simplifying the hierarchy must not imply that
+excluded values were plotted. The loading skeleton mirrors the same
+latest-result, chart, and ledger structure rather than substituting a generic
+card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature

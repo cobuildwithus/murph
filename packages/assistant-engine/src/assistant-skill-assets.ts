@@ -20,6 +20,12 @@ export const ASSISTANT_SKILLS = [
       'Use when direct first-run Murph onboarding is open and the assistant needs to establish the broad private relationship, capture and park one or two change/understand/handle/explore aspiration threads, resolve the six progressive foundation-context checkpoints, return with context, choose a first step together, mark completion, or record an overall decline. Immediate requests and safety needs come first; answering a discovery question is not permission for a plan.',
   },
   {
+    slug: 'hosted-low-usage',
+    name: 'hosted-low-usage',
+    triggerHint:
+      'Use when trusted hosted turn context says Murph usage is running low, or when a user follows up on that warning and asks how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+  },
+  {
     slug: 'experiment-onboarding',
     name: 'experiment-onboarding',
     triggerHint:

@@ -185,8 +185,10 @@ assistant-initiated commercial mention is one short, reply-oriented question
 with no link. A trial off-ramp may naturally ask “should we part ways?”; this is
 optional language, not a fixed script or pressure tactic. If a trusted manual
 check finds no action is needed and the member did not ask about billing, the
-assistant says nothing. Existing automated recovery notices may keep their
-current account links; they are not authority to invoke `murph.subscription`.
+assistant says nothing unless trusted low-usage context calls for the generic,
+link-free heads-up defined below. Existing automated recovery notices may keep
+their current account links; they are not authority to invoke
+`murph.subscription`.
 
 When discussing a usage-saving model, call it “a less capable model that uses
 less of your included usage.” Do not assume the member knows Luna, Terra, or
@@ -207,7 +209,19 @@ effective capacity reaches zero. Low capacity does not send a standalone
 message. On the next allowed conversation-mailbox fetch, Web projects only a
 coarse `low` bit when effective remaining capacity is at or below the shared
 20% threshold. The runtime binds that trusted bit to the accepted input, and
-Murph mentions it naturally inside the resulting reply. Every rendered
+Murph completes the current request, reads the package-owned
+`hosted-low-usage` skill, and appends one short final segment to the resulting
+reply. Bubble-capable messaging routes place that segment after `---`; other
+hosted routes use a final paragraph and never expose the delimiter as copy.
+That first heads-up prefers a known reset or trial-end date to percentage and
+forecast detail, asks one reply-oriented question, and contains no link. It
+does not split status, forecast, handoff, and disclaimer into separate usage
+bubbles. The heads-up waits for a later eligible turn
+during urgent, emergency, crisis, or materially sensitive replies and whenever
+the current request requires a safety-changing or materially important
+question. When the member already asks about usage, billing, continuation, or
+adding usage, Murph answers that request directly under the normal tool rules
+instead of appending a redundant heads-up. Every rendered
 personal limit notice states the included allowance as 100% used before the
 channel-specific follow-up copy.
 
@@ -240,6 +254,25 @@ does not authorize a billing action or a proactive payment link.
 Do not turn this read into onboarding automation, a recurring threshold
 watcher, or a group-chat money prompt. Do not name a group payer, invent a
 balance, or use guilt, urgency, or scarcity language.
+
+The low-usage skill may use the trusted bit for one manual private
+`murph.plan_usage` check. It follows the current Web-owned state rather than
+inventing a billing menu:
+
+- a direct Pulse Trial may offer help starting Pulse now only from the current
+  thresholded recommendation, with the existing quote and confirmation rules;
+- a direct paid Pulse or Edge plan may offer the authorized one-time Add usage
+  handoff, while Edge is discussed as a recurring Pulse alternative only after
+  the member asks and a current quote exists;
+- a Family-sponsored member is never offered a personal top-up; a Family Pulse
+  seat may be moved to Edge by the plan owner, but the assistant verifies
+  `owner: true` through the Family status read before offering that owner a
+  private Settings handoff; a sponsored non-owner is told that the Family
+  owner must make the change, while Family Edge has no higher current tier; and
+- a hosted group receives only a generic first heads-up. After the group asks,
+  `murph.group action="read_usage"` may return the coarse state and first-party
+  funding URL without exposing a payer or contributor; the heads-up does not
+  promise that URL before the read returns it.
 
 ## Group Usage
 

@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import {
   chmodSync,
   existsSync,
@@ -973,13 +974,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.112')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.114')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.112'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.114'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1041,7 +1042,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 7.5 * 60 * 1000;',
     )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
@@ -1132,9 +1133,9 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
-    expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
+    expect(reviewGptReadme).toContain('after at least 7.5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response that completes in under 10 minutes fails closed as untrusted',
+      'A marked concrete-model response that completes in under 7.5 minutes fails closed as untrusted',
     )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
@@ -1429,7 +1430,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'A marked concrete-model response that completes in under 10 minutes',
+      'A marked concrete-model response that completes in under 7.5 minutes',
     )
     expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
@@ -1458,7 +1459,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('sole cross-cutting audit')
     expect(prReviewGptLoop).toContain('Never run both for the same completed')
     expect(prReviewGptLoop).toMatch(
-      /specialist `prompt-review`,\s+`frontend-review`, or write-capable `coverage-write`/u,
+      /specialist `prompt-review`,\s+`product-experience-review`, `frontend-review`, or write-capable\s+`coverage-write`/u,
     )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
@@ -1729,7 +1730,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
     expect(
@@ -1737,7 +1738,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toBe('')
     expect(
@@ -1745,7 +1746,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         'gpt-5-5-pro',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
@@ -1958,7 +1959,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
     expect(
@@ -1967,7 +1968,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
@@ -2001,24 +2002,24 @@ describe('monorepo release flow coverage audit', () => {
     ).toMatchObject({ evidence: null })
   })
 
-  it('fails closed marked concrete-model responses below ten minutes', () => {
+  it('fails closed marked concrete-model responses below seven and a half minutes', () => {
     const harness = loadReviewGptOpenTargetHarness(1)
 
     expect(
       harness.markedResponseDurationFailure('gpt-5.6-sol', 'ROUND_OUTCOME:', 37_000),
-    ).toContain('after 37s, below the 10m minimum')
+    ).toContain('after 37s, below the 7.5m minimum')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toContain('The response is untrusted and was not attested.')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toBe('')
     expect(
@@ -3731,6 +3732,19 @@ exit 1
     })
     mkdirSync(path.join(vaultRoot, 'exports', 'user-files'), { recursive: true })
     mkdirSync(path.join(vaultRoot, 'exports', 'packs', 'existing-pack'), { recursive: true })
+    const now = new Date()
+    const currentMonth = now.toISOString().slice(0, 7)
+    const currentYear = currentMonth.slice(0, 4)
+    const futureMonth = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth() + 1,
+      1,
+    )).toISOString().slice(0, 7)
+    const futureYear = futureMonth.slice(0, 4)
+    const integrationIngestRoot = path.join(vaultRoot, 'ledger', 'integration-ingests')
+    mkdirSync(path.join(integrationIngestRoot, '2020'), { recursive: true })
+    mkdirSync(path.join(integrationIngestRoot, currentYear), { recursive: true })
+    mkdirSync(path.join(integrationIngestRoot, futureYear), { recursive: true })
     writeFileSync(path.join(vaultRoot, 'vault.json'), '{ "id": "vault_test" }\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'CORE.md'), '# Vault\n', 'utf8')
     writeFileSync(path.join(vaultRoot, 'journal', '2026', '2026-03-18.md'), '# Journal\n', 'utf8')
@@ -3787,6 +3801,37 @@ exit 1
       'globally excluded archive\n',
       'utf8',
     )
+    const closedShardContent = `${JSON.stringify({ importedAt: '2020-01-02T00:00:00.000Z' })}\n`
+    const closedShardSourcePath = path.join(
+      integrationIngestRoot,
+      '2020',
+      '2020-01.jsonl',
+    )
+    writeFileSync(
+      closedShardSourcePath,
+      closedShardContent,
+      'utf8',
+    )
+    writeFileSync(
+      path.join(integrationIngestRoot, '2020', '2020-02.jsonl.gz'),
+      gzipSync(`${JSON.stringify({ importedAt: '2020-02-02T00:00:00.000Z' })}\n`),
+    )
+    writeFileSync(
+      path.join(integrationIngestRoot, '2020', '2020-03.jsonl.zip'),
+      'canonical archive classification fixture\n',
+      'utf8',
+    )
+    writeFileSync(
+      path.join(integrationIngestRoot, currentYear, `${currentMonth}.jsonl`),
+      `${JSON.stringify({ importedAt: `${currentMonth}-02T00:00:00.000Z` })}\n`,
+      'utf8',
+    )
+    writeFileSync(
+      path.join(integrationIngestRoot, futureYear, `${futureMonth}.jsonl`),
+      `${JSON.stringify({ importedAt: `${futureMonth}-02T00:00:00.000Z` })}\n`,
+      'utf8',
+    )
+    writeFileSync(path.join(vaultRoot, 'exports', 'user-files', 'keep.gz'), 'excluded\n', 'utf8')
 
     try {
       const output = execFileSync(
@@ -3808,13 +3853,13 @@ exit 1
       )
 
       expect(output).toContain('Data package created.')
-      expect(output).toContain('Vault files: 5')
+      expect(output).toContain('Vault files: 10')
       expect(output).not.toContain(vaultRoot)
 
       const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
       expect(zipMatch).not.toBeNull()
 
-      const zipPath = path.join(repoRoot, zipMatch?.[1] ?? '')
+      const zipPath = path.resolve(repoRoot, zipMatch?.[1] ?? '')
       const bundleDir = path.basename(zipPath, '.zip')
       const entries = execFileSync('unzip', ['-Z1', zipPath], {
         cwd: repoRoot,
@@ -3834,10 +3879,35 @@ exit 1
         `${bundleDir}/vault/exports/assistant-deliveries/base-era.pdf`,
       )
       expect(entries).toContain(`${bundleDir}/vault/exports/user-files/keep.pdf`)
+      const closedShardArchiveEntry =
+        `${bundleDir}/vault/ledger/integration-ingests/2020/2020-01.jsonl.gz`
+      expect(entries).toContain(closedShardArchiveEntry)
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/2020/2020-01.jsonl`,
+      )
+      expect(entries).toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/2020/2020-02.jsonl.gz`,
+      )
+      expect(entries).toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/2020/2020-03.jsonl.zip`,
+      )
+      expect(entries).toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/${currentYear}/${currentMonth}.jsonl`,
+      )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/${currentYear}/${currentMonth}.jsonl.gz`,
+      )
+      expect(entries).toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/${futureYear}/${futureMonth}.jsonl`,
+      )
+      expect(entries).not.toContain(
+        `${bundleDir}/vault/ledger/integration-ingests/${futureYear}/${futureMonth}.jsonl.gz`,
+      )
       expect(entries).not.toContain(
         `${bundleDir}/vault/exports/assistant-deliveries/base-era.zip`,
       )
       expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.zip`)
+      expect(entries).not.toContain(`${bundleDir}/vault/exports/user-files/keep.gz`)
       expect(entries).not.toContain(`${bundleDir}/vault/.runtime/operations/assistant/MEMORY.md`)
       expect(entries).not.toContain(
         `${bundleDir}/vault/.runtime/operations/assistant/sessions/session.json`,
@@ -3861,15 +3931,212 @@ exit 1
       ))
       expect(manifest).toMatchObject({
         counts: {
-          totalFiles: 6,
-          vaultFiles: 5,
+          totalFiles: 11,
+          vaultFiles: 10,
+        },
+        includes: {
+          canonicalIntegrationIngestArchives: true,
+          closedIntegrationIngestShardCompression: 'gzip-9',
         },
         excludes: expect.arrayContaining(['.runtime/**']),
       })
-      expect(manifest.excludes).toContain('*.zip')
+      const closedShardArchive = execFileSync(
+        'unzip',
+        ['-p', zipPath, closedShardArchiveEntry],
+        { cwd: repoRoot, env: withoutNodeV8Coverage() },
+      )
+      expect(gunzipSync(closedShardArchive).toString('utf8')).toBe(closedShardContent)
+      expect(closedShardArchive.subarray(4, 8)).toEqual(Buffer.alloc(4))
+      expect(readFileSync(closedShardSourcePath, 'utf8')).toBe(closedShardContent)
+      expect(existsSync(`${closedShardSourcePath}.gz`)).toBe(false)
+
+      const repeatOutput = execFileSync(
+        'bash',
+        [
+          'scripts/package-data-context.sh',
+          '--vault',
+          vaultRoot,
+          '--out-dir',
+          outputRoot,
+          '--name',
+          'murph-test-data-repeat',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: withoutNodeV8Coverage(),
+        },
+      )
+      const repeatZipMatch = repeatOutput.match(/^ZIP: ([^ ]+) \(/m)
+      expect(repeatZipMatch).not.toBeNull()
+      const repeatZipPath = path.resolve(repoRoot, repeatZipMatch?.[1] ?? '')
+      const repeatBundleDir = path.basename(repeatZipPath, '.zip')
+      const repeatClosedShardArchive = execFileSync(
+        'unzip',
+        [
+          '-p',
+          repeatZipPath,
+          `${repeatBundleDir}/vault/ledger/integration-ingests/2020/2020-01.jsonl.gz`,
+        ],
+        { cwd: repoRoot, env: withoutNodeV8Coverage() },
+      )
+      expect(repeatClosedShardArchive).toEqual(closedShardArchive)
+      expect(readFileSync(closedShardSourcePath, 'utf8')).toBe(closedShardContent)
+      expect(existsSync(`${closedShardSourcePath}.gz`)).toBe(false)
+      expect(manifest.excludes).toContain('non-canonical *.zip')
+      expect(manifest.excludes).toContain('non-canonical *.gz')
       expect(manifest.excludes).not.toContain('exports/assistant-deliveries/**')
     } finally {
       rmSync(outputRoot, { recursive: true, force: true })
+      rmSync(parentRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects duplicate integration-ingest representations for every month without mutation', () => {
+    const currentMonth = new Date().toISOString().slice(0, 7)
+    const scenarios = [
+      { month: '2020-01', representations: ['jsonl', 'jsonl.gz'] },
+      { month: currentMonth, representations: ['jsonl', 'jsonl.gz'] },
+      { month: '2020-02', representations: ['jsonl.gz', 'jsonl.zip'] },
+    ] as const
+
+    for (const scenario of scenarios) {
+      const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-data-context-duplicates-'))
+      const vaultRoot = path.join(parentRoot, 'vault')
+      const outputRoot = path.join(parentRoot, 'output')
+      const year = scenario.month.slice(0, 4)
+      const shardDir = path.join(vaultRoot, 'ledger', 'integration-ingests', year)
+      const logicalPath = path.join(shardDir, `${scenario.month}.jsonl`)
+      const shardContent = `${JSON.stringify({
+        importedAt: `${scenario.month}-02T00:00:00.000Z`,
+      })}\n`
+      const sourceSnapshots = new Map<string, Buffer>()
+
+      mkdirSync(shardDir, { recursive: true })
+      for (const representation of scenario.representations) {
+        const sourcePath = representation === 'jsonl'
+          ? logicalPath
+          : `${logicalPath}.${representation.slice('jsonl.'.length)}`
+        const content = representation === 'jsonl'
+          ? Buffer.from(shardContent)
+          : representation === 'jsonl.gz'
+            ? gzipSync(shardContent)
+            : Buffer.from('canonical zip classification fixture\n')
+        writeFileSync(sourcePath, content)
+        sourceSnapshots.set(sourcePath, content)
+      }
+
+      try {
+        const result = spawnSync(
+          'bash',
+          [
+            'scripts/package-data-context.sh',
+            '--vault',
+            vaultRoot,
+            '--out-dir',
+            outputRoot,
+            '--name',
+            'murph-test-data-duplicates',
+          ],
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: withoutNodeV8Coverage(),
+          },
+        )
+
+        expect(result.status).toBe(1)
+        expect(result.stderr).toContain(
+          'integration-ingest shard has multiple physical representations: '
+            + `ledger/integration-ingests/${year}/${scenario.month}.jsonl`,
+        )
+        for (const [sourcePath, content] of sourceSnapshots) {
+          expect(readFileSync(sourcePath)).toEqual(content)
+        }
+        expect(readdirSync(outputRoot)).toEqual([])
+      } finally {
+        rmSync(parentRoot, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('keeps oversized integration-ingest shards raw without mutating the source vault', () => {
+    const parentRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-data-context-oversize-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const outputRoot = path.join(parentRoot, 'output')
+    const wrapperDir = path.join(parentRoot, 'bin')
+    const oversizeMarkerPath = path.join(parentRoot, 'oversize-wc-used')
+    const shardDir = path.join(vaultRoot, 'ledger', 'integration-ingests', '2020')
+    const shardPath = path.join(shardDir, '2020-01.jsonl')
+    const shardContent = `${JSON.stringify({ importedAt: '2020-01-02T00:00:00.000Z' })}\n`
+    const realWcPath = execFileSync('which', ['wc'], {
+      encoding: 'utf8',
+      env: withoutNodeV8Coverage(),
+    }).trim()
+
+    mkdirSync(shardDir, { recursive: true })
+    mkdirSync(wrapperDir, { recursive: true })
+    writeFileSync(shardPath, shardContent, 'utf8')
+    writeFileSync(
+      path.join(wrapperDir, 'wc'),
+      `#!/bin/sh
+if [ ! -e "\${MURPH_TEST_OVERSIZE_WC_MARKER:?}" ]; then
+  : > "\${MURPH_TEST_OVERSIZE_WC_MARKER:?}"
+  printf '%s\\n' 268435457
+  exit 0
+fi
+exec "\${MURPH_TEST_REAL_WC:?}" "$@"
+`,
+      { mode: 0o700 },
+    )
+
+    try {
+      const output = execFileSync(
+        'bash',
+        [
+          'scripts/package-data-context.sh',
+          '--vault',
+          vaultRoot,
+          '--out-dir',
+          outputRoot,
+          '--name',
+          'murph-test-data-oversize',
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            MURPH_TEST_OVERSIZE_WC_MARKER: oversizeMarkerPath,
+            MURPH_TEST_REAL_WC: realWcPath,
+            PATH: `${wrapperDir}${path.delimiter}${process.env.PATH ?? ''}`,
+          },
+        },
+      )
+
+      const zipMatch = output.match(/^ZIP: ([^ ]+) \(/m)
+      expect(zipMatch).not.toBeNull()
+      const zipPath = path.resolve(repoRoot, zipMatch?.[1] ?? '')
+      const bundleDir = path.basename(zipPath, '.zip')
+      const rawArchiveEntry =
+        `${bundleDir}/vault/ledger/integration-ingests/2020/2020-01.jsonl`
+      const entries = execFileSync('unzip', ['-Z1', zipPath], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: withoutNodeV8Coverage(),
+      }).trim().split('\n')
+
+      expect(existsSync(oversizeMarkerPath)).toBe(true)
+      expect(entries).toContain(rawArchiveEntry)
+      expect(entries).not.toContain(`${rawArchiveEntry}.gz`)
+      expect(execFileSync(
+        'unzip',
+        ['-p', zipPath, rawArchiveEntry],
+        { cwd: repoRoot, encoding: 'utf8', env: withoutNodeV8Coverage() },
+      )).toBe(shardContent)
+      expect(readFileSync(shardPath, 'utf8')).toBe(shardContent)
+      expect(existsSync(`${shardPath}.gz`)).toBe(false)
+    } finally {
       rmSync(parentRoot, { recursive: true, force: true })
     }
   })

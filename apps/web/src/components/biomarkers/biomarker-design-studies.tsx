@@ -38,6 +38,144 @@ const HEMOGLOBIN_HISTORY: readonly LabBiomarkerChartPoint[] = [
   { date: "2026-02-17", displayValue: "18.0", id: "synthetic-hgb-2026", value: 18 },
 ] as const;
 
+const BIOMARKER_PREPARING_PREVIEW_ROWS = [
+  { labelWidth: "w-36", valueWidth: "w-20" },
+  { labelWidth: "w-48", valueWidth: "w-24" },
+  { labelWidth: "w-40", valueWidth: "w-16" },
+] as const;
+
+export function BiomarkerPreparingStateStudy() {
+  return (
+    <article
+      aria-labelledby="biomarker-preparing-study-heading"
+      className="min-w-0 overflow-hidden border-y border-border/70"
+      data-design-study="biomarker-preparing"
+    >
+      <header className="px-5 py-8 sm:px-8 sm:py-10">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Synthetic interface study / Updating
+        </p>
+        <h3
+          className="mt-3 font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+          id="biomarker-preparing-study-heading"
+        >
+          Biomarkers
+        </h3>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+          An in-between state for a member who has already added health data and is waiting for the private index to catch up.
+        </p>
+      </header>
+
+      <section className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
+        <div className="px-5 py-10 sm:px-8 sm:py-12 lg:border-r lg:border-border/70 lg:py-16">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Private biomarker index
+          </p>
+          <h4 className="mt-4 max-w-xl font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            Your records are in. Murph is organizing them.
+          </h4>
+          <p className="mt-4 max-w-[62ch] text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Recognized lab results and device readings will appear together here in one private index. This page will update when the index is ready.
+          </p>
+
+          <div
+            aria-live="polite"
+            className="mt-8 flex items-center gap-3 border-t border-border/70 pt-5"
+            role="status"
+          >
+            <span
+              aria-hidden="true"
+              className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+            />
+            <span className="text-sm font-medium text-foreground">
+              Updating your biomarker index
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-center px-5 py-10 sm:px-8 sm:py-12 lg:py-16">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            What appears next
+          </p>
+          <ol className="mt-5 border-y border-border/70">
+            <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-4 border-b border-border/70 py-5">
+              <span className="font-serif text-xl font-semibold tabular-nums text-primary">01</span>
+              <div>
+                <h5 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                  From your devices
+                </h5>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  Supported measurements with actual readings, shown first.
+                </p>
+              </div>
+            </li>
+            <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-4 py-5">
+              <span className="font-serif text-xl font-semibold tabular-nums text-primary">02</span>
+              <div>
+                <h5 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+                  From the lab
+                </h5>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  Recognized results filed by health area, not by report.
+                </p>
+              </div>
+            </li>
+          </ol>
+          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Future results update the same index
+          </p>
+        </div>
+      </section>
+
+      <section aria-labelledby="biomarker-preparing-preview-heading" className="border-t border-border/70">
+        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+          <h4
+            className="font-serif text-xl font-semibold tracking-tight text-foreground"
+            id="biomarker-preparing-preview-heading"
+          >
+            Index preview
+          </h4>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Building
+          </span>
+        </div>
+        <div aria-hidden="true" className="divide-y divide-border/70">
+          {BIOMARKER_PREPARING_PREVIEW_ROWS.map((row, index) => (
+            <div
+              className="grid min-h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-8 px-5 py-4 sm:min-h-24 sm:px-8"
+              key={`${row.labelWidth}:${row.valueWidth}`}
+            >
+              <div className="flex items-center gap-4">
+                <span className="h-12 w-1 shrink-0 rounded-full bg-border" />
+                <span
+                  className={cn(
+                    "h-4 max-w-[65%] animate-pulse rounded-sm bg-muted motion-reduce:animate-none",
+                    row.labelWidth,
+                  )}
+                />
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={cn(
+                    "h-3 animate-pulse rounded-sm bg-muted motion-reduce:animate-none",
+                    row.valueWidth,
+                  )}
+                />
+                <span
+                  className={cn(
+                    "h-2.5 animate-pulse rounded-sm bg-muted/70 motion-reduce:animate-none",
+                    index === 1 ? "w-16" : "w-12",
+                  )}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </article>
+  );
+}
+
 export function BiomarkerIndexStudy() {
   const [filter, setFilter] = useState<BiomarkerStudyFilter>("all");
   const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(
@@ -83,10 +221,10 @@ export function BiomarkerIndexStudy() {
   return (
     <article
       aria-labelledby="biomarker-index-study-heading"
-      className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
+      className="min-w-0"
       data-design-study="biomarker-index"
     >
-      <header className="grid gap-8 border-b border-border/70 px-5 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <header className="grid gap-8 px-5 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Synthetic interface study
@@ -107,7 +245,7 @@ export function BiomarkerIndexStudy() {
         </p>
       </header>
 
-      <section aria-labelledby="device-study-heading">
+      <section aria-labelledby="device-study-heading" className="border-y border-border/70">
         <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
             From your devices
@@ -120,7 +258,7 @@ export function BiomarkerIndexStudy() {
           {BIOMARKER_DEVICE_STUDIES.map((metric) => (
             <li className="border-b border-border/70 last:border-b-0" key={metric.metricKey}>
               <Link
-                className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+                className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:gap-5"
                 href={`/biomarkers/${metric.metricKey}`}
               >
                 <BiomarkerIcon className="size-9" routeId={metric.metricKey} />
@@ -128,7 +266,7 @@ export function BiomarkerIndexStudy() {
                   <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
                     {metric.category}
                   </p>
-                  <p className="text-base font-semibold text-foreground md:mt-1">{metric.name}</p>
+                  <p className="text-lg font-semibold text-foreground md:mt-1 md:text-base">{metric.name}</p>
                 </div>
                 <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
                   {metric.summary}
@@ -145,7 +283,7 @@ export function BiomarkerIndexStudy() {
         </ol>
       </section>
 
-      <section aria-labelledby="lab-study-heading" className="border-t border-border/70">
+      <section aria-labelledby="lab-study-heading">
         <div className="px-5 pt-8 sm:px-8 sm:pt-10">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="lab-study-heading">
             From the lab
@@ -205,7 +343,7 @@ export function BiomarkerIndexStudy() {
         </div>
 
         {visibleGroups.length > 0 ? (
-          <div className="border-t border-border/70">
+          <div className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
             {visibleGroups.map((group) => (
               <BiomarkerStudyDisclosure
                 forcedOpen={normalizedQuery.length > 0}
@@ -217,7 +355,7 @@ export function BiomarkerIndexStudy() {
             ))}
           </div>
         ) : (
-          <div className="border-t border-border/70 px-5 py-14 text-center sm:px-8">
+          <div className="rounded-xl border border-border/70 bg-card/70 px-5 py-14 text-center sm:px-8">
             <p className="font-serif text-xl font-semibold text-foreground">No matching biomarkers</p>
             <p className="mt-1 text-sm text-muted-foreground">Try another name or source status.</p>
           </div>
@@ -288,7 +426,7 @@ function BiomarkerStudyRow({ result }: { result: BiomarkerStudyResult }) {
         <span
           aria-hidden="true"
           className={cn(
-            "h-8 w-1 shrink-0 rounded-full",
+            "h-12 w-1 shrink-0 rounded-full",
             result.status === "in-range" && "bg-primary",
             result.status === "reported" && "bg-muted-foreground/50",
             result.status === "review" && "bg-destructive",
@@ -383,20 +521,15 @@ export function BiomarkerDetailStudy() {
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-              Results over time
-            </h4>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-primary" />Result</span>
-              <span className="inline-flex items-center gap-2"><span className="h-2 w-5 bg-primary/10" />Lab range</span>
-            </div>
-          </div>
+          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Results over time
+          </h4>
           <div className="mt-4 min-w-0">
             <LabBiomarkerHistoryChart
               displayName="Illustrative hemoglobin"
               points={HEMOGLOBIN_HISTORY}
               referenceRange={{ high: 17, low: 13 }}
+              referenceRangeLabel="13.0 to 17.0 g/dL"
               unit="g/dL"
             />
           </div>

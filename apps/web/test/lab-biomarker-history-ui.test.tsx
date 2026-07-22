@@ -153,6 +153,11 @@ test("measured biomarkers are grouped by health area and link to private histori
     expect(hba1cLink?.querySelector('[aria-hidden="true"]')?.className).toContain(
       "bg-destructive",
     );
+    const statusRailClassTokens = hba1cLink
+      ?.querySelector('[aria-hidden="true"]')
+      ?.className.split(/\s+/u) ?? [];
+    expect(statusRailClassTokens).toContain("h-12");
+    expect(statusRailClassTokens).not.toContain("h-8");
     expect(hba1cLink?.getAttribute("role")).toBeNull();
     expect(hba1cLink?.parentElement).toBe(firstList);
     expect(hba1cLink?.className).toContain("cursor-pointer");
@@ -1019,12 +1024,12 @@ test("detail covers loading, stale, error, and signed-out states", async () => {
   }
 });
 
-test("a shared lab-reported range yields a chart band without summary tiles", async () => {
+test("the latest lab-reported range yields a labeled chart band without summary tiles", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
       id: "hba1c-2025",
-      referenceRange: { high: 5.6, low: 4 },
+      referenceRange: { high: 5.7, low: 4.1 },
       value: 5.6,
     }),
     labRow({
@@ -1051,10 +1056,14 @@ test("a shared lab-reported range yields a chart band without summary tiles", as
     expect(text).not.toContain("Saved history");
     expect(text).not.toContain("Up 0.2% since Jun 3, 2025");
     expect(text).toContain("Range 4 to 5.6%");
+    expect(text).toContain("Latest lab range");
+    expect(text).toContain("4 to 5.6%");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("Shaded lab range");
     expect(
-      rendered.container.querySelector('[aria-label="HbA1c results over time"]')
+      rendered.container.querySelector(
+        '[aria-label="HbA1c results over time; latest lab range 4 to 5.6%"]',
+      )
         ?.getAttribute("aria-describedby"),
     ).toBeNull();
   } finally {
@@ -1117,6 +1126,7 @@ test("an exact one-sided range stays in history without becoming an ambiguous ch
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("<5.6%");
+    expect(text).not.toContain("Latest lab range");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("Dashed lab limit");
   } finally {
@@ -1151,6 +1161,7 @@ test("qualified structured ranges keep their exact text and never become a chart
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("70-99 fasting; <140 non-fasting");
+    expect(text).not.toContain("Latest lab range");
     expect(text).not.toContain("shaded area");
     expect(text).not.toContain("Range 70 to 99 mg/dL");
   } finally {
@@ -1158,7 +1169,7 @@ test("qualified structured ranges keep their exact text and never become a chart
   }
 });
 
-test("disagreeing or missing ranges withhold the band without adding summary tiles", async () => {
+test("a missing latest range withholds the band without adding summary tiles", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
@@ -1183,6 +1194,7 @@ test("disagreeing or missing ranges withhold the band without adding summary til
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).not.toContain("results plotted");
+    expect(text).not.toContain("Latest lab range");
     expect(text).not.toContain("Shaded lab range");
     expect(text).not.toContain("Dashed lab limit");
     expect(text).not.toContain("Saved history");

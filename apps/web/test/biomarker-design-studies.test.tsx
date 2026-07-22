@@ -48,19 +48,22 @@ vi.mock("@/src/components/biomarkers/lab-biomarker-history-chart", async () => {
       displayName,
       points,
       referenceRange,
+      referenceRangeLabel,
     }: {
       ariaDescribedBy?: string;
       displayName: string;
       points: readonly unknown[];
       referenceRange: { high: number | null; low: number | null };
+      referenceRangeLabel?: string | null;
       unit: string | null;
     }): ReactNode {
       return React.createElement("div", {
         "aria-describedby": ariaDescribedBy,
-        "aria-label": `${displayName} results over time`,
+        "aria-label": `${displayName} results over time; latest lab range ${referenceRangeLabel}`,
         "data-high": referenceRange.high,
         "data-low": referenceRange.low,
         "data-point-count": points.length,
+        "data-reference-range-label": referenceRangeLabel,
         role: "img",
       });
     },
@@ -71,6 +74,7 @@ import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
+  BiomarkerPreparingStateStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -87,10 +91,12 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Group usage funding");
   expect(sectionsMarkup).toContain("Biomarker detail");
   expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
@@ -107,6 +113,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const componentsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(componentsMarkup).toContain(">Components<");
+  expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
@@ -115,6 +122,28 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain("Choose amount");
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
+});
+
+test("biomarker preparing study reassures members and previews the index structure", () => {
+  const markup = renderToStaticMarkup(createElement(BiomarkerPreparingStateStudy));
+
+  expect(markup).toContain('data-design-study="biomarker-preparing"');
+  expect(markup).toContain("Your records are in. Murph is organizing them.");
+  expect(markup).toContain("appear together here in one private index");
+  expect(markup).toContain("Future results update the same index");
+  expect(markup).not.toContain("one history");
+  expect(markup).toContain("Updating your biomarker index");
+  expect(markup).toContain('aria-live="polite"');
+  expect(markup).toContain('role="status"');
+  expect(markup).toContain("What appears next");
+  expect(markup).toContain("From your devices");
+  expect(markup).toContain("From the lab");
+  expect(markup).toContain("Index preview");
+  expect(markup).toContain("motion-reduce:animate-none");
+  expect(markup).toContain("lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]");
+  expect(markup).not.toContain("Preparing your lab history");
+  expect(markup).not.toContain("rounded-xl");
+  expect(markup).not.toContain("shadow");
 });
 
 test("biomarker design data covers the full synthetic catalog", () => {
@@ -150,6 +179,10 @@ test("biomarker index study keeps device context, source flags, and area disclos
   expect(markup).toContain("md:block");
   expect(markup).toContain("line-clamp-2");
   expect(markup).toContain("md:line-clamp-none");
+  expect(markup).toContain("border-y border-border/70");
+  expect(markup).toContain("h-12 w-1 shrink-0 rounded-full");
+  expect(markup).not.toContain("h-8 w-1 shrink-0 rounded-full");
+  expect(markup).toContain("overflow-hidden rounded-xl border border-border/70 bg-card/70");
   expect(markup).toContain('type="search"');
   expect(markup).toContain('placeholder="Search biomarkers"');
   expect(markup).toContain("Review");
@@ -180,6 +213,21 @@ test("biomarker index study applies the status control to the visible rows", asy
   );
 
   try {
+    const study = rendered.container.querySelector('[data-design-study="biomarker-index"]');
+    expect(study).not.toBeNull();
+    const studyClassTokens = study?.className.split(/\s+/u) ?? [];
+    expect(studyClassTokens).not.toContain("rounded-xl");
+    expect(studyClassTokens).not.toContain("border");
+    expect(studyClassTokens).not.toContain("bg-card/70");
+
+    const deviceSection = rendered.container.querySelector(
+      'section[aria-labelledby="device-study-heading"]',
+    );
+    const deviceSectionClassTokens = deviceSection?.className.split(/\s+/u) ?? [];
+    expect(deviceSectionClassTokens).toContain("border-y");
+    expect(deviceSectionClassTokens).not.toContain("rounded-xl");
+    expect(deviceSectionClassTokens).not.toContain("bg-card/70");
+
     const reviewButton = getButton(rendered.container, "Review");
     await click(rendered.window, reviewButton);
 
@@ -255,7 +303,10 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain("exact results plotted");
   expect(markup).not.toContain("shaded band");
   expect(markup).not.toContain('aria-describedby="illustrative-biomarker-chart-caption"');
-  expect(markup).toContain('aria-label="Illustrative hemoglobin results over time"');
+  expect(markup).toContain(
+    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL"',
+  );
+  expect(markup).toContain('data-reference-range-label="13.0 to 17.0 g/dL"');
   expect(markup).toContain('data-point-count="4"');
   expect(markup).toContain('data-low="13"');
   expect(markup).toContain('data-high="17"');

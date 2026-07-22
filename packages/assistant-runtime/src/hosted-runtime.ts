@@ -488,6 +488,17 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
+async function hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+  prefetch: HostedMailboxPrefixPrefetch,
+): Promise<boolean> {
+  const response = await prefetch.response;
+  return response.items.length > 0
+    && response.items.every((item) =>
+      item.lane === "system"
+      && item.kind === "runtime.pending-effects-reconcile-requested"
+    );
+}
+
 function isHostedInitialBootstrapPending(input: {
   bootstrapRequired: boolean;
   result: HostedMailboxImportCheckpointResult;
@@ -1659,6 +1670,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
+      causalPendingEffectsOnly?: boolean;
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -1729,6 +1741,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                causalPendingEffectsOnly:
+                  passInput.causalPendingEffectsOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
@@ -2464,6 +2478,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
+        causalPendingEffectsOnly?: boolean;
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -2501,6 +2516,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             presentedInvocationLocalProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
+            causalPendingEffectsOnly:
+              singleWakeInput.causalPendingEffectsOnly === true,
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
@@ -2537,12 +2554,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
-        includeSystemMailbox: boolean;
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
         signal?: AbortSignal;
+        systemMailboxAdmission: "all" | "causal_pending_effects";
       }): Promise<boolean> => {
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
@@ -2691,7 +2708,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        if (!input.includeSystemMailbox) {
+        const shouldImportSystemMailbox =
+          input.systemMailboxAdmission === "all"
+          || (
+            runtimeStateDirtyBeforeMailboxImport
+            && await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+              initialMailboxPrefetch,
+            )
+          );
+        if (!shouldImportSystemMailbox) {
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
         }
@@ -2712,6 +2737,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         try {
           await runForegroundPassAfterMailboxImport({
+            causalPendingEffectsOnly:
+              input.systemMailboxAdmission === "causal_pending_effects",
             initialMailboxImport: systemImport,
             initialMailboxImportContext,
             latencySeed: input.latencySeed,
@@ -2734,7 +2761,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         } = {},
       ): Promise<boolean> =>
         await runForegroundMailboxWakeIfWork({
-          includeSystemMailbox: false,
           latencySeed,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
@@ -2747,6 +2773,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ),
           shouldContinue: options.shouldContinue,
           signal: options.signal,
+          systemMailboxAdmission: "causal_pending_effects",
         });
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
@@ -2754,11 +2781,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         signal: AbortSignal;
       }): Promise<boolean> => {
         return await runForegroundMailboxWakeIfWork({
-          includeSystemMailbox: true,
           latencySeed: input.latencySeed,
           requestIdKind: "checkpoint-wake",
           shouldContinue: input.shouldContinue,
           signal: input.signal,
+          systemMailboxAdmission: "all",
         });
       };
       const resolveHotProjectedAssistantWake = (): {

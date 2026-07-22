@@ -850,7 +850,7 @@ describe("Clinical Records status page", () => {
     });
     cleanup = rendered.cleanup;
 
-    expect(rendered.container.textContent).toContain("Records connected");
+    expect(rendered.container.querySelector('[role="alert"]')).toBeNull();
     expect(rendered.container.textContent).toContain("Partly complete");
     expect(rendered.container.textContent).toContain(
       "Murph added some lab results or report summaries, but part of the copy could not finish.",
@@ -912,7 +912,6 @@ describe("Clinical Records status page", () => {
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Results already copied into Murph stay there");
       expect(rendered.container.textContent).toContain("No patient portals connected");
-      expect(rendered.container.textContent).not.toContain("Records connected");
       expect(rendered.container.textContent).not.toContain("Partly complete");
     });
     const disconnectNotice = Array.from(rendered.container.querySelectorAll('[role="alert"]'))

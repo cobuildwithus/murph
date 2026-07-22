@@ -52,12 +52,14 @@ export function LabBiomarkerHistoryChart({
   displayName,
   points,
   referenceRange = null,
+  referenceRangeLabel = null,
   unit,
 }: {
   ariaDescribedBy?: string;
   displayName: string;
   points: readonly LabBiomarkerChartPoint[];
   referenceRange?: LabBiomarkerChartRange | null;
+  referenceRangeLabel?: string | null;
   unit: string | null;
 }) {
   const data = useMemo(
@@ -80,102 +82,118 @@ export function LabBiomarkerHistoryChart({
   );
   const xDomain = useMemo(() => resolveTimeDomain(data.map((point) => point.time)), [data]);
   const range = normalizeRange(referenceRange);
+  const rangeLabel = range ? referenceRangeLabel?.trim() || null : null;
+  const rangeIsBand = range !== null && range.low !== null && range.high !== null;
 
   return (
-    <ChartContainer
-      aria-describedby={ariaDescribedBy}
-      aria-label={`${displayName} results over time`}
-      className="h-72 w-full sm:h-80"
-      config={chartConfig}
-      initialDimension={{ height: 320, width: 760 }}
-      role="img"
-    >
-      <LineChart
-        accessibilityLayer={false}
-        data={data}
-        margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
+    <div className="min-w-0">
+      {rangeLabel ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <span
+            aria-hidden="true"
+            className={rangeIsBand
+              ? "h-2 w-5 shrink-0 bg-primary/10"
+              : "h-0 w-5 shrink-0 border-t border-dashed border-primary/50"}
+          />
+          <span>Latest lab range</span>
+          <span className="font-mono tabular-nums text-foreground">{rangeLabel}</span>
+        </div>
+      ) : null}
+      <ChartContainer
+        aria-describedby={ariaDescribedBy}
+        aria-label={`${displayName} results over time${rangeLabel ? `; latest lab range ${rangeLabel}` : ""}`}
+        className="h-72 w-full sm:h-80"
+        config={chartConfig}
+        initialDimension={{ height: 320, width: 760 }}
+        role="img"
       >
-        {range ? null : <CartesianGrid vertical={false} strokeDasharray="3 5" />}
-        <XAxis
-          axisLine={false}
-          dataKey="time"
-          domain={xDomain}
-          minTickGap={48}
-          scale="time"
-          tickFormatter={(value) => formatAxisDate(Number(value))}
-          tickLine={false}
-          tickMargin={10}
-          type="number"
-        />
-        <YAxis
-          axisLine={false}
-          domain={["auto", "auto"]}
-          padding={range ? { bottom: 16, top: 16 } : undefined}
-          tickFormatter={(value) => formatLabNumber(Number(value))}
-          tickLine={false}
-          tickMargin={6}
-          width="auto"
-        />
-        {range && range.low !== null && range.high !== null ? (
-          <ReferenceArea
-            fill="var(--color-value)"
-            fillOpacity={0.08}
-            ifOverflow="extendDomain"
-            stroke="none"
-            y1={range.low}
-            y2={range.high}
+        <LineChart
+          accessibilityLayer={false}
+          data={data}
+          margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
+        >
+          {range ? null : <CartesianGrid vertical={false} strokeDasharray="3 5" />}
+          <XAxis
+            axisLine={false}
+            dataKey="time"
+            domain={xDomain}
+            minTickGap={48}
+            scale="time"
+            tickFormatter={(value) => formatAxisDate(Number(value))}
+            tickLine={false}
+            tickMargin={10}
+            type="number"
           />
-        ) : null}
-        {range && range.low !== null ? (
-          <ReferenceLine
-            {...RANGE_LINE_STYLE}
-            ifOverflow="extendDomain"
-            y={range.low}
+          <YAxis
+            axisLine={false}
+            domain={["auto", "auto"]}
+            padding={range ? { bottom: 16, top: 16 } : undefined}
+            tickFormatter={(value) => formatLabNumber(Number(value))}
+            tickLine={false}
+            tickMargin={6}
+            width="auto"
           />
-        ) : null}
-        {range && range.high !== null ? (
-          <ReferenceLine
-            {...RANGE_LINE_STYLE}
-            ifOverflow="extendDomain"
-            y={range.high}
-          />
-        ) : null}
-        <ChartTooltip
-          cursor={{ stroke: "var(--border)", strokeDasharray: "3 5" }}
-          content={
-            <ChartTooltipContent
-              hideIndicator
-              labelFormatter={(_label, payload) => {
-                const item = payload[0]?.payload as { date?: string } | undefined;
-                return item?.date ? formatFullDate(item.date) : "";
-              }}
-              formatter={(value, _name, item) => {
-                const point = item?.payload as { displayValue?: string } | undefined;
-                const displayValue = point?.displayValue ?? formatLabNumber(Number(value));
-
-                return (
-                  <div className="flex min-w-32 items-baseline justify-between gap-3">
-                    <span className="text-muted-foreground">Result</span>
-                    <span className="font-mono font-medium tabular-nums text-foreground">
-                      {displayValue}{labUnitSuffix(unit)}
-                    </span>
-                  </div>
-                );
-              }}
+          {range && range.low !== null && range.high !== null ? (
+            <ReferenceArea
+              fill="var(--color-value)"
+              fillOpacity={0.08}
+              ifOverflow="hidden"
+              stroke="none"
+              y1={range.low}
+              y2={range.high}
             />
-          }
-        />
-        <Line
-          activeDot={{ fill: "var(--color-value)", r: 5, strokeWidth: 0 }}
-          dataKey="value"
-          dot={{ fill: "var(--background)", r: 4, stroke: "var(--color-value)", strokeWidth: 2 }}
-          isAnimationActive={false}
-          stroke="var(--color-value)"
-          strokeWidth={2.5}
-          type="linear"
-        />
-      </LineChart>
-    </ChartContainer>
+          ) : null}
+          {range && range.low !== null ? (
+            <ReferenceLine
+              {...RANGE_LINE_STYLE}
+              ifOverflow="hidden"
+              y={range.low}
+            />
+          ) : null}
+          {range && range.high !== null ? (
+            <ReferenceLine
+              {...RANGE_LINE_STYLE}
+              ifOverflow="hidden"
+              y={range.high}
+            />
+          ) : null}
+          <ChartTooltip
+            cursor={{ stroke: "var(--border)", strokeDasharray: "3 5" }}
+            content={
+              <ChartTooltipContent
+                hideIndicator
+                labelFormatter={(_label, payload) => {
+                  const item = payload[0]?.payload as { date?: string } | undefined;
+                  return item?.date ? formatFullDate(item.date) : "";
+                }}
+                formatter={(value, _name, item) => {
+                  const point = item?.payload as { displayValue?: string } | undefined;
+                  const displayValue = point?.displayValue ?? formatLabNumber(Number(value));
+
+                  return (
+                    <div className="flex min-w-32 items-baseline justify-between gap-3">
+                      <span className="text-muted-foreground">Result</span>
+                      <span className="font-mono font-medium tabular-nums text-foreground">
+                        {displayValue}{labUnitSuffix(unit)}
+                      </span>
+                    </div>
+                  );
+                }}
+              />
+            }
+          />
+          <Line
+            activeDot={{ fill: "var(--color-value)", r: 5, strokeWidth: 0 }}
+            dataKey="value"
+            dot={{ fill: "var(--background)", r: 4, stroke: "var(--color-value)", strokeWidth: 2 }}
+            isAnimationActive={false}
+            stroke="var(--color-value)"
+            strokeWidth={2.5}
+            type="linear"
+          />
+        </LineChart>
+      </ChartContainer>
+    </div>
   );
 }
 

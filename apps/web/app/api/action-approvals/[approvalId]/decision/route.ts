@@ -26,7 +26,6 @@ import { getPrisma } from "@/src/lib/prisma";
 import { verifySensitiveActionChallenge } from "@/src/lib/sensitive-actions/server";
 
 const ACTION_APPROVAL_DECISION_BODY_LIMIT_BYTES = 4 * 1024;
-const APPROVED_REPLY_BODY = "I approved the secure request.";
 
 type ActionApprovalDecision =
   | {
@@ -98,9 +97,6 @@ export const POST = withJsonError(async (
   const contactOption = approval.returnContactKind === null
     ? null
     : await resolveHostedMurphContactOption({
-        ...(decision.decision === "approved"
-          ? { message: { body: APPROVED_REPLY_BODY } }
-          : {}),
         preferredKind: approval.returnContactKind,
       }).catch(() => null);
   const response: HostedActionApprovalDecisionResponse = {

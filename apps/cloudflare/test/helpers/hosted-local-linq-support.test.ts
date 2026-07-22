@@ -127,6 +127,34 @@ describe("hosted local Linq provider stub", () => {
     }
   });
 
+  it("accepts a media-only send without requiring a caption", async () => {
+    const stub = await startHostedLocalLinqStub();
+    const expectedPath = "/chats/chat_media_only/messages";
+
+    try {
+      const response = await fetch(`${stub.baseUrl}${expectedPath}`, {
+        body: JSON.stringify({
+          message: {
+            parts: [{
+              attachment_id: "attachment_local_1",
+              type: "media",
+            }],
+          },
+        }),
+        headers: {
+          authorization: "Bearer hosted-local",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      expect(stub.countAcceptedSends(expectedPath)).toBe(1);
+    } finally {
+      await stub.stop();
+    }
+  });
+
   it("fails one matching logical send before provider acceptance", async () => {
     const stub = await startHostedLocalLinqStub();
     const expectedPath = "/chats/chat_retry/messages";
