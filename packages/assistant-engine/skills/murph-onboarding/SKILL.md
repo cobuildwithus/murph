@@ -435,7 +435,11 @@ the supplied facts before replying and leaves optional label details unknown.
    local-operator route, `vault-cli device connect <provider> --format json` is
    an allowed fallback when the prompt explicitly grants it for the current
    turn. Send only a real
-   returned connection link. A clear “none,” “not relevant,” or skip resolves
+   returned connection link. After a real link is returned, send one short
+   handoff by itself in Murph's own words, inviting the user to connect there
+   and let Murph know afterward. Do not call it setup, prescribe or quote an
+   exact response, or advance to another checkpoint until the user returns or
+   the connection is visible. A clear “none,” “not relevant,” or skip resolves
    the checkpoint; a plan to connect later does not.
 2. **Movement and training.** Current fitness, activity, workouts, and movement
    context, tied to capacity, recovery, or the chosen outcome without starting
