@@ -42,7 +42,7 @@ Review for:
 Rendered evidence:
 - When visual behavior changed, render and inspect the affected experience at relevant desktop and mobile viewports after reading the code. Exercise the touched states when practical.
 - If browser or rendered inspection is unavailable, report the exact verification gap. Do not infer visual quality from source alone.
-- Tiny static copy-only changes that meet the completion workflow fast path do not require a full visual pass.
+- Meaning-preserving tiny static-copy corrections that meet the completion workflow fast path do not require a full visual pass.
 
 Output requirements:
 - Return findings ordered by severity (`high`, `medium`, `low`).

@@ -1542,6 +1542,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const agentWorkflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
+      'utf8',
+    )
 
     expect(productExperienceReview).toContain('irreducible user purpose')
     expect(productExperienceReview).toMatch(
@@ -1565,6 +1569,43 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).not.toContain(
       'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
+    )
+    expect(completionWorkflow).toContain('## Product and Rendered Review Admission')
+    expect(completionWorkflow).toContain(
+      '| Any product-owned dimension | Run `product-experience-review` |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Meaning-preserving tiny static-copy correction | No product decision changed;',
+    )
+    expect(completionWorkflow).toContain(
+      '| Implementation-only presentation with no product-owned dimension changed | No product-decision review |',
+    )
+    expect(completionWorkflow).toContain(
+      'An exemption\nnever waives an applicable specialist.',
+    )
+    expect(completionWorkflow).toContain(
+      'explicit credit exhaustion uses `frontend-review`',
+    )
+    expect(completionWorkflow).toContain(
+      'Semantic copy—including CTA, helper, onboarding,',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'any change to semantic user-facing copy, UI state selection, action count or priority',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'only for meaning-preserving typo, punctuation, grammar, or equivalent localization corrections',
+    )
+    expect(agentWorkflowRouting).toContain(
+      '`completion-workflow.md` § Product and Rendered Review Admission',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'trivial copy-only `apps/web` edits that change static text only',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      '`product-experience-review` for materially changed user-facing behavior',
+    )
+    expect(frontendReview).toContain(
+      'Meaning-preserving tiny static-copy corrections',
     )
   })
 

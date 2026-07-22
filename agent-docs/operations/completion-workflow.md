@@ -57,6 +57,24 @@ Skipping ReviewGPT does not skip applicable specialist audits, a required local
 `deep-review`, the parent final review, scoped verification, CI, merge-conflict
 proof, or the normal commit and PR requirements.
 
+## Product and Rendered Review Admission
+
+Route specialist review by the dimension changed, before evaluating ReviewGPT
+eligibility. A product-owned dimension is semantic user-facing copy, UI state
+selection, action count or priority, user-visible element or screen existence,
+or the journey's timing, delivery, permission, and recovery contract.
+
+| Changed dimension | Product-decision owner | Rendered-implementation route |
+| --- | --- | --- |
+| Any product-owned dimension | Run `product-experience-review` | For `apps/web`, also run `frontend-review` and the Claude UI double-check |
+| Meaning-preserving tiny static-copy correction | No product decision changed; use the tiny copy-only fast path | Run the Claude UI double-check; explicit credit exhaustion uses `frontend-review` |
+| Implementation-only presentation with no product-owned dimension changed | No product-decision review | Run `frontend-review` and the Claude UI double-check |
+| Cross-runtime or non-frontend user journey | Run `product-experience-review` | Run a rendered review only when the journey includes an `apps/web` surface |
+
+ReviewGPT eligibility is independent and evaluated afterward. An exemption
+never waives an applicable specialist. `frontend-review`, the Claude check, and
+ReviewGPT never become fallback product-decision owners.
+
 ## Sequence
 
 1. Finish the functional implementation first.
@@ -67,9 +85,9 @@ proof, or the normal commit and PR requirements.
 3. If the change sprawled, duplicated existing patterns, or introduced speculative structure, cut it back before continuing.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
-   - really low-impact `apps/web` copy-only edits may skip audit subagents when they only change static text and do not alter layout, UI state, auth, pricing logic, schemas, runtime behavior, or security claims; use local readback and focused checks instead
+   - really low-impact `apps/web` copy-only edits may skip audit subagents only when they are meaning-preserving corrections and meet the tiny copy-only fast path below; use local readback and focused checks instead
    - prompt-primary changes use the prompt review path below instead of the normal completion audit stack
-   - new or materially changed user-facing product behavior adds the dedicated `product-experience-review` pass, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows; internal-only behavior, docs/process work, trivial static copy, and presentation-only polish do not trigger it
+   - any change to a product-owned dimension defined above adds the dedicated `product-experience-review` pass, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows; internal-only behavior, docs/process work, meaning-preserving copy corrections, and implementation-only presentation do not trigger it
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass and, for a Codex-native parent with available Claude credits, the Claude Code UI double-check below; material frontend workflow changes run both `product-experience-review` and `frontend-review`, while explicit Claude credit or quota exhaustion uses the ordinary `frontend-review` pass as the non-blocking substitute
    - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
    - when the cross-cutting conditions below apply, select exactly one gate: ReviewGPT for an eligible PR lane that will run it, otherwise local `deep-review`
@@ -196,10 +214,21 @@ If ReviewGPT is selected, an explicit request for deep review or a final bug hun
 Skip `product-experience-review`, `frontend-review`, and `coverage-write` subagents for very small `apps/web` copy-only edits when all of the following are true:
 
 1. The diff only changes static user-facing text.
-2. The change does not alter layout, styling, UI state, component structure, auth, billing/pricing logic, schemas, routes, API behavior, runtime code, or security claims.
-3. Local readback plus focused checks cover the changed surface.
+2. The correction preserves meaning and is limited to a typo, punctuation,
+   grammar, or equivalent localization fix. It does not add, remove, or change
+   instructions, action framing, hierarchy, explanatory content, onboarding,
+   permission or confirmation language, state copy, or a product promise.
+3. The change does not alter layout, styling, UI state, component structure,
+   auth, billing/pricing logic, schemas, routes, API behavior, runtime code, or
+   security claims.
+4. Local readback plus focused checks cover the changed surface.
 
-Use focused component/page tests, typecheck, `git diff --check`, and stale-string searches as appropriate. If the copy change touches claims about security, billing, medical outcomes, or product guarantees, leave this fast path and use the normal review workflow.
+Use focused component/page tests, typecheck, `git diff --check`, and stale-string
+searches as appropriate. Semantic copy—including CTA, helper, onboarding,
+empty, error, success, permission, confirmation, or explanatory copy—leaves
+this fast path and runs `product-experience-review`. If the copy change touches
+claims about security, billing, medical outcomes, or product guarantees, use
+the normal review workflow.
 
 The tiny copy-only fast path does not waive the Claude Code UI double-check for a Codex-native parent while Claude credits are available. If an attempted Claude review reports explicit credit or quota exhaustion, run the normally skipped `frontend-review` pass as the required substitute.
 
