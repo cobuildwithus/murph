@@ -76,12 +76,11 @@ access that an alternate workflow ref could request.
 - Production environment branch policy now permits protected branches only.
 - Three repository-scoped credentials that had exact production-environment
   duplicates were removed; the 33 environment-scoped values were untouched.
-- One repository-scoped production deploy hook has no environment copy. The
-  legitimate job now attaches the production environment, but the credential
-  must be re-entered there and its repository copy removed before
-  `CBX-GITHUB-SCOPE` can pass. GitHub does not expose stored secret values, so
-  this migration cannot be completed by copying the existing value through the
-  API.
+- The remaining Render production deploy hook was entered directly into the
+  protected production environment and its repository-scoped copy was removed.
+  Live GitHub metadata now reports zero repository Actions secrets and confirms
+  the environment-scoped hook exists. Its value was never printed or persisted
+  by the migration tooling.
 
 ## Verification
 
@@ -103,7 +102,9 @@ access that an alternate workflow ref could request.
   bootstrap fallback, followed by mandatory post-landing Testbox proof.
   A later retry encountered the same still-active unrelated lock and stopped
   promptly rather than beginning another ten-minute wait.
-- `CBX-GITHUB-SCOPE`: blocked on the remaining deploy-hook secret migration.
+- `CBX-GITHUB-SCOPE`: passed from live GitHub metadata: the production
+  environment is restricted to protected branches, contains the Render deploy
+  hook, and the repository Actions secret count is zero.
 - Preliminary ReviewGPT attempt 1 was below the minimum trusted duration and
   discarded. Attempt 2 returned `SPECIALIST_OUTCOME: INVALID` because the
   guarded archive omitted `.crabbox.yaml`; the packager now includes it
@@ -113,5 +114,6 @@ access that an alternate workflow ref could request.
   the focused repo-tools/typecheck and CLI packaging-owner suites. Per policy,
   the substantive preliminary pass is not rerun after accepted coverage fixes.
 
-Status: active
+Status: completed
 Updated: 2026-07-22
+Completed: 2026-07-22
