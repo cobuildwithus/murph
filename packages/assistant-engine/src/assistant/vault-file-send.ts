@@ -158,7 +158,7 @@ export async function requestAssistantVaultFileSend(input: {
         status: 'awaiting_approval',
       },
       media: [file],
-      message: buildAssistantVaultFileDeliveryMessage(file.filename),
+      message: '',
       replyToMessageId: input.replyToMessageId ?? null,
       sessionId: input.sessionId,
       threadId: input.threadId ?? null,
@@ -196,10 +196,6 @@ export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
   expiresAt: string
 }): string {
   return buildHostedActionApprovalCycleOwnerKey(input)
-}
-
-export function buildAssistantVaultFileDeliveryMessage(filename: string): string {
-  return `Here it is: ${filename}`
 }
 
 export function buildAssistantVaultFileApprovalFallbackWakeAt(

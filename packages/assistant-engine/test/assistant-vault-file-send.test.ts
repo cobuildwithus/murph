@@ -100,7 +100,7 @@ describe('assistant vault-file send', () => {
       deliveryIdempotencyKey:
         `assistant-vault-file:haa_${'a'.repeat(32)}:2026-06-24T12:15:00.000Z`,
       media: [first.file],
-      message: 'Here it is: report.pdf',
+      message: '',
       nextAttemptAt: '2026-06-24T12:05:00.000Z',
       status: 'awaiting_approval',
     })

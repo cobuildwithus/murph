@@ -53,7 +53,6 @@ const assistantModel = "gpt-5.6-terra";
 const requestInboundText = "Create the synthetic report PDF and attach it here.";
 const pendingReplyText =
   "The report is prepared. Approve the secure action, then tell me to attach it.";
-const attachedReplyText = "Here it is: report.pdf";
 const reportRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`;
 const attachmentUploadLogMessage = "Hosted-local Linq attachment upload accepted.";
 const approvalGenerationVersion = "murph-action-approval-generation-v1";
@@ -216,7 +215,6 @@ describe("hosted local vault-file approval resume e2e", () => {
       userId,
     });
     expect(readObservedLinqMessageParts(attachedReply)).toEqual([
-      { type: "text", value: attachedReplyText },
       { attachment_id: "attachment_local_1", type: "media" },
     ]);
     await expect(requireLinqStub().waitForMatchingRequestCount({
