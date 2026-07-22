@@ -117,17 +117,17 @@ test("biomarker preparing study reassures members and previews the index structu
   const markup = renderToStaticMarkup(createElement(BiomarkerPreparingStateStudy));
 
   expect(markup).toContain('data-design-study="biomarker-preparing"');
-  expect(markup).toContain("Your records are in. Murph is organizing them.");
-  expect(markup).toContain("appear together here in one private index");
-  expect(markup).toContain("Future results update the same index");
+  expect(markup).toContain("Murph is organizing your health records.");
+  expect(markup).toContain("This page will update when your biomarkers are ready.");
   expect(markup).not.toContain("one history");
-  expect(markup).toContain("Updating your biomarker index");
+  expect(markup).toContain("Updating your biomarkers");
   expect(markup).toContain('aria-live="polite"');
   expect(markup).toContain('role="status"');
   expect(markup).toContain("What appears next");
   expect(markup).toContain("From your devices");
   expect(markup).toContain("From the lab");
-  expect(markup).toContain("Index preview");
+  expect(markup).toContain(">Biomarkers<");
+  expect(markup).not.toContain("Future results update the same index");
   expect(markup).toContain("motion-reduce:animate-none");
   expect(markup).toContain("lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]");
   expect(markup).not.toContain("Preparing your lab history");
@@ -156,6 +156,7 @@ test("biomarker index study keeps device context, source flags, and area disclos
   expect(markup).toContain("Your biomarkers");
   expect(markup).toContain("From your devices");
   expect(markup).toContain("From the lab");
+  expect(markup).toContain('class="flex items-baseline justify-between gap-4 border-b border-border/70 py-4"');
   expect(markup).toContain('class="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading"');
   expect(markup).toContain('class="font-serif text-2xl font-semibold tracking-tight text-foreground" id="lab-study-heading"');
   expect(markup).not.toContain("Saved lab biomarkers");
@@ -285,7 +286,10 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain("Below range");
   expect(markup).toContain("Feb 17, 2026");
   expect(markup).toContain("Latest reading");
-  expect(markup).toContain("Lab range");
+  expect(markup).not.toContain("<dl");
+  expect(markup).not.toContain(">Lab range</dt>");
+  expect(markup).not.toContain("4 comparable results");
+  expect(markup).toContain("Example laboratory");
   expect(markup).toContain("Results over time");
   expect(markup).not.toContain("Numeric history");
   expect(markup).not.toContain("A steady rise");

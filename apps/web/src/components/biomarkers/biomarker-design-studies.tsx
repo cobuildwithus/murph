@@ -9,6 +9,7 @@ import {
   type LabBiomarkerChartPoint,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
+import { BiomarkerIndexPlaceholder } from "@/src/components/biomarkers/biomarker-index-placeholder";
 import { Input } from "@/src/components/ui/input";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -38,20 +39,14 @@ const HEMOGLOBIN_HISTORY: readonly LabBiomarkerChartPoint[] = [
   { date: "2026-02-17", displayValue: "18.0", id: "synthetic-hgb-2026", value: 18 },
 ] as const;
 
-const BIOMARKER_PREPARING_PREVIEW_ROWS = [
-  { labelWidth: "w-36", valueWidth: "w-20" },
-  { labelWidth: "w-48", valueWidth: "w-24" },
-  { labelWidth: "w-40", valueWidth: "w-16" },
-] as const;
-
 export function BiomarkerPreparingStateStudy() {
   return (
     <article
       aria-labelledby="biomarker-preparing-study-heading"
-      className="min-w-0 overflow-hidden border-y border-border/70"
+      className="min-w-0"
       data-design-study="biomarker-preparing"
     >
-      <header className="px-5 py-8 sm:px-8 sm:py-10">
+      <header className="border-y border-border/70 px-5 py-8 sm:px-8 sm:py-10">
         <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Synthetic interface study / Updating
         </p>
@@ -62,116 +57,10 @@ export function BiomarkerPreparingStateStudy() {
           Biomarkers
         </h3>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-          An in-between state for a member who has already added health data and is waiting for the private index to catch up.
+          An in-between state for a member who has already added health data and is waiting for their biomarkers to finish updating.
         </p>
       </header>
-
-      <section className="grid border-t border-border/70 lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]">
-        <div className="px-5 py-10 sm:px-8 sm:py-12 lg:border-r lg:border-border/70 lg:py-16">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Private biomarker index
-          </p>
-          <h4 className="mt-4 max-w-xl font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            Your records are in. Murph is organizing them.
-          </h4>
-          <p className="mt-4 max-w-[62ch] text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Recognized lab results and device readings will appear together here in one private index. This page will update when the index is ready.
-          </p>
-
-          <div
-            aria-live="polite"
-            className="mt-8 flex items-center gap-3 border-t border-border/70 pt-5"
-            role="status"
-          >
-            <span
-              aria-hidden="true"
-              className="size-2.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
-            />
-            <span className="text-sm font-medium text-foreground">
-              Updating your biomarker index
-            </span>
-          </div>
-        </div>
-
-        <div className="flex flex-col justify-center px-5 py-10 sm:px-8 sm:py-12 lg:py-16">
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            What appears next
-          </p>
-          <ol className="mt-5 border-y border-border/70">
-            <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-4 border-b border-border/70 py-5">
-              <span className="font-serif text-xl font-semibold tabular-nums text-primary">01</span>
-              <div>
-                <h5 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-                  From your devices
-                </h5>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                  Supported measurements with actual readings, shown first.
-                </p>
-              </div>
-            </li>
-            <li className="grid grid-cols-[2rem_minmax(0,1fr)] gap-4 py-5">
-              <span className="font-serif text-xl font-semibold tabular-nums text-primary">02</span>
-              <div>
-                <h5 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-                  From the lab
-                </h5>
-                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-                  Recognized results filed by health area, not by report.
-                </p>
-              </div>
-            </li>
-          </ol>
-          <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Future results update the same index
-          </p>
-        </div>
-      </section>
-
-      <section aria-labelledby="biomarker-preparing-preview-heading" className="border-t border-border/70">
-        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
-          <h4
-            className="font-serif text-xl font-semibold tracking-tight text-foreground"
-            id="biomarker-preparing-preview-heading"
-          >
-            Index preview
-          </h4>
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-            Building
-          </span>
-        </div>
-        <div aria-hidden="true" className="divide-y divide-border/70">
-          {BIOMARKER_PREPARING_PREVIEW_ROWS.map((row, index) => (
-            <div
-              className="grid min-h-20 grid-cols-[minmax(0,1fr)_auto] items-center gap-8 px-5 py-4 sm:min-h-24 sm:px-8"
-              key={`${row.labelWidth}:${row.valueWidth}`}
-            >
-              <div className="flex items-center gap-4">
-                <span className="h-12 w-1 shrink-0 rounded-full bg-border" />
-                <span
-                  className={cn(
-                    "h-4 max-w-[65%] animate-pulse rounded-sm bg-muted motion-reduce:animate-none",
-                    row.labelWidth,
-                  )}
-                />
-              </div>
-              <div className="flex flex-col items-end gap-2">
-                <span
-                  className={cn(
-                    "h-3 animate-pulse rounded-sm bg-muted motion-reduce:animate-none",
-                    row.valueWidth,
-                  )}
-                />
-                <span
-                  className={cn(
-                    "h-2.5 animate-pulse rounded-sm bg-muted/70 motion-reduce:animate-none",
-                    index === 1 ? "w-16" : "w-12",
-                  )}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <BiomarkerIndexPlaceholder headingAs="h4" variant="preparing" />
     </article>
   );
 }
@@ -246,7 +135,7 @@ export function BiomarkerIndexStudy() {
       </header>
 
       <section aria-labelledby="device-study-heading" className="border-y border-border/70">
-        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
             From your devices
           </h4>
@@ -503,21 +392,6 @@ export function BiomarkerDetailStudy() {
           <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-02-17">
             Feb 17, 2026
           </time>
-
-          <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Lab range</dt>
-              <dd className="font-medium text-foreground">13.0 to 17.0 g/dL</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Source</dt>
-              <dd className="font-medium text-foreground">Example laboratory</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">History</dt>
-              <dd className="font-medium text-foreground">4 comparable results</dd>
-            </div>
-          </dl>
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
@@ -530,6 +404,7 @@ export function BiomarkerDetailStudy() {
               points={HEMOGLOBIN_HISTORY}
               referenceRange={{ high: 17, low: 13 }}
               referenceRangeLabel="13.0 to 17.0 g/dL"
+              referenceRangeSourceLabel="Example laboratory"
               unit="g/dL"
             />
           </div>

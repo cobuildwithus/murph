@@ -223,12 +223,12 @@ Keep the complete result ledger below the chart, including the date, exact
 reported value, source reference range, and lab/source label. Comparator,
 qualitative, and incompatible-unit context stays explicit near the chart or in
 the ledger. When the latest comparable result has an unqualified normalized lab
-range, place one quiet `Latest lab range` legend above its shaded two-sided band
-or dashed one-sided limit. Clip that overlay to the data-focused vertical scale
-rather than flattening the historical trend to fit a wide range, and label it as
-latest so it does not imply that older labs shared the same range. Qualified
-ranges remain ledger-only. Simplifying the hierarchy must not imply that
-excluded values were plotted. The loading skeleton mirrors the same
+range, place one quiet `Latest lab range` legend above dashed boundary rules for
+its two-sided band or one-sided limit. Clip those rules to the data-focused
+vertical scale rather than flattening the historical trend to fit a wide range,
+and label it as latest so it does not imply that older labs shared the same
+range. Qualified ranges remain ledger-only. Simplifying the hierarchy must not
+imply that excluded values were plotted. The loading skeleton mirrors the same
 latest-result, chart, and ledger structure rather than substituting a generic
 card grid.
 

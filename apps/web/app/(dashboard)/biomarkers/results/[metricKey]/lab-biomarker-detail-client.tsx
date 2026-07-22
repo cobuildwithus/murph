@@ -260,27 +260,6 @@ function BiomarkerDetailContent({
             >
               {formatLabDate(detail.latest.date)}
             </time>
-
-            <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">Lab range</dt>
-                <dd className="break-words font-medium text-foreground">
-                  {latestReferenceRange ?? "Not listed"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">Source</dt>
-                <dd className="break-words font-medium text-foreground">
-                  {latestSource ?? "Not listed"}
-                </dd>
-              </div>
-              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-                <dt className="text-muted-foreground">History</dt>
-                <dd className="font-medium text-foreground">
-                  {detail.rows.length} {detail.rows.length === 1 ? "result" : "results"}
-                </dd>
-              </div>
-            </dl>
           </div>
 
           {chartPoints.length > 0 ? (
@@ -294,6 +273,7 @@ function BiomarkerDetailContent({
                   points={chartPoints}
                   referenceRange={chartRange}
                   referenceRangeLabel={latestReferenceRange}
+                  referenceRangeSourceLabel={latestSource}
                   unit={detail.comparableUnit}
                 />
               </div>

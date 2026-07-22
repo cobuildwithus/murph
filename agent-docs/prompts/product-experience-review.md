@@ -75,7 +75,8 @@ Audit interaction economy and craft:
   primary action, continuation, completion, and recovery immediately legible.
   Reject generic dashboard clutter and ornamental work that competes with the
   feature's purpose. Defer token-level spacing, typography, motion, responsive
-  behavior, accessibility, and design-system execution to `frontend-review`.
+  behavior, accessibility, and design-system execution to the preliminary
+  ReviewGPT frontend lens and the separate UI double-check.
 - Use established product and design-system primitives when they express the
   outcome cleanly. Do not preserve a weaker experience merely because it is an
   existing pattern.

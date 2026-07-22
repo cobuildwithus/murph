@@ -147,6 +147,9 @@ test("only device-derived readings decide the latest card value without history 
     const section = rendered.container.querySelector('[aria-labelledby="biomarker-devices-heading"]');
     const deviceHeading = rendered.container.querySelector("#biomarker-devices-heading");
     expect(deviceHeading?.className).toContain("text-2xl");
+    const deviceHeadingRowClassTokens = deviceHeading?.parentElement?.className.split(/\s+/u) ?? [];
+    expect(deviceHeadingRowClassTokens).not.toContain("px-5");
+    expect(deviceHeadingRowClassTokens).not.toContain("sm:px-8");
     const deviceSectionClassTokens = section?.className.split(/\s+/u) ?? [];
     expect(deviceSectionClassTokens).toContain("border-y");
     expect(deviceSectionClassTokens).not.toContain("rounded-xl");
@@ -251,12 +254,74 @@ test("device biomarkers remain visible above the notice for unclassified saved l
     expect(text).toContain("From your devices");
     expect(text).toContain("Resting heart rate");
     expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).not.toContain("What appears next");
     expect(text).not.toContain("Report sequence");
+    expect(rendered.container.querySelector("[data-biomarker-index-state]")).toBeNull();
     expect(text.indexOf("From your devices")).toBeLessThan(
       text.indexOf("No recognized lab biomarkers yet"),
     );
   } finally {
     await rendered.cleanup();
+  }
+});
+
+test("the empty index distinguishes stale data from saved unclassified labs", async () => {
+  browserVaultMock.value.client = clientWithMetricRows([]);
+  browserVaultMock.value.freshness = "stale";
+  browserVaultMock.value.status = "ready";
+
+  const stale = await renderClientComponent(
+    <BiomarkersPageClient
+      authenticated
+      deviceBiomarkers={DEVICE_BIOMARKERS}
+      uploadLabsAction={<button type="button">Sync</button>}
+    />,
+    { requireButton: false },
+  );
+  try {
+    expect(stale.container.querySelector('[data-biomarker-index-state="stale"]')).not.toBeNull();
+    expect(stale.container.textContent).toContain("Murph is checking for newer records.");
+    expect(stale.container.textContent).toContain("Looking for newer health data");
+    expect(stale.container.textContent).toContain("Sync");
+    expect(stale.container.textContent).not.toContain("Future results update the same index");
+    expect(stale.container.textContent).not.toContain("Index preview");
+  } finally {
+    await stale.cleanup();
+  }
+
+  browserVaultMock.value.client = clientWithMetricRows([], [{
+    ...labRow(),
+    analyte: "Report sequence",
+    biomarkerKey: null,
+    id: "report-sequence-only",
+    metricKey: "report-sequence",
+    normalizedUnit: null,
+    normalizedValue: null,
+    textValue: null,
+    unit: null,
+    value: 12345,
+  }]);
+  browserVaultMock.value.freshness = "fresh";
+
+  const saved = await renderClientComponent(
+    <BiomarkersPageClient
+      authenticated
+      deviceBiomarkers={DEVICE_BIOMARKERS}
+      uploadLabsAction={<button type="button">Sync</button>}
+    />,
+    { requireButton: false },
+  );
+  try {
+    expect(saved.container.querySelector('[data-biomarker-index-state="saved"]')).not.toBeNull();
+    expect(saved.container.textContent).toContain(
+      "Your records are saved. Murph is filing what it recognizes.",
+    );
+    expect(saved.container.textContent).toContain("Sync");
+    expect(saved.container.textContent).not.toContain("Report sequence");
+    expect(saved.container.textContent).not.toContain("Future results update the same index");
+    expect(saved.container.textContent).not.toContain("Index preview");
+  } finally {
+    await saved.cleanup();
   }
 });
 
@@ -303,7 +368,7 @@ test("the device section stays hidden without device data or authentication", as
     <BiomarkersPageClient authenticated={false} deviceBiomarkers={DEVICE_BIOMARKERS} />,
   );
   try {
-    expect(signedOut.container.textContent).not.toContain("From your devices");
+    expect(signedOut.container.querySelector("#biomarker-devices-heading")).toBeNull();
   } finally {
     await signedOut.cleanup();
   }
@@ -317,7 +382,7 @@ test("the device section stays hidden without device data or authentication", as
     { requireButton: false },
   );
   try {
-    expect(manualOnly.container.textContent).not.toContain("From your devices");
+    expect(manualOnly.container.querySelector("#biomarker-devices-heading")).toBeNull();
     expect(manualOnly.container.textContent).not.toContain("Resting heart rate");
   } finally {
     await manualOnly.cleanup();
