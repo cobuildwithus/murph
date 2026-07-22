@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { initializeVault } from '@murphai/core'
+import { addMeal, initializeVault } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -196,6 +196,75 @@ test('meal import-json schema exposes the structured payload escape hatch', asyn
     assert.equal(field in schema.options.properties, true, field)
   }
 })
+
+test('meal remove-photo schema requires one automatic-capture meal id', async () => {
+  const schema = await readCommandSchema(createMealCli(), ['meal', 'remove-photo'])
+
+  assert.deepEqual(schema.args.required, ['id'])
+  assert.deepEqual(Object.keys(schema.args.properties), ['id'])
+})
+
+test.sequential(
+  'meal remove-photo clears the automatic attachment while preserving structured nutrition',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-remove-photo-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const photoPath = path.join(parentRoot, 'automatic-meal.jpg')
+      await writeFile(photoPath, 'synthetic meal image bytes', 'utf8')
+      const meal = await addMeal({
+        vaultRoot,
+        occurredAt: '2026-07-22T18:00:00.000Z',
+        photoPath,
+        ingredients: ['tofu', 'rice'],
+        nutrition: {
+          totals: {
+            calories: 520,
+            proteinGrams: 28,
+            carbsGrams: 62,
+            fatGrams: 18,
+          },
+          provenance: {
+            source: 'estimated',
+            confidence: 'medium',
+            sourceDetail: 'Estimated from the automatic meal photo.',
+          },
+        },
+        source: 'device',
+        externalRef: {
+          system: 'meal-photo-capture',
+          resourceType: 'photo',
+          resourceId: 'capture_synthetic_cli_remove_photo',
+          version: 'b'.repeat(64),
+        },
+      })
+
+      const result = await runInProcessJsonCli<ShowResult>(createMealCli(), [
+        'meal',
+        'remove-photo',
+        meal.mealId,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(result.exitCode, null)
+      const shown = requireData(result.envelope)
+      assert.equal(shown.entity.id, meal.mealId)
+      assert.deepEqual(shown.entity.data.attachments ?? [], [])
+      assert.deepEqual(shown.entity.data.ingredients, ['tofu', 'rice'])
+      assert.deepEqual(
+        (shown.entity.data.nutrition as { totals?: { calories?: number } })
+          .totals?.calories,
+        520,
+      )
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
 
 test.sequential(
   'meal add typed options persist the same ingredients and nutrition as JSON input',

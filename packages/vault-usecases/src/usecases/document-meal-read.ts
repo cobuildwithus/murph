@@ -17,6 +17,7 @@ import {
 import {
   deleteEventRecord,
   editEventRecord,
+  removeAutomaticMealPhotoEventRecord,
 } from './event-record-mutations.js'
 import {
   asListEnvelope,
@@ -306,4 +307,18 @@ export async function deleteMealRecord(input: {
     entityLabel: 'meal',
     expectedKinds: ['meal'],
   })
+}
+
+export async function removeAutomaticMealPhotoRecord(input: {
+  vault: string
+  lookup: string
+}) {
+  await removeAutomaticMealPhotoEventRecord({
+    vault: input.vault,
+    lookup: input.lookup,
+    entityLabel: 'meal',
+    expectedKinds: ['meal'],
+  })
+
+  return showMealRecord(input.vault, input.lookup)
 }

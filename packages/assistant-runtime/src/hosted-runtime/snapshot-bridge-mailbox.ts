@@ -87,6 +87,7 @@ export interface HostedWorkspaceMailboxPayloadDecoder {
 
 export function createHostedWorkspaceBridgeMailboxImporter(input: {
   decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
+  operatorHomeRoot: string;
   runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): HostedWorkspaceRuntimeBridgeImportItem {
@@ -143,6 +144,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   item: HostedWorkspaceRuntimeBridgeImportItemInput;
   context?: HostedWorkspaceRuntimeBridgeImportItemContext;
   decodeMailboxPayload: HostedWorkspaceMailboxPayloadDecoder;
+  operatorHomeRoot: string;
   runtime: HostedRuntimeBridgeNormalizedRuntime;
   vaultRoot: string;
 }): ReturnType<HostedWorkspaceRuntimeBridgeImportItem> {
@@ -254,6 +256,7 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     return await importHostedMealPhotoCapturedMailboxItem({
       effectsPort: input.runtime.platform.effectsPort,
       item: input.item,
+      operatorHomeRoot: input.operatorHomeRoot,
       vaultRoot: input.vaultRoot,
       wake,
     });

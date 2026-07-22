@@ -37,6 +37,14 @@ interface EventMutationCoreRuntime {
     retainedPaths: string[]
     deleted: true
   }>
+  removeAutomaticMealPhoto(input: {
+    vaultRoot: string
+    eventId: string
+  }): Promise<{
+    eventId: string
+    ledgerFile: string
+    removedPhotoCount: number
+  }>
   dedupeDeviceEventsByExternalRef(input: {
     vaultRoot: string
     apply?: boolean
@@ -466,6 +474,31 @@ export async function deleteEventRecord(
       },
       EVENT_CONTRACT_INVALID: {
         code: 'contract_invalid',
+      },
+    })
+  }
+}
+
+export async function removeAutomaticMealPhotoEventRecord(
+  input: EventRecordMutationLookupInput,
+) {
+  const record = await requireEventRecord(input)
+  const eventId = resolveCanonicalEventId(record)
+  const core = await loadEventMutationCoreRuntime()
+
+  try {
+    return await core.removeAutomaticMealPhoto({
+      eventId,
+      vaultRoot: input.vault,
+    })
+  } catch (error) {
+    throw toVaultCliError(error, {
+      EVENT_MISSING: {
+        code: 'not_found',
+        message: `No ${input.entityLabel} found for "${input.lookup}".`,
+      },
+      MEAL_PHOTO_RETENTION_SOURCE_INVALID: {
+        code: 'invalid_operation',
       },
     })
   }
