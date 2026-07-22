@@ -343,7 +343,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
   }
 });
 
-test("MurphPersonaPicker constrains its desktop dialog before interaction", async () => {
+test("MurphPersonaPicker constrains its desktop dialog and left-aligns the subtitle", async () => {
   const { MurphPersonaPicker } = await import(
     "@/src/components/murph/murph-persona-picker"
   );
@@ -362,13 +362,19 @@ test("MurphPersonaPicker constrains its desktop dialog before interaction", asyn
     const step = rendered.container.querySelector<HTMLElement>(
       "[data-persona-picker-step='main']",
     );
+    const stepTitle = rendered.container.querySelector<HTMLElement>(
+      "[data-persona-picker-step-title]",
+    );
+    const description = stepTitle?.parentElement?.querySelector("p");
     assert.ok(dialog);
     assert.ok(step);
+    assert.ok(description);
     assert.equal(dialog.style.width, "52rem");
     assert.equal(dialog.style.maxWidth, "calc(100vw - 2rem)");
     assert.match(dialog.className, /min-w-0/u);
     assert.match(step.className, /min-w-0/u);
     assert.match(step.className, /overflow-x-hidden/u);
+    assert.match(description.className, /text-left/u);
   } finally {
     await rendered.cleanup();
   }

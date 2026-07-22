@@ -477,7 +477,7 @@ export function MurphPersonaPicker({
               </DrawerTitle>
             </div>
             <DrawerDescription
-              className={cn("text-sm leading-6", !description && "sr-only")}
+              className={cn("text-left text-sm leading-6", !description && "sr-only")}
             >
               {accessibleDescription}
             </DrawerDescription>
@@ -522,7 +522,7 @@ export function MurphPersonaPicker({
             </DialogTitle>
           </div>
           <DialogDescription
-            className={cn("text-sm leading-6", !description && "sr-only")}
+            className={cn("text-left text-sm leading-6", !description && "sr-only")}
           >
             {accessibleDescription}
           </DialogDescription>
