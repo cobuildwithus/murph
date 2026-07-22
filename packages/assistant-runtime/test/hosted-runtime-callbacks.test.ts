@@ -12,6 +12,9 @@ import type {
   AssistantOutboxPreparedDispatchState,
 } from "@murphai/assistant-engine";
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+} from "@murphai/assistant-engine";
+import {
   getAssistantChannelAdapter,
 } from "@murphai/assistant-engine/assistant-channel-adapters";
 import {
@@ -7867,7 +7870,7 @@ describe("hosted runtime callbacks", () => {
       mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
         createMirrorState({
           automationAuthority: {
-            automationId: "automation_synthetic_meal_closeout",
+            automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
             expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
           },
           delivery: null,
@@ -7960,7 +7963,7 @@ describe("hosted runtime callbacks", () => {
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState({
         automationAuthority: {
-          automationId: "automation_synthetic_meal_closeout",
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
           expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
         },
         delivery: null,
@@ -8017,6 +8020,74 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
+  it("leaves unrelated direct Telegram automations outside meal route authority", async () => {
+    const target = "telegram_direct_saved_reminder";
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      threadId: target,
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        automationAuthority: {
+          automationId: "automation_unrelated_direct_reminder",
+          expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
+        },
+        delivery: null,
+        intentId: "intent_123",
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.sendTelegramMessage.mockResolvedValueOnce({
+      providerMessageId: "provider_unrelated_reminder",
+      target,
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey: "assistant-outbox:intent_123",
+          message: "Unrelated scheduled reminder",
+          replyToMessageId: null,
+          target,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+          }),
+          status: "sent",
+        });
+      },
+    );
+    const resolveCurrentDirectRoute = vi.fn(async () => {
+      throw new Error("unrelated reminder must not resolve meal route authority");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ resolveCurrentDirectRoute }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(resolveCurrentDirectRoute).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target }),
+      expect.any(Object),
+    );
+  });
+
   it("makes no Telegram provider call when automated direct-route access is revoked", async () => {
     const target = "telegram_direct_current";
     const effect = createEffect({
@@ -8028,7 +8099,7 @@ describe("hosted runtime callbacks", () => {
     mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
       createMirrorState({
         automationAuthority: {
-          automationId: "automation_synthetic_meal_closeout",
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
           expectedUpdatedAt: "2026-04-08T00:00:00.000Z",
         },
         delivery: null,

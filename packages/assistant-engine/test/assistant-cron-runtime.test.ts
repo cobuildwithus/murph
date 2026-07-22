@@ -125,7 +125,8 @@ vi.mock('../src/assistant-service.ts', () => ({
   sendAssistantMessageLocal: cronMocks.sendAssistantMessageLocal,
 }))
 
-vi.mock('../src/assistant/channel-adapters.ts', () => ({
+vi.mock('../src/assistant/channel-adapters.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/assistant/channel-adapters.ts')>()),
   getAssistantChannelAdapter: cronMocks.getAssistantChannelAdapter,
 }))
 
@@ -6927,6 +6928,206 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('retries a stale closeout outbox target against the current private route', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
+    const { getAssistantChannelAdapter } = await vi.importActual<
+      typeof import('../src/assistant/channel-adapters.ts')
+    >('../src/assistant/channel-adapters.ts')
+    cronMocks.getAssistantChannelAdapter.mockImplementation(
+      getAssistantChannelAdapter,
+    )
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-meal-closeout-stale-outbox-retry-',
+    )
+    const automationUpdatedAt = '2026-07-22T20:00:00.000Z'
+    const firstIntentId = 'outbox_meal_closeout_stale_route'
+    const secondIntentId = 'outbox_meal_closeout_current_route'
+    const oldTarget = 'telegram_direct_old'
+    const currentTarget = 'telegram_direct_current'
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: automationUpdatedAt,
+      instructions: 'Summarize today\'s imported meals and remove eligible photos.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: oldTarget,
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+      summary: null,
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed:automatic-meal-daily-closeout',
+      ],
+      title: 'Automatic meal daily closeout',
+      updatedAt: automationUpdatedAt,
+    })
+    let currentRouteTarget = oldTarget
+    const resolveScheduledDirectRoute = vi.fn(async () => ({
+      channel: 'telegram' as const,
+      threadId: currentRouteTarget,
+    }))
+    const queuedIntentIds = [firstIntentId, secondIntentId]
+    cronMocks.sendAssistantMessageLocal.mockImplementation(async () => {
+      const intentId = queuedIntentIds.shift()
+      if (!intentId) {
+        throw new Error('Unexpected extra automatic meal closeout turn.')
+      }
+      return {
+        decision: {
+          kind: 'send_message' as const,
+          privateSummary: 'Prepared the automatic meal closeout.',
+          text: 'Daily meal summary',
+        },
+        deliveryOutcome: {
+          kind: 'queued' as const,
+          error: null,
+          intentId,
+          session: { sessionId: 'session-meal-closeout' },
+        },
+        response: 'Daily meal summary',
+        session: { sessionId: 'session-meal-closeout' },
+      }
+    })
+    const executionContext: AssistantExecutionContext = {
+      hosted: {
+        memberId: 'member-meal-closeout-stale-outbox-retry',
+        resolveScheduledDirectRoute,
+        userEnvKeys: [],
+      },
+    }
+
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    await saveAssistantOutboxIntent(
+      vaultRoot,
+      buildTestTelegramOutboxIntent({
+        automationUpdatedAt,
+        createdAt: '2026-07-22T21:20:00.000Z',
+        intentId: firstIntentId,
+        target: oldTarget,
+      }),
+    )
+
+    currentRouteTarget = currentTarget
+    const providerSend = vi.fn(async (input: { target: string }) => ({
+      providerMessageId: 'telegram_provider_current_route',
+      target: input.target,
+    }))
+    const guardedSendTelegram = vi.fn(async (input: {
+      idempotencyKey?: string | null
+      message: string
+      replyToMessageId?: string | null
+      signal?: AbortSignal
+      target: string
+    }) => {
+      if (input.target !== currentRouteTarget) {
+        throw new VaultCliError(
+          'ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE',
+          'Hosted automatic meal closeout no longer matches the current direct route.',
+          { retryable: false },
+        )
+      }
+      return providerSend(input)
+    })
+
+    const staleDispatch = await dispatchAssistantOutboxIntent({
+      dependencies: { sendTelegram: guardedSendTelegram },
+      force: true,
+      intentId: firstIntentId,
+      now: new Date('2026-07-22T21:20:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(staleDispatch.intent.status).toBe('failed')
+    expect(staleDispatch.deliveryError).toEqual(expect.objectContaining({
+      code: 'ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE',
+    }))
+    expect(providerSend).not.toHaveBeenCalled()
+    const paths = resolveAssistantStatePaths(vaultRoot)
+    const failedRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(failedRuntime.jobs).toEqual([
+      expect.objectContaining({
+        jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          pendingOccurrenceAt: '2026-07-22T21:00:00.000Z',
+          retryAfterAt: '2026-07-22T21:20:30.000Z',
+        }),
+      }),
+    ])
+
+    vi.setSystemTime(new Date('2026-07-22T21:20:30.000Z'))
+    await expect(processDueAssistantCronJobsLocal({
+      deliveryDispatchMode: 'queue-only',
+      executionContext,
+      limit: 1,
+      vault: vaultRoot,
+    })).resolves.toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channel: 'telegram',
+        outboxAutomationAuthority: {
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+          expectedUpdatedAt: automationUpdatedAt,
+        },
+        threadId: currentTarget,
+        threadIsDirect: true,
+      }),
+    )
+    await saveAssistantOutboxIntent(
+      vaultRoot,
+      buildTestTelegramOutboxIntent({
+        automationUpdatedAt,
+        createdAt: '2026-07-22T21:20:30.000Z',
+        intentId: secondIntentId,
+        target: currentTarget,
+      }),
+    )
+
+    const currentDispatch = await dispatchAssistantOutboxIntent({
+      dependencies: { sendTelegram: guardedSendTelegram },
+      force: true,
+      intentId: secondIntentId,
+      now: new Date('2026-07-22T21:20:30.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(currentDispatch.intent.status).toBe('sent')
+    expect(providerSend).toHaveBeenCalledOnce()
+    expect(providerSend).toHaveBeenCalledWith(
+      expect.objectContaining({ target: currentTarget }),
+    )
+    const completedRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(completedRuntime.jobs).toEqual([
+      expect.objectContaining({
+        jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        state: expect.objectContaining({
+          consecutiveFailures: 0,
+          pendingOccurrenceAt: null,
+          retryAfterAt: null,
+        }),
+      }),
+    ])
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(2)
+  })
+
   it('fails automatic meal closeout when its Linq direct route changes before a tool effect', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
@@ -9768,6 +9969,52 @@ function buildTestLinqOutboxIntent(input: {
     deliveryIdempotencyKey: null,
     deliveryTransportIdempotent: false,
     lastError: null,
+  })
+}
+
+function buildTestTelegramOutboxIntent(input: {
+  automationUpdatedAt: string
+  createdAt: string
+  intentId: string
+  target: string
+}): AssistantOutboxIntent {
+  return assistantOutboxIntentSchema.parse({
+    schema: 'murph.assistant-outbox-intent.v1',
+    intentId: input.intentId,
+    sessionId: `asst_${input.intentId}`,
+    turnId: `turn_${input.intentId}`,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    lastAttemptAt: null,
+    nextAttemptAt: null,
+    sentAt: null,
+    attemptCount: 0,
+    status: 'pending',
+    message: 'Daily meal summary',
+    subject: null,
+    dedupeKey: `dedupe-${input.intentId}`,
+    targetFingerprint: `telegram:${input.target}`,
+    channel: 'telegram',
+    identityId: null,
+    actorId: null,
+    threadId: input.target,
+    threadIsDirect: true,
+    replyToMessageId: null,
+    bindingDelivery: {
+      kind: 'thread',
+      target: input.target,
+    },
+    deliverySource: null,
+    explicitTarget: null,
+    delivery: null,
+    deliveryConfirmationPending: false,
+    deliveryIdempotencyKey: null,
+    deliveryTransportIdempotent: false,
+    lastError: null,
+    automationAuthority: {
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      expectedUpdatedAt: input.automationUpdatedAt,
+    },
   })
 }
 

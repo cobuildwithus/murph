@@ -41,6 +41,7 @@ import {
   isAssistantOutboxReplyBubbleSuccessor,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   normalizeAssistantDeliveryError,
   readAssistantAutomationState,
   readAssistantOutboxIntent,
@@ -2282,12 +2283,16 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   }
 
   const target = input.target?.trim() ?? "";
-  if (payload.threadIsDirect === true && input.intent?.automationAuthority) {
+  if (
+    payload.threadIsDirect === true &&
+    input.intent?.automationAuthority?.automationId ===
+      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
+  ) {
     const resolveCurrentDirectRoute = input.effectsPort.resolveCurrentDirectRoute;
     if (!resolveCurrentDirectRoute) {
       throw new VaultCliError(
         "ASSISTANT_DIRECT_ROUTE_AUTHORITY_UNAVAILABLE",
-        "Hosted automated private delivery requires current direct route authority.",
+        "Hosted automatic meal closeout delivery requires current direct route authority.",
         { retryable: true },
       );
     }

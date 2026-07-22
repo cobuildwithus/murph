@@ -6,6 +6,7 @@ import {
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantStatePaths } from '../store/paths.js'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../automation-tags.js'
+import { MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID } from '../managed-automations.js'
 import { resolveAssistantStatePaths } from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
@@ -440,6 +441,16 @@ function assistantCronTerminalDeliveryConsumesOccurrence(
 ): boolean {
   if (terminal.kind === 'sent') {
     return true
+  }
+
+  if (
+    terminal.failureStatus === 'failed' &&
+    terminal.failureCode === 'ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE' &&
+    source?.kind === 'automation' &&
+    source.status === 'active' &&
+    source.automationId === MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
+  ) {
+    return false
   }
 
   if (
