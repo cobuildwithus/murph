@@ -2551,7 +2551,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           passResult = await runSingleForegroundPass({
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
-            initialMailboxImportContext: null,
+            initialMailboxImportContext:
+              wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
+                ? {
+                    assistantAskRequestTargetKind:
+                      wakeInput.initialMailboxImportContext.assistantAskRequestTargetKind,
+                  }
+                : null,
             latencySeed: wakeInput.latencySeed ?? null,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
@@ -2628,9 +2634,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // A retained wake that has started importing finishes before shutdown
         // checkpointing; shutdown only suppresses the follow-up assistant pass.
         const importSignal = runtimeAbortController.signal;
-        const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-          input.latencySeed,
-        );
+        const wakeInitialMailboxImportContext =
+          createHostedRuntimeWakeInitialImportContext(input.latencySeed);
+        const initialMailboxImportContext =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+            ? {
+                ...(wakeInitialMailboxImportContext ?? {}),
+                assistantAskRequestTargetKind: "joined_group" as const,
+              }
+            : wakeInitialMailboxImportContext;
         const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId:
@@ -2732,12 +2744,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         const systemImport = await importMailboxLanes(
           ["system"],
-          input.systemMailboxAdmission === "pre_checkpoint_safe"
-            ? (item, context) => importMailboxItem(item, {
-                ...context,
-                assistantAskRequestTargetKind: "joined_group",
-              })
-            : importMailboxItem,
+          importMailboxItem,
         );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);

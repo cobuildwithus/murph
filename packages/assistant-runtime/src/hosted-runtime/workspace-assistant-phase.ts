@@ -266,6 +266,12 @@ const HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS = [
   "runtime.pending-effects-reconcile-requested",
   "assistant.ask.completed",
 ] as const;
+const HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS = [
+  "apply-runtime-control-request",
+] as const;
+const HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS = [
+  "runtime.pending-effects-reconcile-requested",
+] as const;
 const HOSTED_ASSISTANT_ASK_COMPLETION_FIRST_ATTEMPT_ALERT_MS = 60_000;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
@@ -4032,8 +4038,12 @@ async function runSystemMailboxMaintenancePhase(input: {
       || phaseInput.foregroundCausalOnly === true
     )
       ? await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
-          allowedWakeKinds: HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
+          allowedRouteActions: phaseInput.foregroundCausalOnly === true
+            ? HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS
+            : HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS,
+          allowedWakeKinds: phaseInput.foregroundCausalOnly === true
+            ? HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS
+            : HOSTED_FOREGROUND_CAUSAL_WAKE_KINDS,
           ...(assistantAskCompletionOccurredBefore === undefined
             ? {}
             : { assistantAskCompletionOccurredBefore }),

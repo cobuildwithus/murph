@@ -399,11 +399,13 @@ delivery never await the child.
 
 When a joined-group request reaches a dirty warm runtime, the mailbox prefetch
 may import it before the routine idle checkpoint only when the entire fetched
-prefix contains pre-checkpoint-safe system wakes. The decoded request target is
-revalidated during import; a consented-member request remains checkpoint-gated.
-Import kicks the existing detached controller; it does not start or advance the
-at-least-180-second idle snapshot. Any unrelated system wake in that prefix
-keeps the whole system prefix checkpoint-gated.
+prefix contains pre-checkpoint-safe system wakes. One shared import context
+revalidates the decoded request target throughout that pre-checkpoint pass,
+including pre-assistant follow-up imports and foreground reruns; a
+consented-member request remains checkpoint-gated regardless of which import
+observes it. Import kicks the existing detached controller; it does not start or
+advance the at-least-180-second idle snapshot. Any unrelated system wake in
+that prefix keeps the whole system prefix checkpoint-gated.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -416,14 +418,18 @@ or invoke side-effecting tools.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its
-occurrence timestamp predates the oldest pending input. It then owns the next
-assistant pass, and the existing output-only continuation composes and durably
-queues one natural Murph response under its stable idempotency key before the
-still-pending input runs on the next pass. A newer completion does not overtake
-older personal input. This ordering contract ends at durable intent creation;
-ordinary carrier retry ordering remains scoped to one assistant turn so a
-retrying Ask send cannot block all newer personal replies. The mailbox remains
-transport, not an Ask-specific delivery coordinator.
+occurrence timestamp predates the oldest pending input. The cutoff is read from
+the existing complete pending-input index and uses the input's `occurredAt`, not
+its later receipt time. Missing, incomplete, or invalid index evidence fails
+closed without backfill or compaction on the foreground reply path; existing
+background maintenance remains the only repair owner. The completion then owns
+the next assistant pass, and the existing output-only continuation composes and
+durably queues one natural Murph response under its stable idempotency key before
+the still-pending input runs on the next pass. A newer completion does not
+overtake older personal input. This ordering contract ends at durable intent
+creation; ordinary carrier retry ordering remains scoped to one assistant turn
+so a retrying Ask send cannot block all newer personal replies. The mailbox
+remains transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask

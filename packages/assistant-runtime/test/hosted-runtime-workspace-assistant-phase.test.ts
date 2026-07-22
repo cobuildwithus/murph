@@ -12000,6 +12000,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("keeps assistant ask completions out of a causal-only pass without an input cutoff", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: ["apply-runtime-control-request"],
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+      }),
+    );
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
+  });
+
   it("keeps due cron work out of a causal-only zero-effect pass", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
@@ -12118,14 +12139,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
       expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
         expect.objectContaining({
-          allowedRouteActions: [
-            "apply-runtime-control-request",
-            "continue-assistant-ask",
-          ],
-          allowedWakeKinds: [
-            "runtime.pending-effects-reconcile-requested",
-            "assistant.ask.completed",
-          ],
+          allowedRouteActions: ["apply-runtime-control-request"],
+          allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
         }),
       );
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({

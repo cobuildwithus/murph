@@ -13,6 +13,7 @@ import {
 import {
   compactHostedPendingAssistantInputIds,
   enqueueHostedPendingAssistantInputId,
+  inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
@@ -158,7 +159,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
 });
 
 describe("resolveHostedOldestPendingAssistantInputAt", () => {
-  it("uses the oldest pending input received time", async () => {
+  it("uses the oldest indexed pending input occurrence time", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -173,13 +174,48 @@ describe("resolveHostedOldestPendingAssistantInputAt", () => {
       event: createAssistantInputEvent(),
       vault: vaultRoot,
     });
+    await compactHostedPendingAssistantInputIds({ vaultRoot });
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
       vaultRoot,
     });
 
     await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
-      .resolves.toBe("2026-04-23T00:00:03.000Z");
+      .resolves.toBe("2026-04-23T00:00:02.000Z");
+  });
+
+  it("leaves a missing foreground index untouched and fails closed", async () => {
+    const vaultRoot = await createTempVault();
+    await upsertAssistantInputEvent({
+      event: createAssistantInputEvent(),
+      vault: vaultRoot,
+    });
+
+    await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
+      .resolves.toBeNull();
+    await expect(access(resolveHostedPendingAssistantInputStatePath(vaultRoot)))
+      .rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("leaves an incomplete foreground index uncompacted and fails closed", async () => {
+    const vaultRoot = await createTempVault();
+    const event = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent(),
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: false });
+    await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
+      .resolves.toBeNull();
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: false });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([event.inputId]);
   });
 });
 

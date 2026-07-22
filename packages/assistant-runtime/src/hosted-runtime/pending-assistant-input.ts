@@ -3,9 +3,9 @@ import {
 } from "@murphai/assistant-engine";
 
 import {
-  compactHostedPendingAssistantInputIds,
   hasHostedPendingAssistantInputWakeCandidate,
   inspectHostedPendingAssistantInputWakeCandidate,
+  readExistingHostedPendingAssistantInputIds,
 } from "./pending-input-index.ts";
 
 const HOSTED_PENDING_ASSISTANT_INPUT_INDEX_MAINTENANCE_DELAY_MS = 30_000;
@@ -14,8 +14,15 @@ export async function resolveHostedOldestPendingAssistantInputAt(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<string | null> {
-  const inputIds = await compactHostedPendingAssistantInputIds({
-    signal: input.signal ?? null,
+  const inspection = await inspectHostedPendingAssistantInputWakeCandidate({
+    vaultRoot: input.vaultRoot,
+  });
+  if (!inspection.indexComplete) {
+    return null;
+  }
+
+  input.signal?.throwIfAborted();
+  const inputIds = await readExistingHostedPendingAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
   const firstInputId = inputIds[0] ?? null;
@@ -27,7 +34,7 @@ export async function resolveHostedOldestPendingAssistantInputAt(input: {
     inputId: firstInputId,
     vault: input.vaultRoot,
   });
-  const occurredAt = event?.receivedAt ?? event?.occurredAt ?? null;
+  const occurredAt = event?.occurredAt ?? null;
   return occurredAt && Number.isFinite(Date.parse(occurredAt))
     ? occurredAt
     : null;
