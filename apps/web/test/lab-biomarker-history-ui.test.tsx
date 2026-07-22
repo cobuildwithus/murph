@@ -290,8 +290,8 @@ test("unclassified saved lab rows stay out of the index without pretending the r
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("No recognized lab biomarkers yet");
-    expect(text).toContain("saved lab records remain available");
+    expect(text).toContain("Your records are saved. Murph is filing what it recognizes.");
+    expect(text).toContain("saved lab records remain private");
     expect(text).not.toContain("Report sequence");
     expect(text).not.toContain("Other");
   } finally {
@@ -323,7 +323,8 @@ test("stale unclassified lab rows stay available without a refresh banner", asyn
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("No recognized lab biomarkers yet");
+    expect(text).toContain("Your records are saved. Murph is filing what it recognizes.");
+    expect(text).toContain("saved lab records remain private");
     expect(text).not.toContain("Your lab history may be out of date");
     expect(text).not.toContain("Refresh to check for newer data");
     expect(text).not.toContain("No lab results are available in this saved view");
@@ -881,7 +882,8 @@ test("a pending refresh keeps ready empty replicas in the preparing state", asyn
     { requireButton: false },
   );
   try {
-    expect(list.container.textContent).toContain("Preparing your lab history");
+    expect(list.container.textContent).toContain("Murph is organizing your health records.");
+    expect(list.container.textContent).toContain("Updating your biomarkers");
     expect(list.container.textContent).not.toContain("No lab results yet");
     expect(list.container.textContent).not.toContain("Refreshing your lab history");
     expect(list.container.textContent).not.toContain("Sync labs");
@@ -923,9 +925,9 @@ test("stale empty list stays quiet while detail states retain a refresh action",
     { requireButton: false },
   );
   try {
-    expect(list.container.textContent).toContain("No saved lab results in this view");
+    expect(list.container.textContent).toContain("Murph is checking for newer records.");
     expect(list.container.textContent).toContain(
-      "Murph checks for newer data in the background. You can also send Murph a lab report.",
+      "Murph checks for newer device and lab data in the background.",
     );
     expect(list.container.textContent).not.toContain("No lab results yet");
     expect(list.container.textContent).not.toContain("Your lab history may be out of date");
