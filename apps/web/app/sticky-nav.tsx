@@ -18,6 +18,7 @@ const GITHUB_REPO_URL = "https://github.com/cobuildwithus/murph";
 const NAV_LINKS = [
   { href: "/#how", label: "How it works" },
   { href: "/#faq", label: "FAQ" },
+  { href: "/knowledge", label: "Knowledge" },
   { href: "/security", label: "Security" },
 ] as const;
 
