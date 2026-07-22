@@ -243,7 +243,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "currentReviewedHead": "%s"\n' "$review_gpt_head_oid"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-phase.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"$'\n'"agent-docs/FRONTEND.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
     review_gpt_add_rendered_evidence
   else
     review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"

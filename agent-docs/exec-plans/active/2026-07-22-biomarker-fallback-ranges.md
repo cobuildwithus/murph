@@ -117,3 +117,8 @@ Updated: 2026-07-22
   required frontend guidance and stages every validated evidence image into the
   guarded review-context directory so the manifest cannot name an ignored file
   that the ZIP scanner omitted.
+- The next duration-valid retry proved the four packaged images were readable
+  and then returned `INVALID` because the frontend packet still omitted root
+  `PRODUCT.md`. The packager now always supplies the complete frontend context
+  trio required by the repository: `agent-docs/FRONTEND.md`, `PRODUCT.md`, and
+  `DESIGN.md`.
