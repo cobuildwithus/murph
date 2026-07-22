@@ -381,26 +381,11 @@ After the member's first accepted repeated behavior or bounded experiment and
 its support are successfully saved, send a mandatory short text close: celebrate
 the start, say Murph is excited to work with them, name the exact next scheduled
 touchpoint and early review, and end with one broad invitation to use Murph for
-anything else health-related. For every eligible low-risk, non-sensitive launch
-on a route with `generate_song`, a privacy-safe short original song is mandatory
-in the same launch turn. Formal tone, low humor, or quiet reminder support
-changes the musical register, not whether the song is generated. Murph calls
-the tool after the plan and support writes succeed rather than merely offering
-a song or deferring it. An explicit no-music/no-audio preference, a
-safety/privacy exclusion, or time-sensitive help that must be delivered first
-makes the launch ineligible for music without announcing a song omission. For
-an otherwise-eligible launch, only an unavailable or failed tool/route,
-response-media conflict, or generation failure may omit the song, and Murph
-states a plain user-facing blocker without infrastructure details.
-Eligibility also requires an unused response-media slot, no time-sensitive help
-that must be delivered first, and a delivery path where generation failure
-cannot suppress the mandatory text close. Telegram is currently a route blocker
-because it generates music during final delivery before text; this exception
-ends when that path preserves the text close on generation failure. An
-explicitly requested conflicting media item is also a route blocker for that
-turn. The song never includes clinical or potentially embarrassing facts,
-promises results, delays needed help, or substitutes for the plan. This is
-reply-time delight, not a new onboarding automation.
+anything else health-related. The onboarding launch close is text-only:
+onboarding never automatically generates, offers, or mentions a song, and media
+is not a completion criterion. A song the member explicitly requests remains
+ordinary current-request media and does not become part of the onboarding
+contract.
 
 The launch-close turn is not a movement walkthrough. Unless the member
 explicitly asks to see or learn the session in that turn, do not attach
@@ -470,10 +455,7 @@ Use `user_answered` only when all of the following are true:
    not decision-changing, or handled in the parent before use. For an activated
    repeated behavior or experiment, the named support writes succeeded or an
    explicit opt-out or real blocker is recorded, and the mandatory text launch
-   close was delivered. For a first launch, the song was generated in that
-   turn; an explicit no-music/no-audio preference, safety/privacy exclusion, or
-   time-sensitive help made it ineligible; or an otherwise-eligible
-   tool/route/media/generation blocker was stated in plain user-facing language.
+   close was delivered.
 
 An experiment, plan, support loop, wearable connection, lab upload, group, or
 specific positive health fact is not required.
@@ -535,9 +517,8 @@ reflection-only scheduled message returns skip.
    early-review package without a plan dump.
 9. The first activated repeated plan ends with a mandatory privacy-safe text
    celebration that names the next scheduled touchpoint and invites one other
-   health request. Every eligible launch also generates a short original song;
-   formal tone changes its register rather than suppressing it. Delight never
-   substitutes for useful action or creates another onboarding automation.
+   health request. The close is text-only; onboarding does not automatically
+   generate, offer, or mention a song.
 10. Context continues compounding after onboarding without a second profile
    system, automation, or completion score.
 11. A dense foundation memo starts one child for each supplied independent

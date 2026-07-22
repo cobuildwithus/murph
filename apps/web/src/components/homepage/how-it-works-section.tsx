@@ -207,7 +207,7 @@ function RunCard() {
               Finnish Sauna Protocol
             </p>
             <p className="mt-0.5 text-[0.75rem] text-[#736a58]">
-              Recovery · 21 days · Day 8
+              Recovery · 28 days · Day 15
             </p>
           </div>
           <span className="shrink-0 rounded-full bg-[#5a6e32]/10 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#5a6e32]">
@@ -218,7 +218,7 @@ function RunCard() {
         <div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
             <span className="font-mono font-medium uppercase tracking-[0.1em] text-[#5a6e32]">
-              Baseline · 7d ✓
+              Baseline · 14d ✓
             </span>
             <span className="font-mono font-medium uppercase tracking-[0.1em] text-[#2d3436]">
               Active · Day 1 of 14
@@ -228,8 +228,8 @@ function RunCard() {
             </span>
           </div>
           <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-[#2d3436]/10">
-            <div className="w-[33%] rounded-full bg-[#5a6e32]" />
-            <div className="w-[5%] bg-[#5a6e32]/30" />
+            <div className="w-[50%] rounded-full bg-[#5a6e32]" />
+            <div className="w-[4%] bg-[#5a6e32]/30" />
           </div>
         </div>
 
@@ -284,7 +284,7 @@ function LearnCard() {
         <div className="rounded-xl border border-[#c4a882]/15 bg-[#f5f0e8]/60 px-4 py-3">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
-              HRV trend · 21d
+              HRV trend · 28d
             </span>
             <div className="flex items-center gap-3">
               <span className="flex items-center gap-1 text-[0.625rem] text-[#736a58]/60">
@@ -304,14 +304,14 @@ function LearnCard() {
             aria-hidden="true"
           >
             <path
-              d="M8 28 L30 26 L50 28 L70 25 L90 26"
+              d="M8 28 L35 26 L62 28 L90 25 L118 26 L145 25"
               stroke="#d4c4a8"
               strokeWidth="1.25"
               strokeDasharray="3 2"
               strokeLinecap="round"
             />
             <path
-              d="M95 26 L115 22 L140 19 L165 15 L190 16 L215 12 L240 11 L265 8 L290 5"
+              d="M145 25 L163 22 L181 19 L199 15 L217 16 L235 12 L253 11 L272 8 L290 5"
               stroke="#5a6e32"
               strokeWidth="1.75"
               strokeLinecap="round"

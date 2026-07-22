@@ -176,6 +176,7 @@ function createPrivateRun(): ExperimentRunProjection {
     status: "finished",
     statusLabel: "Completed",
     tags: [],
+    timingKnown: true,
     timeline: [],
     title: "Private run title",
     trends: [],

@@ -375,7 +375,7 @@ attribution:
   ownerType: murph
   note: Named for the Tabata 20/10 research lineage, but this page defines a Murph canonical self-experiment variant with conservative field-testing guardrails rather than an external branded workout.
 protocol:
-  doseSignature: 2x/week · 1 starter block/session · 8 x 20 sec work / 10 sec rest · 7-day baseline + 6-week intervention
+  doseSignature: 2x/week · 1 starter block/session · 8 x 20 sec work / 10 sec rest · 14-day baseline + 6-week intervention
   target: Vigorous but controlled only after a negative safety screen. Attempt up to 8 rounds; stopping early for symptoms, unsafe form, unsafe environment, or poor recovery is correct execution.
   frequency:
     sessionsPerWeek: 2
@@ -506,8 +506,8 @@ testPlans:
 
   -
     planId: wearable-cardio-fitness-and-recovery-49d
-    durationDays: 49
-    baselineDays: 7
+    durationDays: 56
+    baselineDays: 14
     interventionDays: 42
     primaryBiomarkerKey: biomarker:estimated-vo2max
     secondaryBiomarkerKeys:

@@ -54,7 +54,7 @@ lineage:
 attribution:
   ownerType: "murph"
 protocol:
-  doseSignature: "3x/week · first-session tolerance check 5–10 min, then 15–20 min only if well tolerated · traditional dry sauna preferably ~80–90 °C; 100 °C is a high-end ceiling, not a goal · 21-day stand-alone dry-sauna experiment"
+  doseSignature: "3x/week · first-session tolerance check 5–10 min, then 15–20 min only if well tolerated · traditional dry sauna preferably ~80–90 °C; 100 °C is a high-end ceiling, not a goal · 28-day stand-alone dry-sauna experiment"
   target: "traditional dry sauna, preferably around 80–90 °C; use lower heat when new and do not chase 100 °C"
   frequency:
     sessionsPerWeek: 3
@@ -168,8 +168,8 @@ testPlans:
 
   -
     planId: "rhr-21d"
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: "biomarker:morning-blood-pressure"
     secondaryBiomarkerKeys:
@@ -180,7 +180,7 @@ testPlans:
     minimumAdherenceSessions: 4
     targetAdherenceSessions: 6
     notes:
-      - "Compare intervention-window averages against the user’s own 7-day baseline instead of highlighting single-session spikes."
+      - "Compare intervention-window averages against the user’s own 14-day baseline instead of highlighting single-session spikes."
       - "Treat morning blood pressure as optional but valuable when a validated home cuff and consistent routine are available."
       - "Keep HRV and sleep-stage markers exploratory unless the personal signal is strong, repeated, and not obviously confounded."
       - "Keep stand-alone sauna and post-exercise sauna interpretations separate whenever workout context is materially different."
@@ -532,7 +532,7 @@ claims:
       - "source_artifact:pmid-34363927"
       - "source_artifact:pmid-38577299"
     caveats:
-      - "The exact Murph 3x/week, 21-day design is a practical protocol, not a named clinical trial."
+      - "The exact Murph 3x/week, 28-day design is a practical protocol, not a named clinical trial."
       - "Review-level evidence should not be converted into guaranteed personal outcomes."
   -
     claimId: "near-term-cardiovascular-proxies-are-practical-targets"

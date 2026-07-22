@@ -184,7 +184,7 @@ protocol:
   interventionSessionsTarget: 18
   steps:
     - "Screen first; do not start after trauma, locking, major swelling, unsafe weight bearing, fever, neurologic symptoms, bony pain, or unclear diagnosis."
-    - "Baseline 7 days: log lateral knee pain, walking/stair symptoms, running load, terrain, hills, shoes, and cross-training."
+    - "Baseline 14 days: log lateral knee pain, walking/stair symptoms, running load, terrain, hills, shoes, and cross-training."
     - "Reduce running until daily activity pain stays mild; use walking or low-irritation cross-training when running escalates pain."
     - "Complete 3 weekly strength/control sessions focused on hip abductors, glutes, external rotators, trunk, and single-leg control."
     - "Start run/walk only after walking, current rehab phase, and lateral-knee palpation are pain-free."
@@ -192,7 +192,7 @@ protocol:
     - "Stop if pain sharpens, rises above ceiling, changes gait, appears at rest, rebounds next day, or comes with red flags."
     - "Progress 1 variable at a time; keep strength work until easy running is consistently tolerated."
   tips:
-  - "Baseline 7 days: log pain location, onset minute, stairs, walking, route, hills, shoes, pace, and mileage."
+  - "Baseline 14 days: log pain location, onset minute, stairs, walking, route, hills, shoes, pace, and mileage."
   - "Set pain ceiling before running; sharp pain, limping, or next-morning rebound ends progression."
   - "Start on flat, predictable routes in stable shoes; avoid hills, camber, speedwork, and long strides."
   - "Do hip, glute, external-rotator, trunk, and single-leg control work before mileage jumps."
@@ -251,8 +251,8 @@ protocol:
   - Do not use NSAIDs, acetaminophen, corticosteroid injection, or other pain-relieving treatment to pass a run-readiness test.
 testPlans:
 - planId: symptom-guided-return-to-run-49d
-  durationDays: 49
-  baselineDays: 7
+  durationDays: 56
+  baselineDays: 14
   interventionDays: 42
   primaryBiomarkerKey: biomarker:lateral-knee-pain
   secondaryBiomarkerKeys:
@@ -261,7 +261,7 @@ testPlans:
   targetAdherenceSessions: 18
   notes:
   - Use manual symptom and function tracking as the primary readout; no extracted evidence supports a standalone wearable biomarker for ITBS recovery.
-  - Compare the 6-week intervention against the user’s own 7-day baseline and inspect trend stability, not a single run.
+  - Compare the 6-week intervention against the user’s own 14-day baseline and inspect trend stability, not a single run.
   - 'Running load is both the exposure and a confounder: keep route, hills, pace, shoes, and cross-training visible.'
   - Rehab completion and running exposure support interpretation; they are not outcome wins.
   - Treat the test as conservative self-management for appropriate users, not diagnostic triage or a cure claim.
@@ -879,7 +879,7 @@ Cycling ITBS, bike-fit adjustment, pregnancy/postpartum return-to-run, post-surg
 
 ## How to run the protocol
 
-Start with a 7-day baseline. Log lateral knee pain location, onset minute or mile, walking and stair symptoms, running exposure, weekly mileage, recent mileage jumps, terrain, hills, downhill, camber, shoes, cross-training, sleep/fatigue/illness, and any treatment changes. During the baseline, avoid runs that clearly flare symptoms.
+Start with a 14-day baseline. Log lateral knee pain location, onset minute or mile, walking and stair symptoms, running exposure, weekly mileage, recent mileage jumps, terrain, hills, downhill, camber, shoes, cross-training, sleep/fatigue/illness, and any treatment changes. During the baseline, avoid runs that clearly flare symptoms.
 
 For this 6-week Murph template, complete three weekly strength/control sessions. Keep the first sessions tolerable and boring: lateral-hip and glute work, trunk control, and single-leg control are reasonable targets to test, but the goal is repeatable loading rather than heroic soreness.
 
