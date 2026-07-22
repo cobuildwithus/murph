@@ -2089,6 +2089,15 @@ How old are you and what's your gender?
     expect(compact).not.toContain(
       'Do not spawn a child for this bounded persistence work.',
     )
+    expect(compact).toContain(
+      'When more than one onboarding progress trigger applies in the same turn, coalesce them.',
+    )
+    expect(compact).toContain(
+      'Accept any immediate child spawns, then send one combined update before slower preservation, extraction, or evidence reads.',
+    )
+    expect(compact).toContain(
+      'treat the later onboarding triggers as satisfied',
+    )
     expect(raw).toContain('https://my.functionhealth.com/documents')
     expect(compact).toContain(
       'download the Lab Results of Record PDFs, and send those files to Murph. Do not wait for them to ask how.',
@@ -2097,7 +2106,19 @@ How old are you and what's your gender?
       'Naming the provider without supplying results does not start a parse child; wait for an actual PDF, paste, or other durable evidence.',
     )
     expect(compact).toContain(
-      'the root must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
+      'immediately call `murph.send_progress_update` once, before slower import, inspection, or extraction work.',
+    )
+    expect(compact).toContain(
+      'This lab-receipt acknowledgement is an explicit skill exception to the global rule that optional background work alone does not need a progress update.',
+    )
+    expect(compact).toContain(
+      'acknowledge that the report arrived and name only work that is genuinely starting',
+    )
+    expect(compact).toContain(
+      'do not claim the report is already saved, parsed, analyzed, or added to the health record.',
+    )
+    expect(compact).toContain(
+      'The root must still verify that the raw source has a durable attachment, document, or import ref, or import it through an existing canonical surface before the substantive reply.',
     )
     expect(compact).toContain(
       'If the three memo children still occupy the session capacity, keep the durable source and leave optional extraction for a later need',
@@ -2284,6 +2305,15 @@ How old are you and what's your gender?
     }
     expect(compact).toContain(
       'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any confirmed enrichment that could materially change the choice.',
+    )
+    expect(compact).toContain(
+      'When that pass spans more than one source or owner, immediately call `murph.send_progress_update` once before the first read.',
+    )
+    expect(compact).toContain(
+      'name the few user-facing areas you are checking and why they matter to the chosen next step',
+    )
+    expect(compact).toContain(
+      'This update is required even when each individual read is routine, and it is not needed for one targeted read.',
     )
     expect(compact).toContain(
       'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',
