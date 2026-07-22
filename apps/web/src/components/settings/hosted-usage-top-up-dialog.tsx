@@ -117,7 +117,14 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     >
       {props.offers.length > 0 || purchaseTriggerLabel ? (
         <DialogTrigger
-          render={<Button type="button" size="xl" className="w-full" />}
+          render={
+            <Button
+              type="button"
+              size={props.scope === "group" ? "xl" : "lg"}
+              variant={props.scope === "group" ? "default" : "outline"}
+              className={props.scope === "group" ? "w-full" : undefined}
+            />
+          }
         >
           {purchaseTriggerLabel ?? (props.scope === "group" ? "Choose amount" : "Add usage")}
         </DialogTrigger>

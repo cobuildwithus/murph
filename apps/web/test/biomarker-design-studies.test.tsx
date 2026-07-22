@@ -97,6 +97,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
   expect(sectionsMarkup).toContain("Add usage to Sunday sleep crew");
   expect(sectionsMarkup).toContain("Choose amount");
+  expect(sectionsMarkup).toContain("personal-usage-credit-owner");
+  expect(sectionsMarkup).toContain("Pulse included AI usage");
+  expect(sectionsMarkup).toContain("Static owner-layout preview");
+  expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
   navigationMocks.tab = "components";

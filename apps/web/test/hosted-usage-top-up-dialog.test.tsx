@@ -44,8 +44,8 @@ vi.mock("@/src/components/ui/button", () => ({
     children,
     className,
     nativeButton: _nativeButton,
-    size: _size,
-    variant: _variant,
+    size,
+    variant,
     ...props
   }: ButtonHTMLAttributes<HTMLButtonElement> & {
     nativeButton?: boolean;
@@ -53,9 +53,11 @@ vi.mock("@/src/components/ui/button", () => ({
     variant?: string;
   }) => {
     void _nativeButton;
-    void _size;
-    void _variant;
-    return createElement("button", { ...props, className }, children);
+    return createElement(
+      "button",
+      { ...props, className, "data-size": size, "data-variant": variant },
+      children,
+    );
   },
   buttonVariants: () => "",
 }));
@@ -218,6 +220,10 @@ test("opens from the settings deep link without preselecting a top-up", async ()
 
   try {
     assert.match(rendered.container.textContent ?? "", /Add usage/);
+    const personalTrigger = buttonByText(rendered.container, "Add usage");
+    assert.equal(personalTrigger.dataset.size, "lg");
+    assert.equal(personalTrigger.dataset.variant, "outline");
+    assert.equal(personalTrigger.classList.contains("w-full"), false);
     const dialog = rendered.container.querySelector('[role="dialog"]');
     assert.ok(dialog);
     assert.equal(dialog.classList.contains("overflow-y-auto"), true);
@@ -309,6 +315,13 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
 
   try {
     assert.match(rendered.container.textContent ?? "", /Choose an amount/);
+    const groupTrigger = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.trim() === "Choose amount");
+    assert.ok(groupTrigger);
+    assert.equal(groupTrigger.dataset.size, "xl");
+    assert.equal(groupTrigger.dataset.variant, "default");
+    assert.equal(groupTrigger.classList.contains("w-full"), true);
     assert.match(
       rendered.container.textContent ?? "",
       /Stripe confirms the payment\./,

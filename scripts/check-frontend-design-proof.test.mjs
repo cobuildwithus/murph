@@ -87,6 +87,80 @@ test("does not count template comments as Design page route proof", () => {
   ]);
 });
 
+test("does not count screenshot lines hidden in HTML comments", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/app/settings/page.tsx",
+      "apps/web/app/design/components-content.tsx",
+    ],
+    prBody: `
+## Design proof
+
+- Design page: /design?tab=components#settings
+<!--
+- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)
+- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)
+-->
+`,
+  });
+
+  assert.deepEqual(result.errors, [
+    "The Design proof section must include a hosted desktop screenshot from the design page.",
+    "The Design proof section must include a hosted mobile screenshot from the design page.",
+  ]);
+});
+
+test("does not count a Design proof section hidden in an HTML comment", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/app/settings/page.tsx",
+      "apps/web/app/design/components-content.tsx",
+    ],
+    prBody: `
+## Summary
+
+Settings changed.
+
+<!--
+## Design proof
+
+- Design page: /design?tab=components#settings
+- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)
+- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)
+-->
+`,
+  });
+
+  assert.deepEqual(result.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+});
+
+test("treats an unclosed HTML comment as hidden through the end of the PR body", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/app/settings/page.tsx",
+      "apps/web/app/design/components-content.tsx",
+    ],
+    prBody: `
+## Summary
+
+Settings changed.
+
+<!--
+## Design proof
+
+- Design page: /design?tab=components#settings
+- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)
+- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)
+`,
+  });
+
+  assert.deepEqual(result.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+});
+
 test("reports every missing frontend design proof requirement", () => {
   const result = validateFrontendDesignProof({
     changedPaths: ["apps/web/app/settings/page.tsx"],

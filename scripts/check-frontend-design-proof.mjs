@@ -51,7 +51,8 @@ function validateFrontendDesignProof({ changedPaths, prBody }) {
     );
   }
 
-  const designProof = readMarkdownSection(prBody, "Design proof");
+  const visiblePrBody = prBody.replace(/<!--[\s\S]*?(?:-->|$)/gu, "");
+  const designProof = readMarkdownSection(visiblePrBody, "Design proof");
   if (!designProof) {
     errors.push("Add a `## Design proof` section to the pull request body.");
   } else {
@@ -96,9 +97,8 @@ function readMarkdownSection(markdown, heading) {
 }
 
 function hasDesignPageLine(section) {
-  const visibleSection = section.replace(/<!--[\s\S]*?-->/gu, "");
   return /^[ \t]*(?:[-*][ \t]+)?Design page[ \t]*:[ \t]*[^\n]*\/design\?tab=(?:components|sections)(?:[#&\s)`]|$)[^\n]*$/imu.test(
-    visibleSection,
+    section,
   );
 }
 
