@@ -2826,6 +2826,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       now: new Date("2026-04-27T00:00:00.000Z"),
+      onDiagnosticStage: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-hosted-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},
@@ -3033,8 +3034,21 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("does not schedule a retry loop for an unclassified managed setup failure", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
-    const setupFailure = new Error("invalid managed automation outcome");
-    mocks.applyMurphManagedAutomations.mockRejectedValueOnce(setupFailure);
+    const setupFailure = Object.assign(
+      new TypeError("private managed automation failure detail"),
+      {
+        code: "MANAGED_SEED_SCHEMA_INVALID",
+        statusCode: 409,
+      },
+    );
+    mocks.applyMurphManagedAutomations.mockImplementationOnce(async (input) => {
+      input.onDiagnosticStage?.({
+        seedCount: 7,
+        seedPosition: 3,
+        stage: "managed_seed",
+      });
+      throw setupFailure;
+    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       logRequests,
@@ -3058,9 +3072,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         level: "warn",
         phase: "error",
         redactedJson: expect.objectContaining({
+          errorCodeDetail: "MANAGED_SEED_SCHEMA_INVALID",
+          errorDetailPresent: true,
+          errorName: "TypeError",
+          errorStatus: 409,
           murphManagedAutomationFailed: true,
+          murphManagedAutomationSeedCount: 7,
+          murphManagedAutomationSeedPosition: 3,
+          murphManagedAutomationStage: "managed_seed",
+          safeErrorMessage: "Hosted execution runtime failed.",
         }),
       }),
+    );
+    expect(JSON.stringify(logRequests)).not.toContain(
+      "private managed automation failure detail",
     );
   });
 
@@ -3294,6 +3319,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.applyMurphManagedAutomations).toHaveBeenCalledWith({
       defaultRoute,
       now: new Date("2026-04-27T00:00:00.000Z"),
+      onDiagnosticStage: expect.any(Function),
       operatorHomeRoot: "/tmp/murph-operator-home",
       routeValidationProfile: "hosted",
       runtimeEnv: {},

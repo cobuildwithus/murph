@@ -22,6 +22,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  type MurphManagedAutomationDiagnosticStage,
 } from '../src/assistant/managed-automations.ts'
 import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -78,18 +79,51 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
-  it('creates managed health automations through the canonical automation registry', async () => {
+  it('keeps diagnostic stage reporting best-effort', async () => {
     const vaultRoot = await createVaultRoot()
 
     await expect(applyMurphManagedAutomations({
       defaultRoute,
-      now: new Date('2026-06-09T12:00:00.000Z'),
+      onDiagnosticStage() {
+        throw new Error('diagnostic sink unavailable')
+      },
+      seeds: [],
       vaultRoot,
     })).resolves.toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 0,
+    })
+  })
+
+  it('creates managed health automations through the canonical automation registry', async () => {
+    const vaultRoot = await createVaultRoot()
+    const diagnosticStages: MurphManagedAutomationDiagnosticStage[] = []
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      onDiagnosticStage(diagnostic) {
+        diagnosticStages.push(diagnostic)
+      },
+      vaultRoot,
+    })
+    expect(result).toEqual({
       created: 5,
       skipped: 0,
       updated: 0,
     })
+    expect(diagnosticStages).toEqual([
+      { stage: 'experiment_lifecycle' },
+      { stage: 'seed_composition' },
+      ...Array.from({ length: 5 }, (_value, seedIndex) => ({
+        seedCount: 5,
+        seedPosition: seedIndex + 1,
+        stage: 'managed_seed' as const,
+      })),
+      { stage: 'onboarding_followup' },
+      { stage: 'experiment_support_series' },
+    ])
 
     const record = await showAutomation({
       automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
