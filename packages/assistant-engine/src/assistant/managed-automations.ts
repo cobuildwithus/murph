@@ -893,22 +893,24 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
-  if (input.shouldYield?.() === true) {
-    return { ...result, yielded: true }
-  }
-  reportMurphManagedAutomationDiagnosticStage(input, {
-    stage: 'onboarding_followup',
-  })
-  const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
-    now,
-    shouldYield: input.shouldYield ?? null,
-    vaultRoot: input.vaultRoot,
-  })
-  if (onboardingReconciliation.yielded) {
-    return { ...result, yielded: true }
-  }
-  if (onboardingReconciliation.updated) {
-    result.updated += 1
+  if (input.seeds === undefined) {
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      stage: 'onboarding_followup',
+    })
+    const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
+      now,
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    })
+    if (onboardingReconciliation.yielded) {
+      return { ...result, yielded: true }
+    }
+    if (onboardingReconciliation.updated) {
+      result.updated += 1
+    }
   }
 
   if (desiredExperimentSupportSeries !== null) {

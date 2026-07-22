@@ -754,7 +754,7 @@ export function buildHostedExecutionDeviceSyncWake(input: {
 }
 
 export function buildHostedExecutionGroupNewsletterEmailNeededWake(input: {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
+  directRoute?: HostedExecutionMealPhotoCapturedWake["directRoute"];
   eventId: string;
   groupDisplayName: string | null;
   groupId: string;
@@ -778,6 +778,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
   byteLength: number;
   captureId: string;
   capturedAt: string;
+  directRoute?: HostedExecutionGroupNewsletterEmailNeededWake["directRoute"];
   eventId: string;
   mealPhotoKey: string;
   memberId: string;
@@ -791,6 +792,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
   }
 
   return {
+    ...(input.directRoute === undefined ? {} : { directRoute: input.directRoute }),
     eventId: input.eventId,
     kind: "meal-photo.captured",
     mealPhoto: {

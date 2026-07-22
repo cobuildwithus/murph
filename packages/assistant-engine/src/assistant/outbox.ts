@@ -2275,6 +2275,7 @@ function maybeUpgradeAssistantOutboxIntentExternalThreadRouteAuthority(input: {
       existing.accountLookupKey === requested.accountLookupKey
       && existing.channel === requested.channel
       && existing.containerMemberId === requested.containerMemberId
+      && existing.threadIsDirect === requested.threadIsDirect
       && existing.threadId === requested.threadId
     ) {
       return input.intent

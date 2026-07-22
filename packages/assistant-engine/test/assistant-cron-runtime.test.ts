@@ -195,6 +195,7 @@ import {
 import type { AssistantExecutionContext } from '../src/assistant/execution-context.ts'
 import type { AssistantNotificationInput } from '../src/assistant/notification-turn.ts'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
 } from '../src/assistant/managed-automations.ts'
@@ -6798,6 +6799,216 @@ describe('assistant cron runtime orchestration', () => {
         }),
       }),
     ])
+  })
+
+  it('fails automatic meal closeout before provider work when its saved route is not direct', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-meal-closeout-group-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-22T20:00:00.000Z',
+      instructions: 'Summarize today\'s imported meals.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'linq_group_thread',
+        threadIsDirect: false,
+      },
+      schedule: {
+        at: '2026-07-22T21:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed:automatic-meal-daily-closeout'],
+      title: 'Automatic meal daily closeout',
+      updatedAt: '2026-07-22T20:00:00.000Z',
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+    const resolveScheduledLinqRoute = vi.fn()
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-meal-closeout-group-route',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_PRIVATE_ROUTE_REQUIRED')
+    expect(resolveScheduledLinqRoute).not.toHaveBeenCalled()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
+  it('revalidates automatic meal closeout Telegram direct authority before provider work', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-meal-closeout-direct-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-22T20:00:00.000Z',
+      instructions: 'Summarize today\'s imported meals.',
+      route: {
+        channel: 'telegram',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'telegram_direct_123',
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-07-22T21:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed:automatic-meal-daily-closeout'],
+      title: 'Automatic meal daily closeout',
+      updatedAt: '2026-07-22T20:00:00.000Z',
+    })
+    const routeAuthority = {
+      channel: 'telegram' as const,
+      containerMemberId: 'member-meal-closeout-direct-route',
+      threadId: 'telegram_direct_123',
+      threadIsDirect: true,
+    }
+    const resolveScheduledExternalThreadRoute = vi.fn(async () => routeAuthority)
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input) => {
+      await input.beforeToolExecution?.()
+      return {
+        response: 'Completed scheduled check-in.',
+        session: { sessionId: 'session-default' },
+      }
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-meal-closeout-direct-route',
+          resolveScheduledExternalThreadRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.run.status).toBe('succeeded')
+    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledWith({
+      channel: 'telegram',
+      signal: expect.any(AbortSignal),
+      target: 'telegram_direct_123',
+      threadIsDirect: true,
+    })
+    expect(resolveScheduledExternalThreadRoute).toHaveBeenCalledTimes(2)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outboxExternalThreadRouteAuthority: routeAuthority,
+        threadIsDirect: true,
+      }),
+    )
+  })
+
+  it('fails automatic meal closeout when its Linq direct route changes before a tool effect', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-22T21:20:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-meal-closeout-stale-direct-route-',
+    )
+    getVaultAutomationStore(vaultRoot).push({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      continuityPolicy: 'fresh',
+      createdAt: '2026-07-22T20:00:00.000Z',
+      instructions: 'Summarize today\'s imported meals.',
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: 'linq_direct_123',
+        threadIsDirect: true,
+      },
+      schedule: {
+        at: '2026-07-22T21:00:00.000Z',
+        kind: 'at',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+      summary: null,
+      tags: ['assistant', 'scheduled', 'murph-managed:automatic-meal-daily-closeout'],
+      title: 'Automatic meal daily closeout',
+      updatedAt: '2026-07-22T20:00:00.000Z',
+    })
+    const sequence: string[] = []
+    const resolveScheduledLinqRoute = vi.fn()
+      .mockImplementationOnce(async () => {
+        sequence.push('initial_authority')
+        return {
+          target: 'linq_direct_123',
+          threadIsDirect: true,
+        }
+      })
+      .mockImplementationOnce(async () => {
+        sequence.push('effect_authority')
+        return {
+          target: 'linq_direct_replacement',
+          threadIsDirect: true,
+        }
+      })
+    cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (input) => {
+      sequence.push('provider_turn')
+      await input.beforeToolExecution?.()
+      return {
+        response: 'This response must remain unreachable.',
+        session: { sessionId: 'session-default' },
+      }
+    })
+    const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
+
+    const result = await executeClaimedAssistantCronJob({
+      executionContext: {
+        hosted: {
+          memberId: 'member-meal-closeout-stale-direct-route',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: claimed,
+      paths,
+      trigger: 'scheduled',
+      vault: vaultRoot,
+    })
+
+    expect(result.runErrorCode).toBe('ASSISTANT_CRON_PRIVATE_ROUTE_STALE')
+    expect(sequence).toEqual([
+      'initial_authority',
+      'provider_turn',
+      'effect_authority',
+    ])
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledTimes(2)
   })
 
   it('executes canonical Telegram cron jobs with a thread-only route', async () => {

@@ -1157,7 +1157,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }, { signal });
   });
 
-  it("resolves scheduled Telegram group authority through the live Web route owner", async () => {
+  it("resolves scheduled Telegram audience authority through the live Web route owner", async () => {
     const signal = new AbortController().signal;
     const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
     const phaseInput = createPhaseInput({});
@@ -1180,6 +1180,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           containerMemberId: "member_synthetic_phase",
           threadId: "telegram_group_123",
         });
+        await expect(resolveScheduledExternalThreadRoute({
+          channel: "telegram",
+          target: "telegram_direct_123",
+          threadIsDirect: true,
+        })).resolves.toEqual({
+          channel: "telegram",
+          containerMemberId: "member_synthetic_phase",
+          threadId: "telegram_direct_123",
+          threadIsDirect: true,
+        });
 
         return {
           assistantAutomationCurrentTurnDeliveryIntentIds: [],
@@ -1197,6 +1207,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       containerMemberId: "member_synthetic_phase",
       threadId: "telegram_group_123",
     }, { signal });
+    expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith({
+      channel: "telegram",
+      containerMemberId: "member_synthetic_phase",
+      threadId: "telegram_direct_123",
+      threadIsDirect: true,
+    }, { signal: undefined });
   });
 
   it("passes the hosted assistant configuration port into assistant execution", async () => {

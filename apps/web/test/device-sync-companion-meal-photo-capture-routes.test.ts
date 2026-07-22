@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   parseMealPhotoCaptureRevocationRequest: vi.fn(),
   readAndValidateMealPhotoUpload: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
+  readHostedMemberRoutingState: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
   requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
@@ -76,6 +77,10 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -151,6 +156,10 @@ describe("meal photo companion routes", () => {
       sha256: "b".repeat(64),
       width: 3,
     });
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      linqChatId: "linq-home-thread",
+      telegramThreadId: null,
+    });
     mocks.stageMealPhoto.mockResolvedValue({
       byteLength: JPEG.byteLength,
       mealPhotoKey: "meal-photo-key",
@@ -174,6 +183,10 @@ describe("meal photo companion routes", () => {
 
   function buildMealPhotoWake(mealPhotoKey = "meal-photo-key") {
     return {
+      directRoute: {
+        channel: "linq",
+        threadId: "linq-home-thread",
+      },
       eventId: EVENT_ID,
       kind: "meal-photo.captured",
       mealPhoto: {
@@ -274,6 +287,10 @@ describe("meal photo companion routes", () => {
       byteLength: JPEG.byteLength,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
+      directRoute: {
+        channel: "linq",
+        threadId: "linq-home-thread",
+      },
       eventId: EVENT_ID,
       mealPhotoKey: "meal-photo-key",
       memberId: MEMBER_ID,
@@ -302,6 +319,44 @@ describe("meal photo companion routes", () => {
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_1",
+    });
+  });
+
+  it("fails before staging when no established private route exists", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValueOnce(null);
+
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(mocks.stageMealPhoto).not.toHaveBeenCalled();
+    expect(mocks.buildHostedExecutionMealPhotoCapturedWake).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("deletes staging when the private route changes before append", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce({
+        linqChatId: "linq-home-thread",
+        telegramThreadId: null,
+      })
+      .mockResolvedValueOnce({
+        linqChatId: null,
+        telegramThreadId: "telegram-home-thread",
+      });
+
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(503);
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
     });
   });
 

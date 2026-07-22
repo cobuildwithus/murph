@@ -406,6 +406,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     case "meal-photo.captured": {
+      assertExactHostedExecutionKeys(record, [
+        "directRoute",
+        "eventId",
+        "kind",
+        "mealPhoto",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution meal-photo.captured wake");
       const mealPhoto = parseHostedExecutionMealPhotoCapturedPayload(record.mealPhoto);
       if (mealPhoto.capturedAt !== occurredAt) {
         throw new TypeError(
@@ -416,6 +424,16 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         byteLength: mealPhoto.byteLength,
         captureId: mealPhoto.captureId,
         capturedAt: mealPhoto.capturedAt,
+        ...(record.directRoute === undefined
+          ? {}
+          : {
+              directRoute: record.directRoute === null
+                ? null
+                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                    record.directRoute,
+                    "Hosted execution wake meal-photo.captured directRoute",
+                  ),
+            }),
         eventId,
         mealPhotoKey: mealPhoto.mealPhotoKey,
         memberId: wireUserId,
@@ -828,6 +846,14 @@ export function parseHostedExecutionExternalThreadRouteAuthority(
         }),
     channel: parseHostedExecutionExternalThreadRouteChannel(record.channel, `${label} channel`),
     containerMemberId: requireString(record.containerMemberId, `${label} containerMemberId`),
+    ...(record.threadIsDirect === undefined
+      ? {}
+      : {
+          threadIsDirect: requireBoolean(
+            record.threadIsDirect,
+            `${label} threadIsDirect`,
+          ),
+        }),
     threadId: requireString(record.threadId, `${label} threadId`),
   };
 }

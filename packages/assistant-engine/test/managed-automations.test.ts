@@ -1034,6 +1034,26 @@ describe('applyMurphManagedAutomations', () => {
   })
 
   it('keeps the automatic meal closeout opt-in and installs it idempotently at 9pm local time', async () => {
+    const onDiagnosticStage = vi.fn()
+    const onboardingFollowup: StoredAutomationRecord = {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'Existing onboarding follow-up instructions.',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Existing onboarding follow-up summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Existing onboarding follow-up',
+    }
+    managedAutomationMocks.records.set(
+      onboardingFollowup.automationId,
+      onboardingFollowup,
+    )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION).toMatchObject({
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
       createWhenMissing: false,
@@ -1066,6 +1086,7 @@ describe('applyMurphManagedAutomations', () => {
     await expect(ensureAutomaticMealCloseoutAutomation({
       defaultRoute,
       now: new Date('2026-07-22T15:00:00.000Z'),
+      onDiagnosticStage,
       vaultRoot,
     })).resolves.toMatchObject({
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
@@ -1085,6 +1106,13 @@ describe('applyMurphManagedAutomations', () => {
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
     })
     expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(onDiagnosticStage).not.toHaveBeenCalledWith({
+      stage: 'onboarding_followup',
+    })
+    expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
+    expect(
+      managedAutomationMocks.records.get(onboardingFollowup.automationId),
+    ).toEqual(onboardingFollowup)
 
     const stored = managedAutomationMocks.records.get(
       MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
