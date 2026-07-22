@@ -2780,7 +2780,6 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolReplyTargetPatch
   }> = []
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
-  const vaultFileResponseMediaOwnerDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   const subagentTokenUsageByThread =
@@ -3495,19 +3494,40 @@ async function runCodexAppServerTurnOnProcess(
     patch: MurphDynamicToolFinalActionPatch,
     deliveryContextOrdinal: number,
   ): Promise<boolean> => {
+    const existingPatch = resolveFinalActionPatch(deliveryContextOrdinal)
+    if (patch.kind === 'reply-required') {
+      finalActionPatches = [
+        ...finalActionPatches.filter(
+          (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+        ),
+        { deliveryContextOrdinal, patch },
+      ]
+      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      return true
+    }
+    if (patch.owner !== 'vault-file' && existingPatch?.kind === 'reply-required') {
+      return false
+    }
     if (
-      patch.kind === 'none' &&
       (computerToolsLockedAfterUserPause ||
         !canApplyNoReplyPatch(deliveryContextOrdinal))
     ) {
       return false
     }
 
-    if (
-      finalActionPatches.some(
-        (action) => action.deliveryContextOrdinal === deliveryContextOrdinal,
-      )
-    ) {
+    if (existingPatch) {
+      if (patch.owner === 'vault-file') {
+        finalActionPatches = [
+          ...finalActionPatches.filter(
+            (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+          ),
+          { deliveryContextOrdinal, patch },
+        ]
+        replyTargetPatches = replyTargetPatches.filter(
+          (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+        )
+        reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+      }
       return true
     }
 
@@ -3518,12 +3538,10 @@ async function runCodexAppServerTurnOnProcess(
         patch,
       },
     ]
-    if (patch.kind === 'none') {
-      replyTargetPatches = replyTargetPatches.filter(
-        (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
-      )
-      reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
-    }
+    replyTargetPatches = replyTargetPatches.filter(
+      (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+    )
+    reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
     return true
   }
 
@@ -3813,10 +3831,20 @@ async function runCodexAppServerTurnOnProcess(
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
+        const existingFinalAction = resolveFinalActionPatch(
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
+        const vaultFileOwnsFinalAction =
+          existingFinalAction?.kind === 'none' &&
+          existingFinalAction.owner === 'vault-file'
+        const vaultFileMayClassifyAfterGenericNoReply =
+          dynamicToolRequest.kind === 'send-vault-file' &&
+          !vaultFileOwnsFinalAction
         if (
-          vaultFileResponseMediaOwnerDeliveryContextOrdinals.has(
+          shouldSuppressDeliveryContext(
             dynamicToolRequestDeliveryContextOrdinal,
           ) &&
+          !vaultFileMayClassifyAfterGenericNoReply &&
           isResponseMediaDynamicToolRequest(dynamicToolRequest)
         ) {
           return {
@@ -3824,7 +3852,9 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [{
                 text: dynamicToolRequest.kind === 'send-vault-file'
                   ? 'vault-file sending cannot be combined with other response media'
-                  : 'response media cannot be changed after a vault-file send',
+                  : vaultFileOwnsFinalAction
+                    ? 'response media cannot be changed after a vault-file send'
+                    : 'response media unavailable after finish_without_reply',
                 type: 'inputText' as const,
               }],
               success: false,
@@ -3884,14 +3914,6 @@ async function runCodexAppServerTurnOnProcess(
         !requiredVaultFileApprovalUrls.includes(result.requiredVaultFileApprovalUrl)
       ) {
         requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
-      }
-      if (
-        dynamicToolRequest.kind === 'send-vault-file' &&
-        result.vaultFileSendOwnsResponseMedia === true
-      ) {
-        vaultFileResponseMediaOwnerDeliveryContextOrdinals.add(
-          dynamicToolRequestDeliveryContextOrdinal,
-        )
       }
       if (result.responseMediaPatch) {
         try {
@@ -4827,7 +4849,7 @@ async function runCodexAppServerTurnOnProcess(
       acceptedNoReplyDeliveryContextOrdinals,
     finalAction,
     finalActionExplicit:
-      finalActionPatch !== null && !requiredUserVisibleOutput,
+      finalActionPatch?.kind === 'none' && !requiredUserVisibleOutput,
     finalMessage,
     transcriptMessage:
       normalizeNullableString(modelFinalMessage) ??

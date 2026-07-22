@@ -175,12 +175,16 @@ function createProgressDeliveryMock(
 }
 
 function createHostedToolContext(input: {
+  beforeToolExecution?: AssistantHostedToolContext['beforeToolExecution']
   computerToolsAvailable?: boolean
   groupTool?: AssistantHostedToolContext['groupTool']
   sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
   vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
   return {
+    ...(input.beforeToolExecution
+      ? { beforeToolExecution: input.beforeToolExecution }
+      : {}),
     computerToolsAvailable: input.computerToolsAvailable ?? true,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
@@ -189,6 +193,157 @@ function createHostedToolContext(input: {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: input.vaultFileSendAvailable ?? false,
+  }
+}
+
+async function runToolAfterNoReply(input: {
+  arguments: Record<string, unknown>
+  executeTurn(context: {
+    beforeToolExecution: () => Promise<void>
+    onFinishWithoutReplyAccepted: NonNullable<
+      CodexAppServerTurnInput['onFinishWithoutReplyAccepted']
+    >
+    onFinishWithoutReplyRecorded: NonNullable<
+      CodexAppServerTurnInput['onFinishWithoutReplyRecorded']
+    >
+    workingDirectory: string
+  }): ReturnType<typeof executeCodexAppServerTurn>
+  expectedSuccess: boolean
+  expectedText: string
+  finalText: string
+  followupNoReplyExpectedText?: string
+  ordering: 'applied' | 'reserved'
+  tool: string
+}) {
+  const workingDirectory = await createTempDir(
+    'assistant-codex-tool-after-no-reply-work-',
+  )
+  const firstToolExecutionStarted = createDeferred<void>()
+  const releaseFirstToolExecution = createDeferred<void>()
+  const onFinishWithoutReplyAccepted = vi.fn<NonNullable<
+    CodexAppServerTurnInput['onFinishWithoutReplyAccepted']
+  >>()
+  const onFinishWithoutReplyRecorded = vi.fn<NonNullable<
+    CodexAppServerTurnInput['onFinishWithoutReplyRecorded']
+  >>()
+  let toolExecutionCount = 0
+  const beforeToolExecution = async (): Promise<void> => {
+    toolExecutionCount += 1
+    if (input.ordering === 'reserved' && toolExecutionCount === 1) {
+      firstToolExecutionStarted.resolve(undefined)
+      await releaseFirstToolExecution.promise
+    }
+  }
+
+  codexMocks.spawn.mockImplementation(() => {
+    const child = new MockChildProcess()
+
+    queueMicrotask(() => {
+      void (async () => {
+        const initialize = await waitForRpcMethod(child, 'initialize')
+        child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+        await writeWarmTurnStarted({
+          child,
+          requestCount: 1,
+          threadId: 'thread-tool-after-no-reply',
+          turnId: 'turn-tool-after-no-reply',
+        })
+
+        child.stdout.write(jsonLine({
+          id: 70,
+          method: 'item/tool/call',
+          params: {
+            arguments: {},
+            namespace: 'murph',
+            tool: 'finish_without_reply',
+            turnId: 'turn-tool-after-no-reply',
+          },
+        }))
+        const noReplyResponse = waitForRpcResponse(child, 70)
+        if (input.ordering === 'applied') {
+          await expect(noReplyResponse).resolves.toMatchObject({
+            id: 70,
+            result: { success: true },
+          })
+        } else {
+          await firstToolExecutionStarted.promise
+        }
+
+        child.stdout.write(jsonLine({
+          id: 71,
+          method: 'item/tool/call',
+          params: {
+            arguments: input.arguments,
+            callId: 'call-tool-after-no-reply',
+            namespace: 'murph',
+            tool: input.tool,
+            turnId: 'turn-tool-after-no-reply',
+          },
+        }))
+        const toolResponse = waitForRpcResponse(child, 71)
+        if (input.ordering === 'reserved') {
+          releaseFirstToolExecution.resolve(undefined)
+          await expect(noReplyResponse).resolves.toMatchObject({
+            id: 70,
+            result: { success: true },
+          })
+        }
+        await expect(toolResponse).resolves.toEqual({
+          id: 71,
+          result: {
+            contentItems: [{
+              text: input.expectedText,
+              type: 'inputText',
+            }],
+            success: input.expectedSuccess,
+          },
+        })
+
+        if (input.followupNoReplyExpectedText) {
+          child.stdout.write(jsonLine({
+            id: 72,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+              turnId: 'turn-tool-after-no-reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 72)).resolves.toEqual({
+            id: 72,
+            result: {
+              contentItems: [{
+                text: input.followupNoReplyExpectedText,
+                type: 'inputText',
+              }],
+              success: false,
+            },
+          })
+        }
+
+        writeCodexV2AssistantEventTurn({
+          child,
+          finalMessage: input.finalText,
+          threadId: 'thread-tool-after-no-reply',
+          turnId: 'turn-tool-after-no-reply',
+        })
+      })()
+    })
+
+    return child
+  })
+
+  const result = await input.executeTurn({
+    beforeToolExecution,
+    onFinishWithoutReplyAccepted,
+    onFinishWithoutReplyRecorded,
+    workingDirectory,
+  })
+  return {
+    onFinishWithoutReplyAccepted,
+    onFinishWithoutReplyRecorded,
+    result,
   }
 }
 
@@ -2871,6 +3026,224 @@ describe('assistant codex runtime', () => {
   it.each(vaultApprovalUrlScenarios)(
     '$name for a pending vault approval',
     runVaultApprovalUrlScenario,
+  )
+
+  const nonOwningVaultSendScenarios = [
+    {
+      expectedSuccess: true,
+      expectedText: JSON.stringify({
+        note:
+          'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
+        status: 'already_in_progress',
+      }),
+      name: 'a different active file',
+      run: async () => {
+        throw new VaultCliError(
+          'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE',
+          'A prior generated file remains active.',
+        )
+      },
+    },
+    {
+      expectedSuccess: false,
+      expectedText: 'vault-file delivery was denied',
+      name: 'a denied approval',
+      run: async () => ({
+        filename: 'report.pdf',
+        status: 'denied' as const,
+      }),
+    },
+    {
+      expectedSuccess: false,
+      expectedText: 'vault-file delivery approval expired',
+      name: 'an expired approval',
+      run: async () => ({
+        filename: 'report.pdf',
+        status: 'expired' as const,
+      }),
+    },
+    {
+      expectedSuccess: false,
+      expectedText: 'secure vault-file approval could not be prepared',
+      name: 'a preparation failure',
+      run: async () => {
+        throw new Error('approval service unavailable')
+      },
+    },
+  ] as const
+
+  it.each(
+    nonOwningVaultSendScenarios.flatMap((scenario) =>
+      (['applied', 'reserved'] as const).map((ordering) => ({
+        ...scenario,
+        ordering,
+      }))
+    ),
+  )(
+    'keeps $name replyable after an $ordering no-reply request',
+    async (scenario) => {
+      const sendVaultFile = vi.fn(scenario.run)
+      const visibleExplanation =
+        'The file was not sent, so I need to explain what happened.'
+      const {
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        result,
+      } = await runToolAfterNoReply({
+        arguments: {
+          ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/report.pdf`,
+        },
+        executeTurn: ({
+          beforeToolExecution,
+          onFinishWithoutReplyAccepted,
+          onFinishWithoutReplyRecorded,
+          workingDirectory,
+        }) => executeCodexAppServerTurn({
+          allowFinishWithoutReply: true,
+          hostedToolContext: createHostedToolContext({
+            beforeToolExecution,
+            computerToolsAvailable: false,
+            sendVaultFile,
+            vaultFileSendAvailable: true,
+          }),
+          onFinishWithoutReplyAccepted,
+          onFinishWithoutReplyRecorded,
+          prompt: 'send the report',
+          workingDirectory,
+        }),
+        expectedSuccess: scenario.expectedSuccess,
+        expectedText: scenario.expectedText,
+        finalText: visibleExplanation,
+        followupNoReplyExpectedText:
+          'finish_without_reply unavailable after assistant output',
+        ordering: scenario.ordering,
+        tool: 'send_vault_file',
+      })
+
+      expect(sendVaultFile).toHaveBeenCalledOnce()
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([])
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toBe(visibleExplanation)
+      expect(result.responseMedia).toEqual([])
+      expect(onFinishWithoutReplyAccepted).not.toHaveBeenCalled()
+      expect(onFinishWithoutReplyRecorded).not.toHaveBeenCalled()
+    },
+  )
+
+  const noReplyMediaEffectScenarios = [
+    {
+      arguments: { prompt: 'Render a private report cover.' },
+      name: 'image generation',
+      tool: 'generate_image',
+    },
+    {
+      arguments: { text: 'Read the private report summary.' },
+      name: 'voice-memo generation and upload',
+      tool: 'generate_voice_memo',
+    },
+    {
+      arguments: {
+        durationSeconds: 10,
+        instrumental: false,
+        prompt: 'Sing the private report summary.',
+      },
+      name: 'song generation and upload',
+      tool: 'generate_song',
+    },
+  ] as const
+
+  it.each(
+    noReplyMediaEffectScenarios.flatMap((scenario) =>
+      (['applied', 'reserved'] as const).map((ordering) => ({
+        ...scenario,
+        ordering,
+      }))
+    ),
+  )(
+    'blocks $name before effects after an $ordering no-reply request',
+    async (scenario) => {
+      const vaultRoot = await createTempDir(
+        'assistant-codex-no-reply-media-vault-',
+      )
+      await initializeVault({ vaultRoot })
+      const providerFetch = vi.fn(async () => new Response('{}'))
+      const uploadGeneratedImage = vi.fn(async () => ({
+        alt: 'Generated image',
+        kind: 'image' as const,
+        source: 'gpt-image-2',
+        url: 'https://imagedelivery.net/account/generated/public',
+      }))
+      const generateAndUpload = vi.fn(async () => ({
+        attachmentId: 'attachment_should_not_exist',
+        filename: 'media-should-not-exist.mp3',
+      }))
+      const persistCanonicalWrite = vi.fn(async () => undefined)
+      const voiceMemoRuntime = scenario.tool === 'generate_image'
+        ? null
+        : {
+            elevenLabs: {
+              apiKeyAvailable: true,
+              modelId: 'eleven_multilingual_v2',
+              voiceId: 'voice_murph',
+            },
+            generateAndUpload,
+            kind: 'linq' as const,
+          }
+      const {
+        onFinishWithoutReplyAccepted,
+        onFinishWithoutReplyRecorded,
+        result,
+      } = await runToolAfterNoReply({
+        arguments: scenario.arguments,
+        executeTurn: ({
+          beforeToolExecution,
+          onFinishWithoutReplyAccepted,
+          onFinishWithoutReplyRecorded,
+          workingDirectory,
+        }) => withHostedCanonicalWritePort(
+          { persistCanonicalWrite },
+          async () => await executeCodexAppServerTurn({
+            allowFinishWithoutReply: true,
+            env: {
+              ELEVENLABS_API_KEY: 'elevenlabs-test-key',
+              LINQ_API_TOKEN: 'linq-test-token',
+              OPENAI_API_KEY: 'openai-test-key',
+            },
+            fetchImpl: providerFetch,
+            hostedGeneratedImageUploader: { uploadGeneratedImage },
+            hostedToolContext: createHostedToolContext({
+              beforeToolExecution,
+              computerToolsAvailable: false,
+            }),
+            onFinishWithoutReplyAccepted,
+            onFinishWithoutReplyRecorded,
+            prompt: 'finish without replying, then generate media',
+            requireHostedGeneratedImageUploader: true,
+            vaultRoot,
+            voiceMemoRuntime,
+            workingDirectory,
+          }),
+        ),
+        expectedSuccess: false,
+        expectedText: 'response media unavailable after finish_without_reply',
+        finalText: 'This media response must stay suppressed.',
+        ordering: scenario.ordering,
+        tool: scenario.tool,
+      })
+
+      expect(providerFetch).not.toHaveBeenCalled()
+      expect(uploadGeneratedImage).not.toHaveBeenCalled()
+      expect(generateAndUpload).not.toHaveBeenCalled()
+      expect(persistCanonicalWrite).not.toHaveBeenCalled()
+      expect(result.acceptedNoReplyDeliveryContextOrdinals).toEqual([0])
+      expect(result.finalAction).toEqual({ kind: 'none' })
+      expect(result.finalActionExplicit).toBe(true)
+      expect(result.finalMessage).toBe('')
+      expect(result.responseMedia).toEqual([])
+      expect(onFinishWithoutReplyAccepted).toHaveBeenCalledOnce()
+      expect(onFinishWithoutReplyRecorded).toHaveBeenCalledOnce()
+    },
   )
 
   it('serializes overlapping vault-file sends before a second approval can start', async () => {

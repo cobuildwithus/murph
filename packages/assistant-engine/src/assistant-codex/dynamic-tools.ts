@@ -1763,9 +1763,14 @@ export type MurphDynamicToolResponseMediaPatch = {
   op: 'append' | 'replace'
 }
 
-export type MurphDynamicToolFinalActionPatch = {
-  kind: 'none'
-}
+export type MurphDynamicToolFinalActionPatch =
+  | {
+      kind: 'none'
+      owner?: 'vault-file'
+    }
+  | {
+      kind: 'reply-required'
+    }
 
 export type MurphDynamicToolReactionPatch = {
   reaction: AssistantMessageReaction
@@ -1800,7 +1805,6 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
-  vaultFileSendOwnsResponseMedia?: boolean
 }
 
 interface ParsedDynamicToolCallRequest {
@@ -2633,19 +2637,26 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
     case 'send-vault-file': {
+      const replyRequiredResult = (
+        success: boolean,
+        text: string,
+      ): MurphDynamicToolExecutionResult => ({
+        ...toolTextResult(success, text),
+        finalActionPatch: { kind: 'reply-required' },
+      })
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
       if (
         !hostedToolContext?.vaultFileSendAvailable
         || typeof sendVaultFile !== 'function'
       ) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'secure vault-file approval is unavailable for this conversation',
         )
       }
       if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'vault-file sending cannot be combined with other response media',
         )
@@ -2676,35 +2687,38 @@ export async function executeMurphDynamicToolRequest(input: {
                 JSON.stringify({
                   filename: result.filename,
                   note:
-                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
+                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
                   status: result.status,
                 }),
               ),
-              finalActionPatch: { kind: 'none' },
-              vaultFileSendOwnsResponseMedia: true,
+              finalActionPatch: { kind: 'none', owner: 'vault-file' },
             }
           case 'denied':
-            return toolTextResult(false, 'vault-file delivery was denied')
+            return replyRequiredResult(false, 'vault-file delivery was denied')
           case 'expired':
-            return toolTextResult(false, 'vault-file delivery approval expired')
+            return replyRequiredResult(
+              false,
+              'vault-file delivery approval expired',
+            )
         }
       } catch (error) {
         if (
           error instanceof VaultCliError
           && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
         ) {
-          return {
-            ...toolTextResult(
-              true,
-              JSON.stringify({
-                note:
-                  'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
-                status: 'already_in_progress',
-              }),
-            ),
-          }
+          return replyRequiredResult(
+            true,
+            JSON.stringify({
+              note:
+                'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
+              status: 'already_in_progress',
+            }),
+          )
         }
-        return toolTextResult(false, 'secure vault-file approval could not be prepared')
+        return replyRequiredResult(
+          false,
+          'secure vault-file approval could not be prepared',
+        )
       }
     }
     case 'create-phone-call': {

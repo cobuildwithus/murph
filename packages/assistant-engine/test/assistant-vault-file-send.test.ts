@@ -1133,8 +1133,7 @@ describe('assistant vault-file send', () => {
 
     expect(result.requiredVaultFileApprovalUrl).toBeUndefined()
     expect(result.responseMediaPatch).toBeUndefined()
-    expect(result.finalActionPatch).toBeUndefined()
-    expect(result.vaultFileSendOwnsResponseMedia).toBeUndefined()
+    expect(result.finalActionPatch).toEqual({ kind: 'reply-required' })
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       note:
@@ -1168,14 +1167,16 @@ describe('assistant vault-file send', () => {
       },
     })
 
-    expect(result.finalActionPatch).toEqual({ kind: 'none' })
+    expect(result.finalActionPatch).toEqual({
+      kind: 'none',
+      owner: 'vault-file',
+    })
     expect(result.responseMediaPatch).toBeUndefined()
-    expect(result.vaultFileSendOwnsResponseMedia).toBe(true)
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       filename: 'report.pdf',
       note:
-        'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
+        'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
       status: 'approved',
     }))
   })
