@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
+import { DeviceSyncCompletionDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
@@ -73,6 +74,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
@@ -141,6 +143,46 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
+  contactAction: {
+    href: "sms:?body=I%20just%20connected%20my%20WHOOP",
+    kind: "imessage",
+    label: "Text Murph",
+  },
+  detail:
+    "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
+  failed: false,
+  kind: "device-sync",
+  retryHref: null,
+  setupGuide: {
+    actionAriaLabel: "See how to sync all of your WHOOP data",
+    actionLabel: "Get full sync",
+    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
+    downloadAction: {
+      ariaLabel: "Download App to sync WHOOP through Apple Health",
+      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      label: "Download App",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
+    steps: [
+      {
+        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
+        title: "Download Murph and sign in",
+      },
+      {
+        detail:
+          "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
+        title: "Turn on Apple Health in WHOOP",
+      },
+    ],
+    title: "Get your full sync",
+    voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
+  },
+  title: "WHOOP is connected",
+  unverified: false,
+};
+
 type SegmentedControlDemoValue = "phone" | "email" | "telegram";
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
@@ -167,6 +209,7 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
+  const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -537,6 +580,28 @@ export function ComponentsContent() {
             </DialogContent>
           </Dialog>
         </Section>
+
+        <Separator />
+
+        <div id="whoop-completion-dialog" className="scroll-mt-24">
+          <Section title="WHOOP Completion Dialog">
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Production completion flow for WHOOP. Open the preview, then choose
+              Get full sync to review the voice memo, setup steps, and action hierarchy.
+            </p>
+            <div className="flex">
+              <Button onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}>
+                Preview WHOOP completion
+              </Button>
+            </div>
+            {whoopCompletionPreviewKey > 0 ? (
+              <DeviceSyncCompletionDialog
+                key={whoopCompletionPreviewKey}
+                model={WHOOP_COMPLETION_DIALOG_MODEL}
+              />
+            ) : null}
+          </Section>
+        </div>
 
         <Separator />
 
