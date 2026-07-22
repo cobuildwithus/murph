@@ -78,6 +78,7 @@ import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistan
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -158,6 +159,7 @@ export function ComponentsContent() {
   const [collapsibleOpen, setCollapsibleOpen] = useState(false);
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
+  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -564,6 +566,26 @@ export function ComponentsContent() {
               groupName="Sunday sleep crew"
             />
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Garmin Historical Data Preflight">
+          <div className="flex flex-col items-start gap-3">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Provider-specific reminder shown before Murph opens Garmin&apos;s
+              authorization screen. It names the default-off permission without
+              claiming Murph can verify the external setting.
+            </p>
+            <Button onClick={() => setGarminHistoricalDataDialogOpen(true)}>
+              Preview Garmin preflight
+            </Button>
+          </div>
+          <GarminHistoricalDataDialog
+            open={garminHistoricalDataDialogOpen}
+            onContinue={() => setGarminHistoricalDataDialogOpen(false)}
+            onOpenChange={setGarminHistoricalDataDialogOpen}
+          />
         </Section>
 
         <Separator />

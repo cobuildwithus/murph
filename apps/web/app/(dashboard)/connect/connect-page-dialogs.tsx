@@ -17,6 +17,50 @@ import {
 
 import type { ConnectIntentRecoveryRequest, ConnectSource } from "./connect-page-types";
 
+export function GarminHistoricalDataDialog({
+  open,
+  onContinue,
+  onOpenChange,
+}: {
+  open: boolean;
+  onContinue: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+        <DialogHeader className="pr-10">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Garmin
+          </span>
+          <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
+            Turn on Historical Data
+          </DialogTitle>
+          <DialogDescription className="leading-6">
+            Garmin leaves Historical Data off by default. When Garmin asks what
+            to share, turn it on before approving so Murph can receive the
+            recent history Garmin makes available.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button type="button" size="lg" onClick={onContinue}>
+            Continue to Garmin
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ConnectConsentDialog({
   source,
   onAccepted,
