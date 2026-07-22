@@ -63,10 +63,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // persona redesign adds 10,122B, producing 9,420,302B. PR #824's Epic query
 // expansion measures 9,388,733B on that mainline; the exact combined graph
 // measures 9,424,514B. Ratchet the fixed total backstop to that exact
-// local measurement;
+// local measurement. PR #835's memory-only ChatGPT auth bridge on
+// current main measures 9,430,166B on CI Linux; ratchet to that exact
+// production artifact measurement;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_424_514;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_430_166;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
