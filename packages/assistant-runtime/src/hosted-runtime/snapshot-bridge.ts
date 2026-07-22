@@ -21,7 +21,7 @@ import {
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
-  compactHostedPendingAssistantInputIds,
+  compactHostedUnresolvedAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
   hasHostedProviderCleanupRecoveryCompleted,
@@ -425,7 +425,7 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      const pendingInputIds = await compactHostedPendingAssistantInputIds({
+      const pendingInputIds = await compactHostedUnresolvedAssistantInputIds({
         signal: input.signal,
         vaultRoot: input.vaultRoot,
       });

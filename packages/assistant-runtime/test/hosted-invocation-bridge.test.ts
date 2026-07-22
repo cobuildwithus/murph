@@ -39,8 +39,12 @@ import {
   createAssistantOutboxIntent,
 } from "@murphai/assistant-engine/assistant-outbox";
 import {
+  readAssistantInputEvent,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
+import {
+  saveAssistantAutomationState,
+} from "@murphai/assistant-engine/assistant-state";
 import {
   withCanonicalWriteLock,
 } from "@murphai/core";
@@ -71,6 +75,9 @@ import {
   type HostedWorkspaceMailboxPayloadDecoder,
   type HostedWorkspaceSnapshotArchiveBuilder,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
+import {
+  enqueueHostedPendingAssistantInputId,
+} from "../src/hosted-runtime/pending-input-index.ts";
 
 const TEST_REQUEST = {
   attemptId: "attempt_bridge",
@@ -954,6 +961,38 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectMissing(path.join(vaultRoot, residuePaths.evidence));
   });
 
+  it("keeps disabled-channel nonterminal input residue in an idle snapshot", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const residuePaths = await writeDisabledPendingAssistantInputResidue(vaultRoot);
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint("2026-06-10T00:00:00.000Z"),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.inputEvent)).toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === residuePaths.pendingIndex)).toBe(true);
+    await expectPresent(path.join(vaultRoot, residuePaths.inputEvent));
+    await expectPresent(path.join(vaultRoot, residuePaths.pendingIndex));
+    await expect(readAssistantInputEvent({
+      inputId: residuePaths.inputId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      replyTarget: {
+        channel: "linq",
+        threadId: "thread-disabled-residue",
+      },
+    });
+  });
+
   it("prunes only quiescent runtime deliveries before archive planning", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -1358,6 +1397,72 @@ async function writeSettledAssistantInputResidue(
     "utf8",
   );
   return { evidence, inputEvent };
+}
+
+async function writeDisabledPendingAssistantInputResidue(
+  vaultRoot: string,
+): Promise<{ inputEvent: string; inputId: string; pendingIndex: string }> {
+  const recordedAt = "2026-01-01T00:00:00.000Z";
+  await saveAssistantAutomationState(vaultRoot, {
+    autoReply: [{
+      channel: "linq",
+      eligibleAfter: null,
+      enabledAt: recordedAt,
+    }],
+    updatedAt: recordedAt,
+    version: 1,
+  });
+  const event = await upsertAssistantInputEvent({
+    now: new Date(recordedAt),
+    vault: vaultRoot,
+    event: {
+      content: {
+        text: "old disabled-channel hosted input",
+      },
+      conversation: {
+        accountId: null,
+        actorId: "actor-disabled-residue",
+        actorIsSelf: false,
+        source: "linq",
+        threadId: "thread-disabled-residue",
+        threadIsDirect: true,
+      },
+      occurredAt: recordedAt,
+      receivedAt: recordedAt,
+      replyTarget: {
+        channel: "linq",
+        messageId: "message-disabled-residue",
+        threadId: "thread-disabled-residue",
+      },
+      sourceRef: {
+        dedupeKey: "dedupe-disabled-residue",
+        eventId: "event-disabled-residue",
+        itemId: "item-disabled-residue",
+        kind: "hosted-mailbox",
+        lane: "conversation",
+        laneSeq: "2",
+        payloadSchema: "test-payload",
+        payloadSource: "inline",
+        source: "hosted-mailbox",
+        wakeSchema: "test-wake",
+      },
+    },
+  });
+  await enqueueHostedPendingAssistantInputId({
+    inputId: event.inputId,
+    vaultRoot,
+  });
+  await saveAssistantAutomationState(vaultRoot, {
+    autoReply: [],
+    updatedAt: "2026-01-01T00:01:00.000Z",
+    version: 1,
+  });
+
+  return {
+    inputEvent: `.runtime/operations/assistant/input-events/${event.inputId}.json`,
+    inputId: event.inputId,
+    pendingIndex: ".runtime/operations/assistant/hosted-pending-inputs.json",
+  };
 }
 
 async function expectPresent(absolutePath: string): Promise<void> {

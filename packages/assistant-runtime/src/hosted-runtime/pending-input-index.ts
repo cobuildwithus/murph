@@ -49,7 +49,8 @@ interface HostedPendingAssistantInputStateReadResult {
 interface HostedPendingAssistantInputCompactionResult {
   conversationPrefixEvidenceComplete: boolean;
   earliestPendingConversationLaneSeq: string | null;
-  inputIds: string[];
+  runnableInputIds: string[];
+  unresolvedInputIds: string[];
 }
 
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
@@ -89,7 +90,7 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
   now?: Date | string;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputMediaRetentionProtections> {
-  const inputIds = await compactHostedPendingAssistantInputIds({
+  const inputIds = await compactHostedUnresolvedAssistantInputIds({
     vaultRoot: input.vaultRoot,
   });
   const protectedAttachmentIds = new Set<string>();
@@ -194,6 +195,10 @@ export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
     filePath: resolveHostedPendingAssistantInputStatePath(input.vaultRoot),
   });
   const inputIds = existing.state.inputIds;
+  const enabledAutoReplyChannels = new Set(
+    (await readAssistantAutomationState(input.vaultRoot)).autoReply
+      .map((entry) => entry.channel),
+  );
   const probeLimit = Math.min(
     inputIds.length,
     DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
@@ -214,7 +219,13 @@ export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
         })
       ),
     );
-    if (existingEvents.some((event) => event !== null)) {
+    if (existingEvents.some((event) =>
+      event !== null
+      && isHostedPendingAssistantInputStillReplyable({
+        enabledAutoReplyChannels,
+        event,
+      })
+    )) {
       return {
         hasCandidate: true,
         indexComplete: !existing.missing && existing.state.backfilled,
@@ -278,7 +289,17 @@ export async function compactHostedPendingAssistantInputIds(input: {
   return [...(await compactHostedPendingAssistantInputState({
     ...input,
     inspectConversationPrefix: false,
-  })).inputIds];
+  })).runnableInputIds];
+}
+
+export async function compactHostedUnresolvedAssistantInputIds(input: {
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<string[]> {
+  return [...(await compactHostedPendingAssistantInputState({
+    ...input,
+    inspectConversationPrefix: false,
+  })).unresolvedInputIds];
 }
 
 export async function compactHostedConversationMailboxHandledThroughSeq(input: {
@@ -391,7 +412,8 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     return {
       conversationPrefixEvidenceComplete: true,
       earliestPendingConversationLaneSeq: null,
-      inputIds: [],
+      runnableInputIds: [],
+      unresolvedInputIds: [],
     };
   }
 
@@ -400,7 +422,8 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       .map((entry) => entry.channel),
   );
   input.signal?.throwIfAborted();
-  const remaining: { cursor: AssistantInputCursor; inputId: string }[] = [];
+  const runnable: { cursor: AssistantInputCursor; inputId: string }[] = [];
+  const unresolved: { cursor: AssistantInputCursor; inputId: string }[] = [];
   const missingInputIds: string[] = [];
   let conversationPrefixEvidenceComplete = true;
   let earliestPendingConversationLaneSeq: bigint | null = null;
@@ -418,14 +441,6 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       }
       continue;
     }
-    if (
-      !isHostedPendingAssistantInputStillReplyable({
-        enabledAutoReplyChannels,
-        event,
-      })
-    ) {
-      continue;
-    }
     const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
       captureId: event.projection.captureId,
       inputId,
@@ -433,6 +448,10 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     });
     input.signal?.throwIfAborted();
     if (!complete) {
+      unresolved.push({
+        cursor: event.cursor,
+        inputId,
+      });
       if (
         input.inspectConversationPrefix
         && event.sourceRef.kind === "hosted-mailbox"
@@ -450,20 +469,30 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
           earliestPendingConversationLaneSeq = laneSeq;
         }
       }
-      remaining.push({
-        cursor: event.cursor,
-        inputId,
-      });
+      if (
+        isHostedPendingAssistantInputStillReplyable({
+          enabledAutoReplyChannels,
+          event,
+        })
+      ) {
+        runnable.push({
+          cursor: event.cursor,
+          inputId,
+        });
+      }
     }
   }
 
-  const runnableInputIds = remaining
+  const runnableInputIds = runnable
+    .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
+    .map((item) => item.inputId);
+  const unresolvedInputIds = unresolved
     .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
     .map((item) => item.inputId);
   const remainingState = createHostedPendingAssistantInputState(
     [
       ...missingInputIds,
-      ...runnableInputIds,
+      ...unresolvedInputIds,
     ],
     { backfilled: input.backfilled },
   );
@@ -475,7 +504,8 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     return {
       conversationPrefixEvidenceComplete: false,
       earliestPendingConversationLaneSeq: null,
-      inputIds: [...input.state.inputIds],
+      runnableInputIds,
+      unresolvedInputIds: [...input.state.inputIds],
     };
   }
 
@@ -490,7 +520,11 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     conversationPrefixEvidenceComplete: true,
     earliestPendingConversationLaneSeq:
       earliestPendingConversationLaneSeq?.toString() ?? null,
-    inputIds: runnableInputIds,
+    runnableInputIds,
+    unresolvedInputIds: [
+      ...missingInputIds,
+      ...unresolvedInputIds,
+    ],
   };
 }
 

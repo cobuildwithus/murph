@@ -228,6 +228,15 @@ describe("hosted pending assistant input index", () => {
 
   it("finds fresh runnable input after a large missing prefix without an unbounded wake probe", async () => {
     const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
     const missingInputIds = Array.from(
       { length: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT + 10 },
       (_, index) => `ain_${String(index + 1).padStart(32, "0")}`,
@@ -373,6 +382,11 @@ describe("hosted pending assistant input index", () => {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
       vaultRoot,
+    });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-04-23T00:00:04.000Z",
+      version: 1,
     });
 
     await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
@@ -896,7 +910,7 @@ describe("hosted pending assistant input index", () => {
     ]);
   });
 
-  it("drops indexed inputs whose source cannot be processed by the reply channel", async () => {
+  it("retains nonterminal indexed inputs whose source cannot currently use the reply channel", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -945,6 +959,7 @@ describe("hosted pending assistant input index", () => {
     ]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       processable.inputId,
+      mismatched.inputId,
     ]);
   });
 
@@ -1022,6 +1037,41 @@ describe("hosted pending assistant input index", () => {
       now: () => "2026-04-23T00:03:00.000Z",
       vaultRoot,
     })).resolves.toBeNull();
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-04-23T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      second.inputId,
+    ]);
+    await expect(compactHostedConversationMailboxHandledThroughSeq({
+      importedThroughSeq: "20",
+      vaultRoot,
+    })).resolves.toBe("19");
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: first.cursor,
+        enabledAt: "2026-04-23T00:04:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:04:00.000Z",
+      version: 1,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      second.inputId,
+    ]);
+
+    await writeTerminalEvidence({
+      evidenceId: second.inputId,
+      groupInputIds: [second.inputId],
+      vaultRoot,
+    });
+    await expect(compactHostedConversationMailboxHandledThroughSeq({
+      importedThroughSeq: "20",
+      vaultRoot,
+    })).resolves.toBe("20");
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 

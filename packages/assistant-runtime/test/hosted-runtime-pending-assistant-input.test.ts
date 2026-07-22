@@ -70,7 +70,7 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
     })).resolves.toBeNull();
   });
 
-  it("keeps foreground inspection read-only before background wake resolution compacts stale indexed input", async () => {
+  it("keeps foreground inspection read-only and retains disabled-channel nonterminal input", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -107,7 +107,12 @@ describe("resolveHostedPendingAssistantInputWakeAt", () => {
       vaultRoot,
     })).resolves.toBeNull();
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
-      .resolves.toEqual([]);
+      .resolves.toEqual([event.inputId]);
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-06-02T12:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
   });
 
   it("backfills a missing rollout index before scheduling background work", async () => {
