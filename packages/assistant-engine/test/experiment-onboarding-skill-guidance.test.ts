@@ -82,10 +82,17 @@ describe('experiment onboarding skill guidance', () => {
       'Preserve the planned intervention window when changing baseline length.',
     )
     expect(selfManagement).toContain(
-      "follow `experiment-onboarding`'s normal 14-day prospective baseline for repeated-measurement runs",
+      'let `experiment-onboarding` own baseline timing and never override a selected Health Commons test plan',
     )
     expect(selfManagement).toContain(
-      'a concrete design reason makes the normal 14-day prospective baseline disproportionate',
+      'the resolved protocol or `experiment-onboarding` decision allows a shorter baseline for a concrete design reason',
+    )
+    expect(selfManagement).not.toContain('14-day')
+    expect(selfManagement).not.toContain(
+      'Do not wait for perfect certainty or a long baseline when a low-risk reversible test can start now.',
+    )
+    expect(selfManagement).not.toContain(
+      'Use when natural variation is high and the intervention effect is not immediate.',
     )
   })
 
