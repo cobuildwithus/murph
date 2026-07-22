@@ -535,7 +535,7 @@ describe("runner bundle container-entrypoint esbuild step", () => {
     expect(budgets).toEqual({
       entryBytes: 1_450_742 + 48_000 + 250_000,
       staticClosureBytes: 7_500_000 + 96_000 + 250_000,
-      totalBytes: 9_465_301,
+      totalBytes: 9_484_284,
     });
   });
 
@@ -577,6 +577,27 @@ describe("runner bundle container-entrypoint esbuild step", () => {
         staticBootClosureBytesMetafile(staticClosureBytes + 1),
       ),
     ).toThrow(/static boot closure .* exceeds budget/);
+  });
+
+  it("gates the total bundle at the production ratchet boundary", () => {
+    const { totalBytes } = resolveRunnerEntrypointBundleBudgets();
+    const dynamicChunkBytes = totalBytes - 1_000;
+
+    expect(
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes),
+      ),
+    ).toEqual({
+      entryBytes: 1_000,
+      staticClosureBytes: 1_000,
+      totalBytes,
+    });
+
+    expect(() =>
+      assertRunnerEntrypointBundleWithinBudgets(
+        dynamicOnlyChunkMetafile(dynamicChunkBytes + 1),
+      ),
+    ).toThrow(/total output .* exceeds budget/);
   });
 
   it("does not count dynamic-only chunks toward the static boot closure budget", () => {

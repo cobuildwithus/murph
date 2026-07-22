@@ -69,10 +69,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // remediation adds another 491B, and the final delivery-context ownership
 // correction adds 397B. The round-five consolidated outcome correction adds
 // 1,090B, producing 9,465,301B on local macOS; ratchet by those exact measured
-// increases;
+// increases. The hosted low-usage conversation skill adds 18,983B, producing
+// 9,484,284B on local macOS; ratchet by that exact measured increase;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_465_301;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_484_284;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
