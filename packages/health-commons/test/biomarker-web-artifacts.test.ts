@@ -13,6 +13,22 @@ const TEST_REFERENCE_GUIDANCE: HealthCommonsBiomarkerReferenceGuidance = {
   classification: "conditional_numeric",
   reviewStatus: "reviewed",
   use: "context_only",
+  fallbackRanges: [
+    {
+      label: "Example contextual interval",
+      unit: "fallback-unit",
+      lowerBound: { inclusive: true, value: 2 },
+      upperBound: { inclusive: true, value: 8 },
+      applicability: "Applies only to the matrix and population reviewed by the source.",
+      source: {
+        title: "Example reference interval guideline",
+        organization: "Example organization",
+        year: 2026,
+        sourceType: "consensus_statement",
+        url: "https://example.test/reference-interval-guideline",
+      },
+    },
+  ],
   items: [
     {
       kind: "decision_limit",

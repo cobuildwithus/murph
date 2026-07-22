@@ -6,6 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabBiomarkerDetail,
@@ -35,8 +36,10 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   formatLabDate,
   formatLabFlag,
+  formatLabNumber,
   formatLabResultReferenceRange,
   formatLabUnit,
+  labUnitSuffix,
   labResultYear,
 } from "@/src/lib/biomarkers/lab-result-display";
 import {
@@ -48,6 +51,7 @@ import { cn } from "@/src/lib/utils";
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
   chatAction?: ReactNode;
+  fallbackRanges?: readonly HealthCommonsWebBiomarkerFallbackRange[];
   metricKey: string;
   summary?: string | null;
   uploadLabsAction?: ReactNode;
@@ -61,6 +65,7 @@ interface LabResultYearGroup {
 export function LabBiomarkerDetailClient({
   authenticated,
   chatAction = null,
+  fallbackRanges = [],
   metricKey,
   summary = null,
   uploadLabsAction = null,
@@ -130,6 +135,7 @@ export function LabBiomarkerDetailClient({
     content = (
       <BiomarkerDetailContent
         detail={detail}
+        fallbackRanges={fallbackRanges}
         onRefresh={() => void refresh()}
         refreshPending={refreshPending}
         stale={freshness === "stale"}
@@ -183,11 +189,13 @@ function BiomarkerDetailShell({
 
 function BiomarkerDetailContent({
   detail,
+  fallbackRanges,
   onRefresh,
   refreshPending,
   stale,
 }: {
   detail: BrowserVaultLabBiomarkerDetail;
+  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[];
   onRefresh: () => void;
   refreshPending: boolean;
   stale: boolean;
@@ -198,10 +206,13 @@ function BiomarkerDetailContent({
     id: point.rowId,
     value: point.value,
   }));
-  const chartRange = resolveChartedReferenceRange(detail);
   const latestStatus = resolveLatestResultStatus(detail.latest.flag);
   const latestReferenceRange = formatLabResultReferenceRange(detail.latest);
-  const latestSource = detail.latest.labName ?? detail.latest.sourceLabel;
+  const chartReference = resolveChartedReferenceContext(
+    detail,
+    fallbackRanges,
+    latestReferenceRange,
+  );
 
   return (
     <>
@@ -264,24 +275,17 @@ function BiomarkerDetailContent({
 
           {chartPoints.length > 0 ? (
             <div className="min-w-0 border-t border-border/70 px-5 py-8 sm:px-8 sm:py-10 lg:border-t-0">
-              <h3 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-                Results over time
-              </h3>
-              <div className="mt-4 min-w-0">
+              <div className="min-w-0">
                 <LabBiomarkerHistoryChart
                   displayName={detail.displayName}
                   points={chartPoints}
-                  referenceRange={chartRange}
-                  referenceRangeLabel={latestReferenceRange}
-                  referenceRangeSourceLabel={latestSource}
+                  referenceRange={chartReference?.range}
+                  referenceRangeLabel={chartReference?.label}
+                  referenceRangeSourceLabel={chartReference?.sourceLabel}
+                  referenceRangeTitle={chartReference?.title}
                   unit={detail.comparableUnit}
                 />
               </div>
-              {chartPoints.length === 1 ? (
-                <p className="mt-3 text-sm text-muted-foreground">
-                  A second comparable numeric result will show a change over time.
-                </p>
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -564,14 +568,22 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
 }
 
 /**
- * The chart overlays the latest lab-reported range as current context. It is
- * deliberately labeled as latest because older results may have come from a
- * different lab or range. Only use it when the latest row is itself part of
- * the normalized comparable series; qualified ranges stay exact in the ledger.
+ * The chart prefers the latest lab-reported range because older results may
+ * have come from a different lab or range. Exact one-sided source limits are
+ * valid context; qualified ranges that cannot be normalized stay in the
+ * ledger. A sourced adult fallback is used only when the latest comparable
+ * result has no lab range and the authored unit matches exactly.
  */
-function resolveChartedReferenceRange(
+function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
-): LabBiomarkerChartRange | null {
+  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[],
+  latestReferenceRange: string | null,
+): {
+  label: string;
+  range: LabBiomarkerChartRange;
+  sourceLabel: string | null;
+  title: string;
+} | null {
   const latestPoint = detail.chartSeries.find((point) => point.rowId === detail.latest.id);
   if (
     !latestPoint
@@ -583,13 +595,68 @@ function resolveChartedReferenceRange(
   }
 
   const normalizedRange = detail.latest.normalizedReferenceRange;
-  if (normalizedRange?.lowComparator || normalizedRange?.highComparator) {
+  const low = normalizedRange?.low ?? null;
+  const high = normalizedRange?.high ?? null;
+  if ((low !== null || high !== null) && latestReferenceRange) {
+    return {
+      label: latestReferenceRange,
+      range: { high, low },
+      sourceLabel: detail.latest.labName ?? detail.latest.sourceLabel,
+      title: "Latest lab range",
+    };
+  }
+
+  // Any source-provided range text, including a qualified range that cannot
+  // be normalized, blocks generic context from replacing the lab's wording.
+  if (latestReferenceRange !== null || detail.comparableUnit === null) {
     return null;
   }
 
-  const low = normalizedRange?.low ?? null;
-  const high = normalizedRange?.high ?? null;
-  return low === null && high === null ? null : { high, low };
+  const comparableUnit = formatLabUnit(detail.comparableUnit).trim();
+  const fallback = fallbackRanges.find(
+    (candidate) => formatLabUnit(candidate.unit).trim() === comparableUnit,
+  );
+  if (!fallback) {
+    return null;
+  }
+
+  const label = formatFallbackReferenceRange(fallback);
+  if (!label) {
+    return null;
+  }
+
+  return {
+    label,
+    range: {
+      high: fallback.upperBound?.value ?? null,
+      low: fallback.lowerBound?.value ?? null,
+    },
+    sourceLabel: fallback.label,
+    title: "General adult reference",
+  };
+}
+
+function formatFallbackReferenceRange(
+  range: HealthCommonsWebBiomarkerFallbackRange,
+): string | null {
+  const lower = range.lowerBound;
+  const upper = range.upperBound;
+  const unit = labUnitSuffix(range.unit);
+  if (lower && upper) {
+    if (lower.inclusive && upper.inclusive) {
+      return `${formatLabNumber(lower.value)} to ${formatLabNumber(upper.value)}${unit}`;
+    }
+    const lowerComparator = lower.inclusive ? ">=" : ">";
+    const upperComparator = upper.inclusive ? "<=" : "<";
+    return `${lowerComparator}${formatLabNumber(lower.value)} to ${upperComparator}${formatLabNumber(upper.value)}${unit}`;
+  }
+  if (lower) {
+    return `${lower.inclusive ? ">=" : ">"}${formatLabNumber(lower.value)}${unit}`;
+  }
+  if (upper) {
+    return `${upper.inclusive ? "<=" : "<"}${formatLabNumber(upper.value)}${unit}`;
+  }
+  return null;
 }
 
 function isAuthRequiredBrowserVaultError(error: string | null): boolean {

@@ -406,7 +406,7 @@ test("a numeric result with source text remains plotted without a qualitative om
     expect(text).toContain("5.6%");
     expect(text).not.toContain("comparable numeric results");
     expect(text).not.toContain("Numeric history");
-    expect(text).toContain("Results over time");
+    expect(text).not.toContain("Results over time");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("qualitative result");
     expect(
@@ -782,7 +782,7 @@ test("a single numeric result stays visible without implying a trend", async () 
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("In range");
     expect(text).not.toContain("comparable numeric result in %");
-    expect(text).toContain("A second comparable numeric result will show a change over time");
+    expect(text).not.toContain("A second comparable numeric result will show a change over time");
     expect(
       rendered.container.querySelector("#biomarker-latest-result-heading")?.className,
     ).toContain("text-primary");
@@ -1109,7 +1109,7 @@ test("a one-sided lab range explains the chart limit", async () => {
   }
 });
 
-test("an exact one-sided range stays in history without becoming an ambiguous chart line", async () => {
+test("an exact one-sided range becomes a labeled chart limit", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
@@ -1134,9 +1134,14 @@ test("an exact one-sided range stays in history without becoming an ambiguous ch
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("<5.6%");
-    expect(text).not.toContain("Latest lab range");
+    expect(text).toContain("Latest lab range");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("Dashed lab limit");
+    expect(
+      rendered.container.querySelector(
+        '[aria-label="HbA1c results over time; latest lab range <5.6%"]',
+      ),
+    ).not.toBeNull();
   } finally {
     await rendered.cleanup();
   }
@@ -1162,7 +1167,11 @@ test("qualified structured ranges keep their exact text and never become a chart
   browserVaultMock.value.status = "ready";
 
   const rendered = await renderClientComponent(
-    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="hba1c"
+    />,
     { requireButton: false },
   );
 
@@ -1170,8 +1179,148 @@ test("qualified structured ranges keep their exact text and never become a chart
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("70-99 fasting; <140 non-fasting");
     expect(text).not.toContain("Latest lab range");
+    expect(text).not.toContain("General adult reference");
     expect(text).not.toContain("shaded area");
     expect(text).not.toContain("Range 70 to 99 mg/dL");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a unit-matched fallback appears only when the latest lab range is absent", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2025-06-03",
+      id: "chloride-2025",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 102,
+      unit: "mmol/L",
+      value: 102,
+    }),
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      flag: "normal",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("In range");
+    expect(text).toContain("Lab rangeNot listed");
+    expect(text).toContain("Adult reference97 to 107 mmol/L");
+    expect(text).toContain("CSCC harmonized adult reference interval");
+    expect(text).toContain("General adult reference");
+    expect(text).not.toContain("Latest lab range");
+    expect(
+      rendered.container.querySelector(
+        '[aria-label="Chloride results over time; general adult reference 97 to 107 mmol/L"]',
+      ),
+    ).not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("the reporting lab range wins over a matching general fallback", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2025-06-03",
+      id: "chloride-2025",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 102,
+      referenceRange: { high: 106, low: 98 },
+      unit: "mmol/L",
+      value: 102,
+    }),
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      referenceRange: { high: 106, low: 98 },
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("Latest lab range");
+    expect(text).toContain("98 to 106 mmol/L");
+    expect(text).not.toContain("General adult reference");
+    expect(text).not.toContain("CSCC harmonized adult reference interval");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a fallback with a different unit is withheld", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mEq/L",
+      normalizedValue: 101,
+      unit: "mEq/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("Lab rangeNot listed");
+    expect(text).not.toContain("Adult reference");
+    expect(text).not.toContain("General adult reference");
   } finally {
     await rendered.cleanup();
   }
@@ -1215,6 +1364,14 @@ test("a missing latest range withholds the band without adding summary tiles", a
 function clientWithRows(rows: BrowserVaultLabResultRow[]): BrowserVaultQueryClient {
   return createBrowserVaultQueryClient(createReplica(rows));
 }
+
+const TEST_ADULT_FALLBACK_RANGES = [{
+  applicability: "For contextual fallback display on adult serum or plasma results.",
+  label: "CSCC harmonized adult reference interval",
+  lowerBound: { inclusive: true, value: 97 },
+  unit: "mmol/L",
+  upperBound: { inclusive: true, value: 107 },
+}] as const;
 
 function createReplica(labResultRows: BrowserVaultLabResultRow[]): BrowserVaultReplica {
   return {

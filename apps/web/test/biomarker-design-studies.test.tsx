@@ -309,14 +309,14 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain(">Lab range</dt>");
   expect(markup).not.toContain("4 comparable results");
   expect(markup).toContain("Example laboratory");
-  expect(markup).toContain("Results over time");
+  expect(markup).not.toContain("Results over time");
   expect(markup).not.toContain("Numeric history");
   expect(markup).not.toContain("A steady rise");
   expect(markup).not.toContain("exact results plotted");
   expect(markup).not.toContain("shaded band");
   expect(markup).not.toContain('aria-describedby="illustrative-biomarker-chart-caption"');
   expect(markup).toContain(
-    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL"',
+    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL from Example laboratory"',
   );
   expect(markup).toContain('data-reference-range-label="13.0 to 17.0 g/dL"');
   expect(markup).toContain('data-point-count="4"');

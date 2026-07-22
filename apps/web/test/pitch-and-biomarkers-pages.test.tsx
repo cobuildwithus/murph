@@ -249,7 +249,17 @@ test("Biomarker result context follows explicit Health Commons entity mappings",
   const context = resolveLabBiomarkerContext("alt");
 
   assert.equal(context.displayName, "ALT");
+  assert.deepEqual(context.fallbackRanges, []);
   assert.match(context.summary ?? "", /^ALT measures alanine aminotransferase activity,/u);
+
+  const chlorideContext = resolveLabBiomarkerContext("chloride");
+  assert.deepEqual(chlorideContext.fallbackRanges, [{
+    applicability: "For contextual fallback display on serum or plasma results from adults ages 19 through 79 when the saved result uses this exact unit and has no range; the interval was harmonized from Canadian data, and source-laboratory flags and per-result ranges remain authoritative.",
+    label: "CSCC harmonized adult reference interval",
+    lowerBound: { inclusive: true, value: 97 },
+    unit: "mmol/L",
+    upperBound: { inclusive: true, value: 107 },
+  }]);
 });
 
 test("legacy biomarker detail links back to the measured results page truthfully", () => {

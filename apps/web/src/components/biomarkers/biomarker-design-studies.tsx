@@ -395,10 +395,7 @@ export function BiomarkerDetailStudy() {
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
-          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Results over time
-          </h4>
-          <div className="mt-4 min-w-0">
+          <div className="min-w-0">
             <LabBiomarkerHistoryChart
               displayName="Illustrative hemoglobin"
               points={HEMOGLOBIN_HISTORY}

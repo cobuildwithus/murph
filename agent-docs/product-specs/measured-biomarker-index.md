@@ -64,12 +64,26 @@ member-facing biomarker.
 - Plot only exact numeric results that the query owner has already established
   as comparable. Comparator and qualitative results stay exact in the ledger
   and never become invented points.
-- When the latest result belongs to the normalized comparable series and has an
-  unqualified numeric range, show that range as quiet dashed boundary rules
-  labeled `Latest lab range`. Clip the rules to the data-focused vertical scale
-  rather than compressing the historical trend, and do not imply that older
-  labs used the same range. Keep qualified or non-comparable ranges exact in the
-  ledger.
+- When the latest result belongs to the normalized comparable series and has a
+  numeric source range, show that range as quiet dashed boundary rules labeled
+  `Latest lab range`. Preserve exact one-sided source comparators. Clip the
+  two-sided rules to the data-focused vertical scale rather than compressing the
+  historical trend; extend that scale only enough to keep a one-sided limit
+  visible. Do not imply that older labs used the same range.
+- When that latest comparable result has no usable numeric source range, use an
+  exact-unit authored Health Commons fallback only when its applicability is
+  broad enough for this context-free page. Label it `General adult reference`, keep
+  the imported source flag authoritative, and omit the fallback when age, sex,
+  pregnancy, fasting, specimen, assay, treatment, or risk context is required.
+  A qualified source range stays exact in the ledger and is not replaced by a
+  generic fallback.
+- The initial reviewed fallback catalog is intentionally sparse: CSCC adult
+  serum/plasma intervals are authored for calcium, chloride, LDH, phosphate,
+  and total protein only. The generated biomarker index projects the display
+  fields; primary source metadata remains with the authored Commons guidance.
+- Let the graph follow the latest-reading block without a redundant visible
+  chart title or a single-result instruction. The accessible chart name still
+  identifies the biomarker and reference context.
 - Keep the result ledger available at every viewport. The full four-column
   layout starts only when it fits; smaller screens use one accessible stacked
   representation rather than duplicated desktop/mobile markup.

@@ -129,6 +129,18 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+## Saved biomarker reference context
+
+Saved lab-result pages keep the imported source flag and per-result laboratory
+range authoritative. A normalized latest source range may appear on the chart
+as a two-sided band or exact one-sided limit. If the latest comparable result
+has no usable numeric source range, the server may provide an exact-unit,
+sourced Health Commons fallback labeled `General adult reference`; the browser
+does not infer ranges, convert fallback units, or use a fallback to relabel the
+result. The initial catalog covers calcium, chloride, LDH, phosphate, and total
+protein in the exact reviewed CSCC units. Context-dependent biomarkers omit the
+fallback.
+
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
 ## Core responsibilities

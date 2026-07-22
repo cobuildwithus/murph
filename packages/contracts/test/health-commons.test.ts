@@ -917,4 +917,100 @@ describe("@murphai/contracts health commons schemas", () => {
       }),
     ).toMatchObject({ success: false });
   });
+
+  it("validates independently sourced unit-specific biomarker fallback ranges", () => {
+    const source = {
+      title: "Harmonized reference interval guideline",
+      organization: "Example laboratory standards body",
+      year: 2026,
+      sourceType: "consensus_statement",
+      doi: "10.1000/example-fallback-range",
+    } as const;
+    const baseGuidance = {
+      classification: "source_range_only",
+      reviewStatus: "reviewed",
+      use: "context_only",
+      items: [{
+        kind: "reference_interval",
+        guidance: "Prefer the reporting laboratory interval whenever it is available.",
+        applicability: "Applies only as contextual education for the reviewed population.",
+        source,
+      }],
+    } as const;
+    const interval = {
+      label: "Reviewed interval",
+      unit: "example-unit",
+      lowerBound: { inclusive: true, value: 2 },
+      upperBound: { inclusive: true, value: 8 },
+      applicability: "Applies only to the population and matrix reviewed by the source.",
+      source,
+    } as const;
+    const upperBoundOnly = {
+      label: "Reviewed upper bound",
+      unit: "alternate-unit",
+      upperBound: { inclusive: false, value: 10 },
+      applicability: "Applies only to the population and matrix reviewed by the source.",
+      source,
+    } as const;
+    const lowerBoundOnly = {
+      label: "Reviewed lower bound",
+      unit: "third-unit",
+      lowerBound: { inclusive: true, value: 1 },
+      applicability: "Applies only to the population and matrix reviewed by the source.",
+      source,
+    } as const;
+
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [interval, upperBoundOnly, lowerBoundOnly],
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{
+          ...interval,
+          lowerBound: undefined,
+          upperBound: undefined,
+        }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{ ...interval, source: undefined }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{
+          ...interval,
+          lowerBound: { inclusive: true, value: 8 },
+          upperBound: { inclusive: true, value: 2 },
+        }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [interval, { ...upperBoundOnly, unit: interval.unit }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{
+          ...interval,
+          source: {
+            title: source.title,
+            organization: source.organization,
+            year: source.year,
+            sourceType: source.sourceType,
+          },
+        }],
+      }),
+    ).toMatchObject({ success: false });
+  });
 });

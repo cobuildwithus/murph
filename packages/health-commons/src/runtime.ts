@@ -62,6 +62,7 @@ import {
 
 export type {
   HealthCommonsWebBiomarkerOverview,
+  HealthCommonsWebBiomarkerFallbackRange,
   HealthCommonsWebBiomarkerResearch,
   HealthCommonsWebBiomarkerShell,
   HealthCommonsWebExperimentProtocolTab,
@@ -2710,6 +2711,8 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     Array.isArray(value["categories"]) &&
     value["categories"].every(isString) &&
     isGeneratedWebBiomarkerDesiredDirection(value["desiredDirection"]) &&
+    Array.isArray(value["fallbackRanges"]) &&
+    value["fallbackRanges"].every(isGeneratedWebBiomarkerFallbackRange) &&
     typeof value["hidden"] === "boolean" &&
     typeof value["key"] === "string" &&
     typeof value["published"] === "boolean" &&
@@ -2722,6 +2725,36 @@ function isGeneratedWebBiomarkerIndexEntry(value: unknown): boolean {
     typeof value["title"] === "string" &&
     (typeof value["unit"] === "string" || value["unit"] === null)
   );
+}
+
+function isGeneratedWebBiomarkerFallbackRange(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const lowerBound = value["lowerBound"];
+  const upperBound = value["upperBound"];
+  return typeof value["applicability"] === "string"
+    && typeof value["label"] === "string"
+    && typeof value["unit"] === "string"
+    && (lowerBound === undefined || isGeneratedWebBiomarkerFallbackBound(lowerBound))
+    && (upperBound === undefined || isGeneratedWebBiomarkerFallbackBound(upperBound))
+    && (lowerBound !== undefined || upperBound !== undefined)
+    && !(
+      isGeneratedWebBiomarkerFallbackBound(lowerBound)
+      && isGeneratedWebBiomarkerFallbackBound(upperBound)
+      && lowerBound["value"] >= upperBound["value"]
+    );
+}
+
+function isGeneratedWebBiomarkerFallbackBound(value: unknown): value is {
+  inclusive: boolean;
+  value: number;
+} {
+  return isRecord(value)
+    && typeof value["inclusive"] === "boolean"
+    && typeof value["value"] === "number"
+    && Number.isFinite(value["value"]);
 }
 
 function isGeneratedWebRoute(value: Record<string, unknown>): boolean {

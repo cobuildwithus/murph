@@ -176,6 +176,41 @@ const EXPECTED_GUIDANCE_CLASSIFICATION_COUNTS = {
   source_range_only: 52,
 } as const;
 
+const EXPECTED_FALLBACK_RANGES = {
+  "biomarker:calcium": { lowerBound: 2.15, unit: "mmol/L", upperBound: 2.55 },
+  "biomarker:chloride": { lowerBound: 97, unit: "mmol/L", upperBound: 107 },
+  "biomarker:ldh": { lowerBound: 122, unit: "U/L", upperBound: 235 },
+  "biomarker:phosphate": { lowerBound: 0.8, unit: "mmol/L", upperBound: 1.5 },
+  "biomarker:total-protein": { lowerBound: 62, unit: "g/L", upperBound: 79 },
+} as const;
+
+const REPRESENTATIVE_CONTEXT_DEPENDENT_FALLBACK_OMISSIONS = [
+  "biomarker:blood-glucose", // fasting state and test context
+  "biomarker:hba1c", // diagnostic decision limits are not reference intervals
+  "biomarker:serum-creatinine", // age and sex
+  "biomarker:alkaline-phosphatase", // age and sex
+  "biomarker:albumin", // assay method
+  "biomarker:potassium", // serum versus plasma
+  "biomarker:thyroid-stimulating-hormone", // pregnancy and clinical setting
+  "biomarker:free-t4", // assay method
+  "biomarker:bilirubin", // age and method harmonization limits
+  "biomarker:sodium", // local analytical verification
+  "biomarker:triglycerides", // fasting state and risk category
+  "biomarker:ldl-c", // treatment target and risk category
+  "biomarker:poc-troponin-i", // assay generation
+  "biomarker:hemoglobin", // age, sex, and pregnancy
+  "biomarker:mercury", // specimen
+  "biomarker:psa-total", // age and risk context
+] as const;
+
+const DECISION_NUMERIC_VALUES_THAT_MUST_NOT_BECOME_FALLBACKS = [
+  "biomarker:blood-glucose",
+  "biomarker:hba1c",
+  "biomarker:ldl-c",
+  "biomarker:ferritin",
+  "biomarker:lead",
+] as const;
+
 const contentRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../content",
@@ -327,6 +362,111 @@ describe("requested biomarker Health Commons coverage", () => {
     expect([...classificationCounts.keys()].sort()).toEqual(
       [...HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS].sort(),
     );
+  });
+
+  it("keeps authored fallback ranges sparse, sourced, bounded, and unit-specific", () => {
+    const requestedLabEntityKeys = new Set(
+      REQUESTED_LAB_MARKERS.map(([, , entityKey]) => entityKey),
+    );
+    const actualFallbackEntityKeys: string[] = [];
+
+    for (const entityKey of requestedLabEntityKeys) {
+      const page = pagesByKey.get(entityKey);
+      if (!page) {
+        throw new Error(`Missing authored Commons page: ${entityKey}`);
+      }
+
+      const fallbackRanges = page.frontmatter.referenceGuidance?.fallbackRanges;
+      if (!fallbackRanges) {
+        continue;
+      }
+
+      actualFallbackEntityKeys.push(entityKey);
+      expect(new Set(fallbackRanges.map((range) => range.unit)).size).toBe(
+        fallbackRanges.length,
+      );
+
+      for (const range of fallbackRanges) {
+        expect(range.label.trim().length).toBeGreaterThan(0);
+        expect(range.unit.trim()).toBe(range.unit);
+        expect(range.unit.length).toBeGreaterThan(0);
+        expect(range.applicability.split(/\s+/u).length).toBeGreaterThanOrEqual(8);
+        expect(range.applicability).toMatch(
+          /source-laboratory flags and per-result ranges remain authoritative/iu,
+        );
+        expect(`${range.label} ${range.applicability}`).not.toMatch(
+          /\b(?:optimal|wellness)\b/iu,
+        );
+        expect(`${range.label} ${range.applicability}`).not.toMatch(
+          /\bdiagnos(?:e|ed|es|ing|is|tic)\b/iu,
+        );
+
+        expect(range.source.title.length).toBeGreaterThan(0);
+        expect(range.source.organization.length).toBeGreaterThan(0);
+        expect(range.source.year).toBeGreaterThanOrEqual(1900);
+        expect(Boolean(range.source.url || range.source.doi || range.source.pmid)).toBe(true);
+
+        expect(Boolean(range.lowerBound || range.upperBound)).toBe(true);
+        if (range.lowerBound) {
+          expect(Number.isFinite(range.lowerBound.value)).toBe(true);
+          expect(typeof range.lowerBound.inclusive).toBe("boolean");
+        }
+        if (range.upperBound) {
+          expect(Number.isFinite(range.upperBound.value)).toBe(true);
+          expect(typeof range.upperBound.inclusive).toBe("boolean");
+        }
+        if (range.lowerBound && range.upperBound) {
+          expect(range.lowerBound.value).toBeLessThan(range.upperBound.value);
+        }
+      }
+    }
+
+    expect(actualFallbackEntityKeys.length).toBeGreaterThanOrEqual(5);
+    expect(actualFallbackEntityKeys.sort()).toEqual(
+      Object.keys(EXPECTED_FALLBACK_RANGES).sort(),
+    );
+
+    for (const [entityKey, expected] of Object.entries(EXPECTED_FALLBACK_RANGES)) {
+      const fallbackRanges = pagesByKey.get(entityKey)?.frontmatter.referenceGuidance
+        ?.fallbackRanges;
+      expect(fallbackRanges).toHaveLength(1);
+
+      const range = fallbackRanges?.[0];
+      expect(range).toMatchObject({
+        label: "CSCC harmonized adult reference interval",
+        unit: expected.unit,
+        lowerBound: { inclusive: true, value: expected.lowerBound },
+        upperBound: { inclusive: true, value: expected.upperBound },
+        source: {
+          title: "Best practice guidelines on reference interval harmonization in Canada: Evidence-based recommendations from the CSCC working group on reference interval harmonization (CSCC WG-hRI)",
+          organization: "Canadian Society of Clinical Chemists",
+          year: 2025,
+          sourceType: "consensus_statement",
+          url: "https://cscc-sccc.ca/wp-content/uploads/Best-practice-guidelines-on-reference-interval-harmonization-in-Canada.pdf",
+          doi: "10.1016/j.clinbiochem.2025.110986",
+        },
+      });
+    }
+  });
+
+  it("deliberately omits fallback ranges when interpretation needs result context", () => {
+    for (const entityKey of REPRESENTATIVE_CONTEXT_DEPENDENT_FALLBACK_OMISSIONS) {
+      const guidance = pagesByKey.get(entityKey)?.frontmatter.referenceGuidance;
+      expect(guidance, entityKey).toBeDefined();
+      expect(guidance?.fallbackRanges, entityKey).toBeUndefined();
+    }
+  });
+
+  it("does not repurpose clinical decision values as display fallback ranges", () => {
+    for (const entityKey of DECISION_NUMERIC_VALUES_THAT_MUST_NOT_BECOME_FALLBACKS) {
+      const guidance = pagesByKey.get(entityKey)?.frontmatter.referenceGuidance;
+      expect(guidance, entityKey).toBeDefined();
+      expect(
+        guidance?.items.some((item) => (item.numericValues?.length ?? 0) > 0),
+        entityKey,
+      ).toBe(true);
+      expect(guidance?.fallbackRanges, entityKey).toBeUndefined();
+    }
   });
 
   it("preserves comparator semantics instead of manufacturing exact points", () => {

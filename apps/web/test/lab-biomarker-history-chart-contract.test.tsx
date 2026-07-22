@@ -176,6 +176,56 @@ test("a single reference bound renders one dashed line and no band", () => {
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
 });
 
+test("a fallback bound uses a distinct general-reference label", () => {
+  const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "HbA1c",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 5 },
+      { date: "2026-06-14", id: "p2", value: 4.7 },
+    ],
+    referenceRange: { high: 5.7, low: null },
+    referenceRangeLabel: "<5.7%",
+    referenceRangeTitle: "General reference",
+    unit: "percent",
+  }));
+
+  expect(markup).toContain("General reference");
+  expect(markup).not.toContain("Latest lab range");
+  expect(captured.chartAriaLabel).toBe(
+    "HbA1c results over time; general reference <5.7%",
+  );
+  expect(captured.referenceAreas).toHaveLength(0);
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([5.7]);
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(4.7)).toBe(4.7);
+  expect(maximum(5)).toBe(5.7);
+});
+
+test("a lower-only reference keeps its bound visible below the data", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "eGFR",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 102 },
+      { date: "2026-06-14", id: "p2", value: 79 },
+    ],
+    referenceRange: { high: null, low: 60 },
+    referenceRangeLabel: ">=60 mL/min/1.73m^2",
+    referenceRangeTitle: "General reference",
+    unit: "mL/min/1.73m^2",
+  }));
+
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([60]);
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(79)).toBe(60);
+  expect(maximum(102)).toBe(102);
+});
+
 test("a supplied display value preserves the lab's reported precision in the tooltip", () => {
   renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "Hemoglobin",

@@ -1589,6 +1589,39 @@ export type HealthCommonsBiomarkerGuidanceSource = z.infer<
   typeof healthCommonsBiomarkerGuidanceSourceSchema
 >;
 
+export const healthCommonsBiomarkerFallbackRangeSchema = z
+  .object({
+    label: shortStringSchema,
+    unit: shortStringSchema,
+    lowerBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+    upperBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+    applicability: longStringSchema,
+    source: healthCommonsBiomarkerGuidanceSourceSchema,
+  })
+  .strict()
+  .superRefine((range, context) => {
+    if (!range.lowerBound && !range.upperBound) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback ranges must preserve at least one explicit bound.",
+      });
+    }
+    if (
+      range.lowerBound
+      && range.upperBound
+      && range.lowerBound.value >= range.upperBound.value
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback range lower bounds must be lower than upper bounds.",
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerFallbackRange = z.infer<
+  typeof healthCommonsBiomarkerFallbackRangeSchema
+>;
+
 export const healthCommonsBiomarkerGuidanceItemSchema = z
   .object({
     kind: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_ITEM_KINDS),
@@ -1608,6 +1641,7 @@ export const healthCommonsBiomarkerReferenceGuidanceSchema = z
     classification: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS),
     reviewStatus: z.literal("reviewed"),
     use: z.literal("context_only"),
+    fallbackRanges: z.array(healthCommonsBiomarkerFallbackRangeSchema).min(1).optional(),
     items: z.array(healthCommonsBiomarkerGuidanceItemSchema).min(1),
   })
   .strict()
@@ -1629,6 +1663,17 @@ export const healthCommonsBiomarkerReferenceGuidanceSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Qualitative guidance must not manufacture numeric values.",
+      });
+    }
+    if (
+      guidance.fallbackRanges
+      && new Set(guidance.fallbackRanges.map((range) => range.unit)).size
+        !== guidance.fallbackRanges.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback ranges must use unique exact units.",
+        path: ["fallbackRanges"],
       });
     }
   });
