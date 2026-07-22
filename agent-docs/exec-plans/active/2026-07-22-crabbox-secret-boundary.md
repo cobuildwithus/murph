@@ -88,7 +88,11 @@ access that an alternate workflow ref could request.
 - Focused tests: `pnpm exec vitest run --config scripts/vitest.config.ts
   --no-coverage scripts/verification-dispatch.test.ts
   scripts/crabbox/run-verification.test.ts
-  scripts/crabbox/trusted-verification-entrypoint.test.ts` passed (22 tests).
+  scripts/crabbox/trusted-verification-entrypoint.test.ts` passed (24 tests).
+- ReviewGPT packaging owner: `pnpm exec vitest run --config
+  packages/cli/vitest.workspace.ts --no-coverage
+  packages/cli/test/release-script-coverage-audit.test.ts` passed (40 tests,
+  1 skipped).
 - Tools typecheck: `pnpm exec tsc --noEmit -p tsconfig.tools.json` passed.
 - Workflow syntax: both edited GitHub Actions files parsed successfully through
   Ruby YAML; `actionlint` and repository-local Prettier are unavailable.
@@ -97,11 +101,17 @@ access that an alternate workflow ref could request.
   Pre-landing Crabbox is not a truthful fallback because the new trusted
   entrypoint does not exist on `main`; focused local proof plus CI is the
   bootstrap fallback, followed by mandatory post-landing Testbox proof.
+  A later retry encountered the same still-active unrelated lock and stopped
+  promptly rather than beginning another ten-minute wait.
 - `CBX-GITHUB-SCOPE`: blocked on the remaining deploy-hook secret migration.
 - Preliminary ReviewGPT attempt 1 was below the minimum trusted duration and
   discarded. Attempt 2 returned `SPECIALIST_OUTCOME: INVALID` because the
   guarded archive omitted `.crabbox.yaml`; the packager now includes it
   explicitly and requires a same-head retry.
+- Preliminary ReviewGPT completed on `9386cc0175` with three coverage findings.
+  Its tests-only `reviewgpt-coverage.patch` was inspected, applied, and passed
+  the focused repo-tools/typecheck and CLI packaging-owner suites. Per policy,
+  the substantive preliminary pass is not rerun after accepted coverage fixes.
 
 Status: active
 Updated: 2026-07-22

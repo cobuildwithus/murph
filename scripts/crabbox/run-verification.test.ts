@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -167,6 +168,40 @@ describe("Crabbox verification environment", () => {
         PATH: "/usr/bin:/bin",
       },
     )).toContain("trusted Testbox entrypoint");
+  });
+
+  it("fails closed before starting candidate-controlled child commands", () => {
+    const tempRoot = makeTempRoot();
+    const binDir = path.join(tempRoot, "bin");
+    const childMarkerPath = path.join(tempRoot, "child-started");
+    for (const command of ["corepack", "bash"]) {
+      writeExecutable(
+        path.join(binDir, command),
+        [
+          "#!/bin/sh",
+          `: > ${shellQuote(childMarkerPath)}`,
+          "exit 0",
+        ].join("\n"),
+      );
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [runnerPath, "test:diff", "scripts/verification-dispatch.mjs"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ACTIONS_RUNTIME_TOKEN: "ambient-actions-token",
+          HOME: path.join(tempRoot, "home"),
+          PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
+        },
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("trusted Testbox entrypoint");
+    expect(existsSync(childMarkerPath)).toBe(false);
   });
 });
 

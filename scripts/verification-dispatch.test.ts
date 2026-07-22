@@ -132,23 +132,36 @@ describe("verification dispatcher", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const capturePath = path.join(tempRoot, "args.txt");
+    const crabboxProbeCapturePath = path.join(tempRoot, "crabbox-probe-env.txt");
+    const blacksmithProbeCapturePath = path.join(tempRoot, "blacksmith-probe-env.txt");
     const envCapturePath = path.join(tempRoot, "env-allow.txt");
     const secretCapturePath = path.join(tempRoot, "secret-env.txt");
     const sentinelCapturePath = path.join(tempRoot, "sentinel.txt");
+    const expectedSanitizedProbeEnvironment = "unset\n".repeat(10);
     const fakeCrabboxPath = path.join(binDir, "crabbox");
     const fakeBlacksmithPath = path.join(binDir, "blacksmith");
     writeExecutable(
       fakeCrabboxPath,
       [
         "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
+        'if [ "${1:-}" = "--version" ]; then',
+        `  printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(crabboxProbeCapturePath)}`,
+        "  exit 0",
+        "fi",
         `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
         `printf "%s" "\${CRABBOX_ENV_ALLOW-unset}" > ${shellQuote(envCapturePath)}`,
         `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(secretCapturePath)}`,
         `printf "%s" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(sentinelCapturePath)}`,
       ].join("\n"),
     );
-    writeExecutable(fakeBlacksmithPath, "#!/bin/sh\nexit 0");
+    writeExecutable(
+      fakeBlacksmithPath,
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(blacksmithProbeCapturePath)}`,
+        "exit 0",
+      ].join("\n"),
+    );
     writeExecutable(path.join(binDir, "git"), "#!/bin/sh\nexit 0");
 
     const result = spawnSync(
@@ -160,6 +173,7 @@ describe("verification dispatcher", () => {
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
           CODEX_THREAD_ID: "thread-1",
+          CI: "",
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
           CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
           CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
@@ -177,6 +191,12 @@ describe("verification dispatcher", () => {
 
     expect(result.status, result.stderr).toBe(0);
     const args = readFileSync(capturePath, "utf8").trim().split("\n");
+    expect(readFileSync(crabboxProbeCapturePath, "utf8")).toBe(
+      expectedSanitizedProbeEnvironment,
+    );
+    expect(readFileSync(blacksmithProbeCapturePath, "utf8")).toBe(
+      expectedSanitizedProbeEnvironment,
+    );
     expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
     expect(readFileSync(secretCapturePath, "utf8")).toBe(
       "unset\nunset\nunset\nunset\nunset\nunset\n",
