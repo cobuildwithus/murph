@@ -988,9 +988,6 @@ export async function selectNovelIntegrationIngestEvidence(
         if (decision === "unsafe") {
           return failOpenSelection();
         }
-        if (decision === "complete") {
-          return { parts: [], receiptIsNovel: false };
-        }
       }
     } catch {
       return failOpenSelection();
