@@ -176,6 +176,7 @@ function createRun(
     status: "finished",
     statusLabel: "Completed",
     tags: ["sleep"],
+    timingKnown: true,
     timeline: [],
     title: "Red Light Glasses Before Bed",
     trends: [{

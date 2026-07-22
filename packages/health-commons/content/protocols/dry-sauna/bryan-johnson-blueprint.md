@@ -219,8 +219,8 @@ testPlans:
 
   -
     planId: source-attributed-rhr-hrv-21d
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: biomarker:resting-heart-rate
     secondaryBiomarkerKeys:

@@ -55,7 +55,7 @@ attribution:
   ownerType: murph
   note: Drafted from the Daily Step Floor research workspace and canonical ledger in the supplied snapshot.
 protocol:
-  doseSignature: 7–14 day baseline · chosen daily step floor · 28 day intervention · one consistent step source
+  doseSignature: 14 day baseline · chosen daily step floor · 28 day intervention · one consistent step source
   target: A daily total-step floor chosen from recent baseline, safety constraints, and burden tier; cadence or MVPA is optional logging, not part of the canonical dose.
   frequency:
     sessionsPerWeek: 7
@@ -63,7 +63,7 @@ protocol:
   interventionSessionsTarget: 28
   steps:
     - "Pick 1 step source—phone, watch, wearable, or pedometer—and keep placement and wear/carry rules stable."
-    - "Observe baseline 7–14 days before raising the target; use lower floors or guidance when safety context is uncertain."
+    - "Observe baseline for 14 days before raising the target; use lower floors or guidance when safety context is uncertain."
     - "Choose floor before day 1: baseline-only, baseline +1,000–2,000, fixed 6k/8k/10k/12k, or custom ramp."
     - "Set fallback rule for poor sleep, illness, pain, heat, hazardous routes, travel, or disruption."
     - "Fill the step gap safely with errands, indoor laps, breaks, commute walking, or an easy planned walk."
@@ -71,7 +71,7 @@ protocol:
     - "Log steps, floor hit, device gaps, intentional walking, pain, symptoms, recovery, sleep, illness, terrain, and confounders."
     - "Review weekly; lower, slow, or stop if pain, recovery, safety, sleep, or life friction worsens."
   tips:
-  - Baseline first: wear the same tracker 7–14 days before raising your floor.
+  - Baseline first: wear the same tracker for 14 days before raising your floor.
   - Set a floor from baseline: baseline-only, +1,000–2,000, 6k, 8k, 10k, 12k, or a ramp.
   - Fill gaps early with errands, indoor laps, walking breaks, commute walks, or one easy planned walk.
   - Use fallback days for poor sleep, illness, pain, heat, travel, unsafe routes, or recovery debt.
@@ -304,15 +304,6 @@ experimentOnboarding:
       target:
         object: "protocol"
         field: "stepSource"
-    - id: "baseline_window"
-      label: "Baseline window"
-      question: "Use a 7-day or 14-day baseline before setting the floor?"
-      options:
-        - "seven_days"
-        - "fourteen_days"
-      target:
-        object: "analysisPlan"
-        field: "baselineWindow"
     - id: "floor_tier"
       label: "Step-floor tier"
       question: "Which floor tier should the experiment use?"

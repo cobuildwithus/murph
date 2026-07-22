@@ -50,7 +50,7 @@ attribution:
   ownerType: murph
   note: Drafted from the 2026-04-27 Cold Plunge research restart package, canonical source ledger, extracted source findings, and standalone source-protocol evidence appraisals.
 protocol:
-  doseSignature: 'Murph conservative field-test starting dose: 2–3x/week · measured 10–15 °C water · 1–3 min head-out immersion · 7-day baseline + 14-day intervention; not an evidence-proven optimal dose'
+  doseSignature: 'Murph conservative field-test starting dose: 2–3x/week · measured 10–15 °C water · 1–3 min head-out immersion · 14-day baseline + 14-day intervention; not an evidence-proven optimal dose'
   target: A repeatable, uncomfortable-but-controlled head-out immersion that keeps breathing controllable and allows an immediate self-exit.
   frequency:
     sessionsPerWeek: 3
@@ -176,8 +176,8 @@ protocol:
   - 'Any stop condition occurs: exit immediately, end the session, do not repeat the next session until the cause is resolved; seek urgent/emergency help for chest symptoms, fainting, confusion, severe breathlessness, swelling/throat tightness/wheeze, suspected submersion/aspiration, or inability to rewarm.'
 testPlans:
 - planId: mood-safety-21d
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: biomarker:self-reported-mood
   secondaryBiomarkerKeys:
@@ -1170,9 +1170,9 @@ After a stable baseline, does a short block of **controlled, head-out cold plung
 
 ## Simple version
 
-Run a 21-day experiment:
+Run a 28-day experiment:
 
-- **7 baseline days**
+- **14 baseline days**
 - **14 intervention days**
 - **2–3 cold-plunge sessions per week**
 - **6 target sessions**, with **4 sessions** as the minimum for a useful first read

@@ -390,14 +390,14 @@ attribution:
   ownerType: murph
   note: Synthesized from the no-added-sugar-diet research run using the canonical source ledger and source extraction batches dated 2026-04-25.
 protocol:
-  doseSignature: Daily · label-defined no added sugars · Murph default 7-day baseline + 21-day intervention
+  doseSignature: Daily · label-defined no added sugars · Murph default 14-day baseline + 21-day intervention
   target: Use 0 g Added Sugars on labels as an experiment boundary, not a health threshold; when reasonable, avoid unlabeled sources while preserving meals, calories/carbs, fluids, fruit, dairy, starches/legumes, and required medical nutrition.
   frequency:
     sessionsPerDay: 1
   interventionSessionsMinimum: 14
   interventionSessionsTarget: 21
   steps:
-    - "Baseline 7 days: eat normally and log estimated added-sugar intake."
+    - "Baseline 14 days: eat normally and log estimated added-sugar intake."
     - "Choose boundary before day 1: label-defined Added Sugars, or stricter free-sugar boundary."
     - "Identify recurring sugar sources; finish, move, replace, or set planned exceptions without skipping meals or discarding needed food."
     - "Replace obvious daily sources first, especially sweet drinks; avoid default swaps to juice, fasting, meal skipping, or sweetener overload."
@@ -406,7 +406,7 @@ protocol:
     - "Keep regular meals, protein, fiber-rich carbs, fruit, dairy/alternatives, legumes, starches, and hydration in place."
     - "Daily, log added-sugar grams, biggest source avoided/consumed, replacements, cravings, symptoms, social friction, and exceptions."
   tips:
-  - Baseline normally for 7 days; log labels, drinks, sauces, desserts, and likely unlabeled added sugar.
+  - Baseline normally for 14 days; log labels, drinks, sauces, desserts, and likely unlabeled added sugar.
   - Choose the boundary before day 1: Added Sugars label only, or stricter free-sugar.
   - Replace sweet drinks first: water, seltzer, unsweetened tea, coffee, milk, or plain yogurt.
   - Keep meals normal: protein, fruit, dairy, legumes, starches, vegetables, and fluids stay in.
@@ -417,7 +417,7 @@ protocol:
   - Many supporting studies use free-sugar, sugar-sweetened-beverage, pediatric, clinical, or substitution designs; these are adjacent to, not identical with, a strict adult no-added-sugar diet.
   - Pregnancy, children, diabetes medication, underweight or frailty, heavy athletic training, and eating-disorder history need a clinician-aligned or adapted approach.
   - This protocol should feel like a bounded measurement experiment, not a moral rule about food.
-  - 'The 0 g/day boundary, 7/21-day structure, and 14-session minimum are Murph run-quality defaults, not evidence-derived clinical thresholds; extracted interventions used heterogeneous windows including short counseling/logging, 4-week, 8-week, and 12-week designs.'
+  - 'The 0 g/day boundary, 14/21-day structure, and 14-session minimum are Murph run-quality defaults, not evidence-derived clinical thresholds; extracted interventions used heterogeneous windows including short counseling/logging, 4-week, 8-week, and 12-week designs.'
   - Adherence targets never override stop conditions; treating low blood sugar or eating enough food counts as safety care, not failure.
   - A stricter free-sugar boundary is not a default upgrade; it is a separate boundary choice and should be avoided in special-population, medical-diet, food-insecurity, or underfueling contexts unless clinician-guided.
   - Omit weight, waist, or glucose tracking if the measurement itself increases distress, restriction, compulsion, or unsafe behavior.
@@ -471,8 +471,8 @@ protocol:
 testPlans:
 -
   planId: added-sugar-intake-28d
-  durationDays: 28
-  baselineDays: 7
+  durationDays: 35
+  baselineDays: 14
   interventionDays: 21
   primaryBiomarkerKey: biomarker:body-weight
   secondaryBiomarkerKeys:
@@ -497,7 +497,7 @@ testPlans:
   minimumAdherenceSessions: 21
   targetAdherenceSessions: 28
   notes:
-  - Use this longer plan when the user wants a steadier baseline, has irregular restaurant or travel weeks, or wants more stable weight and waist context.
+  - Use this longer intervention when the user has irregular restaurant or travel weeks or wants more stable weight and waist context.
   - Do not use the longer plan to promise disease-risk changes; distal outcomes remain research context rather than personal self-experiment endpoints.
 expectedSignalDescriptions:
 -
@@ -630,7 +630,7 @@ experimentOnboarding:
         field: "reminderPolicy"
   planDefaults:
     testPlanId: "added-sugar-intake-28d"
-    firstSessionGuidance: "Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise keep the run as exposure logging plus safety and livability review instead of a biomarker-outcome test. The 7/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds."
+    firstSessionGuidance: "Start with logging and replacing the biggest obvious sources; do not make the diet smaller, stricter, or lower-carb. Use the body-weight-primary plan only when weekly weight tracking is safe and available; otherwise keep the run as exposure logging plus safety and livability review instead of a biomarker-outcome test. The 14/21-day plan and 14-session minimum are Murph run-quality defaults, not clinical thresholds."
   adaptationPolicy:
     fields:
       - id: "measurement_plan"

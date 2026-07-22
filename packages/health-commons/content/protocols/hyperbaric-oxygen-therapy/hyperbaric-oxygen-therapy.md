@@ -609,8 +609,8 @@ testPlans:
 
   -
     planId: "clinician-supervised-hbot-recovery-49d"
-    durationDays: 49
-    baselineDays: 7
+    durationDays: 56
+    baselineDays: 14
     interventionDays: 42
     primaryBiomarkerKey: "biomarker:morning-blood-pressure"
     secondaryBiomarkerKeys:
