@@ -1,6 +1,6 @@
 # Clarify onboarding goals and preserve their meaning
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -31,7 +31,8 @@ Updated: 2026-07-22
 ## Scope
 
 - `packages/assistant-engine/skills/murph-onboarding/SKILL.md`
-- Focused assistant-engine prompt/skill regression tests.
+- `packages/assistant-engine/test/assistant-skill-assets.test.ts`
+- `packages/assistant-engine/test/model-behavior.test.ts`
 - `agent-docs/product-specs/murph-onboarding.md` for the durable product and
   persistence contract.
 
@@ -69,3 +70,21 @@ Updated: 2026-07-22
 - The stable system prompt already owns the canonical Apple Health App Store
   URL and states that the iOS app can connect Apple Health; the onboarding
   skill does not yet offer that path after a no-source answer.
+
+## Completion evidence
+
+- Focused assistant-engine verification passed: 2 files and 93 tests.
+- Product-experience review returned no findings.
+- Preliminary specialist ReviewGPT identified three issues. The implementation
+  now makes outcome, progress signal, and reason an explicit completion
+  contract; derives wearable examples only from the live hosted-provider list;
+  and adds deterministic prompt regressions for one, several, and absent
+  providers. The suggested paid real-model test was not added because the
+  existing opt-in seam does not exercise production onboarding state, history,
+  vault persistence, or skill injection; that broader evaluation remains a
+  separate production-faithful test-harness task.
+- `pnpm verify:acceptance` passed in an isolated Blacksmith Testbox after the
+  final prompt and regression changes.
+- The reviewed change is published as draft PR #869; the final head will be
+  marked ready after this plan is archived.
+Completed: 2026-07-22
