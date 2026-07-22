@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
 import { DeviceSyncCompletionDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -77,6 +78,8 @@ import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-e
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
+import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -602,6 +605,31 @@ export function ComponentsContent() {
             ) : null}
           </Section>
         </div>
+
+        <Separator />
+
+        <Section title="Usage credit">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Group funding uses one shared card and the standard usage-credit
+            amount dialog. Credit is added only after payment is complete.
+          </p>
+          <div
+            className="max-w-xl"
+            data-design-component="group-usage-funding"
+            id="group-usage-funding-component"
+          >
+            <GroupUsageFundingCard
+              action={
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  scope="group"
+                />
+              }
+              groupName="Sunday sleep crew"
+            />
+          </div>
+        </Section>
 
         <Separator />
 

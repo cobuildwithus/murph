@@ -38,6 +38,21 @@ describe('experiment onboarding skill guidance', () => {
     )
   }
 
+  async function readSelfManagementExperimentsSkill() {
+    const skill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'self-management-experiments',
+    )
+    expect(skill).toBeTruthy()
+    if (!skill) {
+      throw new Error('self-management-experiments skill is not registered')
+    }
+
+    return readFile(
+      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
+      'utf8',
+    )
+  }
+
   it('requires every resolved safety question before any active start', async () => {
     const raw = await readExperimentOnboardingSkill()
 
@@ -50,6 +65,35 @@ describe('experiment onboarding skill guidance', () => {
       'write `--onboarding-completed-at` only after every question was answered',
     )
     expect(raw).toContain('Never activate a run with a blocking disposition')
+  })
+
+  it('prefers a two-week baseline for custom repeated-measurement runs', async () => {
+    const onboarding = await readExperimentOnboardingSkill()
+    const selfManagement = await readSelfManagementExperimentsSkill()
+
+    expect(onboarding).toContain(
+      'For a custom repeated-measurement run, prefer a 14-day prospective baseline',
+    )
+    expect(onboarding).toContain('pass `--baseline-days 14`')
+    expect(onboarding).toContain(
+      'Use a shorter or absent prospective baseline only when the design has a concrete reason',
+    )
+    expect(onboarding).toContain(
+      'Preserve the planned intervention window when changing baseline length.',
+    )
+    expect(selfManagement).toContain(
+      'let `experiment-onboarding` own baseline timing and never override a selected Health Commons test plan',
+    )
+    expect(selfManagement).toContain(
+      'the resolved protocol or `experiment-onboarding` decision allows a shorter baseline for a concrete design reason',
+    )
+    expect(selfManagement).not.toContain('14-day')
+    expect(selfManagement).not.toContain(
+      'Do not wait for perfect certainty or a long baseline when a low-risk reversible test can start now.',
+    )
+    expect(selfManagement).not.toContain(
+      'Use when natural variation is high and the intervention effect is not immediate.',
+    )
   })
 
   it('requires first-session prep to include a compact walkthrough', async () => {

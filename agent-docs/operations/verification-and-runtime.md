@@ -134,6 +134,13 @@ before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
+For every user-facing `apps/web` UI diff, verification also includes
+`pnpm test:frontend-design-proof`, a production-component update on
+`/design?tab=components` or a composed-section update on
+`/design?tab=sections`, and desktop and mobile screenshots from that catalog
+surface in the pull request. The pull-request workflow repeats the policy check
+against the final base-to-head diff and PR body.
+
 ## Scoped Verification Mode
 
 The text-only docs/process fast path above is not a scoped-verification exception. It is the default verification rule for eligible Markdown-only docs work.

@@ -105,8 +105,13 @@ vi.mock("@/src/components/ui/dialog", async () => {
     DialogDescription: passthrough("p"),
     DialogHeader: passthrough("div"),
     DialogTitle: passthrough("h2"),
-    DialogTrigger(props: { children?: React.ReactNode }) {
-      return React.createElement("div", null, props.children);
+    DialogTrigger(props: {
+      children?: React.ReactNode;
+      render?: React.ReactElement;
+    }) {
+      return props.render
+        ? React.cloneElement(props.render, undefined, props.children)
+        : React.createElement("div", null, props.children);
     },
   };
 });
@@ -293,6 +298,11 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /\$8\.42/);
     assert.match(markup, /usage credit remaining/);
     assert.match(markup, /Add usage/);
+    const addUsageButton = markup.match(/<button[^>]*>Add usage<\/button>/u)?.[0];
+    assert.ok(addUsageButton);
+    assert.match(addUsageButton, /\bh-11\b/u);
+    assert.match(addUsageButton, /\bborder-foreground\/20\b/u);
+    assert.doesNotMatch(addUsageButton, /\bw-full\b/u);
   });
 
   test("renders server-projected top-up offers without duplicating billing eligibility", async () => {

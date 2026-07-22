@@ -93,12 +93,21 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(">Sections<");
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
+  expect(sectionsMarkup).toContain("Group usage funding");
   expect(sectionsMarkup).toContain("Biomarker detail");
   expect(sectionsMarkup).toContain("Boundary result detail");
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
+  expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
+  expect(sectionsMarkup).toContain("Sunday sleep crew");
+  expect(sectionsMarkup).toContain("Add group credit");
+  expect(sectionsMarkup).toContain("Choose amount");
+  expect(sectionsMarkup).toContain("personal-usage-credit-owner");
+  expect(sectionsMarkup).toContain("Pulse included AI usage");
+  expect(sectionsMarkup).toContain("Static owner-layout preview");
+  expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
   navigationMocks.tab = "components";
@@ -111,6 +120,16 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
+  expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain("Sunday sleep crew");
+  expect(componentsMarkup).toContain("Add group credit");
+  expect(componentsMarkup).toContain("Choose amount");
+  expect(componentsMarkup).toMatch(
+    /data-slot="radio-group-item"[^>]*class="[^"]*sr-only/u,
+  );
+  expect(componentsMarkup).toContain(
+    "group-has-data-checked/choice-card:text-primary-foreground",
+  );
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
 });
