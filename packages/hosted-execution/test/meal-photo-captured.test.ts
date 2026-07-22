@@ -15,6 +15,10 @@ describe("meal-photo.captured hosted execution wake", () => {
       byteLength: 1024,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
+      directRoute: {
+        channel: "linq",
+        threadId: "linq_home_thread_synthetic",
+      },
       eventId: "meal-photo:enrollment:capture",
       mealPhotoKey: "meal_photo_opaque_key",
       memberId: "member_synthetic_001",
@@ -25,6 +29,22 @@ describe("meal-photo.captured hosted execution wake", () => {
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
     expect(isHostedSystemWake(wake)).toBe(true);
     expect(isHostedMailboxKind(wake.kind)).toBe(true);
+  });
+
+  it("accepts legacy wakes without route proof for coordinated rollout", () => {
+    const wake = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 1024,
+      captureId: CAPTURE_ID,
+      capturedAt: CAPTURED_AT,
+      eventId: "meal-photo:enrollment:legacy-capture",
+      mealPhotoKey: "meal_photo_opaque_key",
+      memberId: "member_synthetic_001",
+      occurredAt: CAPTURED_AT,
+      sha256: SHA256,
+    });
+
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(wake.directRoute).toBeUndefined();
   });
 
   it("rejects drifted timestamps and malformed integrity metadata", () => {

@@ -144,7 +144,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
   const readCurrentLease = input.readCurrentLease
     ?? (() => createHostedRuntimeBridgeLeaseFromWorkspaceRequest(input.request));
   const runtime = normalizeHostedAssistantRuntimeConfig(input.runtime, input.platform);
-  const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(vaultRoot);
   const decodeMailboxPayload = input.decodeMailboxPayload;
   if (!decodeMailboxPayload) {
     throw new Error("Hosted mailbox payload decoder is required for this invocation.");
@@ -196,7 +195,6 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
     },
     importItem: createHostedWorkspaceBridgeMailboxImporter({
       decodeMailboxPayload,
-      operatorHomeRoot,
       runtime,
       vaultRoot,
     }),

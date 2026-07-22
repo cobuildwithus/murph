@@ -48,7 +48,6 @@ afterEach(async () => {
 describe("hosted meal photo mailbox import", () => {
   it("imports one canonical meal idempotently and deletes staging only after checkpoint", async () => {
     const vaultRoot = await createTestVault();
-    const operatorHomeRoot = path.join(path.dirname(vaultRoot), "operator-home");
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);
     const deleteMealPhoto = vi.fn(async () => undefined);
     const effectsPort = createEffectsPort({ deleteMealPhoto, readMealPhoto });
@@ -58,7 +57,6 @@ describe("hosted meal photo mailbox import", () => {
     const first = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item,
-      operatorHomeRoot,
       vaultRoot,
       wake,
     });
@@ -80,7 +78,6 @@ describe("hosted meal photo mailbox import", () => {
     const replay = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item,
-      operatorHomeRoot,
       vaultRoot,
       wake,
     });
@@ -92,7 +89,15 @@ describe("hosted meal photo mailbox import", () => {
     expect(
       mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
     ).toHaveBeenCalledWith({
-      operatorHomeRoot,
+      defaultRoute: {
+        channel: "linq",
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: "linq_home_thread",
+        threadIsDirect: true,
+      },
       routeValidationProfile: "hosted",
       vaultRoot,
     });
@@ -121,7 +126,6 @@ describe("hosted meal photo mailbox import", () => {
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item: createMealPhotoMailboxItem(),
-      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -145,7 +149,6 @@ describe("hosted meal photo mailbox import", () => {
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort: createEffectsPort(),
       item: createMealPhotoMailboxItem(),
-      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -169,7 +172,6 @@ describe("hosted meal photo mailbox import", () => {
     const first = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item: createMealPhotoMailboxItem(),
-      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -191,7 +193,6 @@ describe("hosted meal photo mailbox import", () => {
     const retry = await importHostedMealPhotoCapturedMailboxItem({
       effectsPort,
       item: createMealPhotoMailboxItem(),
-      operatorHomeRoot: path.join(path.dirname(vaultRoot), "operator-home"),
       vaultRoot,
       wake: createMealPhotoWake(),
     });
@@ -201,6 +202,24 @@ describe("hosted meal photo mailbox import", () => {
     expect(
       mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
     ).toHaveBeenCalledTimes(2);
+  });
+
+  it("imports a legacy capture without installing an unproven delivery route", async () => {
+    const vaultRoot = await createTestVault();
+    const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+
+    const outcome = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({ readMealPhoto }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(null),
+    });
+
+    expect(outcome.status).toBe("imported");
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    expect(
+      mealPhotoImportMocks.ensureAutomaticMealCloseoutAutomation,
+    ).not.toHaveBeenCalled();
   });
 });
 
@@ -215,11 +234,17 @@ async function createTestVault(): Promise<string> {
   return vaultRoot;
 }
 
-function createMealPhotoWake() {
+function createMealPhotoWake(
+  directRoute: { channel: "linq" | "telegram"; threadId: string } | null = {
+    channel: "linq",
+    threadId: "linq_home_thread",
+  },
+) {
   return buildHostedExecutionMealPhotoCapturedWake({
     byteLength: JPEG_BYTES.byteLength,
     captureId: CAPTURE_ID,
     capturedAt: CAPTURED_AT,
+    ...(directRoute ? { directRoute } : {}),
     eventId: "meal-photo:enrollment:capture",
     mealPhotoKey: "meal_photo_opaque_key",
     memberId: "member_synthetic_001",

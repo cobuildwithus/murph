@@ -338,10 +338,12 @@ describe("parseHostedExecutionEvent", () => {
     expect(parseHostedExecutionExternalThreadRouteAuthority({
       channel: "linq",
       containerMemberId: "member_container_123",
+      threadIsDirect: true,
       threadId: "chat_123",
     })).toEqual({
       channel: "linq",
       containerMemberId: "member_container_123",
+      threadIsDirect: true,
       threadId: "chat_123",
     });
   });

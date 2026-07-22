@@ -9,10 +9,14 @@ import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
+  readHostedMemberRoutingState,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import {
   jsonOk,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
+  assertActiveHostedThreadRouteContainerAccess,
   assertHostedThreadRouteEgressAuthority,
 } from "@/src/lib/hosted-routing/thread-route-store";
 import { readOptionalJsonObject } from "@/src/lib/http";
@@ -36,9 +40,42 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  await assertHostedThreadRouteEgressAuthority({
-    authority,
-    prisma: getPrisma(),
-  });
+  const prisma = getPrisma();
+  if (authority.threadIsDirect === true) {
+    if (authority.channel !== "telegram") {
+      throwHostedThreadRouteEgressUnauthorized();
+    }
+    const routing = await readHostedMemberRoutingState({
+      memberId,
+      prisma,
+    });
+    const directThreadId = normalizeRouteId(routing?.telegramThreadId);
+    if (directThreadId !== authority.threadId) {
+      throwHostedThreadRouteEgressUnauthorized();
+    }
+    await assertActiveHostedThreadRouteContainerAccess({
+      containerMemberId: memberId,
+      prisma,
+    });
+  } else {
+    await assertHostedThreadRouteEgressAuthority({
+      authority,
+      prisma,
+    });
+  }
   return jsonOk({ authorized: true });
 });
+
+function normalizeRouteId(value: string | null | undefined): string | null {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  return normalized.length > 0 ? normalized : null;
+}
+
+function throwHostedThreadRouteEgressUnauthorized(): never {
+  throw hostedOnboardingError({
+    code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED",
+    httpStatus: 403,
+    message: "Hosted thread route is not authorized for this runtime.",
+    retryable: false,
+  });
+}

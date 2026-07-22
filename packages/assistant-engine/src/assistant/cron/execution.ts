@@ -38,6 +38,7 @@ import {
 } from '../automation/shared.js'
 import type { AssistantExecutionContext } from '../execution-context.js'
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY,
 } from '../managed-automations.js'
@@ -713,12 +714,15 @@ export async function executeClaimedAssistantCronJob(
               shouldYield: input.shouldYield ?? null,
             })
           }
+          const directAudienceRequired =
+            assistantCronJobRequiresDirectAudience(input.job)
           const authorizedDelivery = maintenanceJob
             ? {
                 externalThreadRouteAuthority: null,
                 route: resolveAssistantCronNotificationDeliveryRoute(claimedJob.target),
               }
             : await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                directAudienceRequired,
                 executionContext: input.executionContext ?? null,
                 signal: yieldCancellation.signal,
                 target: claimedJob.target,
@@ -748,9 +752,13 @@ export async function executeClaimedAssistantCronJob(
               vault: input.vault,
             })
 
-            if (notificationExecutionContext?.hosted?.groupTool) {
+            if (
+              directAudienceRequired
+              || notificationExecutionContext?.hosted?.groupTool
+            ) {
               const currentAuthorizedDelivery =
                 await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                  directAudienceRequired,
                   executionContext: input.executionContext ?? null,
                   signal: yieldCancellation.signal,
                   target: claimedJob.target,
@@ -765,13 +773,18 @@ export async function executeClaimedAssistantCronJob(
                   ?? currentRoute.deliveryTarget,
               )
               if (
-                currentRoute.threadIsDirect !== false
+                currentRoute.threadIsDirect
+                  !== (directAudienceRequired ? true : false)
                 || !expectedTarget
                 || currentTarget !== expectedTarget
               ) {
                 throw new VaultCliError(
-                  'ASSISTANT_CRON_GROUP_ROUTE_STALE',
-                  'Scheduled group route changed before the next tool or delivery.',
+                  directAudienceRequired
+                    ? 'ASSISTANT_CRON_PRIVATE_ROUTE_STALE'
+                    : 'ASSISTANT_CRON_GROUP_ROUTE_STALE',
+                  directAudienceRequired
+                    ? 'Scheduled private route changed before the next tool or delivery.'
+                    : 'Scheduled group route changed before the next tool or delivery.',
                   { retryable: true },
                 )
               }
@@ -2147,6 +2160,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
 }
 
 async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
+  directAudienceRequired: boolean
   executionContext: AssistantExecutionContext | null
   signal: AbortSignal
   target: AssistantCronJob['target']
@@ -2156,11 +2170,27 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
 }> {
   const route = resolveAssistantCronNotificationDeliveryRoute(input.target)
+  if (
+    input.directAudienceRequired
+    && (
+      (input.target.channel !== 'linq' && input.target.channel !== 'telegram')
+      || route.threadIsDirect !== true
+    )
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_PRIVATE_ROUTE_REQUIRED',
+      'Automatic meal closeout requires a verified private Linq or Telegram route.',
+      { retryable: true },
+    )
+  }
   if (assistantCronExecutionDeliveryTargetProfile(input) !== 'hosted') {
     return { externalThreadRouteAuthority: null, route }
   }
 
-  if (input.target.channel === 'telegram' && route.threadIsDirect === false) {
+  if (
+    input.target.channel === 'telegram'
+    && (route.threadIsDirect === false || input.directAudienceRequired)
+  ) {
     const target = normalizeNullableString(
       route.deliveryTarget ?? route.bindingDelivery?.target,
     )
@@ -2183,15 +2213,20 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       channel: 'telegram',
       signal: input.signal,
       target,
+      ...(input.directAudienceRequired ? { threadIsDirect: true } : {}),
     })
     if (
       authority.channel !== 'telegram'
       || normalizeNullableString(authority.containerMemberId) === null
+      || (
+        input.directAudienceRequired
+        && authority.threadIsDirect !== true
+      )
       || normalizeNullableString(authority.threadId) !== target
     ) {
       throw new VaultCliError(
         'ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE',
-        'Hosted group delivery requires exact thread route authority before provider work.',
+        'Hosted Telegram delivery requires exact thread route authority before provider work.',
         { retryable: true },
       )
     }
@@ -2243,6 +2278,13 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       { retryable: true },
     )
   }
+  if (input.directAudienceRequired && authority.threadIsDirect !== true) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_PRIVATE_ROUTE_REQUIRED',
+      'Automatic meal closeout requires current direct-message authority before provider work.',
+      { retryable: true },
+    )
+  }
 
   const bindingDelivery = route.bindingDelivery
     ? {
@@ -2261,6 +2303,15 @@ async function resolveAssistantCronAuthorizedNotificationDeliveryRoute(input: {
       threadIsDirect: authority.threadIsDirect,
     },
   }
+}
+
+function assistantCronJobRequiresDirectAudience(
+  job: ResolvedAssistantCronJob,
+): boolean {
+  return job.kind === 'canonical'
+    && job.source.kind === 'automation'
+    && job.source.automationId
+      === MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
 }
 
 class AssistantCronForegroundYieldedError extends VaultCliError {

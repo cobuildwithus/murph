@@ -120,6 +120,7 @@ export interface HostedExecutionExternalThreadRouteAuthority {
   accountLookupKey?: string | null;
   channel: HostedExecutionExternalThreadRouteChannel;
   containerMemberId: string;
+  threadIsDirect?: boolean;
   threadId: string;
 }
 
@@ -676,7 +677,13 @@ export interface HostedExecutionMealPhotoCapturedPayload {
   sha256: string;
 }
 
+export interface HostedExecutionMealPhotoCapturedDirectRoute {
+  channel: "linq" | "telegram";
+  threadId: string;
+}
+
 export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  directRoute?: HostedExecutionMealPhotoCapturedDirectRoute | null;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }

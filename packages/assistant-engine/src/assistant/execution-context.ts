@@ -398,6 +398,7 @@ export interface AssistantHostedExecutionContext {
     channel: 'telegram'
     signal?: AbortSignal | null
     target: string
+    threadIsDirect?: boolean
   }): Promise<HostedExecutionExternalThreadRouteAuthority>
   usageRecorder?: AssistantUsageRecorder | null
   userEnvKeys: readonly string[]

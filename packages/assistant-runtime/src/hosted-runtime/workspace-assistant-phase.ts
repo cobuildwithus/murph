@@ -1368,6 +1368,7 @@ export async function runHostedWorkspaceAssistantPhase(
           channel,
           signal,
           target,
+          threadIsDirect,
         }) => {
           const assertAuthority =
             input.runtime.platform.effectsPort.assertExternalThreadRouteAuthority;
@@ -1381,6 +1382,7 @@ export async function runHostedWorkspaceAssistantPhase(
           const authority = {
             channel,
             containerMemberId: input.request.userId,
+            ...(threadIsDirect === undefined ? {} : { threadIsDirect }),
             threadId: target,
           } as const;
           await assertAuthority(authority, { signal });

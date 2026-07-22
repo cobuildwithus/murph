@@ -27,7 +27,6 @@ const MEAL_PHOTO_EXTERNAL_RESOURCE_TYPE = "photo";
 export async function importHostedMealPhotoCapturedMailboxItem(input: {
   effectsPort: HostedRuntimeEffectsPort;
   item: HostedMailboxResolvedImportItem;
-  operatorHomeRoot: string;
   vaultRoot: string;
   wake: HostedExecutionMealPhotoCapturedWake;
 }): Promise<HostedMailboxItemImportOutcome> {
@@ -71,7 +70,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
       return blockedMealPhotoImport("meal_photo.capture_conflict", false);
     }
     if (!(await automaticMealCloseoutIsReady({
-      operatorHomeRoot: input.operatorHomeRoot,
+      directRoute: input.wake.directRoute ?? null,
       vaultRoot: input.vaultRoot,
     }))) {
       return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
@@ -134,7 +133,7 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
   }
 
   if (!(await automaticMealCloseoutIsReady({
-    operatorHomeRoot: input.operatorHomeRoot,
+    directRoute: input.wake.directRoute ?? null,
     vaultRoot: input.vaultRoot,
   }))) {
     return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
@@ -144,12 +143,26 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
 }
 
 async function automaticMealCloseoutIsReady(input: {
-  operatorHomeRoot: string;
+  directRoute: HostedExecutionMealPhotoCapturedWake["directRoute"];
   vaultRoot: string;
 }): Promise<boolean> {
+  // Old Web producers did not carry a private route. Import those already-
+  // durable captures without creating an automation; the first routed
+  // capture after the coordinated rollout installs it safely.
+  if (!input.directRoute) {
+    return true;
+  }
   try {
     await ensureAutomaticMealCloseoutAutomation({
-      operatorHomeRoot: input.operatorHomeRoot,
+      defaultRoute: {
+        channel: input.directRoute.channel,
+        deliverySource: null,
+        deliveryTarget: null,
+        identityId: null,
+        participantId: null,
+        threadId: input.directRoute.threadId,
+        threadIsDirect: true,
+      },
       routeValidationProfile: "hosted",
       vaultRoot: input.vaultRoot,
     });

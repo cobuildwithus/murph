@@ -3026,6 +3026,15 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
     })
+    await expect(deliverAssistantOutboxMessage({
+      ...deliveryInput,
+      externalThreadRouteAuthority: {
+        ...routeAuthority,
+        threadIsDirect: true,
+      },
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_OUTBOX_DEDUPE_EFFECT_MISMATCH',
+    })
     await expect(
       readAssistantOutboxIntent(vaultRoot, queued.intent.intentId),
     ).resolves.toMatchObject({
