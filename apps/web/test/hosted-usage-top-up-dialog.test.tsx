@@ -306,6 +306,41 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   }
 });
 
+test("names the exact Family beneficiary in the trigger and dialog", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      offers: usageCreditOffers(),
+      scope: "family",
+      targetLabel: "Family member",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const trigger = buttonByText(rendered.container, "Add usage");
+    assert.equal(
+      trigger.getAttribute("aria-label"),
+      "Add usage for Family member",
+    );
+
+    await clickButton(rendered.container, rendered.window, "Add usage");
+
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "Add usage for Family member",
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Choose how much usage credit to add for Family member in a one-time payment\./,
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("opens an honest unavailable state when a deep link has no current offers", async () => {
   const { HostedUsageTopUpDialog } = await import(
     "@/src/components/settings/hosted-usage-top-up-dialog"
@@ -1439,7 +1474,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
     }),
     {
       location: {
-        href: "https://example.test/settings?usagePurchase=hucp_return&usageCheckout=success&keep=1#subscription",
+        href: "https://example.test/settings?usagePurchase=hucp_return&usageCheckout=success&usageFamily=hbag_abcdefghijklmnop&usageMember=member_family&keep=1#family",
       },
       requireButton: false,
     },
@@ -1459,7 +1494,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
     expect(rendered.replaceState).toHaveBeenCalledWith(
       {},
       "",
-      "/settings?keep=1#subscription",
+      "/settings?keep=1#family",
     );
 
     await act(async () => {
@@ -1487,7 +1522,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
   }
 });
 
-test("checks an owned return even when the account no longer has top-up offers", async () => {
+test("keeps a recovery-only terminal return visible until the owner closes it", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
     purchaseId: "hucp_inactive_return",
     status: "fulfilled",
@@ -1497,11 +1532,14 @@ test("checks an owned return even when the account no longer has top-up offers",
   );
   const rendered = await renderClientComponent(
     createElement(HostedUsageTopUpDialog, {
+      deferTerminalRefreshUntilClose: true,
       offers: [],
       purchaseReturn: {
         kind: "success",
         purchaseId: "hucp_inactive_return",
       },
+      scope: "family",
+      targetLabel: "this former family member",
     }),
     {
       location: {
@@ -1523,12 +1561,67 @@ test("checks an owned return even when the account no longer has top-up offers",
       url: "/api/settings/billing/usage-credit/purchases/hucp_inactive_return",
     });
     assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /The available usage for this former family member has been updated\./,
+    );
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
         (button) => button.textContent?.includes("Add usage"),
       ),
       false,
     );
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Close");
+
+    expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("removes a recovery-only canceled return after its confirmation closes", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_inactive_cancel",
+    status: "expired",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      deferTerminalRefreshUntilClose: true,
+      offers: [],
+      purchaseReturn: {
+        kind: "cancel",
+        purchaseId: "hucp_inactive_cancel",
+      },
+      scope: "family",
+      targetLabel: "this former family member",
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_inactive_cancel&usageCheckout=cancel&usageFamily=hbag_abcdefghijklmnop&usageMember=member_former#family",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Checkout canceled\. No usage was added\./,
+    );
+    expect(mocks.routerRefresh).not.toHaveBeenCalled();
+
+    await clickButton(rendered.container, rendered.window, "Close");
+
     expect(mocks.routerRefresh).toHaveBeenCalledTimes(1);
   } finally {
     await rendered.cleanup();

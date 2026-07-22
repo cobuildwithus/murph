@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Non-Negotiable Rules
 
@@ -42,20 +42,25 @@ Last verified: 2026-07-21
 - Group newsletter setup is valid only from a verified non-direct iMessage or Telegram group route. The structured setup action owns the stable slug, canonical configuration, and exactly one system delivery tag; ordinary model-authored automation writes cannot claim those tags. The ordinary dynamic-tool planner exposes the newsletter email port only when the trusted runtime supplies scheduled email occurrence authority, so a current-chat newsletter receives no email capability. For group-email preparation, the signed callback member resolves the unique hosted group; any legacy request `groupId` is compatibility-only, ignored, and never authority.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- Personal usage-credit Checkout is an authenticated Settings payment boundary,
-  not an assistant or browser-selected billing primitive. The route must enforce
-  the normal app-session and same-origin/CSRF protections, derive payer and
-  beneficiary as the same direct personal member, recheck active paid Pulse or
-  Edge access, and resolve the fixed $5/$10/$25 offer and reusable Price from
-  server configuration. Before Checkout creation, the service must re-fetch
+- Usage-credit Checkout is an authenticated payment boundary, not an assistant
+  or browser-selected billing primitive. Settings routes must enforce the
+  normal app-session and same-origin/CSRF protections. Personal checkout binds
+  payer and beneficiary to the same active direct paid Pulse or Edge member.
+  Family checkout binds payer to the active Family owner, rechecks the selected
+  active unsuspended direct member in that owner's active group, and resolves
+  the Customer only from the group's active billing reference. The fixed
+  $5/$10/$25 offer and reusable Price come from server configuration. Before
+  Checkout creation, the service must re-fetch
   that Price and fail closed unless its mode, active state, one-time per-unit
   shape, single currency, and exact amount match the frozen purchase; Adaptive
   Pricing stays disabled. The browser may submit only the offer code and a
   single-use request key; it must never choose an amount, Price, Customer,
-  payer, beneficiary, grant, or Checkout URL. Trial, Family-sponsored,
-  suspended, thread-container, missing-billing, and malformed states fail
-  closed. The schema separates payer from beneficiary for later composition,
-  but group funding and group checkout authorization are not implemented.
+  payer, beneficiary, group, Customer, grant, or Checkout URL. Trial,
+  unauthorized Family-sponsored, suspended, thread-container, missing-billing,
+  and malformed states fail closed. Personal, hosted-group, and Family targets
+  remain distinct even when payer and beneficiary ids coincide. Mutable Family
+  membership gates a fresh purchase; exact request-key replay and fulfillment
+  use the immutable purchase after creation.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session state must never grant credit. The verified Stripe
   receipt owner must re-fetch and bind the live one-time Session, line item,

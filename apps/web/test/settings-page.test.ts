@@ -95,7 +95,9 @@ const mocks = vi.hoisted(() => ({
   readHostedAccountSettingsPageSnapshot: vi.fn(),
   readHostedActiveUsageCreditPurchaseForPayer: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
+  readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
+  readHostedUsageCreditPurchaseTargetForPayer: vi.fn(),
   readHostedUsageCreditProjection: vi.fn(),
   readHostedSecureApprovalStatus: vi.fn(),
   withServerApprovedPrivyAccountHints: vi.fn((input: {
@@ -142,6 +144,8 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
 vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", () => ({
   readHostedActiveUsageCreditPurchaseForPayer:
     mocks.readHostedActiveUsageCreditPurchaseForPayer,
+  readHostedUsageCreditPurchaseTargetForPayer:
+    mocks.readHostedUsageCreditPurchaseTargetForPayer,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/account-settings-snapshot", () => ({
@@ -155,6 +159,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedConfiguredUsageCreditOfferCodes:
+    mocks.readHostedConfiguredUsageCreditOfferCodes,
   readHostedPersonalUsageCreditOfferCodes:
     mocks.readHostedPersonalUsageCreditOfferCodes,
 }));
@@ -254,7 +260,16 @@ beforeEach(() => {
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
+  mocks.readHostedConfiguredUsageCreditOfferCodes.mockReturnValue([
+    "usage_5_usd",
+    "usage_10_usd",
+    "usage_25_usd",
+  ]);
   mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([]);
+  mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue({
+    beneficiaryMemberId: "member_123",
+    kind: "personal",
+  });
   mocks.readHostedPersonalAiUsageStatus.mockResolvedValue({
     generatedAt: "2026-07-10T12:00:00.000Z",
     reason: "hosted_access_inactive",
@@ -632,7 +647,6 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
-      beneficiaryMemberId: "member_123",
       payerMemberId: "member_123",
       prisma: mocks.prisma,
     });
@@ -756,6 +770,10 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
     purchaseId: "hucp_abcdefghijklmnop",
     retryAllowed: false,
     status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_123",
+      kind: "personal",
+    },
     url: "https://checkout.stripe.test/session",
   } as const;
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
@@ -772,6 +790,89 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
     }),
     undefined,
   );
+});
+
+test("SettingsPage routes a frozen Family purchase and return to the selected member", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  const familyOwner = {
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_abcdefghijklmnop",
+    invites: [],
+    members: [],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  };
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+  const activePurchase = {
+    offerCode: "usage_25_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: false,
+    status: "checkout_open",
+    target: {
+      beneficiaryMemberId: "member_family",
+      familyGroupId: "hbag_abcdefghijklmnop",
+      kind: "family",
+    },
+    url: "https://checkout.stripe.test/family-session",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(activePurchase);
+  mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue(
+    activePurchase.target,
+  );
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usageFamily: "hbag_abcdefghijklmnop",
+      usageMember: "member_family",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: null,
+      usageTopUpPurchaseReturn: null,
+    }),
+    undefined,
+  );
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith({
+    ownerSnapshot: familyOwner,
+    usageTopUpActiveMemberId: "member_family",
+    usageTopUpActivePurchase: activePurchase,
+    usageTopUpOffers: [
+      { amountLabel: "$5", offerCode: "usage_5_usd" },
+      { amountLabel: "$10", offerCode: "usage_10_usd" },
+      { amountLabel: "$25", offerCode: "usage_25_usd" },
+    ],
+    usageTopUpPurchaseReturn: {
+      kind: "success",
+      purchaseId: "hucp_abcdefghijklmnop",
+    },
+    usageTopUpReturnMemberId: "member_family",
+  }, undefined);
+  expect(mocks.readHostedUsageCreditPurchaseTargetForPayer).toHaveBeenCalledWith({
+    payerMemberId: "member_123",
+    prisma: mocks.prisma,
+    purchaseId: "hucp_abcdefghijklmnop",
+  });
 });
 
 test.each([
@@ -1045,7 +1146,12 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     canStartFamily: true,
     familyState: "none",
   }), undefined);
-  expect(mocks.HostedFamilySettings).toHaveBeenCalledTimes(1);
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpOffers: [],
+    }),
+    undefined,
+  );
 });
 
 test("SettingsPage awaits database-backed settings reads one at a time", async () => {

@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
+  resolveHostedFamilyUsageCreditCheckoutTargetTx: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
   requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://join.example.test"),
   requireHostedStripeApiMode: vi.fn(),
@@ -61,6 +62,11 @@ vi.mock("@/src/lib/hosted-web/encryption", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  resolveHostedFamilyUsageCreditCheckoutTargetTx:
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
@@ -110,11 +116,13 @@ vi.mock("@/src/lib/prisma", () => ({
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
+  createHostedFamilyMemberUsageCreditCheckout,
   createHostedGroupUsageCreditCheckout,
   createHostedUsageCreditCheckout,
   expireHostedUsageCreditCheckout,
   parseHostedUsageCreditCheckoutRequest,
   readHostedActiveUsageCreditPurchaseForPayer,
+  readHostedUsageCreditPurchaseTargetForPayer,
   readHostedUsageCreditPurchaseStatus,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 
@@ -159,6 +167,11 @@ beforeEach(() => {
     joinCode: "group_join_code_1234",
     kind: "friends",
     runtimeMemberId: "member_group_runtime",
+  });
+  mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValue({
+    beneficiaryMemberId: "hbm_familymember1",
+    groupId: "hbag_abcdefghijklmnop",
+    stripeCustomerId: "cus_family_owner",
   });
   mocks.requireHostedStripeUsageCreditCheckoutConfig.mockImplementation(
     ({ offerCode }: { offerCode: string }) => ({
@@ -220,6 +233,143 @@ describe("parseHostedUsageCreditCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it("charges the Family customer and freezes the selected member as beneficiary", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const checkout = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(checkout).toMatchObject({
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/session",
+    });
+    const purchase = onlyPurchase(fake.purchases);
+    expect(purchase).toMatchObject({
+      beneficiaryMemberId: "hbm_familymember1",
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+    });
+    expect(new URL(String(purchase.checkoutSuccessUrl))).toMatchObject({
+      hash: "#family",
+      pathname: "/settings",
+    });
+    const successUrl = new URL(String(purchase.checkoutSuccessUrl));
+    expect(Object.fromEntries(successUrl.searchParams)).toEqual({
+      usageCheckout: "success",
+      usageFamily: "hbag_abcdefghijklmnop",
+      usageMember: "hbm_familymember1",
+      usagePurchase: checkout.purchaseId,
+    });
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ customer: "cus_family_owner" }),
+      expect.any(Object),
+    );
+    expect(mocks.readHostedConfiguredUsageCreditOfferCodes).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberStripeBillingRef).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
+    await expect(readHostedActiveUsageCreditPurchaseForPayer({
+      now: NOW,
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      purchaseId: checkout.purchaseId,
+      target: {
+        beneficiaryMemberId: "hbm_familymember1",
+        familyGroupId: "hbag_abcdefghijklmnop",
+        kind: "family",
+      },
+    });
+    await expect(readHostedUsageCreditPurchaseTargetForPayer({
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+      purchaseId: checkout.purchaseId,
+    })).resolves.toEqual({
+      beneficiaryMemberId: "hbm_familymember1",
+      familyGroupId: "hbag_abcdefghijklmnop",
+      kind: "family",
+    });
+  });
+
+  it("does not confuse an owner Family seat with the owner's personal target", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    });
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValueOnce({
+      beneficiaryMemberId: MEMBER_ID,
+      groupId: "hbag_abcdefghijklmnop",
+      stripeCustomerId: "cus_family_owner",
+    });
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: MEMBER_ID,
+      clientRequestKey: "family_owner_key_12",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_5_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({
+      recovered: true,
+      targetConflict: true,
+    });
+    expect(fake.purchases.size).toBe(1);
+  });
+
+  it("reauthorizes fresh Family requests but recovers an exact frozen request", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    const first = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValue(null);
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ purchaseId: first.purchaseId });
+    expect(mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx).toHaveBeenCalledTimes(1);
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: "fresh_family_key_12",
+      now: new Date(NOW.getTime() + 2_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      httpStatus: 403,
+    });
+  });
+
   it("funds the server-resolved group beneficiary without requiring a paid plan", async () => {
     const fake = createFakePrisma();
     mocks.getPrisma.mockReturnValue(fake.prisma);
@@ -484,6 +634,10 @@ describe("createHostedUsageCreditCheckout", () => {
       purchaseId: checkout.purchaseId,
       retryAllowed: false,
       status: "checkout_open",
+      target: {
+        beneficiaryMemberId: MEMBER_ID,
+        kind: "personal",
+      },
       url: "https://checkout.stripe.test/session",
     });
     expect(mocks.readHostedPersonalUsageCreditOfferCodes).not.toHaveBeenCalled();
@@ -513,6 +667,10 @@ describe("createHostedUsageCreditCheckout", () => {
       purchaseId: checkout.purchaseId,
       retryAllowed: false,
       status: "checkout_open",
+      target: {
+        beneficiaryMemberId: MEMBER_ID,
+        kind: "personal",
+      },
     });
   });
 
@@ -541,6 +699,10 @@ describe("createHostedUsageCreditCheckout", () => {
       restartAt: (purchase.checkoutExpiresAt as Date).toISOString(),
       retryAllowed: false,
       status: "reconciling",
+      target: {
+        beneficiaryMemberId: MEMBER_ID,
+        kind: "personal",
+      },
     });
     expectNoStripeProviderIo();
   });

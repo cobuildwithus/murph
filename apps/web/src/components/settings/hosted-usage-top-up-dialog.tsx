@@ -93,6 +93,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           ? "Check payment"
           : null
     : null;
+  const familyTarget =
+    props.scope === "family" && props.targetLabel ? props.targetLabel : null;
+  const triggerLabel =
+    purchaseTriggerLabel ??
+    (props.scope === "group" ? "Add group usage" : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -103,6 +108,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           props.purchaseReturn.purchaseId === purchase.purchaseId,
         scope: props.scope,
         status: purchase.status,
+        targetLabel: familyTarget ?? undefined,
         targetConflict: purchase.targetConflict,
       })
     : null;
@@ -117,9 +123,18 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     >
       {props.offers.length > 0 || purchaseTriggerLabel ? (
         <DialogTrigger
-          render={<Button type="button" variant="outline" size="lg" />}
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              aria-label={
+                familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
+              }
+            />
+          }
         >
-          {purchaseTriggerLabel ?? (props.scope === "group" ? "Add group usage" : "Add usage")}
+          {triggerLabel}
         </DialogTrigger>
       ) : null}
       <DialogContent
@@ -133,25 +148,31 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             className="text-xl font-semibold leading-tight outline-none"
           >
             {statusContent
-              ? statusContent.title
+              ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
               : props.offers.length === 0
                 ? "Usage credit unavailable"
                 : props.scope === "group"
                   ? "Add group usage"
-                  : "Add usage"}
+                  : familyTarget
+                    ? `Add usage for ${familyTarget}`
+                    : "Add usage"}
           </DialogTitle>
           <DialogDescription>
             {purchase
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
                 : props.scope === "group"
-                ? "Murph checks Stripe before changing this group's available usage."
-                : "Murph checks Stripe before changing your available usage."
+                  ? "Murph checks Stripe before changing this group's available usage."
+                  : familyTarget
+                    ? `Murph checks Stripe before changing the available usage for ${familyTarget}.`
+                    : "Murph checks Stripe before changing your available usage."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
                   ? "Choose how much usage credit to add to this group in a one-time payment. Stripe confirms the payment before Murph adds it."
-                  : "Choose how much usage credit to add in a one-time payment. Stripe confirms the payment before Murph adds it."}
+                  : familyTarget
+                    ? `Choose how much usage credit to add for ${familyTarget} in a one-time payment. Stripe confirms the payment before Murph adds it.`
+                    : "Choose how much usage credit to add in a one-time payment. Stripe confirms the payment before Murph adds it."}
           </DialogDescription>
         </DialogHeader>
 

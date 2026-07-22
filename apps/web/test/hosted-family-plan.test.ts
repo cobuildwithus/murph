@@ -107,6 +107,7 @@ import {
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
   readHostedFamilyAccessForMember,
+  resolveHostedFamilyUsageCreditCheckoutTargetTx,
   resolveHostedFamilyInviteTokenForInbound,
   removeHostedFamilyMemberTx,
   updateHostedFamilyMemberPlan,
@@ -302,6 +303,121 @@ describe("hosted Family plan", () => {
       previousHostedOnboardingPublicBaseUrl,
     );
     clearHostedOnboardingEnvCache();
+  });
+
+  it("authorizes an active unsuspended Family beneficiary against group billing", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      id: "hbagm_mom",
+    });
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toEqual({
+      beneficiaryMemberId: "member_mom",
+      groupId: "hbag_family",
+      stripeCustomerId: "cus_family",
+    });
+    expect(tx.hostedAccountGroup.findUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        billingStatus: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      }),
+      where: { ownerMemberId: "member_owner" },
+    });
+    expect(tx.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        groupId: "hbag_family",
+        memberId: "member_mom",
+        status: "active",
+      },
+    });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    {
+      member: { suspendedAt: new Date("2026-07-22T12:00:00.000Z"), threadContainer: null },
+      membership: { id: "hbagm_mom" },
+    },
+    {
+      member: { suspendedAt: null, threadContainer: null },
+      membership: null,
+    },
+    {
+      member: { suspendedAt: null, threadContainer: { memberId: "member_mom" } },
+      membership: { id: "hbagm_mom" },
+    },
+  ])("rejects an ineligible Family usage-credit beneficiary", async ({ member, membership }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce(membership);
+    tx.hostedMember.findUnique.mockResolvedValueOnce(member);
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+  });
+
+  it.each([
+    {
+      billingStatus: HostedBillingStatus.past_due,
+      label: "inactive",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.active,
+      label: "suspended",
+      suspendedAt: new Date("2026-07-22T12:00:00.000Z"),
+    },
+  ])("rejects an $label Family owner group for usage-credit checkout", async ({
+    billingStatus,
+    suspendedAt,
+  }) => {
+    const tx = createTxMock({
+      group: {
+        billingStatus,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt,
+      },
+    });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+    expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects Family usage-credit checkout without current group Stripe billing", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      id: "hbagm_mom",
+    });
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
   });
 
   it("creates owner family groups without storing seat capacity on the group", async () => {

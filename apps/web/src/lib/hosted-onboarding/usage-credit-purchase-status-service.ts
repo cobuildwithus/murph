@@ -25,6 +25,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
+import { normalizeHostedGroupUsageJoinCode } from "../hosted-groups/group-usage-funding";
 import { getPrisma } from "../prisma";
 
 const HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS = 30 * 60 * 1_000;
@@ -62,8 +63,25 @@ export interface HostedActiveUsageCreditPurchaseProjection
   extends HostedUsageCreditPurchaseStatusResult {
   offerCode: HostedUsageCreditOfferCode;
   retryAllowed: boolean;
+  target: HostedUsageCreditPurchaseTargetProjection;
   url?: string;
 }
+
+export type HostedUsageCreditPurchaseTargetProjection =
+  | {
+      beneficiaryMemberId: string;
+      kind: "personal";
+    }
+  | {
+      beneficiaryMemberId: string;
+      groupJoinCode: string;
+      kind: "group";
+    }
+  | {
+      beneficiaryMemberId: string;
+      familyGroupId: string;
+      kind: "family";
+    };
 
 export async function readHostedUsageCreditPurchaseStatus(input: {
   beneficiaryMemberId?: string;
@@ -157,7 +175,47 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
     retryAllowed:
       purchase.payer.suspendedAt === null &&
       canRetryHostedUsageCreditCheckoutCreate({ now, purchase }),
+    target: projectHostedUsageCreditPurchaseTarget(purchase),
   };
+}
+
+export async function readHostedUsageCreditPurchaseTargetForPayer(input: {
+  payerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+  purchaseId: string;
+}): Promise<HostedUsageCreditPurchaseTargetProjection> {
+  if (!HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN.test(input.purchaseId)) {
+    throw buildHostedUsageCreditPurchaseNotFoundError();
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const purchase = await prisma.hostedUsageCreditPurchase.findFirst({
+    select: {
+      beneficiaryMemberId: true,
+      checkoutSuccessUrl: true,
+      id: true,
+      payerMemberId: true,
+    },
+    where: {
+      id: input.purchaseId,
+      payerMemberId: input.payerMemberId,
+    },
+  });
+  if (!purchase) {
+    throw buildHostedUsageCreditPurchaseNotFoundError();
+  }
+  return projectHostedUsageCreditPurchaseTarget(purchase);
+}
+
+export function projectHostedUsageCreditPurchaseTarget(input: Pick<
+  HostedUsageCreditPurchase,
+  "beneficiaryMemberId" | "checkoutSuccessUrl" | "id" | "payerMemberId"
+>): HostedUsageCreditPurchaseTargetProjection {
+  const target = readHostedUsageCreditPurchaseTarget(input);
+  if (!target) {
+    throw buildHostedUsageCreditInvariantError("purchase_target_invalid");
+  }
+  return target;
 }
 
 export async function expireHostedUsageCreditCheckout(input: {
@@ -395,4 +453,109 @@ export function buildHostedUsageCreditPurchaseNotFoundError() {
     httpStatus: 404,
     message: "That usage-credit purchase was not found.",
   });
+}
+
+function readHostedUsageCreditPurchaseTarget(input: Pick<
+  HostedUsageCreditPurchase,
+  "beneficiaryMemberId" | "checkoutSuccessUrl" | "id" | "payerMemberId"
+>): HostedUsageCreditPurchaseTargetProjection | null {
+  if (!input.payerMemberId) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(input.checkoutSuccessUrl);
+  } catch {
+    return null;
+  }
+  if (
+    url.searchParams.get("usageCheckout") !== "success"
+    || url.searchParams.get("usagePurchase") !== input.id
+  ) {
+    return null;
+  }
+
+  const searchKeys = [...url.searchParams.keys()].sort();
+  if (
+    url.pathname === "/settings"
+    && url.hash === "#subscription"
+    && stringArraysEqual(searchKeys, ["usageCheckout", "usagePurchase"])
+    && input.beneficiaryMemberId === input.payerMemberId
+  ) {
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      kind: "personal",
+    };
+  }
+
+  const familyGroupId = url.searchParams.get("usageFamily");
+  const familyMemberId = url.searchParams.get("usageMember");
+  if (
+    url.pathname === "/settings"
+    && url.hash === "#family"
+    && stringArraysEqual(searchKeys, [
+      "usageCheckout",
+      "usageFamily",
+      "usageMember",
+      "usagePurchase",
+    ])
+    && isHostedOpaqueSelector(familyGroupId, "hbag_")
+    && familyMemberId === input.beneficiaryMemberId
+  ) {
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      familyGroupId,
+      kind: "family",
+    };
+  }
+
+  const groupPathPrefix = "/groups/fund/";
+  if (
+    url.pathname.startsWith(groupPathPrefix)
+    && url.hash === ""
+    && stringArraysEqual(searchKeys, ["usageCheckout", "usagePurchase"])
+  ) {
+    const encodedJoinCode = url.pathname.slice(groupPathPrefix.length);
+    if (!encodedJoinCode || encodedJoinCode.includes("/")) {
+      return null;
+    }
+    let decodedJoinCode: string;
+    try {
+      decodedJoinCode = decodeURIComponent(encodedJoinCode);
+    } catch {
+      return null;
+    }
+    const groupJoinCode = normalizeHostedGroupUsageJoinCode(decodedJoinCode);
+    if (!groupJoinCode) {
+      return null;
+    }
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      groupJoinCode,
+      kind: "group",
+    };
+  }
+
+  return null;
+}
+
+function isHostedOpaqueSelector(
+  value: string | null,
+  prefix: string,
+): value is string {
+  return Boolean(
+    value
+    && value.startsWith(prefix)
+    && value.length <= 200
+    && /^[A-Za-z0-9_-]+$/u.test(value),
+  );
+}
+
+function stringArraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
