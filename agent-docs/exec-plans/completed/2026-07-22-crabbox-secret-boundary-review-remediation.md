@@ -46,5 +46,6 @@ to the root-owned shell wrapper.
   proof remains post-landing because `main` does not yet contain this corrected
   root-owned entrypoint.
 
-Status: active
+Status: completed
 Updated: 2026-07-22
+Completed: 2026-07-22

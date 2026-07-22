@@ -166,13 +166,14 @@ describe("trusted Crabbox verification entrypoint", () => {
       { cwd: tempRoot, stdio: "ignore" },
     );
     await waitForFile(readyPath);
-    child.kill("SIGINT");
-    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    const exitResult = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
       (resolve, reject) => {
         child.once("error", reject);
         child.once("exit", (code, signal) => resolve({ code, signal }));
       },
     );
+    child.kill("SIGINT");
+    const result = await exitResult;
 
     expect(result).toEqual({ code: 130, signal: null });
     rmSync(readFileSync(homePath, "utf8"), { force: true, recursive: true });
