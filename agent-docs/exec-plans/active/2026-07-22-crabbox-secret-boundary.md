@@ -57,6 +57,9 @@ access that an alternate workflow ref could request.
    supplies every current workflow use.
 7. Update security and verification documentation, then run canonical local
    verification. Record the required post-landing remote proof.
+8. Keep `.crabbox.yaml` in the guarded ReviewGPT package even when a patch
+   changes only its consumers, so exact-head security review can inspect the
+   provider/ref trust root its tests and docs rely on.
 
 ## Adversarial validation rubric
 
@@ -95,6 +98,10 @@ access that an alternate workflow ref could request.
   entrypoint does not exist on `main`; focused local proof plus CI is the
   bootstrap fallback, followed by mandatory post-landing Testbox proof.
 - `CBX-GITHUB-SCOPE`: blocked on the remaining deploy-hook secret migration.
+- Preliminary ReviewGPT attempt 1 was below the minimum trusted duration and
+  discarded. Attempt 2 returned `SPECIALIST_OUTCOME: INVALID` because the
+  guarded archive omitted `.crabbox.yaml`; the packager now includes it
+  explicitly and requires a same-head retry.
 
 Status: active
 Updated: 2026-07-22
