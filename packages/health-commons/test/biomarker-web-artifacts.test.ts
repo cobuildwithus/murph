@@ -1,11 +1,40 @@
 import { describe, expect, it } from "vitest";
 
-import type { HealthCommonsCatalogEntity } from "@murphai/contracts";
+import type {
+  HealthCommonsBiomarkerReferenceGuidance,
+  HealthCommonsCatalogEntity,
+} from "@murphai/contracts";
 import { buildHealthCommonsWebBiomarkerResearch } from "../src/biomarker-web-artifacts.ts";
 
 const TEST_PAGE_REVISION_ID = `sha256:${"1".repeat(64)}`;
 const TEST_CATALOG_HASH = `sha256:${"2".repeat(64)}`;
 const SOURCE_KEY = "source_artifact:test-source";
+const TEST_REFERENCE_GUIDANCE: HealthCommonsBiomarkerReferenceGuidance = {
+  classification: "conditional_numeric",
+  reviewStatus: "reviewed",
+  use: "context_only",
+  items: [
+    {
+      kind: "decision_limit",
+      guidance: "A test decision limit is preserved as contextual education only.",
+      applicability: "Applies only to the named test method and reviewed population.",
+      numericValues: [
+        {
+          label: "Example upper comparator",
+          unit: "example-unit",
+          upperBound: { inclusive: false, value: 10 },
+        },
+      ],
+      source: {
+        title: "Example guideline",
+        organization: "Example organization",
+        year: 2026,
+        sourceType: "clinical_guideline",
+        url: "https://example.test/guideline",
+      },
+    },
+  ],
+};
 
 describe("@murphai/health-commons biomarker web artifacts", () => {
   it("omits unsafe biomarker source urls from research links", () => {
@@ -30,6 +59,12 @@ describe("@murphai/health-commons biomarker web artifacts", () => {
 
     expect(research.sourceHighlights[0]?.externalUrl).toBe("https://example.test/source");
     expect(research.claims[0]?.sources[0]?.externalUrl).toBe("https://example.test/source");
+  });
+
+  it("projects structured reference guidance into the research artifact", () => {
+    const research = buildResearchWithSourceUrl("https://example.test/source");
+
+    expect(research.referenceGuidance).toEqual(TEST_REFERENCE_GUIDANCE);
   });
 });
 
@@ -68,6 +103,7 @@ function createBiomarkerEntity() {
         sourceKeys: [SOURCE_KEY],
       },
     ],
+    referenceGuidance: TEST_REFERENCE_GUIDANCE,
     relativePath: "biomarkers/test-biomarker.md",
     revision: {
       pageRevisionId: TEST_PAGE_REVISION_ID,

@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:hdl-c"
 slug: "biomarkers/hdl-c"
 title: "HDL-C"
-summary: "High-density lipoprotein cholesterol from a lipid panel; a watch metric for cholesterol protocols rather than a promised response."
+summary: "HDL-C measures cholesterol carried within high-density lipoproteins, which adds lipid context but is not a stand-alone treatment target or direct measure of HDL function."
 status: "draft"
 quality: "usable"
 aliases:
@@ -70,5 +70,21 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Opted-in lipid experiment summaries will appear once enough comparable runs are available."
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for HDL-C; use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies to the named lipid analyte and method with fasting status, treatment, overall cardiovascular risk, and the source laboratory report retained."
+      source:
+        title: "2026 ACC/AHA/Multisociety Guideline on the Management of Dyslipidemia"
+        organization: "American College of Cardiology, American Heart Association, and collaborating societies; Circulation"
+        year: 2026
+        sourceType: "clinical_guideline"
+        url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001423"
+        doi: "10.1161/CIR.0000000000001423"
 ---
+
 HDL-C is used here as a lab-measured lipid marker. These cholesterol protocols treat LDL-C as the primary endpoint and use other lipid markers as supportive or contextual measures.

@@ -62,11 +62,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // unit normalization, the combined head measures 9,410,180B. Current main's
 // persona redesign adds 10,122B, producing 9,420,302B. PR #824's Epic query
 // expansion measures 9,388,733B on that mainline; the exact combined graph
-// measures 9,424,514B. Ratchet the fixed total backstop to that exact
-// local measurement;
+// measures 9,424,514B. PR #838's reviewed biomarker catalog produces
+// 9,424,731B on CI Linux (+217B) and 9,460,571B on local macOS. Ratchet the
+// fixed total backstop to the larger exact measurement;
 // dynamic chunk jitter still receives no extra margin or platform-specific
 // branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_424_514;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_460_571;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local

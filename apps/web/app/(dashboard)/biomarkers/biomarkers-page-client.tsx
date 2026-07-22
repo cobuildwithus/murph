@@ -13,7 +13,7 @@ import {
 } from "@murphai/query/browser-biomarkers";
 
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
-import { BiomarkerDeviceReadingCard } from "@/src/components/biomarkers/biomarker-device-reading-card";
+import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
@@ -151,13 +151,44 @@ export function BiomarkersPageClient({
       ) : null}
 
       {authenticated && !authRequired && biomarkers.length > 0 ? (
-        <MeasuredBiomarkerControls
-          counts={filterCounts}
-          filter={filter}
-          onFilterChange={setFilter}
-          onQueryChange={setQuery}
-          query={query}
-        />
+        <section aria-labelledby="lab-biomarkers-heading" className="flex flex-col gap-4">
+          <h2
+            className="font-serif text-2xl font-semibold tracking-tight text-foreground"
+            id="lab-biomarkers-heading"
+          >
+            From the lab
+          </h2>
+          <MeasuredBiomarkerControls
+            counts={filterCounts}
+            filter={filter}
+            onFilterChange={setFilter}
+            onQueryChange={setQuery}
+            query={query}
+          />
+          {groups.length > 0 ? (
+            <div className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
+              {groups.map((group) => (
+                <MeasuredBiomarkerSection
+                  key={group.id}
+                  group={group}
+                />
+              ))}
+            </div>
+          ) : (
+            <div
+              aria-live="polite"
+              className="rounded-xl border border-border/70 bg-card/70 px-5 py-10 text-center"
+              role="status"
+            >
+              <p className="font-serif text-xl font-semibold text-foreground">
+                No matching biomarkers
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Try another name or status.
+              </p>
+            </div>
+          )}
+        </section>
       ) : null}
 
       {(authRequired || status === "empty" || status === "ready")
@@ -173,31 +204,6 @@ export function BiomarkersPageClient({
         />
       ) : null}
 
-      {authenticated && biomarkers.length > 0 && groups.length > 0 ? (
-        <div className="flex flex-col gap-6">
-          {groups.map((group) => (
-            <MeasuredBiomarkerSection
-              key={group.id}
-              group={group}
-            />
-          ))}
-        </div>
-      ) : null}
-
-      {authenticated && biomarkers.length > 0 && groups.length === 0 ? (
-        <div
-          aria-live="polite"
-          className="rounded-xl border border-border/70 bg-card/70 px-5 py-10 text-center"
-          role="status"
-        >
-          <p className="font-serif text-xl font-semibold text-foreground">
-            No matching biomarkers
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Try another name or status.
-          </p>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -233,10 +239,10 @@ function countSavedLabResults(client: BrowserVaultQueryClient): number {
 
 function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   return (
-    <section aria-labelledby="biomarker-devices-heading" className="flex flex-col gap-3">
-      <div className="flex items-baseline justify-between gap-4">
+    <section aria-labelledby="biomarker-devices-heading" className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
+      <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
         <h2
-          className="font-serif text-xl font-semibold tracking-tight text-foreground"
+          className="font-serif text-2xl font-semibold tracking-tight text-foreground"
           id="biomarker-devices-heading"
         >
           From your devices
@@ -246,10 +252,10 @@ function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
         </span>
       </div>
 
-      <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <ul>
         {items.map((item) => (
-          <li className="min-w-0" key={item.entry.routeId}>
-            <DeviceMetricCard item={item} />
+          <li className="min-w-0 border-b border-border/70 last:border-b-0" key={item.entry.routeId}>
+            <DeviceMetricRow item={item} />
           </li>
         ))}
       </ul>
@@ -257,18 +263,35 @@ function DeviceMetricsSection({ items }: { items: DeviceMetricListItem[] }) {
   );
 }
 
-function DeviceMetricCard({ item }: { item: DeviceMetricListItem }) {
+function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
   const { entry, summary } = item;
+  const category = entry.category?.replaceAll("-", " ") ?? "Device metric";
+  const valueLabel = `${formatMetricValue(summary.latest.value, entry.valuePrecision)}${labUnitSuffix(summary.latest.unit ?? entry.unit)}`;
 
   return (
-    <BiomarkerDeviceReadingCard
-      category={entry.category}
-      routeId={entry.routeId}
-      stale={summary.stale}
-      summary={entry.summary}
-      title={entry.shortName}
-      valueLabel={`${formatMetricValue(summary.latest.value, entry.valuePrecision)}${labUnitSuffix(summary.latest.unit ?? entry.unit)}`}
-    />
+    <Link
+      className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+      href={`/biomarkers/${entry.routeId}`}
+    >
+      <BiomarkerIcon className="size-9" routeId={entry.routeId} />
+      <div className="min-w-0">
+        <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
+          {category}
+        </p>
+        <p className="text-base font-semibold text-foreground md:mt-1">{entry.shortName}</p>
+      </div>
+      <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
+        {entry.summary ?? "A device-derived health metric from your connected data."}
+      </p>
+      <p className="col-span-2 min-w-24 text-left md:col-span-1 md:text-right">
+        <span className="font-serif text-3xl font-semibold tabular-nums text-foreground">
+          {valueLabel}
+        </span>
+        {summary.stale ? (
+          <span className="mt-1 block text-xs font-medium text-destructive">Out of date</span>
+        ) : null}
+      </p>
+    </Link>
   );
 }
 
@@ -310,7 +333,7 @@ function MeasuredBiomarkerControls({
             aria-label={`${option.label}, ${counts[option.value]}`}
             aria-pressed={filter === option.value}
             className={cn(
-              "rounded-full border-2 bg-card/60 px-5 text-sm text-foreground hover:bg-muted/30",
+              "inline-flex items-center justify-center gap-2 rounded-full border-2 bg-card/60 px-5 text-sm leading-none text-foreground hover:bg-muted/30",
               filter === option.value ? "border-foreground" : "border-border/70",
             )}
             key={option.value}
@@ -337,7 +360,7 @@ function MeasuredBiomarkerControls({
               {option.label}
             </span>
             <span aria-hidden="true" className="text-muted-foreground">·</span>
-            <span className="text-sm font-normal tabular-nums text-muted-foreground">
+            <span className="inline-flex min-w-4 items-center justify-center self-center font-mono text-xs font-normal leading-none tabular-nums text-muted-foreground">
               {counts[option.value]}
             </span>
           </Button>
@@ -358,7 +381,7 @@ function MeasuredBiomarkerSection({
   return (
     <details
       aria-labelledby={headingId}
-      className="group overflow-hidden rounded-xl border border-border/70 bg-card/70"
+      className="group border-b border-border/70 last:border-b-0"
       onToggle={(event) => {
         setOpen(event.currentTarget.open);
       }}
@@ -403,9 +426,20 @@ function MeasuredBiomarkerRow({
       href={`/biomarkers/results/${encodeURIComponent(biomarker.metricKey)}`}
       prefetch={false}
     >
-      <h3 className="min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
-        {biomarker.displayName}
-      </h3>
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "h-8 w-1 shrink-0 rounded-full",
+            status === "review" && "bg-destructive",
+            status === "in-range" && "bg-primary",
+            status === "reported" && "bg-muted-foreground/50",
+          )}
+        />
+        <h3 className="min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
+          {biomarker.displayName}
+        </h3>
+      </div>
       <p className="min-w-0 break-words text-sm sm:ml-auto sm:max-w-[50%] sm:text-right">
         <strong
           className={cn(

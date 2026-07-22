@@ -52,6 +52,7 @@ import BiomarkersPage, {
 import { BiomarkerLayoutClient } from "../app/(dashboard)/biomarkers/[biomarkerId]/biomarker-layout-client";
 import LabBiomarkerResultPage, {
   metadata as biomarkerResultMetadata,
+  resolveLabBiomarkerContext,
 } from "../app/(dashboard)/biomarkers/results/[metricKey]/page";
 import PitchPage, { metadata as pitchMetadata } from "../app/pitch/page";
 import { resolveHealthCommonsBiomarkerShell } from "../src/lib/health-commons/biomarker-projections";
@@ -223,6 +224,13 @@ test("Biomarker result route binds server auth and metric params to private hist
   assert.match(markup, /Your biomarkers/);
   assert.doesNotMatch(markup, /All biomarkers/);
   assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
+});
+
+test("Biomarker result context follows explicit Health Commons entity mappings", () => {
+  const context = resolveLabBiomarkerContext("alt");
+
+  assert.equal(context.displayName, "ALT");
+  assert.match(context.summary ?? "", /^ALT measures alanine aminotransferase activity,/u);
 });
 
 test("legacy biomarker detail links back to the measured results page truthfully", () => {

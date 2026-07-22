@@ -45,6 +45,9 @@
       "@murphai/health-commons": [
         "../../packages/health-commons/src/index.ts"
       ],
+      "@murphai/health-commons/biomarker-entity-mappings": [
+        "../../packages/health-commons/src/biomarker-entity-mappings.ts"
+      ],
       "@murphai/health-commons/runtime": [
         "../../packages/health-commons/src/runtime.ts"
       ],

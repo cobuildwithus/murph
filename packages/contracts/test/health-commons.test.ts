@@ -12,6 +12,7 @@ import {
   HEALTH_COMMONS_SOURCE_INDEX_SCHEMA_VERSION,
   healthCommonsArtifactManifestSchema,
   healthCommonsArtifactPointerSchema,
+  healthCommonsBiomarkerReferenceGuidanceSchema,
   healthCommonsCatalogEntitySchema,
   healthCommonsCatalogSchema,
   healthCommonsChangeRecordSchema,
@@ -356,6 +357,35 @@ describe("@murphai/contracts health commons schemas", () => {
       success: true,
       data: validBiomarkerPage,
     });
+    const referenceGuidance = {
+      classification: "source_range_only",
+      reviewStatus: "reviewed",
+      use: "context_only",
+      items: [{
+        kind: "reference_interval",
+        guidance: "Use the reporting source's reference interval.",
+        applicability: "Applies to the named assay and reporting source.",
+        source: {
+          title: "Reference interval standard",
+          organization: "Example standards body",
+          year: 2026,
+          sourceType: "consensus_statement",
+          url: "https://example.com/reference-interval",
+        },
+      }],
+    } as const;
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validBiomarkerPage,
+        referenceGuidance,
+      }),
+    ).toMatchObject({ success: true });
+    expect(
+      safeParseContract(healthCommonsPageFrontmatterSchema, {
+        ...validSourceArtifactPage,
+        referenceGuidance,
+      }),
+    ).toMatchObject({ success: false });
     expect(
       safeParseContract(healthCommonsPageFrontmatterSchema, validMeasurementMethodPage),
     ).toEqual({
@@ -832,5 +862,59 @@ describe("@murphai/contracts health commons schemas", () => {
     ).toMatchObject({
       success: false,
     });
+  });
+
+  it("rejects contradictory or unsourced biomarker reference guidance", () => {
+    const source = {
+      title: "Reference guidance standard",
+      organization: "Example standards body",
+      year: 2026,
+      sourceType: "clinical_guideline",
+      url: "https://example.com/reference-guidance",
+    } as const;
+    const numericValue = {
+      label: "Example upper comparator",
+      unit: "example-unit",
+      upperBound: { inclusive: false, value: 10 },
+    } as const;
+    const baseItem = {
+      kind: "decision_limit",
+      guidance: "Use this decision limit only in its reviewed clinical context.",
+      applicability: "Applies only to the named assay and reviewed population.",
+      source,
+    } as const;
+
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        classification: "conditional_numeric",
+        reviewStatus: "reviewed",
+        use: "context_only",
+        items: [baseItem],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        classification: "qualitative",
+        reviewStatus: "reviewed",
+        use: "context_only",
+        items: [{ ...baseItem, numericValues: [numericValue] }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        classification: "source_range_only",
+        reviewStatus: "reviewed",
+        use: "context_only",
+        items: [{
+          ...baseItem,
+          source: {
+            title: source.title,
+            organization: source.organization,
+            year: source.year,
+            sourceType: source.sourceType,
+          },
+        }],
+      }),
+    ).toMatchObject({ success: false });
   });
 });
