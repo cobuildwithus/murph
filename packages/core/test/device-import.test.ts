@@ -4242,7 +4242,7 @@ test("concatenated malformed ingest rows cannot hide current or legacy delivery 
   }
 });
 
-test("importDeviceBatch recognizes an incremental marker beyond the row budget", async () => {
+test("importDeviceBatch fails open when an incremental marker is beyond the row budget", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-partial-retention-retry");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
   const partA = {
@@ -4281,13 +4281,130 @@ test("importDeviceBatch recognizes an incremental marker beyond the row budget",
     accountId: "unrelated-account",
   })}\n`;
   await fs.appendFile(path.join(vaultRoot, filtered.ingestShardPath), unrelatedRow.repeat(65), "utf8");
-  const beforeReplay = await snapshotVaultFiles(vaultRoot);
   const replay = await importDeviceBatch(input);
+  const convergedReplay = await importDeviceBatch(input);
 
-  assert.equal(replay.applied, false);
-  assert.equal(replay.ingestId, null);
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  assert.ok(replay.applied);
+  assert.equal(replay.persistedEvidencePartCount, 2);
+  assert.ok(replay.ingestId);
+  const replayRecord = await readRequiredIntegrationIngest(vaultRoot, replay.ingestId);
+  assert.deepEqual(
+    replayRecord.parts.map((part) => part.role),
+    [partA.role, partB.role],
+  );
+  assert.equal(convergedReplay.applied, false);
+  assert.equal(convergedReplay.ingestId, null);
 });
+
+test.each([
+  ["raw-only", "deleted", "tail"],
+  ["raw-only", "deleted", "beyond-tail"],
+  ["raw-only", "malformed", "tail"],
+  ["raw-only", "malformed", "beyond-tail"],
+  ["linked-output", "deleted", "tail"],
+  ["linked-output", "deleted", "beyond-tail"],
+  ["linked-output", "malformed", "tail"],
+  ["linked-output", "malformed", "beyond-tail"],
+] as const)(
+  "filtered %s replay retains complete evidence after %s omitted proof with marker %s",
+  async (deliveryKind, damage, markerPlacement) => {
+    const vaultRoot = await makeTempDirectory(
+      `murph-device-import-filtered-evidence-repair-${deliveryKind}-${damage}-${markerPlacement}`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    const partA = {
+      role: "junction-summary-activity",
+      fileName: "junction-summary-activity.json",
+      content: { date: "2026-06-03", steps: 8_000 },
+    } as const;
+    const partB = {
+      role: "junction-summary-workouts",
+      fileName: "junction-summary-workouts.json",
+      content: { id: "filtered-evidence-repair", sport: "running" },
+    } as const;
+    const buildInput = (
+      importedAt: string,
+      evidenceParts: readonly [typeof partA] | readonly [typeof partA, typeof partB],
+    ) => ({
+      vaultRoot,
+      provider: "junction",
+      accountId: "jxn_acct_filtered_evidence_repair",
+      importedAt,
+      ...(deliveryKind === "linked-output"
+        ? {
+            events: [{
+              ...buildJunctionStyleWorkoutEvent({
+                resourceId: "filtered-evidence-repair",
+              }),
+              evidenceRoles: evidenceParts.map((part) => part.role),
+            }],
+          }
+        : {}),
+      evidenceParts,
+    });
+
+    const seed = await importDeviceBatch(buildInput(
+      "2026-06-03T21:00:00.000Z",
+      [partA],
+    ));
+    const filteredInput = buildInput(
+      "2026-06-04T21:00:00.000Z",
+      [partA, partB],
+    );
+    const filtered = await importDeviceBatch(filteredInput);
+    assert.ok(seed.applied);
+    assert.ok(filtered.applied);
+    assert.equal(filtered.persistedEvidencePartCount, 1);
+    assert.ok(filtered.ingestId);
+    assert.ok(filtered.ingestShardPath);
+    const filteredRecord = await readRequiredIntegrationIngest(vaultRoot, filtered.ingestId);
+    assert.deepEqual(filteredRecord.parts.map((part) => part.role), [partB.role]);
+
+    const unrelatedRows = markerPlacement === "beyond-tail"
+      ? Array.from({ length: 65 }, (_, index) => ({
+          ...filteredRecord,
+          id: deterministicContractId(
+            "xfm",
+            `filtered-evidence-repair-tail-${deliveryKind}-${damage}-${index}`,
+          ),
+          provider: "unrelated-provider",
+          accountId: "unrelated-account",
+        }))
+      : [];
+    const damagedPrefix = damage === "malformed" ? "{\"damaged\":\n" : "";
+    await fs.writeFile(
+      path.join(vaultRoot, filtered.ingestShardPath),
+      damagedPrefix
+        + [filteredRecord, ...unrelatedRows]
+          .map((record) => JSON.stringify(record))
+          .join("\n")
+        + "\n",
+      "utf8",
+    );
+
+    const repaired = await importDeviceBatch(filteredInput);
+
+    assert.ok(repaired.applied);
+    assert.equal(repaired.persistedEvidencePartCount, 2);
+    assert.ok(repaired.ingestId);
+    const repairedLines = (await fs.readFile(
+      path.join(vaultRoot, filtered.ingestShardPath),
+      "utf8",
+    )).trimEnd().split("\n");
+    const repairedLine = repairedLines.at(-1);
+    assert.ok(repairedLine);
+    const repairedRecord = JSON.parse(repairedLine) as IntegrationIngestRecord;
+    assert.equal(repairedRecord.id, repaired.ingestId);
+    assert.deepEqual(
+      repairedRecord.parts.map((part) => part.role),
+      [partA.role, partB.role],
+    );
+    const beforeReplay = await snapshotVaultFiles(vaultRoot);
+    const replay = await importDeviceBatch(filteredInput);
+    assert.equal(replay.applied, false);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
+  },
+);
 
 test("importDeviceBatch repairs a valid historical partial exact row with one self-contained delivery", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-historical-partial-repair");

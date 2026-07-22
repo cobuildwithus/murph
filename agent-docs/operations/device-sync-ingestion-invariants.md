@@ -94,12 +94,12 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    multi-part delivery changes only some evidence, the new ingest row retains
    only those novel parts and only their output-role links under a distinct
    per-delivery incremental-evidence marker inspected with the original
-   delivery ids. It can authorize an intact no-op when every current output
-   still exists, but it cannot masquerade as a complete row or authorize repair
-   from incomplete proof. When neither an exact partial marker nor bounded
-   novelty can be proved, ingestion fails open by retaining one complete
-   received evidence set, after which the next replay converges. A repair
-   delivery also
+   delivery ids. The marker is only a locator: it cannot authorize a no-op or
+   repair from incomplete proof. Missing canonical outputs fail closed before
+   reconciliation; otherwise the existing novelty owner proves every incoming
+   evidence fingerprint, receipt, and output link. When that proof is missing
+   or unsafe, ingestion fails open by retaining one complete received evidence
+   set, after which the next replay converges. A repair delivery also
    retains the complete received evidence set rather than trusting damaged
    historical proof. A batch whose novel evidence cannot be associated with
    its accepted prepared event, or whose prepared events share one canonical

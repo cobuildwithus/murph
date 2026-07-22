@@ -4646,11 +4646,12 @@ export async function importDeviceBatch({
       ? undefined
       : ingestIdInspection.entriesById.get(id))
     .filter((record): record is IntegrationIngestRecord =>
-      record !== undefined && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
+      record !== undefined
+      && record.id !== incrementalEvidenceImportId
+      && storedIntegrationIngestIsDeviceDeliveryCandidate(record, deviceBatchPlan)
     );
   const matchingStoredDeliveries = () => candidateStoredDeliveries().filter((record) =>
-    record.id !== incrementalEvidenceImportId
-    && storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
+    storedIntegrationIngestMatchesDeviceDelivery(record, deviceBatchPlan)
   );
   const partialStoredDelivery = () => {
     const record = ingestIdInspection.entriesById.get(incrementalEvidenceImportId);
@@ -4677,12 +4678,7 @@ export async function importDeviceBatch({
     if (ingestIdInspection.unsafe) {
       return undefined;
     }
-    const exact = matchingStoredDeliveries().find(storedDeliveryRetainsCurrentOutputs);
-    if (exact) {
-      return exact;
-    }
-    const partial = partialStoredDelivery();
-    return partial && storedDeliveryRetainsCurrentOutputs(partial) ? partial : undefined;
+    return matchingStoredDeliveries().find(storedDeliveryRetainsCurrentOutputs);
   };
   const hasInvalidCandidateId = () => orderedCandidateImportIds.some((id) =>
     ingestIdInspection.invalidIds.has(id)
@@ -4737,6 +4733,13 @@ export async function importDeviceBatch({
   };
   const inspectExactDeliveryState = (): ExactDeliveryState => {
     assertNoCurrentImportIdConflict();
+    const partial = partialStoredDelivery();
+    if (partial && !storedDeliveryRetainsCurrentOutputs(partial)) {
+      throw new VaultError(
+        "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
+        "Filtered device delivery marker cannot prove the current canonical outputs.",
+      );
+    }
     const retainedDelivery = authorizedStoredDelivery();
     if (retainedDelivery) {
       return {
@@ -5129,6 +5132,8 @@ export async function importDeviceBatch({
           sampleIds: new Set(sampleRecords.map((record) => record.id)),
         })
       : { parts: [], receiptIsNovel: false };
+    const partialMarkerNeedsEvidenceRepair = partialStoredDelivery() !== undefined
+      && (novelty.parts.length > 0 || novelty.receiptIsNovel);
     const shouldPersistDelivery = hasAppendedOutputs
       || novelty.parts.length > 0
       || novelty.receiptIsNovel
@@ -5150,6 +5155,7 @@ export async function importDeviceBatch({
     );
     const novelEvidenceParts = new Set(novelty.parts);
     const retainedEvidenceParts = evidenceRepairRequired
+      || partialMarkerNeedsEvidenceRepair
       || hasUnassociatedNovelEvidence
       || hasSharedCanonicalEventOwner
       ? deviceBatchPlan.preparedEvidenceParts
