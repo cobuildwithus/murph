@@ -270,7 +270,7 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
 
   return (
     <Link
-      className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+      className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:gap-5"
       href={`/biomarkers/${entry.routeId}`}
     >
       <BiomarkerIcon className="size-9" routeId={entry.routeId} />
@@ -278,7 +278,7 @@ function DeviceMetricRow({ item }: { item: DeviceMetricListItem }) {
         <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
           {category}
         </p>
-        <p className="text-base font-semibold text-foreground md:mt-1">{entry.shortName}</p>
+        <p className="text-lg font-semibold text-foreground md:mt-1 md:text-base">{entry.shortName}</p>
       </div>
       <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
         {entry.summary ?? "A device-derived health metric from your connected data."}
