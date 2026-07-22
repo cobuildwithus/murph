@@ -1467,7 +1467,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'A marked concrete-model response that completes in under 7.5 minutes',
+      'its minimum trustworthy duration is 4 minutes',
+    )
+    expect(prReviewGptLoop).toContain(
+      'Treat 7.5 minutes as the default final-gate trust floor',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A marked concrete-model response below 6.5 minutes is too',
     )
     expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')

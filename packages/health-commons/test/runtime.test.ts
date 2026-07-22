@@ -632,15 +632,15 @@ describe("@murphai/health-commons runtime catalog reader", () => {
     });
 
     expect(shell).toEqual(expect.objectContaining({
-      baselineDays: 7,
-      durationDays: 21,
+      baselineDays: 14,
+      durationDays: 28,
       id: "finnish-sauna",
       schemaVersion: "murph.commons.web.experiment-shell.v1",
       title: "Finnish Dry Sauna",
     }));
     expect(protocolTab).toEqual(expect.objectContaining({
-      baselineDays: 7,
-      durationDays: 21,
+      baselineDays: 14,
+      durationDays: 28,
       id: "finnish-sauna",
       schemaVersion: "murph.commons.web.experiment-protocol-tab.v1",
     }));

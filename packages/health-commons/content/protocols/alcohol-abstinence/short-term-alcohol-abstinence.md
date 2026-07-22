@@ -885,7 +885,7 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: Alcohol-free · choose 7, 14, or 30 days · 7-day baseline preferred · daily adherence, symptom, craving, sleep, and social-context logs · end-of-challenge review and next-week plan
+  doseSignature: Alcohol-free · choose 7, 14, or 30 days · 14-day baseline preferred · daily adherence, symptom, craving, sleep, and social-context logs · end-of-challenge review and next-week plan
   target: Complete abstinence from alcoholic beverages for the selected calendar-day window.
   frequency:
     sessionsPerWeek: 7
@@ -894,7 +894,7 @@ protocol:
   steps:
     - "Complete safety screen; do not self-start if withdrawal, dependence, high/uncertain intake, pregnancy, liver, seizure, mental-health, medication, or substance risks exist."
     - "Choose duration: 7 days for starter check, 14 days for midpoint commitment, or 30 days for strongest challenge fit."
-    - "Baseline 7 days when practical; log alcohol timing/amount, sleep, RHR/HRV, mood, cravings, social plans, caffeine, and meds."
+    - "Baseline 14 days when practical; log alcohol timing/amount, sleep, RHR/HRV, mood, cravings, social plans, caffeine, and meds."
     - "Set start/end dates; remove easy-access alcohol, plan social friction, and choose a non-moral lapse plan."
     - "During challenge, avoid alcoholic drinks; use no/low-alcohol products only if they do not trigger cravings or extra drinking occasions."
     - "Daily, log alcohol-free status; if drinking happens, record amount, context, symptoms, craving, and next-step decision."
@@ -962,8 +962,8 @@ protocol:
 testPlans:
 -
   planId: alcohol-free-30d-full-challenge
-  durationDays: 37
-  baselineDays: 7
+  durationDays: 44
+  baselineDays: 14
   interventionDays: 30
   primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
@@ -985,8 +985,8 @@ testPlans:
   - Include an end-of-challenge review and a next-week drinking or continued-abstinence plan.
 -
   planId: alcohol-free-14d-midpoint
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
@@ -1005,8 +1005,8 @@ testPlans:
   - Alcohol-free days and any drinks remain exposure checks; review social friction and replacement behaviors at day 7 and day 14.
 -
   planId: alcohol-free-7d-starter
-  durationDays: 14
-  baselineDays: 7
+  durationDays: 21
+  baselineDays: 14
   interventionDays: 7
   primaryBiomarkerKey: biomarker:resting-heart-rate
   secondaryBiomarkerKeys:
@@ -1179,9 +1179,9 @@ experimentOnboarding:
         field: "durationChoice"
     - id: "baseline_window"
       label: "Baseline window"
-      question: "Can you observe a 7-day usual-intake baseline first, or are you starting the alcohol-free window now with retrospective baseline context?"
+      question: "Can you observe a 14-day usual-intake baseline first, or are you starting the alcohol-free window now with retrospective baseline context?"
       options:
-        - "seven_day_baseline_first"
+        - "fourteen_day_baseline_first"
         - "start_now_with_retrospective_context"
       target:
         object: "analysisPlan"
@@ -2130,7 +2130,7 @@ After a stable baseline, what changes when alcohol is removed for a defined **7-
 
 1. Screen for safety first. This self-guided version is only for adults who can reasonably stop drinking without withdrawal risk. Possible dependence or loss of control, current or past withdrawal symptoms, high or uncertain intake, prior severe withdrawal, pregnancy/trying to conceive/breastfeeding questions, high-risk or complex medication use, known or suspected liver disease or abnormal liver tests, active AUD treatment/recent detox, unstable mental health, self-harm risk, co-occurring substance use, seizure disorder, or significant cardiovascular/medical instability means clinician-guided care first.
 2. Choose one duration: **7 days** for a starter check, **14 days** for a midpoint commitment, or **30 days** for the best-evidenced full challenge.
-3. Log a 7-day baseline if practical. During the challenge, log each calendar day as alcohol-free or not.
+3. Log a 14-day baseline if practical. During the challenge, log each calendar day as alcohol-free or not.
 4. Watch the first week carefully for withdrawal-like symptoms, sleep disruption, mood changes, and cravings.
 5. At the end, review what changed, what did not, what felt hard, and what you want the next week to look like.
 

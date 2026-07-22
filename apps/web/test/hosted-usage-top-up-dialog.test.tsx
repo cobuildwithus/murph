@@ -44,8 +44,8 @@ vi.mock("@/src/components/ui/button", () => ({
     children,
     className,
     nativeButton: _nativeButton,
-    size: _size,
-    variant: _variant,
+    size,
+    variant,
     ...props
   }: ButtonHTMLAttributes<HTMLButtonElement> & {
     nativeButton?: boolean;
@@ -53,9 +53,11 @@ vi.mock("@/src/components/ui/button", () => ({
     variant?: string;
   }) => {
     void _nativeButton;
-    void _size;
-    void _variant;
-    return createElement("button", { ...props, className }, children);
+    return createElement(
+      "button",
+      { ...props, className, "data-size": size, "data-variant": variant },
+      children,
+    );
   },
   buttonVariants: () => "",
 }));
@@ -171,12 +173,12 @@ vi.mock("@/src/components/ui/choice-card", () => ({
       title: ReactNode;
     }
   >(function ChoiceCard(
-    { description, disabled, id, meta, title, value },
+    { className, description, disabled, id, meta, title, value },
     ref,
   ) {
     return createElement(
       "label",
-      { htmlFor: id },
+      { className, htmlFor: id },
       createElement("input", {
         disabled,
         id,
@@ -218,10 +220,14 @@ test("opens from the settings deep link without preselecting a top-up", async ()
 
   try {
     assert.match(rendered.container.textContent ?? "", /Add usage/);
+    const personalTrigger = buttonByText(rendered.container, "Add usage");
+    assert.equal(personalTrigger.dataset.size, "lg");
+    assert.equal(personalTrigger.dataset.variant, "outline");
+    assert.equal(personalTrigger.classList.contains("w-full"), false);
     const dialog = rendered.container.querySelector('[role="dialog"]');
     assert.ok(dialog);
     assert.equal(dialog.classList.contains("overflow-y-auto"), true);
-    assert.equal(dialog.classList.contains("sm:max-w-lg"), true);
+    assert.equal(dialog.classList.contains("sm:max-w-xl"), true);
     const radioInputs = Array.from(
       rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
     );
@@ -230,10 +236,10 @@ test("opens from the settings deep link without preselecting a top-up", async ()
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
     assert.match(
       rendered.container.textContent ?? "",
-      /one-time payment\. Stripe confirms the payment before Murph adds it\./,
+      /Choose a one-time credit amount for your account\./,
     );
     assert.equal(
-      rendered.container.querySelector("h2")?.classList.contains("text-xl"),
+      rendered.container.querySelector("h2")?.classList.contains("text-3xl"),
       true,
     );
     assert.equal(rendered.container.querySelector("h2")?.tabIndex, -1);
@@ -241,6 +247,56 @@ test("opens from the settings deep link without preselecting a top-up", async ()
       rendered.container
         .querySelector('[role="radiogroup"]')
         ?.classList.contains("sm:grid-cols-3"),
+      true,
+    );
+    assert.equal(
+      rendered.container
+        .querySelector('[role="radiogroup"]')
+        ?.classList.contains("grid-cols-3"),
+      false,
+    );
+    const firstAmountCard = rendered.container.querySelector<HTMLLabelElement>(
+      'label[for="usage-top-up-0"]',
+    );
+    assert.ok(firstAmountCard);
+    assert.equal(firstAmountCard.classList.contains("h-20"), true);
+    assert.equal(firstAmountCard.classList.contains("sm:h-24"), true);
+    assert.equal(
+      firstAmountCard.classList.contains(
+        "[&_[data-slot=field-content]]:justify-center",
+      ),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.classList.contains(
+        "[&_[data-slot=field-content]]:gap-0",
+      ),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("text-3xl"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("leading-none"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("h-5"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("items-center"),
+      true,
+    );
+    const selectionActions = buttonByText(
+      rendered.container,
+      "Choose an amount",
+    ).parentElement;
+    assert.ok(selectionActions);
+    assert.equal(selectionActions.classList.contains("grid"), true);
+    assert.equal(
+      selectionActions.classList.contains("sm:grid-cols-[auto_minmax(0,1fr)]"),
       true,
     );
     assert.equal(
@@ -285,7 +341,18 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Add group usage/);
+    assert.match(rendered.container.textContent ?? "", /Choose an amount/);
+    const groupTrigger = Array.from(
+      rendered.container.querySelectorAll<HTMLButtonElement>("button"),
+    ).find((button) => button.textContent?.trim() === "Choose amount");
+    assert.ok(groupTrigger);
+    assert.equal(groupTrigger.dataset.size, "xl");
+    assert.equal(groupTrigger.dataset.variant, "default");
+    assert.equal(groupTrigger.classList.contains("w-full"), true);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Choose a one-time credit amount for this group\./,
+    );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
       rendered.container,
@@ -556,7 +623,7 @@ test("rejects a malformed recovery restart timestamp", async () => {
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Could not open Stripe right now\. Try again\./,
+      /Try again, or choose another amount\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Checkout not open yet/);
   } finally {
@@ -757,9 +824,9 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
 
-    assert.match(rendered.container.textContent ?? "", /Opening Stripe…/);
+    assert.match(rendered.container.textContent ?? "", /Opening checkout…/);
     assert.equal(
-      buttonByText(rendered.container, "Opening Stripe…").getAttribute("aria-busy"),
+      buttonByText(rendered.container, "Opening checkout…").getAttribute("aria-busy"),
       "true",
     );
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
@@ -788,7 +855,7 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
     expect(rendered.assign).toHaveBeenCalledWith(
       "https://checkout.stripe.test/session",
     );
-    assert.equal(buttonByText(rendered.container, "Opening Stripe…").disabled, true);
+    assert.equal(buttonByText(rendered.container, "Opening checkout…").disabled, true);
 
     const pageShowEvent = new rendered.window.Event("pageshow");
     Object.defineProperty(pageShowEvent, "persisted", { value: true });
@@ -801,11 +868,11 @@ test("posts the exact offer payload, shows pending text, and redirects to Stripe
       /Checkout was interrupted\. Retry to recover it\./,
     );
     assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $5").disabled,
+      buttonByText(rendered.container, "Try again · $5").disabled,
       false,
     );
     assert.equal(
-      buttonByText(rendered.container, "Choose a different amount").disabled,
+      buttonByText(rendered.container, "Change amount").disabled,
       false,
     );
   } finally {
@@ -1105,7 +1172,7 @@ test("bounds checkout creation and restores retry and dismiss controls", async (
     );
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $5").disabled,
+      buttonByText(rendered.container, "Try again · $5").disabled,
       false,
     );
   } finally {
@@ -1164,7 +1231,7 @@ test("aborts an owned checkout on close and preserves its retry key", async () =
       rendered.container.textContent ?? "",
       /Checkout was interrupted\. Retry to recover it\./,
     );
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $5");
+    await clickButton(rendered.container, rendered.window, "Try again · $5");
 
     assert.deepEqual(
       mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload,
@@ -1198,11 +1265,11 @@ test("restores controls when the browser cannot create a request key", async () 
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Could not open Stripe right now\. Try again\./,
+      /Try again, or choose another amount\./,
     );
     assert.equal(buttonByText(rendered.container, "Cancel").disabled, false);
     assert.equal(
-      buttonByText(rendered.container, "Continue to checkout · $5").disabled,
+      buttonByText(rendered.container, "Try again · $5").disabled,
       false,
     );
     expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
@@ -1237,9 +1304,12 @@ test("retries a failed checkout with the same client request key", async () => {
   try {
     await clickRadio(rendered.container, rendered.window, "usage_2500");
     await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
-    assert.match(rendered.container.textContent ?? "", /Stripe is unavailable\./);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Try again, or choose another amount\./,
+    );
 
-    await clickButton(rendered.container, rendered.window, "Continue to checkout · $25");
+    await clickButton(rendered.container, rendered.window, "Try again · $25");
     const checkoutCalls = mocks.requestHostedOnboardingJson.mock.calls;
     assert.equal(checkoutCalls.length, 2);
     assert.deepEqual(checkoutCalls[0]?.[0]?.payload, checkoutCalls[1]?.[0]?.payload);
@@ -1304,7 +1374,20 @@ test("lets the member choose a different amount with a fresh request key", async
     );
     assert.ok(firstAmount);
     const focus = vi.spyOn(firstAmount, "focus");
-    await clickButton(rendered.container, rendered.window, "Choose a different amount");
+    const lockedActions = buttonByText(
+      rendered.container,
+      "Change amount",
+    ).parentElement;
+    assert.ok(lockedActions);
+    assert.equal(lockedActions.classList.contains("grid"), true);
+    assert.equal(lockedActions.classList.contains("sm:grid-cols-2"), true);
+    assert.match(rendered.container.textContent ?? "", /Checkout didn’t open/);
+    assert.equal(
+      buttonByText(rendered.container, "Try again · $5").dataset.size,
+      "xl",
+    );
+    assert.equal(buttonByText(rendered.container, "Change amount").dataset.size, "xl");
+    await clickButton(rendered.container, rendered.window, "Change amount");
 
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
@@ -1393,7 +1476,7 @@ test("offers target-neutral recovery for an active checkout on another destinati
     );
     assert.equal(
       Array.from(rendered.container.querySelectorAll("button")).some(
-        (button) => button.textContent?.trim() === "Choose a different amount",
+        (button) => button.textContent?.trim() === "Change amount",
       ),
       false,
     );
@@ -1452,7 +1535,7 @@ test("treats a Stripe return as a status lookup, not proof of fulfillment", asyn
     });
     assert.match(
       rendered.container.textContent ?? "",
-      /Payment submitted\. Stripe is confirming it\./,
+      /Payment submitted\. We’re confirming it\./,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Usage added/);
     expect(mocks.routerRefresh).not.toHaveBeenCalled();
@@ -1626,7 +1709,7 @@ test("keeps polling when cancel reconciliation reports payment pending", async (
 
     assert.match(
       rendered.container.textContent ?? "",
-      /Payment submitted\. Stripe is confirming it\./,
+      /Payment submitted\. We’re confirming it\./,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",

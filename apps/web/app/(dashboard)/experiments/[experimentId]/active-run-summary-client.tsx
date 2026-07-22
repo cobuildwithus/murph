@@ -84,7 +84,7 @@ function buildCardData(
   protocolFacts: readonly ProtocolFact[],
 ): ExperimentCardData {
   return {
-    title: buildCardTitle(protocol),
+    title: buildCardTitle(protocol.title, run),
     protocol: buildCardProtocol(protocolFacts),
     signals: run.signals.slice(0, EXPERIMENT_CARD_MAX_SIGNALS).map((signal) => ({
       label: signal.label,
@@ -167,11 +167,15 @@ function sampleEvenly(values: number[], max: number): number[] {
 }
 
 // The run's own name in the browser vault can be arbitrary (e.g. "7-day sauna
-// RHR experiment"). Prefer the canonical protocol name plus its duration.
-function buildCardTitle(protocol: ExperimentResultsPublicProjection): string {
-  const duration = protocol.durationDays;
-  if (Number.isFinite(duration) && duration > 0) {
-    return `${duration}-day ${protocol.title}`;
+// RHR experiment"). Keep the canonical protocol name, but use only the saved
+// run's duration so a later catalog revision cannot relabel shared results.
+function buildCardTitle(
+  protocolTitle: string,
+  run: ExperimentRunProjection,
+): string {
+  const duration = run.timingKnown ? run.durationDays : undefined;
+  if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
+    return `${duration}-day ${protocolTitle}`;
   }
-  return protocol.title;
+  return protocolTitle;
 }

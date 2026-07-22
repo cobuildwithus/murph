@@ -46,7 +46,7 @@ attribution:
   ownerType: murph
   note: Drafted from the 2026-04-27 Red Light Glasses Before Bed research restart package.
 protocol:
-  doseSignature: Nightly · 90–120 min before intended bedtime · high-filtering amber/red/orange glasses · 14-night intervention after 7-day baseline
+  doseSignature: Nightly · 90–120 min before intended bedtime · high-filtering amber/red/orange glasses · 14-night intervention after 14-day baseline
   target: high-filtering amber, red, or orange evening glasses with spectral data when available
   frequency:
     sessionsPerWeek: 7
@@ -69,7 +69,7 @@ protocol:
   interventionSessionsTarget: 12
   steps:
     - "Choose high-filtering amber, red, or orange glasses; prefer spectral, melanopic, alpha-opic, or mDFD data when available."
-    - "Baseline 7 days: no glasses; keep bedtime, screens, room light, caffeine, alcohol, supplements, and exercise timing stable."
+    - "Baseline 14 days: no glasses; keep bedtime, screens, room light, caffeine, alcohol, supplements, and exercise timing stable."
     - "On intervention nights, wear glasses 90–120 min before intended bedtime during usual indoor wind-down."
     - "Keep room lighting and screen habits stable unless testing broader light or screen reduction."
     - "Remove glasses before sleep and before driving, stairs, cooking, tools, low-light navigation, or color/contrast/motion-critical tasks."
@@ -146,8 +146,8 @@ protocol:
   - End the experiment if tracking creates anxiety, rumination, extra sleep-score checking, or friction that outweighs any benefit.
 testPlans:
 - planId: sol-wiredness-21d
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: biomarker:sleep-onset-latency
   secondaryBiomarkerKeys:
@@ -158,7 +158,7 @@ testPlans:
   minimumAdherenceSessions: 10
   targetAdherenceSessions: 12
   notes:
-  - Compare the 14-night intervention window with the user’s own 7-night baseline rather than highlighting single-night changes.
+  - Compare the 14-night intervention window with the user’s own 14-night baseline rather than highlighting single-night changes.
   - Use sleep-onset latency and sleep efficiency as the main measurable read; subjective sleep-onset ease and pre-bed wiredness help interpret quiet-wakefulness errors.
   - Treat resting heart rate, HRV, and deep-sleep minutes as exploratory downstream checks because direct eyewear evidence does not establish them as primary effects.
   - Mark attribution as weak if the user also changes screen curfew, room-light setup, melatonin, supplements, bedtime, or timed light therapy during the same test.
@@ -874,7 +874,7 @@ After a stable baseline, does wearing high-filtering amber, red, or orange glass
 
 ## Simple version
 
-Run a 21-day experiment: 7 baseline nights, then 14 intervention nights with the glasses on 90–120 minutes before intended bedtime. A useful first read needs at least 10 adherent intervention nights, with 12 as the target.
+Run a 28-day experiment: 14 baseline nights, then 14 intervention nights with the glasses on 90–120 minutes before intended bedtime. A useful first read needs at least 10 adherent intervention nights, with 12 as the target.
 
 Keep daytime light normal. Do not add new melatonin, sleep supplements, a screen curfew, a new bedtime target, a room-light redesign, or timed light therapy during the same test unless the run is intentionally marked as weaker attribution [source_artifact:evening-light-reduction-pmid-30410784; source_artifact:evening-light-reduction-pmid-31752544; source_artifact:pmid-36508661].
 

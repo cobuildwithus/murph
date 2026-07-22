@@ -142,7 +142,7 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: 2x/week · 4 x 4 min intervals · 85–95% HRmax · 7-day baseline + 6-week intervention
+  doseSignature: 2x/week · 4 x 4 min intervals · 85–95% HRmax · 14-day baseline + 6-week intervention
   target: 85–95% estimated HRmax by the later part of each interval
   frequency:
     sessionsPerWeek: 2
@@ -246,8 +246,8 @@ testPlans:
 
   -
     planId: wearable-cardio-fitness-49d
-    durationDays: 49
-    baselineDays: 7
+    durationDays: 56
+    baselineDays: 14
     interventionDays: 42
     primaryBiomarkerKey: biomarker:estimated-vo2max
     secondaryBiomarkerKeys:
@@ -819,9 +819,9 @@ After a stable baseline, does a short block of **Norwegian-style 4x4 aerobic int
 
 ## Simple version
 
-Run a 49-day experiment:
+Run a 56-day experiment:
 
-- **7 baseline days**
+- **14 baseline days**
 - **42 intervention days**
 - **2 interval sessions per week**
 - **12 target sessions**, with **8 sessions** as the minimum for a useful first read

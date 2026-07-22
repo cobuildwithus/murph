@@ -1,5 +1,7 @@
 "use client";
 
+import { CheckIcon } from "lucide-react";
+
 import {
   Field,
   FieldContent,
@@ -41,7 +43,7 @@ function ChoiceCard({
   return (
     <FieldLabel
       className={cn(
-        "relative isolate h-full cursor-pointer overflow-hidden rounded-xl border-border bg-card p-0 transition-[border-color,background-color] duration-200 ease-out hover:border-primary/35 hover:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-data-checked:border-primary/50 has-data-checked:bg-primary/10 has-data-checked:ring-1 has-data-checked:ring-primary/15 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:hover:border-border data-[disabled=true]:hover:bg-card",
+        "group/choice-card relative isolate h-full cursor-pointer overflow-hidden rounded-xl border-border bg-card p-0 transition-[border-color,background-color] duration-200 ease-out hover:border-primary/35 hover:bg-primary/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-data-checked:border-primary/50 has-data-checked:bg-primary/10 has-data-checked:ring-1 has-data-checked:ring-primary/15 data-[disabled=true]:cursor-not-allowed data-[disabled=true]:hover:border-border data-[disabled=true]:hover:bg-card",
         artwork && "min-h-44",
         className,
       )}
@@ -57,25 +59,33 @@ function ChoiceCard({
         </span>
       ) : null}
       <Field
-        className="relative z-10 h-full items-start gap-3 p-4 sm:p-5"
-        orientation="horizontal"
+        className="relative z-10 h-full gap-3 p-4 [&>[data-slot=radio-group-item]]:absolute sm:p-5"
       >
         <RadioGroupItem
           aria-describedby={[descriptionId, metaId].filter(Boolean).join(" ")}
           aria-labelledby={titleId}
           disabled={disabled}
           id={id}
+          className="sr-only"
           {...props}
         />
         <FieldContent className={cn("gap-2", disabled && "opacity-55")}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-start justify-between gap-3">
             <FieldTitle
               id={titleId}
               className="text-base font-semibold text-foreground"
             >
               {title}
             </FieldTitle>
-            {badge}
+            <div className="flex shrink-0 items-center gap-2">
+              {badge}
+              <span
+                aria-hidden="true"
+                className="flex size-5 items-center justify-center rounded-full border border-border text-transparent transition-colors group-has-data-checked/choice-card:border-primary group-has-data-checked/choice-card:bg-primary group-has-data-checked/choice-card:text-primary-foreground"
+              >
+                <CheckIcon className="size-3" strokeWidth={2.4} />
+              </span>
+            </div>
           </div>
           <FieldDescription id={descriptionId} className="text-pretty">
             {description}

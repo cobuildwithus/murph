@@ -113,6 +113,7 @@ vi.mock("@/src/lib/hosted-execution/usage-limit-notice-claim", async () => {
         usageCreditLedgerVersion: bigint;
       }) => ({
         idempotencyKey: actual.buildHostedAiUsageGateNoticeIdempotencyKey(input),
+        providerIdempotencyKey: "ai-usage-attempt:hld_usage_notice",
         status: "claimed" as const,
       }),
     ),
@@ -189,6 +190,7 @@ describe("hosted Linq webhook transport", () => {
         });
         return {
           idempotencyKey: buildHostedAiUsageGateNoticeIdempotencyKey(input),
+          providerIdempotencyKey: "ai-usage-attempt:hld_usage_notice",
           status: "claimed",
         };
       });
@@ -765,7 +767,7 @@ describe("hosted Linq webhook transport", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat-1",
-        idempotencyKey: expectedIdempotencyKey,
+        idempotencyKey: "ai-usage-attempt:hld_usage_notice",
         message: "usage-limit",
         replyToMessageId: "message-1",
       }),

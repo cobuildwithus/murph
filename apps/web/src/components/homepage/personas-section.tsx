@@ -31,7 +31,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
     messages: [
       {
         from: "murph",
-        text: "Night 9 of magnesium glycinate. Deep sleep is up 18% vs your baseline week.",
+        text: "Night 9 of magnesium glycinate. Deep sleep is up 18% vs your two-week baseline.",
       },
       {
         from: "user",
@@ -50,9 +50,11 @@ const PERSONAS: ReadonlyArray<Persona> = [
         { label: "REM", value: "1h 08m", delta: "+6%" },
       ],
       trend: {
-        baseline: [58, 56, 60, 57, 59],
-        active: [59, 64, 68, 71, 75, 78, 82, 85],
-        label: "9 day trend",
+        baseline: [
+          58, 56, 60, 57, 59, 58, 61, 57, 60, 59, 56, 58, 60, 57,
+        ],
+        active: [59, 64, 68, 71, 75, 78, 82, 85, 84],
+        label: "9 active nights",
       },
     },
     tagline: "Testing whether magnesium actually deepens sleep.",

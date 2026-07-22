@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -75,6 +76,8 @@ import {
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
+import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -485,7 +488,7 @@ export function ComponentsContent() {
 
         <Section title="Alert">
           <div className="flex flex-col gap-4">
-            <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 8 of 21. Next session scheduled for this evening.</AlertDescription></Alert>
+            <Alert><AlertTitle>Experiment in progress</AlertTitle><AlertDescription>Day 15 of 28. Next session scheduled for this evening.</AlertDescription></Alert>
             <Alert variant="destructive"><AlertTitle>Oura disconnected</AlertTitle><AlertDescription>Reconnect your ring to continue tracking metrics.</AlertDescription></Alert>
           </div>
         </Section>
@@ -532,10 +535,35 @@ export function ComponentsContent() {
           <Dialog>
             <div className="flex"><DialogTrigger render={<Button>Open Dialog</Button>} /></div>
             <DialogContent>
-              <DialogHeader><DialogTitle>Start Experiment</DialogTitle><DialogDescription>This will begin a 7-day baseline period followed by 14 days of active tracking.</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle>Start Experiment</DialogTitle><DialogDescription>This will begin a 14-day baseline period followed by 14 days of active tracking.</DialogDescription></DialogHeader>
               <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
+        </Section>
+
+        <Separator />
+
+        <Section title="Usage credit">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Group funding uses one shared card and the standard usage-credit
+            amount dialog. Credit is added only after payment is complete.
+          </p>
+          <div
+            className="max-w-xl"
+            data-design-component="group-usage-funding"
+            id="group-usage-funding-component"
+          >
+            <GroupUsageFundingCard
+              action={
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  scope="group"
+                />
+              }
+              groupName="Sunday sleep crew"
+            />
+          </div>
         </Section>
 
         <Separator />
@@ -782,11 +810,11 @@ export function ComponentsContent() {
         <Section title="Progress">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 7d ✓</span>
+              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
               <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
               <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
             </div>
-            <Progress value={38} className="h-1.5" />
+            <Progress value={54} className="h-1.5" />
           </div>
         </Section>
 
@@ -815,14 +843,14 @@ export function ComponentsContent() {
           <div className="max-w-sm rounded-xl border border-border bg-card p-5">
             <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">Plan & Timeline</span>
             <div className="mt-4 flex flex-col gap-4">
-              <TimelineEntry date="Apr 5" label="End" title="Experiment ends" description="Final analysis generated" variant="default" upcoming />
-              <TimelineEntry date="Apr 1" label="Checkpoint" title="Week 2 review" variant="outline" upcoming />
-              <TimelineEntry date="Mar 31" label="Upcoming" title="Session 3 of 3" upcoming />
-              <TimelineEntry date="Mar 30" label="Today" title="Session logged" description="20 min at 85°C. Deep sleep was 1h50m last night." />
-              <TimelineEntry date="Mar 29" title="HRV milestone" description="HRV crossed 50ms for the first time." />
-              <TimelineEntry date="Mar 28" title="Skipped session" description="Feeling unwell, rest day." variant="muted" />
-              <TimelineEntry date="Mar 25" label="Checkpoint" title="Week 1 complete" description="Baseline captured. Active phase started." variant="outline" />
-              <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 21 days" variant="primary" last />
+              <TimelineEntry date="Apr 15" label="End" title="Experiment ends" description="Final analysis generated" variant="default" upcoming />
+              <TimelineEntry date="Apr 14" label="Checkpoint" title="Week 2 review" variant="outline" upcoming />
+              <TimelineEntry date="Apr 6" label="Upcoming" title="Session 3 of 3" upcoming />
+              <TimelineEntry date="Apr 5" label="Today" title="Session logged" description="20 min at 85°C. Deep sleep was 1h50m last night." />
+              <TimelineEntry date="Apr 4" title="HRV milestone" description="HRV crossed 50ms for the first time." />
+              <TimelineEntry date="Apr 3" title="Skipped session" description="Feeling unwell, rest day." variant="muted" />
+              <TimelineEntry date="Apr 1" label="Checkpoint" title="Baseline complete" description="Baseline captured. Active phase started." variant="outline" />
+              <TimelineEntry date="Mar 18" label="Start" title="Experiment started" description="Finnish Sauna Protocol · 28 days" variant="primary" last />
             </div>
           </div>
         </Section>

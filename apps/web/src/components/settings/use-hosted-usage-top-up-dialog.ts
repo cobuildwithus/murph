@@ -340,11 +340,8 @@ function useHostedUsageTopUpDialog({
     let requestKey: string;
     try {
       requestKey = previousRequestKey ?? createClientRequestKey();
-    } catch (error) {
-      const message = toErrorMessage(
-        error,
-        "Could not open Stripe right now. Try again.",
-      );
+    } catch {
+      const message = "Try again, or choose another amount.";
       if (sourceScreen.kind === "selection") {
         dispatch({
           type: "selection_checkout_failed",
@@ -391,7 +388,7 @@ function useHostedUsageTopUpDialog({
         && response.status === "checkout_open"
         && !resolvedCheckoutUrl
       ) {
-        throw new Error("Could not open Stripe right now. Try again.");
+        throw new Error("Checkout didn’t open. Try again.");
       }
       return { checkoutUrl: resolvedCheckoutUrl, response };
     });
@@ -516,15 +513,15 @@ function useHostedUsageTopUpDialog({
 }
 
 function checkoutErrorMessage(
-  error: unknown,
+  _error: unknown,
   abortReason: CheckoutAbortReason,
 ): string {
-  if (isAbortError(error)) {
+  if (isAbortError(_error)) {
     return abortReason === "dismissed"
       ? "Checkout was interrupted. Retry to recover it."
       : "Checkout took too long to open. Try again.";
   }
-  return toErrorMessage(error, "Could not open Stripe right now. Try again.");
+  return "Try again, or choose another amount.";
 }
 
 function cancelErrorMessage(

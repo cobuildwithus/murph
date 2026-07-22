@@ -384,7 +384,7 @@ attribution:
   ownerType: murph
   note: "Synthesized from the Digital Sunset research run and canonical source ledger in output-packages/research/digital-sunset."
 protocol:
-  doseSignature: Nightly · no personal screens for 30–60 min before intended bedtime · stricter no-screen-in-bed rule · 14-night intervention after 7-day baseline
+  doseSignature: Nightly · no personal screens for 30–60 min before intended bedtime · stricter no-screen-in-bed rule · 14-night intervention after 14-day baseline
   target: personal phones, tablets, laptops, handheld gaming, and interactive personal screens during the pre-bed window
   frequency:
     sessionsPerWeek: 7
@@ -508,8 +508,8 @@ protocol:
 testPlans:
 -
   planId: digital-sunset-sol-21d
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: "biomarker:sleep-onset-latency"
   secondaryBiomarkerKeys:
@@ -517,7 +517,7 @@ testPlans:
   minimumAdherenceSessions: 10
   targetAdherenceSessions: 12
   notes:
-  - Use a 7-day baseline with normal evening screen behavior before starting the curfew.
+  - Use a 14-day baseline with normal evening screen behavior before starting the curfew.
   - Compare intervention averages with the user’s own baseline rather than interpreting single nights.
   - Pair wearable sleep-onset and sleep-efficiency trends with a one-tap subjective sleep-onset and pre-sleep-wiredness log.
   - Treat HRV, resting heart rate, next-day mood, cognition, and any consumer sleep-stage output as optional exploratory context only; do not use them as pass/fail signals for Digital Sunset.
@@ -1373,9 +1373,9 @@ After a stable baseline, does stopping personal screen use for the last **30–6
 
 ## Simple version
 
-Run a 21-day experiment:
+Run a 28-day experiment:
 
-- **7 baseline days** with your usual evening screen routine.
+- **14 baseline days** with your usual evening screen routine.
 - **14 intervention nights** with no personal screens for at least **30 minutes before intended bedtime**.
 - Use **60 minutes** as a larger screen-free window only if it is realistic; superiority over 30 minutes is unproven, and it should not delay bedtime or create anxiety.
 - Keep the phone **out of bed**; outside the bedroom is optional when safe and practical.
@@ -1425,7 +1425,7 @@ Do not use this as treatment for chronic insomnia, suspected sleep apnea, unsafe
 
 ## Off-ramp
 
-At the end of 21 days, choose the plainest conclusion:
+At the end of 28 days, choose the plainest conclusion:
 
 1. **Worth repeating** if adherent nights show easier wind-down or better sleep-onset signals with low burden and no safety issues.
 2. **Probably noise** if only one or two nights moved, the result is confounded, or baseline screen use was already low.

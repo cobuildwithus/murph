@@ -980,6 +980,10 @@ describe('assistant local PDF evidence guidance', () => {
       onboardingGuidance: true,
     }))
 
+    expect(readHostedWearableProviderList(prompt)).toBe(
+      'Oura (`oura`) and WHOOP (`whoop`)',
+    )
+    expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
@@ -998,6 +1002,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
     )
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain(
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
@@ -1076,7 +1081,9 @@ describe('assistant local PDF evidence guidance', () => {
       onboardingGuidance: false,
     }))
 
+    expect(readHostedWearableProviderList(prompt)).toBeNull()
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
       'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
     )
@@ -2160,6 +2167,9 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).not.toContain('Natural first-run flow')
     expect(prompt).not.toContain('vault-cli device account list --format json')
+    expect(readHostedWearableProviderList(prompt)).toBe('WHOOP (`whoop`)')
+    expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
@@ -2460,4 +2470,10 @@ function createCommonNotificationPromptInput(
 
 function firstNChars(value: string, length: number): string {
   return value.slice(0, length)
+}
+
+function readHostedWearableProviderList(prompt: string): string | null {
+  return prompt.match(
+    /^- Hosted wearable connection links are available for (.+)\. When offering examples/mu,
+  )?.[1] ?? null
 }

@@ -50,7 +50,7 @@ media:
   relativePath: design-assets/hero-caffeine-curfew.jpeg
   mediaType: image/jpeg
 protocol:
-  doseSignature: Daily · 14 intervention days after optional 7-day baseline · all caffeine before 10–11am or ≥8h before bedtime, whichever is earlier
+  doseSignature: Daily · 14 intervention days after optional 14-day baseline · all caffeine before 10–11am or ≥8h before bedtime, whichever is earlier
   target: 'all caffeine sources: coffee, tea, energy products, supplements, decaf, chocolate/cocoa, and caffeine-containing medicines'
   frequency:
     sessionsPerWeek: 7
@@ -71,14 +71,14 @@ protocol:
   interventionSessionsMinimum: 10
   interventionSessionsTarget: 12
   steps:
-    - "Run a 7-day baseline when possible; keep caffeine unchanged and log source, serving size, estimated mg, and time."
+    - "Run a 14-day baseline when possible; keep caffeine unchanged and log source, serving size, estimated mg, and time."
     - "Choose bedtime anchor; set cutoff as earlier of 10–11 AM or 8h before bed."
     - "For 14 days, keep all caffeine before cutoff; log coffee, tea, energy products, decaf, chocolate, supplements, and medicines."
     - "Keep total caffeine stable or lower; do not stack one large early dose or use pills, powders, shots, or pre-workout."
     - "Track cutoff adherence, total mg, sleep timing, sleep onset, sleep quality, and withdrawal or excess-caffeine symptoms daily."
     - "Review adherent days against baseline; flag alcohol, illness, stress, travel, late exercise, schedule shifts, and medication changes."
   tips:
-  - "Run baseline first: log source, milligrams, last caffeine time, bedtime, and sleep onset for 7 days."
+  - "Run baseline first: log source, milligrams, last caffeine time, bedtime, and sleep onset for 14 days."
   - "Set cutoff as the earlier of 10–11am or 8 hours before intended bedtime."
   - "Make morning caffeine measured: coffee, tea, decaf, chocolate, pre-workout, supplements, and medicines all count."
   - "Avoid front-loading: skip pills, powders, energy shots, pre-workout, or one giant early dose."
@@ -132,8 +132,8 @@ protocol:
   - End the experiment if sleep worsens after the withdrawal period, daytime function is impaired, or tracking creates distress.
 testPlans:
 - planId: caffeine-curfew-21d
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: biomarker:sleep-onset-latency
   secondaryBiomarkerKeys:
@@ -145,7 +145,7 @@ testPlans:
   minimumAdherenceSessions: 10
   targetAdherenceSessions: 12
   notes:
-  - Use a 7-day baseline when available; otherwise, treat the first run as weaker attribution.
+  - Use a 14-day baseline when available; otherwise, treat the first run as weaker attribution.
   - Score only days where all caffeine was logged and the cutoff was met or clearly marked as missed.
   - Pair wearable sleep metrics with subjective sleep onset, sleep quality, withdrawal symptoms, and curfew adherence.
   - Anchor interpretation in sleep onset and sleep continuity; use deep-sleep staging, resting heart rate, blood pressure, and HRV as supporting same-device trends.
@@ -1071,9 +1071,9 @@ After a stable baseline, does moving all caffeine before a strict late-morning o
 
 ## Simple version
 
-Run a 21-day test when possible:
+Run a 28-day test when possible:
 
-- **7 baseline days** logging usual caffeine without changing it
+- **14 baseline days** logging usual caffeine without changing it
 - **14 intervention days** with all caffeine before the earlier of **10–11am** or **8 hours before intended bedtime**
 - **12 target adherent days**, with **10 days** as the minimum useful first read
 - all-source caffeine logging, including coffee, tea, decaf, chocolate/cocoa, cola, energy drinks or shots, pre-workout or stimulant blends, caffeine tablets or powders, and caffeine-containing medicines, with high-dose or concentrated products treated as safety flags rather than implementation tools
