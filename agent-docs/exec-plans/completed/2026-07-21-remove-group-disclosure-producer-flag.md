@@ -1,6 +1,6 @@
 # Remove the consented group disclosure producer flag
 
-Status: active
+Status: completed
 Created: 2026-07-21
 Updated: 2026-07-21
 
@@ -71,3 +71,14 @@ Updated: 2026-07-21
 - Cloudflare TypeScript, Node tests, and Workers tests
 - `pnpm docs:drift`
 - `git diff --check`
+
+## Deployment outcome
+
+- Pushed the hard deletion to `main` at commit
+  `35d113843b0e76f3b9aeaf0b778f3f169fa00ae8`.
+- `pnpm cf:deploy` completed successfully in
+  [production workflow run 29876321410](https://github.com/cobuildwithus/murph/actions/runs/29876321410).
+- All five predeploy gates, the Worker deploy, and the deployed-endpoint smoke
+  passed. The endpoint smoke held until Cloudflare served the expected runner
+  bundle, then completed green.
+Completed: 2026-07-21
