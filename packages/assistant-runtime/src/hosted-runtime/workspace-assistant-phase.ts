@@ -151,6 +151,7 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
   type HostedSystemMailboxPendingItem,
+  type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
@@ -256,6 +257,10 @@ const HOSTED_DEVICE_SYNC_STATUS_PROMPT_TIMEOUT_MS = 1_000;
 const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-update"] as const;
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
+] as const;
+const HOSTED_CONVERSATION_PRE_PLANNING_ROUTE_ACTIONS = [
+  "apply-member-preferences",
+  "record-phone-call-result-context",
 ] as const;
 const HOSTED_FOREGROUND_PENDING_EFFECTS_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
@@ -1511,9 +1516,13 @@ export async function runHostedWorkspaceAssistantPhase(
     const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
-        ? await runPrePlanningMemberPreferencesMailboxPhase({
+        ? await runPrePlanningSystemMailboxPhase({
+          allowedRouteActions: input.acceptedAssistantInputCausalSeq
+            ? HOSTED_CONVERSATION_PRE_PLANNING_ROUTE_ACTIONS
+            : HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
           executionContext,
           input,
+          maxCausalSeq: input.acceptedAssistantInputCausalSeq ?? null,
         })
         : {
             continueAssistantLane: true,
@@ -3745,9 +3754,11 @@ function buildPreAutomationLaneSkippedAssistantWakeResult(input: {
   };
 }
 
-async function runPrePlanningMemberPreferencesMailboxPhase(input: {
+async function runPrePlanningSystemMailboxPhase(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
+  maxCausalSeq: string | null;
 }): Promise<{
   continueAssistantLane: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -3760,7 +3771,8 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     assertHostedAssistantPhaseLiveness(input.input.signal);
     const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
     const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
+      maxCausalSeq: input.maxCausalSeq,
       now: () => now,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -3788,8 +3800,9 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     }
 
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
       executionContext: input.executionContext,
+      maxCausalSeq: input.maxCausalSeq,
       now: () => now,
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       runtime: input.input.runtime,
@@ -3830,7 +3843,8 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
 
   const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
   const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+    allowedRouteActions: input.allowedRouteActions,
+    maxCausalSeq: input.maxCausalSeq,
     now: () => now,
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4102,9 +4116,11 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         result: null,
       }
-    : await runPrePlanningMemberPreferencesMailboxPhase({
+    : await runPrePlanningSystemMailboxPhase({
+        allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
         executionContext: input.executionContext,
         input: phaseInput,
+        maxCausalSeq: null,
       });
   const mergeMemberPreferencesPrePlanningResult = (
     result: HostedWorkspaceRunnerAssistantPhaseResult | null,

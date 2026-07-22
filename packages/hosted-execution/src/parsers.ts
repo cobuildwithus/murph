@@ -19,7 +19,8 @@ import {
 import {
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
-  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
   isHostedLinqConversationContactKind,
@@ -1356,28 +1357,36 @@ function parseHostedExecutionPhoneCallResultedPayload(
   label: string,
 ): HostedExecutionPhoneCallResultedPayload {
   const record = requireObject(value, label);
-  assertExactHostedExecutionKeys(record, ["context", "route"], label);
+  assertExactHostedExecutionKeys(record, ["context", "originSessionId"], label);
   const context = requireString(record.context, `${label}.context`);
   if (
     context.trim().length === 0
-    || [...context].length > HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS
+    || new TextEncoder().encode(context).byteLength
+      > HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES
   ) {
     throw new TypeError(
       `${label}.context must contain between 1 and `
-      + `${HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS} Unicode code points.`,
+      + `${HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES} UTF-8 bytes.`,
     );
   }
-  const route = parseHostedExecutionAssistantNotificationRoute(
-    record.route,
-    `${label}.route`,
-  );
-  if (route.threadIsDirect !== true || route.delivery.kind === "explicit") {
-    throw new TypeError(`${label}.route must identify a bound direct conversation.`);
+  const originSessionId = requireString(
+    record.originSessionId,
+    `${label}.originSessionId`,
+  ).trim();
+  if (
+    originSessionId.length === 0
+    || [...originSessionId].length
+      > HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS
+  ) {
+    throw new TypeError(
+      `${label}.originSessionId must contain between 1 and `
+      + `${HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS} Unicode code points.`,
+    );
   }
 
   return {
     context,
-    route,
+    originSessionId,
   };
 }
 

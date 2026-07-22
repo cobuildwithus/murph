@@ -2743,6 +2743,7 @@ export async function executeMurphDynamicToolRequest(input: {
       try {
         const result = await phoneCalls.start({
           brief: input.request.brief,
+          originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief: input.request.brief,
             scope: requestKeyScope,

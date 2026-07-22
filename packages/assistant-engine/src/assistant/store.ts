@@ -626,6 +626,11 @@ export async function appendAssistantConversationContextEntry(input: {
         sessionId: input.sessionId,
       })
     }
+    if (session.binding.threadIsDirect !== true) {
+      throw new TypeError(
+        'Assistant conversation context requires an existing direct session.',
+      )
+    }
 
     const existingEntries = await readAssistantTranscriptEntries(
       paths,

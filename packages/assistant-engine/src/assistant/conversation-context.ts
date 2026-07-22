@@ -1,18 +1,9 @@
 import { createHash } from 'node:crypto'
 
-import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
-import { resolveAssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-
 import {
-  normalizeAssistantExecutionContext,
-  resolveAssistantExecutionDefaultTarget,
-  resolveAssistantExecutionOperatorDefaults,
-} from './execution-context.js'
-import type {
-  AssistantExecutionContext,
-  AssistantSessionResolutionFields,
-} from './service-contracts.js'
-import { resolveAssistantSessionForMessage } from './session-resolution.js'
+  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
+} from '@murphai/hosted-execution'
+
 import { normalizeNullableString } from './shared.js'
 import { appendAssistantConversationContextEntry } from './store.js'
 
@@ -21,17 +12,17 @@ const ASSISTANT_CONVERSATION_CONTEXT_TRANSCRIPT_PREFIX =
 const ASSISTANT_CONVERSATION_CONTEXT_KEY_HASH_LENGTH = 32
 const ASSISTANT_CONVERSATION_CONTEXT_KEY_HASH_PATTERN = /^[a-f0-9]{32}$/u
 
-export interface AssistantConversationContextInput
-  extends AssistantSessionResolutionFields {
+export interface AssistantConversationContextInput {
   context: string
-  executionContext?: AssistantExecutionContext | null
   idempotencyKey: string
   occurredAt: string
+  sessionId: string
+  vault: string
 }
 
 export interface AssistantConversationContextResult {
   appended: boolean
-  session: Awaited<ReturnType<typeof resolveAssistantSessionForMessage>>['session']
+  session: Awaited<ReturnType<typeof appendAssistantConversationContextEntry>>['session']
 }
 
 export function buildAssistantConversationContextTranscriptText(input: {
@@ -69,47 +60,46 @@ export function readAssistantConversationContextTranscriptText(
   if (!ASSISTANT_CONVERSATION_CONTEXT_KEY_HASH_PATTERN.test(keyHash)) {
     return null
   }
-  return normalizeNullableString(text.slice(markerEnd + 1))
+  const context = normalizeNullableString(text.slice(markerEnd + 1))
+  return context
+    ? truncateUtf8(context, HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES)
+    : null
 }
 
 export async function recordAssistantConversationContextLocal(
   input: AssistantConversationContextInput,
 ): Promise<AssistantConversationContextResult> {
-  if (input.threadIsDirect !== true) {
-    throw new TypeError('Assistant conversation context requires a direct thread.')
-  }
   const occurredAtMs = Date.parse(input.occurredAt)
   if (!Number.isFinite(occurredAtMs)) {
     throw new TypeError('Assistant conversation context occurredAt must be an ISO timestamp.')
   }
-  const executionContext = normalizeAssistantExecutionContext(input.executionContext)
-  const boundaryDefaultTarget = resolveAssistantExecutionDefaultTarget({
-    executionContext,
-    fallbackTarget: createDefaultLocalAssistantModelTarget(),
-  })
-  const defaults = resolveAssistantExecutionOperatorDefaults({
-    defaults: await resolveAssistantOperatorDefaults(),
-    executionContext,
-  })
-  const resolved = await resolveAssistantSessionForMessage({
-    boundaryDefaultTarget,
-    defaults,
-    message: {
-      ...input,
-      deliverResponse: false,
-      executionContext,
-      prompt: input.context,
-    },
-  })
-  if (resolved.session.binding.threadIsDirect !== true) {
-    throw new TypeError('Assistant conversation context resolved outside a direct thread.')
-  }
   return await appendAssistantConversationContextEntry({
     createdAt: new Date(occurredAtMs).toISOString(),
-    sessionId: resolved.session.sessionId,
+    sessionId: input.sessionId,
     text: buildAssistantConversationContextTranscriptText(input),
     vault: input.vault,
   })
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) {
+    return value
+  }
+  const codePoints = [...value]
+  let low = 0
+  let high = codePoints.length
+  let best = ''
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2)
+    const candidate = codePoints.slice(0, middle).join('')
+    if (Buffer.byteLength(candidate, 'utf8') <= maxBytes) {
+      best = candidate
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  return best
 }
 
 function normalizeRequiredConversationContextValue(

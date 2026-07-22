@@ -25,9 +25,9 @@ afterEach(async () => {
 })
 
 describe('assistant conversation context', () => {
-  it('resolves the exact direct session and records no outbound turn', async () => {
+  it('records only on the exact initiating direct session', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
-      'assistant-conversation-context-route-',
+      'assistant-conversation-context-origin-',
     )
     cleanupPaths.push(parentRoot)
     const target = createAssistantModelTarget({
@@ -41,49 +41,111 @@ describe('assistant conversation context', () => {
     if (!target) {
       throw new Error('Expected assistant target.')
     }
-    const context = 'Internal phone-call result context.'
-
-    const result = await recordAssistantConversationContextLocal({
-      actorId: 'actor-blind',
-      bindingDeliveryTarget: 'chat-target',
-      channel: 'linq',
-      context,
+    const telegram = await resolveAssistantSession({
+      actorId: 'telegram-actor',
+      bindingDeliveryTarget: 'telegram-chat',
+      channel: 'telegram',
       deliveryKind: 'thread',
-      executionContext: {
-        hosted: {
-          defaultTarget: target,
-          memberId: 'member-blind',
-          userEnvKeys: [],
-        },
-      },
-      idempotencyKey: 'phone-call.resulted:call-route',
-      identityId: 'identity-blind',
-      occurredAt: '2026-07-22T16:24:46.000Z',
-      threadId: 'thread-blind',
+      identityId: 'telegram-identity',
+      target,
+      threadId: null,
       threadIsDirect: true,
       vault: vaultRoot,
     })
-
-    expect(result.appended).toBe(true)
-    expect(result.session.binding).toMatchObject({
-      actorId: 'actor-blind',
+    const linq = await resolveAssistantSession({
+      actorId: 'linq-actor',
+      bindingDeliveryTarget: 'linq-chat',
       channel: 'linq',
-      delivery: {
-        kind: 'thread',
-        target: 'chat-target',
-      },
-      identityId: 'identity-blind',
-      threadId: 'thread-blind',
+      deliveryKind: 'thread',
+      identityId: 'linq-identity',
+      target,
+      threadId: 'linq-chat',
       threadIsDirect: true,
+      vault: vaultRoot,
     })
-    const entries = await listAssistantTranscriptEntries(
+    const context = 'The pharmacy call completed.'
+
+    const result = await recordAssistantConversationContextLocal({
+      context,
+      idempotencyKey: 'phone-call.resulted:call-origin',
+      occurredAt: '2026-07-22T16:24:46.000Z',
+      sessionId: telegram.session.sessionId,
+      vault: vaultRoot,
+    })
+
+    expect(result.session.sessionId).toBe(telegram.session.sessionId)
+    expect(await listAssistantTranscriptEntries(
       vaultRoot,
-      result.session.sessionId,
+      telegram.session.sessionId,
+    )).toHaveLength(1)
+    expect(await listAssistantTranscriptEntries(
+      vaultRoot,
+      linq.session.sessionId,
+    )).toHaveLength(0)
+  })
+
+  it('fails closed when the initiating session does not exist', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-conversation-context-route-',
     )
-    expect(entries).toHaveLength(1)
-    expect(readAssistantConversationContextTranscriptText(
-      entries[0]?.text ?? '',
-    )).toBe(context)
+    cleanupPaths.push(parentRoot)
+    const context = 'Internal phone-call result context.'
+
+    await expect(recordAssistantConversationContextLocal({
+      context,
+      idempotencyKey: 'phone-call.resulted:call-route',
+      occurredAt: '2026-07-22T16:24:46.000Z',
+      sessionId: 'session_missing',
+      vault: vaultRoot,
+    })).rejects.toThrow(/not found/u)
+  })
+
+  it('fails closed when the initiating session is not direct', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'assistant-conversation-context-group-',
+    )
+    cleanupPaths.push(parentRoot)
+    const target = createAssistantModelTarget({
+      approvalPolicy: 'never',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'vercel-ai-gateway',
+      provider: 'codex-cli',
+      reasoningEffort: 'medium',
+      sandbox: 'danger-full-access',
+    })
+    if (!target) {
+      throw new Error('Expected assistant target.')
+    }
+    const group = await resolveAssistantSession({
+      actorId: 'group-actor',
+      bindingDeliveryTarget: 'group-chat',
+      channel: 'linq',
+      deliveryKind: 'thread',
+      identityId: 'group-identity',
+      target,
+      threadId: 'group-chat',
+      threadIsDirect: false,
+      vault: vaultRoot,
+    })
+
+    await expect(recordAssistantConversationContextLocal({
+      context: 'Internal phone-call result context.',
+      idempotencyKey: 'phone-call.resulted:group-call',
+      occurredAt: '2026-07-22T16:24:46.000Z',
+      sessionId: group.session.sessionId,
+      vault: vaultRoot,
+    })).rejects.toThrow(/existing direct session/u)
+  })
+
+  it('bounds provider replay context by UTF-8 bytes', () => {
+    const transcriptText = buildAssistantConversationContextTranscriptText({
+      context: '界'.repeat(2_000),
+      idempotencyKey: 'phone-call.resulted:multibyte',
+    })
+    const context = readAssistantConversationContextTranscriptText(transcriptText)
+
+    expect(context).not.toBeNull()
+    expect(Buffer.byteLength(context ?? '', 'utf8')).toBeLessThanOrEqual(4_000)
   })
 
   it('appends once and invalidates provider-native resume without creating a turn', async () => {

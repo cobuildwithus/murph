@@ -239,11 +239,12 @@ export interface HostedExecutionAssistantNotificationRequestedEvent
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
-export const HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS = 8_000;
+export const HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES = 4_000;
+export const HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS = 200;
 
 export interface HostedExecutionPhoneCallResultedPayload {
   context: string;
-  route: HostedExecutionAssistantNotificationRoute;
+  originSessionId: string;
 }
 
 export interface HostedExecutionPhoneCallResultedEvent

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
-  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS,
+  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -507,22 +507,12 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("parses bounded phone-call result context for a bound direct route", () => {
+  it("parses bounded phone-call result context for an initiating session", () => {
     const value = {
       kind: "phone-call.resulted",
       phoneCall: {
         context: "Internal call result context.",
-        route: {
-          actorId: "+15550002222",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "chat_home_123",
-          },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "chat_home_123",
-          threadIsDirect: true,
-        },
+        originSessionId: "session_origin",
       },
       userId: "user-1",
     } as const;
@@ -539,23 +529,12 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
-  it("rejects phone-call result context without a bounded direct binding", () => {
-    const route = {
-      actorId: "+15550002222",
-      channel: "linq",
-      delivery: {
-        kind: "thread",
-        target: "chat_home_123",
-      },
-      identityId: "hbidx:phone:v1:test",
-      threadId: "chat_home_123",
-      threadIsDirect: true,
-    } as const;
+  it("rejects phone-call result context without a bounded origin session", () => {
     const value = {
       kind: "phone-call.resulted",
       phoneCall: {
         context: "Internal call result context.",
-        route,
+        originSessionId: "session_origin",
       },
       userId: "user-1",
     } as const;
@@ -564,21 +543,18 @@ describe("parseHostedExecutionEvent", () => {
       ...value,
       phoneCall: {
         ...value.phoneCall,
-        route: {
-          ...route,
-          threadIsDirect: false,
-        },
+        originSessionId: "",
       },
-    })).toThrow(/bound direct conversation/u);
+    })).toThrow(/non-empty string/u);
     expect(() => parseHostedExecutionEvent({
       ...value,
       phoneCall: {
         ...value.phoneCall,
-        context: "x".repeat(
-          HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS + 1,
+        context: "界".repeat(
+          Math.ceil(HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES / 3) + 1,
         ),
       },
-    })).toThrow(/Unicode code points/u);
+    })).toThrow(/UTF-8 bytes/u);
   });
 
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {

@@ -160,6 +160,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     endedAt: null,
     id: "hpc_123",
     memberId: "member_123",
+    originSessionId: "session_phone_call",
     provider: "retell",
     providerCallId: "retell_call_123",
     requestKey: "request_123",

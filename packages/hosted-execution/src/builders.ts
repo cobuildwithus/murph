@@ -532,7 +532,7 @@ export function buildHostedExecutionPhoneCallResultedWake(input: {
     }),
     phoneCall: {
       context: input.phoneCall.context,
-      route: cloneAssistantNotificationRoute(input.phoneCall.route),
+      originSessionId: input.phoneCall.originSessionId,
     },
   };
 }

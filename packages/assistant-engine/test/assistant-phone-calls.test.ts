@@ -243,6 +243,7 @@ describe("assistant phone calls", () => {
     const start = vi.fn(async (input) => {
       expect(input).toEqual({
         brief: BASE_BRIEF,
+        originSessionId: "session_phone_call",
         requestKey: expectedRequestKey,
       });
       return {

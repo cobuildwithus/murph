@@ -16,26 +16,11 @@ export async function executeHostedPhoneCallResultedWake(input: {
   vaultRoot: string;
   wake: HostedExecutionPhoneCallResultedWake;
 }): Promise<HostedMailboxOutcome> {
-  const route = input.wake.phoneCall.route;
-  const delivery = route.delivery;
-  if (route.threadIsDirect !== true || delivery.kind === "explicit") {
-    throw new TypeError(
-      "Hosted phone-call result context requires a bound direct conversation route.",
-    );
-  }
-
   await recordAssistantConversationContext({
-    actorId: route.actorId,
-    bindingDeliveryTarget: delivery.target,
-    channel: route.channel,
     context: input.wake.phoneCall.context,
-    deliveryKind: delivery.kind,
-    executionContext: input.executionContext,
     idempotencyKey: input.wake.eventId,
-    identityId: route.identityId,
     occurredAt: input.wake.occurredAt,
-    threadId: route.threadId,
-    threadIsDirect: true,
+    sessionId: input.wake.phoneCall.originSessionId,
     vault: input.vaultRoot,
   });
 

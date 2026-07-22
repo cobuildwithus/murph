@@ -13027,6 +13027,67 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
+  it("records a causally earlier phone-call result before planning fresh conversation input", async () => {
+    const callOrder: string[] = [];
+    let contextWakeChecks = 0;
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
+      if (input?.allowedWakeKinds?.includes("runtime.pending-effects-reconcile-requested")) {
+        return { at: null, reason: null };
+      }
+      if (input?.allowedRouteActions?.includes("record-phone-call-result-context")) {
+        contextWakeChecks += 1;
+        return contextWakeChecks === 1
+          ? { at: "2026-04-27T00:00:00.000Z", reason: "assistant" }
+          : { at: null, reason: null };
+      }
+      return { at: null, reason: null };
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async (input) => {
+        callOrder.push("phone-call-result");
+        expect(input.allowedRouteActions).toEqual([
+          "apply-member-preferences",
+          "record-phone-call-result-context",
+        ]);
+        expect(input.maxCausalSeq).toBe("20");
+        return {
+          item: {
+            ...createSystemMailboxItem(),
+            causalSeq: "19",
+            itemId: "system_mailbox_item_phone_call_result",
+            mailboxDedupeKey: "dedupe_system_mailbox_item_phone_call_result",
+            routeAction: "record-phone-call-result-context" as const,
+          },
+          itemId: "system_mailbox_item_phone_call_result",
+          metrics: {
+            bootstrapResult: null,
+            conversationMetrics: null,
+            mailboxLane: "phone-call-result-context",
+            redactedLogEntries: [],
+          },
+          status: "processed",
+        };
+      },
+    );
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
+      callOrder.push("assistant");
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      acceptedAssistantInputCausalSeq: "20",
+      importedCount: 1,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    expect(callOrder).toEqual(["phone-call-result", "assistant"]);
+  });
+
   it("drains one bounded due preference page before rescheduling fresh conversation input", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
@@ -14844,6 +14905,7 @@ function createPhaseWorkspace(input: {
 }
 
 function createPhaseInput(input: {
+  acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
   causalPendingEffectsOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
@@ -14901,6 +14963,11 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    ...(
+      input.acceptedAssistantInputCausalSeq
+        ? { acceptedAssistantInputCausalSeq: input.acceptedAssistantInputCausalSeq }
+        : {}
+    ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
     causalPendingEffectsOnly: input.causalPendingEffectsOnly,
     clearAssistantAutomationScheduleChanged:

@@ -149,11 +149,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-input-tail-"));
     const olderItem = createMailboxItem({
+      causalSeq: "11",
       id: "mailbox_initial_input_tail_older",
       laneSeq: "1",
       occurredAt: "2026-04-26T00:00:01.000Z",
     });
     const newerItem = createMailboxItem({
+      causalSeq: "12",
       id: "mailbox_initial_input_tail_newer",
       laneSeq: "2",
       occurredAt: "2026-04-26T00:00:02.000Z",
@@ -168,6 +170,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const selectedInputIdsByPass: string[][] = [];
     const selectedContextsByPass: unknown[] = [];
+    const selectedCausalSeqsByPass: Array<string | null | undefined> = [];
     const { mailboxPort } = createMailboxPort({ items: [olderItem, newerItem] });
 
     try {
@@ -226,6 +229,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ?? phaseInput.initialMailboxImport.importResult.assistantInputRecords
             ?? [];
           selectedInputIdsByPass.push(selection.inputIds);
+          selectedCausalSeqsByPass.push(phaseInput.acceptedAssistantInputCausalSeq);
           selectedContextsByPass.push(
             records.find((record) =>
               record.assistantInputId === selection.inputIds[0]
@@ -248,6 +252,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(firstPass.latestAssistantInputBatch?.assistantInputIds, [newerInputId]);
       assert.deepEqual(firstPass.latestAssistantInputBatch?.assistantInputRecords, [{
         assistantInputId: newerInputId,
+        causalSeq: "12",
         linqDeliveryContext: newerContext,
       }]);
       assert.deepEqual(firstPass.latestAssistantInputBatch?.linqDeliveryContexts, [newerContext]);
@@ -261,6 +266,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(selectedInputIdsByPass, [[olderInputId], [newerInputId]]);
+      assert.deepEqual(selectedCausalSeqsByPass, ["11", "12"]);
       assert.deepEqual(selectedContextsByPass, [olderContext, newerContext]);
       assert.equal(secondPass.latestAssistantInputBatch, null);
       assert.deepEqual(checkpointRequests, []);

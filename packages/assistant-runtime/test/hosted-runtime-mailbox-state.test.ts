@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
@@ -295,6 +296,41 @@ describe("hosted runtime mailbox import state", () => {
 });
 
 describe("hosted runtime system mailbox state", () => {
+  it("admits phone-call context only through the accepted conversation causal frontier", () => {
+    const item: HostedSystemMailboxPendingItem = {
+      ...buildPendingSystemMailboxItem({
+        itemId: "phone-call-result",
+        mailboxLaneSeq: "19",
+      }),
+      causalSeq: "21",
+      routeAction: "record-phone-call-result-context",
+      wake: {
+        eventId: "phone-call.resulted:call-1",
+        kind: "phone-call.resulted",
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        phoneCall: {
+          context: "Internal call result context.",
+          originSessionId: "session_origin",
+        },
+        userId: "member_123",
+      },
+    };
+    const input = {
+      allowedRouteActions: ["record-phone-call-result-context"] as const,
+      now: "2026-04-27T00:00:00.000Z",
+      state: { pending: [item] },
+    };
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      ...input,
+      maxCausalSeq: "20",
+    })).toBeNull();
+    expect(findNextHostedSystemMailboxQueueItem({
+      ...input,
+      maxCausalSeq: "21",
+    })).toEqual(item);
+  });
+
   it("acknowledges only the contiguous imported prefix before pending system work", () => {
     expect(resolveHostedSystemMailboxHandledThroughSeq({
       importedSeq: "9",
@@ -558,7 +594,7 @@ function buildPendingSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: "2026-04-27T00:00:00.000Z",
     postCheckpointRecord: null,
-    preferenceCausalSeq: input.mailboxLaneSeq,
+    causalSeq: input.mailboxLaneSeq,
     requestId: null,
     routeAction: "apply-member-preferences",
     status: "pending",

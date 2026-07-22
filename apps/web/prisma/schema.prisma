@@ -754,6 +754,7 @@ model HostedPhoneCall {
   id             String                @id
   memberId       String                @map("member_id")
   requestKey     String                @map("request_key")
+  originSessionId String?              @map("origin_session_id")
   provider       String                @default("retell")
   providerCallId String?               @unique @map("provider_call_id")
   status         HostedPhoneCallStatus @default(starting)

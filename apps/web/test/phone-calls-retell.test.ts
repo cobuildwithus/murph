@@ -749,31 +749,45 @@ describe("Retell phone-call result handling", () => {
       callId: "hpc_123",
       memberId: "member-123",
       occurredAt: "2026-07-22T16:24:46.000Z",
+      originSessionId: "session_phone_call",
       result: {
         followUp: "Ask whether another day works.",
         outcome: "needs_user",
         summary: "The requested time was unavailable.",
-      },
-      route: {
-        actorId: "+12125550111",
-        channel: "linq",
-        delivery: {
-          kind: "thread",
-          target: "chat_home_123",
-        },
-        identityId: "hbidx:phone:v1:test",
-        threadId: "chat_home_123",
-        threadIsDirect: true,
       },
     });
 
     expect(wake.kind).toBe("phone-call.resulted");
     expect(wake.eventId).toBe("phone-call.resulted:hpc_123");
     expect(wake.phoneCall.context).toContain("The requested time was unavailable.");
+    expect(wake.phoneCall.originSessionId).toBe("session_phone_call");
     expect(JSON.stringify(wake)).not.toContain("notification");
     expect(JSON.stringify(wake)).not.toContain("responsePolicy");
     expect(JSON.stringify(wake)).not.toContain("deliveryIdempotencyKey");
     expect(JSON.stringify(wake)).not.toContain("require_send");
+  });
+
+  it("keeps maximum multibyte result context inside one committed history message", () => {
+    const context = buildPhoneCallResultContext({
+      brief: {
+        ...VALID_BRIEF,
+        goal: "目".repeat(1_000),
+        to: {
+          ...VALID_BRIEF.to,
+          label: "先".repeat(200),
+        },
+      },
+      result: {
+        followUp: "次".repeat(1_000),
+        outcome: "needs_user",
+        summary: "結".repeat(2_000),
+      },
+    });
+
+    expect(Buffer.byteLength(context, "utf8")).toBeLessThanOrEqual(4_000);
+    expect(context).toContain("needs_user");
+    expect(context).toContain("結");
+    expect(context).toContain("untrusted");
   });
 
   it("updates call_ended once with provider id and end timestamp", async () => {
@@ -1322,11 +1336,11 @@ describe("Retell phone-call result handling", () => {
     expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
   });
 
-  it("does not finalize call_analyzed when no result context route is available", async () => {
+  it("does not finalize call_analyzed when result context cannot be appended", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultContext: async () => {
-        throw new Error("result context route unavailable");
+        throw new Error("result context append unavailable");
       },
     });
 
@@ -1342,7 +1356,7 @@ describe("Retell phone-call result handling", () => {
         data_storage_setting: "basic_attributes_only",
       },
       prisma: store.prisma,
-    })).rejects.toThrow("result context route unavailable");
+    })).rejects.toThrow("result context append unavailable");
 
     expect(store.currentCall()).toMatchObject({
       analyzedAt: null,
@@ -1522,6 +1536,7 @@ function buildHostedPhoneCall(overrides: Partial<HostedPhoneCall> = {}): HostedP
     endedAt: null,
     id: "hpc_test",
     memberId: "member_123",
+    originSessionId: "session_phone_call",
     provider: "retell",
     providerCallId: "retell_call_123",
     requestKey: "phone_call_request_1",

@@ -32,9 +32,6 @@ import {
   isHostedPhoneCallProviderCleanupPending,
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
-import {
-  requireHostedPhoneCallResultContextRoute,
-} from "./result-context-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import {
   hasPhoneCallAdvancedBeyondStart,
@@ -57,6 +54,7 @@ interface HostedPhoneCallReservationData {
   briefEncrypted: string;
   id: string;
   memberId: string;
+  originSessionId: string;
   provider: "retell";
   requestKey: string;
   status: "starting";
@@ -100,12 +98,10 @@ export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
   memberId: string;
+  originSessionId: string;
   prisma?: HostedPhoneCallStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   requestKey: string;
-  resultContextRouteResolver?: (resolverInput: {
-    memberId: string;
-  }) => Promise<void>;
   runtime?: PhoneCallRuntime;
   signal?: AbortSignal;
   transferNumberResolver?: (resolverInput: {
@@ -134,14 +130,6 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     ?? startHostedPhoneCallReconciliationWorkflow;
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
-  const requireResultContextRoute: NonNullable<
-    typeof input.resultContextRouteResolver
-  > =
-    input.resultContextRouteResolver
-    ?? (async ({ memberId }) => {
-      await requireHostedPhoneCallResultContextRoute({ memberId });
-    });
-
   const existing = await store.hostedPhoneCall.findUnique({
     where: {
       memberId_requestKey: {
@@ -156,6 +144,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       call: existing,
       crypto,
       memberId: input.memberId,
+      originSessionId: input.originSessionId,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -177,10 +166,6 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   input.signal.throwIfAborted();
-  await requireResultContextRoute({
-    memberId: input.memberId,
-  });
-  input.signal.throwIfAborted();
   const transferNumber = input.brief.allowTransferToUser
     ? await resolveTransferNumber({
         memberId: input.memberId,
@@ -201,6 +186,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       briefEncrypted,
       id: callId,
       memberId: input.memberId,
+      originSessionId: input.originSessionId,
       provider: "retell",
       requestKey: input.requestKey,
       status: "starting",
@@ -213,6 +199,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       call,
       crypto,
       memberId: input.memberId,
+      originSessionId: input.originSessionId,
       runtime,
       signal: input.signal,
       startReconciliationWorkflow,
@@ -529,12 +516,16 @@ async function resolveExistingHostedPhoneCall(input: {
   call: HostedPhoneCall;
   crypto: HostedPhoneCallCrypto;
   memberId: string;
+  originSessionId: string;
   runtime: PhoneCallRuntime;
   signal: AbortSignal;
   startReconciliationWorkflow: HostedPhoneCallReconciliationWorkflowStarter;
   store: HostedPhoneCallStore;
 }): Promise<HostedPhoneCallStartResponse> {
   if (input.call.memberId !== input.memberId) {
+    throw new Error("Hosted phone call request key collision.");
+  }
+  if (input.call.originSessionId !== input.originSessionId) {
     throw new Error("Hosted phone call request key collision.");
   }
   assertHostedPhoneCallBriefMatches({

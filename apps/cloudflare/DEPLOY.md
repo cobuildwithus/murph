@@ -133,7 +133,10 @@ safe because Web does not require the runner to consume the header.
 ## Phone-Call Result Context Deployment
 
 `phone-call.resulted` is a new system-mailbox kind and has no safe old-runner,
-new-web compatibility window. Deploy Cloudflare and the runner consumer first
+new-web compatibility window. First apply the additive nullable
+`HostedPhoneCall.origin_session_id` migration and confirm that active calls from
+the prior producer have drained; those legacy rows intentionally have no safe
+session fallback. Deploy Cloudflare and the runner consumer next
 with `container_rollout=immediate`, require managed-container smoke to report
 the expected runner-bundle fingerprint, and verify there are no hosted mailbox
 parse or quarantine failures. Only then deploy Web, which replaces the prior

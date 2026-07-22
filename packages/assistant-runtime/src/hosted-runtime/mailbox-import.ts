@@ -105,6 +105,7 @@ export interface HostedMailboxImportLoopResult {
 
 export interface HostedMailboxAssistantInputRecord {
   assistantInputId: string;
+  causalSeq?: string | null;
   emailDeliveryContext?: HostedAssistantEmailDeliveryContext;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext;
 }
@@ -508,6 +509,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
         assistantInputIds.push(outcome.assistantInputId);
         assistantInputRecords.push({
           assistantInputId: outcome.assistantInputId,
+          causalSeq: item.causalSeq ?? null,
           ...(outcome.emailDeliveryContext
             ? { emailDeliveryContext: outcome.emailDeliveryContext }
             : {}),

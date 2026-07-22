@@ -224,6 +224,7 @@ export interface HostedWorkspaceRunnerPlatform
 }
 
 export interface HostedWorkspaceRunnerAssistantPhaseInput {
+  acceptedAssistantInputCausalSeq?: string | null;
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
@@ -1012,6 +1013,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     });
   };
   const assistantPhaseInput = {
+    acceptedAssistantInputCausalSeq: resolveAcceptedAssistantInputCausalSeq({
+      acceptedBatch: acceptedInitialAssistantInputBatch,
+      selectedInputIds: selectedInitialAssistantInputIds,
+    }),
     assistantAutomationScheduleChanged: () => assistantAutomationScheduleChanged,
     backgroundMaintenanceSignal: backgroundMaintenanceAbortController.signal,
     clearAssistantAutomationScheduleChanged: () => {
@@ -1826,6 +1831,21 @@ function filterHostedWorkspaceRunnerAssistantInputBatch(
       return !excludedInputIds.has(record.assistantInputId);
     }),
   );
+}
+
+function resolveAcceptedAssistantInputCausalSeq(input: {
+  acceptedBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  selectedInputIds: readonly string[];
+}): string | null {
+  const terminalInputId = input.selectedInputIds.at(-1);
+  if (!terminalInputId || !input.acceptedBatch) {
+    return null;
+  }
+  const record = readHostedWorkspaceRunnerAssistantInputBatchRecords(
+    input.acceptedBatch,
+  ).find((candidate) => candidate.assistantInputId === terminalInputId);
+  const causalSeq = record?.causalSeq ?? null;
+  return causalSeq && /^[1-9]\d*$/u.test(causalSeq) ? causalSeq : null;
 }
 
 async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefixRepair(input: {

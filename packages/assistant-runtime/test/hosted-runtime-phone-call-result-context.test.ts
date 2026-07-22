@@ -31,17 +31,7 @@ describe("hosted phone-call result context", () => {
       occurredAt: "2026-07-22T16:24:46.000Z",
       phoneCall: {
         context: "Internal context with untrusted call result data.",
-        route: {
-          actorId: "actor-blind",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "chat-target",
-          },
-          identityId: "identity-blind",
-          threadId: "thread-blind",
-          threadIsDirect: true,
-        },
+        originSessionId: "session-direct",
       },
     });
 
@@ -56,47 +46,11 @@ describe("hosted phone-call result context", () => {
       mailboxLane: "phone-call-result-context",
     });
     expect(assistantEngineMocks.recordAssistantConversationContext).toHaveBeenCalledWith({
-      actorId: "actor-blind",
-      bindingDeliveryTarget: "chat-target",
-      channel: "linq",
       context: "Internal context with untrusted call result data.",
-      deliveryKind: "thread",
-      executionContext,
       idempotencyKey: "phone-call.resulted:call-1",
-      identityId: "identity-blind",
       occurredAt: "2026-07-22T16:24:46.000Z",
-      threadId: "thread-blind",
-      threadIsDirect: true,
+      sessionId: "session-direct",
       vault: "/vault",
     });
-  });
-
-  it("rejects an unbound explicit delivery route", async () => {
-    const wake = buildHostedExecutionPhoneCallResultedWake({
-      eventId: "phone-call.resulted:call-2",
-      memberId: "member-1",
-      occurredAt: "2026-07-22T16:25:00.000Z",
-      phoneCall: {
-        context: "Internal call result context.",
-        route: {
-          actorId: null,
-          channel: "linq",
-          delivery: {
-            kind: "explicit",
-            target: "recipient",
-          },
-          identityId: null,
-          threadId: null,
-          threadIsDirect: true,
-        },
-      },
-    });
-
-    await expect(executeHostedPhoneCallResultedWake({
-      executionContext: { hosted: null },
-      vaultRoot: "/vault",
-      wake,
-    })).rejects.toThrow("bound direct conversation route");
-    expect(assistantEngineMocks.recordAssistantConversationContext).not.toHaveBeenCalled();
   });
 });

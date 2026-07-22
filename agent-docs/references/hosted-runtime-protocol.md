@@ -946,18 +946,25 @@ Existing global file-type exclusions still apply regardless of directory.
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. Phone-call
 analysis therefore uses the dedicated `phone-call.resulted` system-mailbox event
-instead. Web stores a bounded untrusted context record plus the exact bound
-direct route; the runtime appends one idempotent internal transcript entry to
-that route's resident session without starting a provider turn, exposing tools,
-or delivering a message. The append clears native provider resume metadata so
+instead. At call start, Web stores the trusted initiating resident-session id
+on the call row. Completion carries that exact id plus at most 4,000 UTF-8 bytes
+of untrusted context; it never re-resolves mutable notification routing. The
+runtime requires the referenced session to exist and remain direct, then appends
+one idempotent internal transcript entry without starting a provider turn,
+exposing tools, creating a session, rerouting context, or delivering a message.
+If result and conversation rows import together, the bounded pre-planning phase
+admits the result only when its causal sequence is at or before the accepted
+conversation frontier. The append clears native provider resume metadata so
 the next attended user turn rebuilds from committed transcript history and sees
 both the prior conversation and the call outcome. A repeated webhook or mailbox
 delivery may clear stale resume again, but it must not append the same context
 entry twice.
 
 `phone-call.resulted` is a hard-cut consumer-first mailbox rollout. An old
-runner quarantines the unknown system row and blocks system-lane progress, so
-deploy Cloudflare and the runner with `container_rollout=immediate`, prove the
+runner quarantines the unknown system row and blocks system-lane progress. Apply
+the additive nullable `origin_session_id` migration and let pre-deploy active
+calls drain first; those rows lack initiating-session proof and fail closed.
+Then deploy Cloudflare and the runner with `container_rollout=immediate`, prove the
 new runner-bundle fingerprint and no mailbox parse failures, and only then
 deploy the web producer. The first compatible runner remains the rollback floor
 while web can produce the event or any result event can remain durable or

@@ -206,13 +206,11 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
-    preferenceCausalSeq: routeAction === "apply-member-preferences"
-      ? (
-        input.wake.kind === "member.preferences.updated"
-          ? (input.wake.preferenceCausalSeq ?? input.item.item.causalSeq ?? null)
-          : (input.item.item.causalSeq ?? null)
-      )
-      : null,
+    causalSeq: input.item.item.causalSeq ?? (
+      input.wake.kind === "member.preferences.updated"
+        ? (input.wake.preferenceCausalSeq ?? null)
+        : null
+    ),
     requestId: input.item.payload.requestId ?? null,
     routeAction,
     status: "pending",
@@ -232,6 +230,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   executionContext?: AssistantExecutionContext | null;
+  maxCausalSeq?: string | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -258,6 +257,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
       const pending = findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
+        maxCausalSeq: input.maxCausalSeq ?? null,
         now: startedAt,
         state: selectionState,
       });
@@ -544,7 +544,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,
     preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
-    preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
+    preferenceCausalSeq: input.pendingItem.causalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
@@ -609,7 +609,7 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
-    && left.preferenceCausalSeq === right.preferenceCausalSeq
+    && left.causalSeq === right.causalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId
