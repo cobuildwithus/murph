@@ -127,6 +127,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   durable work state. Trusted owners derive and revalidate the target,
   membership generation, origin, and return route; model-supplied labels or
   questions never confer authority or select an internal runtime id.
+- A dirty group runtime may import the exact Assistant Ask request prefix on its
+  mailbox wake without publishing or advancing the routine idle snapshot; that
+  path only starts the detached read owner. An existing personal-input pass
+  claims an older completion before answering and retains the stable delivery
+  key.
 - A detached assistant read may overlap foreground work only in a separate
   one-shot process with OS-enforced read-only roots and no write, tool-network,
   route, delivery, or recursion authority. The resident foreground assistant

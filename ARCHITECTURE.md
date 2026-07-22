@@ -101,6 +101,12 @@ web-owned rows; the model supplies only the question and an optional visible
 group label. Web rechecks membership before the group read and completion
 append. The paired mailbox rows are the only durable operation state, and the
 answer remains untrusted data when the private runtime composes its follow-up.
+While a group runtime is already dirty, a mailbox wake may import the bounded
+Assistant Ask request prefix before the idle snapshot floor and start the
+existing detached one-shot reader without another foreground assistant pass.
+On the return path, an existing private-input pass imports and claims any older
+completion first and reuses its stable delivery key. Neither path publishes or
+pulls forward the routine idle snapshot.
 
 The reverse `consented_member` adapter lets an authenticated group Murph ask
 one current member's private Murph under a separate exact grant. Web/Postgres

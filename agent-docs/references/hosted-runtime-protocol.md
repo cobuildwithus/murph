@@ -380,6 +380,13 @@ generation, and ten-minute expiry, appends one encrypted
 `assistant.ask.requested` item, then signals the existing group runtime. Exact
 retry reuses that item and cannot resolve a different target.
 
+If the target runtime is already dirty, the external mailbox wake inspects the
+already-fetched system prefix for an Assistant Ask item. It imports a matching
+request and kicks the detached controller directly, without running an
+Ask-only foreground assistant pass, publishing a workspace snapshot, or
+shortening the idle checkpoint floor. Unrelated system work remains on the
+ordinary post-checkpoint lane.
+
 The target runtime rechecks expiry, membership generation, runtime identity,
 and the active write fence before context assembly. It snapshots bounded
 committed conversation evidence in memory and seals it with the live restored
@@ -404,7 +411,14 @@ route, then appends one deterministic encrypted `assistant.ask.completed` item
 to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
-or invoke side-effecting tools.
+or invoke side-effecting tools. When personal input is already pending, its
+existing pre-assistant system import claims and stages any older completion
+delivery first, then continues that personal input in the same assistant phase;
+the completion and personal reply drain in causal order after the phase commit.
+Replay keeps the deterministic completion delivery key, and a first attempt
+delayed at least one minute emits only a redacted stuck-zero-attempt warning.
+This does not add an Ask-only foreground pass or pull forward the routine idle
+snapshot.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask

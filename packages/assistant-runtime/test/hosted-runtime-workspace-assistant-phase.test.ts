@@ -230,6 +230,9 @@ import {
   type HostedWorkspaceRuntimeAssistantPhaseInput,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
+  buildHostedAssistantAskCompletionDeliveryKey,
+} from "../src/hosted-runtime/events/assistant-ask-completion.ts";
+import {
   enqueueHostedPendingAssistantInputId,
   inspectHostedPendingAssistantInputWakeCandidate,
   readExistingHostedPendingAssistantInputIds,
@@ -11833,8 +11836,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-        allowedRouteActions: ["apply-runtime-control-request"],
-        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+        allowedRouteActions: [
+          "apply-runtime-control-request",
+          "continue-assistant-ask",
+        ],
+        allowedWakeKinds: [
+          "runtime.pending-effects-reconcile-requested",
+          "assistant.ask.completed",
+        ],
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
@@ -11859,6 +11868,131 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         shouldYieldBackgroundDelivery: null,
         vaultRoot: "/tmp/murph-vault",
         wake: pendingEffectsItem.wake,
+      }),
+    );
+  });
+
+  it("claims a completed assistant ask before a later foreground reply", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const completionItem = createAssistantAskCompletionSystemMailboxItem();
+    const completionDeliveryIdempotencyKey =
+      buildHostedAssistantAskCompletionDeliveryKey({
+        eventId: completionItem.wake.eventId,
+      });
+    const completionDeliveryEffect = {
+      ...createDeliveryEffect(),
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: completionDeliveryIdempotencyKey,
+      },
+    };
+    const personalDeliveryEffect = {
+      ...createDeliveryEffect(),
+      effectId: "effect_personal_reply",
+      fingerprint: "fingerprint_personal_reply",
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: "assistant-outbox:intent_personal_reply",
+        turnId: "turn_personal_reply",
+      },
+    };
+    mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: completionItem,
+      itemId: completionItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-ask-completion",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      completionDeliveryEffect,
+    ]).mockResolvedValueOnce([personalDeliveryEffect]);
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationProgressed: true,
+      assistantAutomationCurrentTurnDeliveryIntentIds: ["intent_personal_reply"],
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: [
+          "apply-runtime-control-request",
+          "continue-assistant-ask",
+        ],
+        allowedWakeKinds: [
+          "runtime.pending-effects-reconcile-requested",
+          "assistant.ask.completed",
+        ],
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        includeBackgroundDueIntents: true,
+        vaultRoot: "/tmp/murph-vault",
+      }),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        freshAssistantInputIds: ["ain_00000000000000000000000000000001"],
+      }),
+    );
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.runHostedAssistantAutomationLane.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenNthCalledWith(2, {
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: ["intent_personal_reply"],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(result).toEqual(expect.objectContaining({
+      afterCheckpointKeepsForegroundImportLoop: true,
+      checkpointReason: "outbox_sending",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        hostedAssistantAskCompletionStuckZeroAttempt: true,
+      }),
+    }));
+
+    await result.afterCheckpoint?.();
+
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        assistantDeliveryEffects: [
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              idempotencyKey: completionDeliveryIdempotencyKey,
+            }),
+          }),
+        ],
+        shouldYieldBackgroundDelivery: null,
+        vaultRoot: "/tmp/murph-vault",
+        wake: completionItem.wake,
+      }),
+    );
+    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        assistantDeliveryEffects: [personalDeliveryEffect],
+        vaultRoot: "/tmp/murph-vault",
       }),
     );
   });
@@ -11921,9 +12055,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-      allowedRouteActions: ["apply-runtime-control-request"],
-      allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
-      vaultRoot: "/tmp/murph-vault",
+        allowedRouteActions: [
+          "apply-runtime-control-request",
+          "continue-assistant-ask",
+        ],
+        allowedWakeKinds: [
+          "runtime.pending-effects-reconcile-requested",
+          "assistant.ask.completed",
+        ],
+        vaultRoot: "/tmp/murph-vault",
       }),
     );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
@@ -11940,9 +12080,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
-      allowedRouteActions: ["apply-runtime-control-request"],
-      allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
-      vaultRoot: "/tmp/murph-vault",
+        allowedRouteActions: [
+          "apply-runtime-control-request",
+          "continue-assistant-ask",
+        ],
+        allowedWakeKinds: [
+          "runtime.pending-effects-reconcile-requested",
+          "assistant.ask.completed",
+        ],
+        vaultRoot: "/tmp/murph-vault",
       }),
     );
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
@@ -15241,6 +15387,36 @@ function createPendingEffectsReconcileSystemMailboxItem() {
       effectId: "vault-file-send:effect_pending",
       eventId: "evt_runtime_pending_effects_reconcile",
       kind: "runtime.pending-effects-reconcile-requested" as const,
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      userId: "member_synthetic_phase",
+    },
+  };
+}
+
+function createAssistantAskCompletionSystemMailboxItem() {
+  return {
+    ...createSystemMailboxItem(),
+    attemptCount: 1,
+    itemId: "system_mailbox_item_assistant_ask_completion",
+    lastAttemptAt: "2026-04-27T00:03:00.000Z",
+    mailboxDedupeKey: "dedupe_system_mailbox_item_assistant_ask_completion",
+    occurredAt: "2026-04-27T00:00:00.000Z",
+    routeAction: "continue-assistant-ask" as const,
+    wake: {
+      ask: {
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        originAssistantInputId: "ain_ask_origin_synthetic",
+        originSessionId: "asst_ask_origin_synthetic",
+        question: "What is today's synthetic group plan?",
+        requestId: "aask_req_synthetic",
+        result: {
+          answer: "The synthetic plan is ready.",
+          outcome: "answered" as const,
+        },
+        targetLabel: "Synthetic group",
+      },
+      eventId: "aask_done_synthetic",
+      kind: "assistant.ask.completed" as const,
       occurredAt: "2026-04-27T00:00:00.000Z",
       userId: "member_synthetic_phase",
     },

@@ -488,6 +488,21 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
+async function hasPrefetchedAssistantAskRequest(
+  prefetch: HostedMailboxPrefixPrefetch,
+): Promise<boolean> {
+  try {
+    const response = await prefetch.response;
+    return response.items.some((item) =>
+      item.lane === "system" && item.kind === "assistant.ask.requested"
+    );
+  } catch {
+    // The ordinary lane import owns retry/fallback behavior for a failed
+    // prefetch. A failed optimization must not broaden pre-checkpoint work.
+    return false;
+  }
+}
+
 function isHostedInitialBootstrapPending(input: {
   bootstrapRequired: boolean;
   result: HostedMailboxImportCheckpointResult;
@@ -2537,12 +2552,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         return passResult;
       };
       const runForegroundMailboxWakeIfWork = async (input: {
-        includeSystemMailbox: boolean;
         latencySeed: HostedRuntimeWakeLatencySeed | null;
         requestIdKind: "checkpoint-interrupt" | "checkpoint-wake" | "idle-wake";
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
         signal?: AbortSignal;
+        systemMailboxMode: "all" | "assistant-ask-request";
       }): Promise<boolean> => {
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
@@ -2691,14 +2706,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        if (!input.includeSystemMailbox) {
+        const prefetchedAssistantAskRequest = input.systemMailboxMode === "assistant-ask-request"
+          ? await hasPrefetchedAssistantAskRequest(initialMailboxPrefetch)
+          : false;
+        if (
+          input.systemMailboxMode === "assistant-ask-request"
+          && !prefetchedAssistantAskRequest
+        ) {
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
         }
 
         await finishMailboxImportWithoutAssistant(conversationImport);
 
-        const systemImport = await importMailboxLanes(["system"], importMailboxItem);
+        const systemImport = await importMailboxLanes(
+          ["system"],
+          input.systemMailboxMode === "assistant-ask-request"
+            ? importForegroundMailboxItem
+            : importMailboxItem,
+        );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
@@ -2709,6 +2735,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         ) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
+        }
+        if (input.systemMailboxMode === "assistant-ask-request") {
+          await finishMailboxImportWithoutAssistant(systemImport);
+          return systemImport.importResult.importedCount > 0;
         }
         try {
           await runForegroundPassAfterMailboxImport({
@@ -2734,7 +2764,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         } = {},
       ): Promise<boolean> =>
         await runForegroundMailboxWakeIfWork({
-          includeSystemMailbox: false,
           latencySeed,
           requestIdKind: "checkpoint-interrupt",
           runAssistantWithoutMailboxWork:
@@ -2747,6 +2776,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ),
           shouldContinue: options.shouldContinue,
           signal: options.signal,
+          systemMailboxMode: "assistant-ask-request",
         });
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
@@ -2754,11 +2784,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         signal: AbortSignal;
       }): Promise<boolean> => {
         return await runForegroundMailboxWakeIfWork({
-          includeSystemMailbox: true,
           latencySeed: input.latencySeed,
           requestIdKind: "checkpoint-wake",
           shouldContinue: input.shouldContinue,
           signal: input.signal,
+          systemMailboxMode: "all",
         });
       };
       const resolveHotProjectedAssistantWake = (): {

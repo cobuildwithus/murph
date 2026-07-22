@@ -246,8 +246,20 @@ describe("hosted system mailbox notification execution context", () => {
           status: "imported",
         },
       );
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [
+          expect.objectContaining({
+            attemptCount: 0,
+            lastAttemptAt: null,
+            routeAction: "continue-assistant-ask",
+            status: "pending",
+          }),
+        ],
+      });
 
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["continue-assistant-ask"],
+        allowedWakeKinds: ["assistant.ask.completed"],
         executionContext: null,
         now: () => FIXED_NOW,
         runtime: createRuntime({
@@ -258,6 +270,16 @@ describe("hosted system mailbox notification execution context", () => {
       });
 
       assert.equal(prepared?.status, "processed");
+      expect(prepared).toEqual(expect.objectContaining({
+        item: expect.objectContaining({
+          attemptCount: 1,
+          lastAttemptAt: FIXED_NOW,
+          routeAction: "continue-assistant-ask",
+        }),
+      }));
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [],
+      });
       const executionInput = mocks.executeHostedMailboxEvent.mock.calls[0]?.[0];
       expect(executionInput).toEqual(
         expect.objectContaining({
