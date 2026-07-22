@@ -23,23 +23,23 @@ function GroupUsageFundingCard({
   groupName,
 }: GroupUsageFundingCardProps) {
   return (
-    <Card className="gap-6 py-6 sm:py-8">
-      <CardHeader className="gap-5 px-6 sm:px-8">
+    <Card className="gap-5 py-6 sm:py-8">
+      <CardHeader className="gap-4 px-6 sm:px-8">
         <Badge
           variant="secondary"
           className="w-fit font-mono text-[10px] uppercase tracking-[0.12em]"
         >
           Group usage · {capacityLabel}
         </Badge>
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium text-muted-foreground">{groupName}</p>
           <CardTitle>
-            <h1 className="text-balance font-serif text-4xl font-semibold leading-[1.05] tracking-tight text-foreground">
-              Add usage to {groupName}
+            <h1 className="text-balance font-serif text-3xl font-semibold leading-[1.05] tracking-tight text-foreground sm:text-4xl">
+              Add group credit
             </h1>
           </CardTitle>
           <CardDescription className="max-w-md text-pretty text-base leading-7">
-            One payment gives this group extra usage. Personal plans stay
-            unchanged.
+            One-time credit belongs to this group. Personal plans stay unchanged.
           </CardDescription>
         </div>
       </CardHeader>

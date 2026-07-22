@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { CircleAlertIcon } from "lucide-react";
 
 import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
@@ -109,6 +110,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
     selection?.attempt.kind === "locked" ? selection.attempt.error : null;
+  const selectionNeedsRecovery = selectionError !== null;
 
   return (
     <Dialog
@@ -150,13 +152,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
                 : props.scope === "group"
-                ? "Murph checks Stripe before changing this group's available usage."
-                : "Murph checks Stripe before changing your available usage."
+                  ? "We’ll update this group’s credit as soon as payment is complete."
+                  : "We’ll update your credit as soon as payment is complete."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Credit stays with this group. Stripe confirms the payment."
-                  : "Stripe confirms payment before credit is added."}
+                  ? "Choose a one-time credit amount for this group."
+                  : "Choose a one-time credit amount for your account."}
           </DialogDescription>
         </DialogHeader>
 
@@ -217,7 +219,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   }}
                 >
                   {purchase.operation === "opening_checkout"
-                    ? "Opening Stripe…"
+                    ? "Opening checkout…"
                     : "Retry checkout"}
                 </Button>
               ) : null}
@@ -292,49 +294,89 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 ))}
               </RadioGroup>
             </FieldSet>
-            <FieldError>{selectionError}</FieldError>
-            <div
-              className={
-                selection.attempt.kind === "locked"
-                  ? "flex flex-col-reverse gap-2"
-                  : "flex flex-col-reverse gap-2 sm:flex-row"
-              }
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="lg"
-                className="sm:w-auto"
-                onClick={() => controller.handleOpenChange(false)}
+            {selectionNeedsRecovery ? (
+              <div
+                className="flex gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-4"
+                role="alert"
               >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                className="w-full sm:flex-1"
-                disabled={!controller.selectedOffer || controller.checkoutInFlight}
-                size="xl"
-                aria-busy={controller.checkoutInFlight}
-                onClick={() => void controller.startCheckout()}
-              >
-                {controller.checkoutInFlight
-                  ? "Opening Stripe…"
-                  : controller.selectedOffer
-                    ? `Continue to checkout · ${controller.selectedOffer.amountLabel}`
-                    : "Choose an amount"}
-              </Button>
-              {selection.attempt.kind === "locked" && selection.attempt.error ? (
+                <CircleAlertIcon
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0 text-destructive"
+                />
+                <div className="space-y-1">
+                  <p className="font-semibold text-foreground">
+                    Checkout didn’t open
+                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {selectionError}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {selectionNeedsRecovery ? (
+              <div className="flex flex-col gap-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Button
+                    type="button"
+                    size="xl"
+                    className="w-full"
+                    disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                    aria-busy={controller.checkoutInFlight}
+                    onClick={() => void controller.startCheckout()}
+                  >
+                    {controller.checkoutInFlight
+                      ? "Opening checkout…"
+                      : controller.selectedOffer
+                        ? `Try again · ${controller.selectedOffer.amountLabel}`
+                        : "Try again"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xl"
+                    className="w-full"
+                    onClick={controller.changeAmount}
+                  >
+                    Change amount
+                  </Button>
+                </div>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="ghost"
                   size="lg"
-                  className="w-full sm:flex-1"
-                  onClick={controller.changeAmount}
+                  className="w-full"
+                  onClick={() => controller.handleOpenChange(false)}
                 >
-                  Choose a different amount
+                  Cancel
                 </Button>
-              ) : null}
-            </div>
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-[auto_minmax(0,1fr)]">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xl"
+                  className="w-full sm:w-auto"
+                  onClick={() => controller.handleOpenChange(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                  size="xl"
+                  aria-busy={controller.checkoutInFlight}
+                  onClick={() => void controller.startCheckout()}
+                >
+                  {controller.checkoutInFlight
+                    ? "Opening checkout…"
+                    : controller.selectedOffer
+                      ? `Continue to checkout · ${controller.selectedOffer.amountLabel}`
+                      : "Choose an amount"}
+                </Button>
+              </div>
+            )}
           </div>
         ) : null}
       </DialogContent>

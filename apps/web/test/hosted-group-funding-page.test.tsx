@@ -119,10 +119,11 @@ describe("hosted group funding page", () => {
       }),
     }));
 
-    assert.match(markup, /<h1[^>]*>Add usage to Sunday sleep crew<\/h1>/u);
+    assert.match(markup, /Sunday sleep crew/u);
+    assert.match(markup, /<h1[^>]*>Add group credit<\/h1>/u);
     assert.match(
       markup,
-      /One payment gives this group extra usage\. Personal plans stay unchanged\./u,
+      /One-time credit belongs to this group\. Personal plans stay unchanged\./u,
     );
     assert.match(markup, /Group usage · Running low/u);
     assert.match(markup, /top-up:group/u);

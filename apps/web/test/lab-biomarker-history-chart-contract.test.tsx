@@ -7,7 +7,6 @@ const captured = vi.hoisted(() => ({
   chartConfig: null as Record<string, unknown> | null,
   gridRendered: false,
   lineChartProps: null as Record<string, unknown> | null,
-  referenceAreas: [] as Record<string, unknown>[],
   referenceLines: [] as Record<string, unknown>[],
   tooltipFormatter: null as ((
     value: unknown,
@@ -34,10 +33,6 @@ vi.mock("recharts", async () => {
     LineChart(props: Record<string, unknown> & { children?: ReactNode }) {
       captured.lineChartProps = props;
       return passthrough(props);
-    },
-    ReferenceArea(props: Record<string, unknown>) {
-      captured.referenceAreas.push(props);
-      return null;
     },
     ReferenceLine(props: Record<string, unknown>) {
       captured.referenceLines.push(props);
@@ -97,7 +92,6 @@ beforeEach(() => {
   captured.chartConfig = null;
   captured.gridRendered = false;
   captured.lineChartProps = null;
-  captured.referenceAreas = [];
   captured.referenceLines = [];
   captured.tooltipFormatter = null;
   captured.yAxisDomain = null;
@@ -128,7 +122,7 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("0.0015 mg/L");
 });
 
-test("the latest reference range renders quiet context without flattening the trend", () => {
+test("the latest reference range renders quiet boundary context without flattening the trend", () => {
   const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "HbA1c",
     points: [
@@ -137,24 +131,25 @@ test("the latest reference range renders quiet context without flattening the tr
     ],
     referenceRange: { high: 5.6, low: 4 },
     referenceRangeLabel: "4 to 5.6%",
+    referenceRangeSourceLabel: "Example Lab",
     unit: "percent",
   }));
 
   expect(markup).toContain("Latest lab range");
   expect(markup).toContain("4 to 5.6%");
+  expect(markup).toContain("Example Lab");
   expect(captured.chartAriaLabel).toBe(
-    "HbA1c results over time; latest lab range 4 to 5.6%",
+    "HbA1c results over time; latest lab range 4 to 5.6% from Example Lab",
   );
-  expect(captured.referenceAreas).toHaveLength(1);
-  expect(captured.referenceAreas[0]).toMatchObject({ y1: 4, y2: 5.6 });
+  expect(markup).toContain("border-y");
+  expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([4, 5.6]);
-  expect(captured.gridRendered).toBe(false);
+  expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisPadding).toMatchObject({ bottom: 16, top: 16 });
 
   // Keep the automatic, data-focused domain and clip a wider current lab
   // range rather than compressing the historical trend into a flat line.
   expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
-  expect(captured.referenceAreas[0]).toMatchObject({ ifOverflow: "hidden" });
   for (const line of captured.referenceLines) {
     expect(line).toMatchObject({ ifOverflow: "hidden" });
   }
@@ -178,7 +173,6 @@ test("a single reference bound renders one dashed line and no band", () => {
   expect(markup).toContain("Latest lab range");
   expect(markup).toContain("Up to 99 mg/dL");
   expect(markup).toContain("border-dashed");
-  expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
 });
 
@@ -209,7 +203,6 @@ test("no reference range keeps the grid and default domain", () => {
     unit: "mIU/L",
   }));
 
-  expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines).toHaveLength(0);
   expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
