@@ -344,7 +344,12 @@ async function persistHostedAiUsageRecordTx(input: {
       id: input.record.usageId,
     },
     create: buildHostedAiUsageCreateData(input.record, input.memberId),
-    update: {},
+    // Keep this identity-only branch non-empty so Prisma delegates the upsert
+    // to PostgreSQL. Exact concurrent replays then serialize on the usage id
+    // without changing any immutable usage data.
+    update: {
+      id: input.record.usageId,
+    },
     select: HOSTED_AI_USAGE_IMMUTABLE_SELECT,
   });
 
