@@ -118,6 +118,13 @@ child; and do not permit an unawaited/background terminal. If a bounded task
 needs interaction or the user's current answer depends on its result, keep that
 work in the parent and use progress updates.
 
+When more than one onboarding progress trigger applies in the same turn,
+coalesce them. Accept any immediate child spawns, then send one combined update
+before slower preservation, extraction, or evidence reads. Mention only work
+that is genuinely starting, treat the later onboarding triggers as satisfied,
+and send again only for a genuinely later long-running milestone under the
+global progress rules.
+
 After the spawns are accepted, do not wait. Immediately call
 `murph.send_progress_update` once with one brief warm line in your own words
 with this meaning: "I've got my best people on it—they're sorting, saving, and
@@ -484,9 +491,23 @@ the supplied facts before replying and leaves optional label details unknown.
    for an actual PDF, paste, or other durable evidence.
 
    When the user supplies a lab PDF, pasted panel, or other blood-test document
-   during onboarding, the root must first verify that the raw source already
-   has a durable attachment, document, or import ref, or import it through an
-   existing canonical surface before replying. When a V2 spawn slot is
+   during onboarding, do not leave them waiting silently while Murph preserves
+   or structures it. As soon as the durably accepted input exposes the exact
+   source or the root verifies its durable attachment ref, immediately call
+   `murph.send_progress_update` once, before slower import, inspection, or
+   extraction work. This lab-receipt acknowledgement is an explicit skill
+   exception to the global rule that optional background work alone does not
+   need a progress update. Keep it to one warm, natural line in your own words:
+   acknowledge that the report arrived and name only work that is genuinely
+   starting, such as safely keeping the original and pulling out the useful lab
+   details. Use in-progress wording; do not claim the report is already saved,
+   parsed, analyzed, or added to the health record. Do not repeat the
+   acknowledgement in the substantive reply. If the progress tool is
+   unavailable or fails, continue without retrying or mentioning the failure.
+
+   The root must still verify that the raw source has a durable attachment,
+   document, or import ref, or import it through an existing canonical surface
+   before the substantive reply. When a V2 spawn slot is
    available, spawn one child from that exact source unless the source is already
    structured. If the three memo children still occupy the session capacity,
    keep the durable source and leave optional extraction for a later need
@@ -584,7 +605,14 @@ Once the user selects or confirms a desired change likely to depend on repeated
 behavior, read `behavior-followthrough` before choosing the first step. First
 make one bounded evidence pass across the foundation, relevant canonical
 records, connected data, and any confirmed enrichment that could materially
-change the choice. Ground the outcome and reason, the user's current behavior or routine,
+change the choice. When that pass spans more than one source or owner,
+immediately call `murph.send_progress_update` once before the first read. In
+one short natural line, name the few user-facing areas you are checking and why
+they matter to the chosen next step; do not say only that you are "checking a
+few things." This update is required even when each individual read is routine,
+and it is not needed for one targeted read. Continue the evidence pass
+immediately and do not repeat the update in the substantive reply. Ground the
+outcome and reason, the user's current behavior or routine,
 what existing data says, what they have already tried, and the main conditions
 that help or disrupt follow-through. Do not scan unrelated health history.
 
