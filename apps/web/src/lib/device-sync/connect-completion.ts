@@ -409,7 +409,7 @@ function buildWhoopAppleHealthSetupGuide(voiceMemoSrc: string): DeviceSyncComple
     downloadAction: {
       ariaLabel: "Download Murph to sync WHOOP through Apple Health",
       href: MURPH_IOS_APP_STORE_URL,
-      label: "Download Murph",
+      label: "Download App",
       rel: "noopener noreferrer",
       target: "_blank",
     },
