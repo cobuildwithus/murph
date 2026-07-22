@@ -14,7 +14,8 @@ For PR-lane patch implementation, this loop is the sole cross-cutting audit
 gate and replaces local `deep-review`. Never run both for the same completed
 change, including when the change is complex, sensitive, or the user asks for a
 final bug hunt. This loop does not replace the specialist `prompt-review`,
-`frontend-review`, or write-capable `coverage-write` passes triggered by
+`product-experience-review`, `frontend-review`, or write-capable
+`coverage-write` passes triggered by
 `agent-docs/operations/completion-workflow.md`.
 
 For ReviewGPT-eligible PR-lane work, do not call the PR good to merge until the
@@ -74,11 +75,13 @@ worktree of the PR branch at that pushed head so ReviewGPT artifacts, CI, and
 merge target all refer to the same commit. Do not run it on unpushed local
 changes, a dirty worktree, or a checkout that is not at the pushed head.
 
-The PR body must carry the intent contract, applicable UX outline, and change-shape breakdown from
+The PR body must carry the intent contract, applicable product-experience
+contract, and change-shape breakdown from
 `agent-docs/operations/completion-workflow.md` § PR Description: why the PR
-exists, the user-visible goal and flow it is meant to ship, invariants to
-preserve, non-obvious affected surfaces, and added/deleted lines by source,
-tests, docs, config/tooling, and generated/other.
+exists, the user-visible goal and smallest complete flow it is meant to ship,
+immediate feedback, timing and continuation ownership, terminal delivery or
+recovery, invariants to preserve, non-obvious affected surfaces, and
+added/deleted lines by source, tests, docs, config/tooling, and generated/other.
 Before firing a round, confirm that block is present and current.
 
 At round 1, also record the exact first-reviewed head and its five-category
