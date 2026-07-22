@@ -317,6 +317,55 @@ test("HostedFamilyManager hides paid seat quantity controls", async () => {
   }
 });
 
+test("HostedFamilyManager presents rows as mobile cards without forcing horizontal overflow", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      invites: [
+        {
+          acceptUrl: "https://app.murph.test/family/accept/PENDING",
+          channel: "family",
+          expiresAtIso: "2026-07-30T00:00:00.000Z",
+          id: "inv_pending",
+          planCode: "edge",
+          targetEmail: "family@example.test",
+          targetLabel: "Family member",
+          targetPhoneHint: null,
+          targetTelegramUsername: null,
+          telegramInviteUrl: null,
+        },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    const table = container.querySelector("table");
+    assert.ok(table);
+    assert.doesNotMatch(table.className, /min-w-/u);
+    assert.doesNotMatch(table.parentElement?.className ?? "", /overflow-x-auto/u);
+
+    const body = table.querySelector("tbody");
+    assert.match(body?.className ?? "", /\bgrid\b/u);
+    assert.match(body?.className ?? "", /md:table-row-group/u);
+
+    const rows = body?.querySelectorAll("tr") ?? [];
+    assert.equal(rows.length, 2);
+    for (const row of rows) {
+      assert.match(row.className, /\bgrid\b/u);
+      assert.match(row.className, /rounded-xl/u);
+      assert.match(row.className, /md:table-row/u);
+    }
+    assert.match(body?.textContent ?? "", /Plan/u);
+    assert.match(body?.textContent ?? "", /Status/u);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("HostedFamilyManager adds the selected Edge seat while creating an invite", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"

@@ -578,6 +578,14 @@ test("renders the dials in the mobile drawer", async () => {
   try {
     assert.ok(rendered.container.querySelector("[data-drawer-open='true']"));
     assert.equal(rendered.container.querySelector("[data-dialog-open='true']"), null);
+    const drawerContent = rendered.container.querySelector("[data-drawer-content='true']");
+    assert.match(drawerContent?.className ?? "", /h-dvh/u);
+    assert.match(
+      drawerContent?.className ?? "",
+      /data-\[vaul-drawer-direction=bottom\]:max-h-dvh/u,
+    );
+    const description = drawerContent?.querySelector("p");
+    assert.match(description?.className ?? "", /text-left/u);
     assert.match(rendered.container.textContent ?? "", /Tune Murph's personality/u);
     assert.ok(findDialInput(rendered.container, "Humor"));
     assert.ok(findDialInput(rendered.container, "Push"));

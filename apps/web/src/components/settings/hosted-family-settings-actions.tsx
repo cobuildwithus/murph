@@ -501,8 +501,8 @@ export function HostedFamilyManager(props: {
         ) : null}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[44rem] text-sm">
+      <div className="min-w-0">
+        <table className="w-full text-sm">
           <thead className="sr-only">
             <tr>
               <th>Member</th>
@@ -511,7 +511,7 @@ export function HostedFamilyManager(props: {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="grid gap-3 md:table-row-group md:divide-y md:divide-border">
             {props.members.map((member) => {
               const isRetry = member.pendingPlanCode !== null;
               const targetPlanCode = member.pendingPlanCode
@@ -521,8 +521,11 @@ export function HostedFamilyManager(props: {
               );
 
               return (
-                <tr key={member.memberId}>
-                  <td className="py-3 pr-3">
+                <tr
+                  key={member.memberId}
+                  className="grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-border bg-background p-4 md:table-row md:rounded-none md:border-0 md:bg-transparent md:p-0"
+                >
+                  <td className="col-span-2 block min-w-0 md:table-cell md:py-3 md:pr-3">
                     <div className="truncate font-medium text-foreground">
                       {member.isOwner ? "You" : member.label ?? "Family member"}
                     </div>
@@ -532,25 +535,32 @@ export function HostedFamilyManager(props: {
                       </div>
                     ) : null}
                   </td>
-                  <td className="py-3 pr-3 align-top">
+                  <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                      Plan
+                    </span>
                     <Badge variant="outline">
                       {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
                     </Badge>
                   </td>
-                  <td className="py-3 pr-3 align-top">
+                  <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                      Status
+                    </span>
                     <Badge variant={member.pendingPlanCode ? "secondary" : member.isOwner ? "outline" : "default"}>
                       {member.pendingPlanCode
                         ? `Updating to ${props.tiers.find((tier) => tier.planCode === member.pendingPlanCode)?.name}`
                         : member.isOwner ? "Owner" : "Active"}
                     </Badge>
                   </td>
-                  <td className="py-3 text-right align-top">
-                    <div className="inline-flex items-center gap-1">
+                  <td className="col-span-2 block text-right align-top md:table-cell md:py-3">
+                    <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:gap-1">
                       {targetTier ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
+                          className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                           aria-label={isRetry
                             ? member.isOwner
                               ? `Retry updating your plan to ${targetTier.name}`
@@ -582,8 +592,11 @@ export function HostedFamilyManager(props: {
           const link = inviteShareLink(invite);
           const secondary = invite.targetLabel ? inviteContacts(invite)[0] ?? null : null;
           return (
-            <tr key={invite.id}>
-              <td className="py-3 pr-3">
+            <tr
+              key={invite.id}
+              className="grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-border bg-background p-4 md:table-row md:rounded-none md:border-0 md:bg-transparent md:p-0"
+            >
+              <td className="col-span-2 block min-w-0 md:table-cell md:py-3 md:pr-3">
                 <div className="truncate font-medium text-foreground">
                   {inviteDisplayName(invite)}
                 </div>
@@ -591,21 +604,28 @@ export function HostedFamilyManager(props: {
                   {secondary ? `${secondary} · ` : ""}Expires {formatFamilyDate(invite.expiresAtIso)}
                 </div>
               </td>
-              <td className="py-3 pr-3 align-top">
+              <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                  Plan
+                </span>
                 <Badge variant="outline">
                   {props.tiers.find((tier) => tier.planCode === invite.planCode)?.name}
                 </Badge>
               </td>
-              <td className="py-3 pr-3 align-top">
+              <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                  Status
+                </span>
                 <Badge variant="secondary">Pending</Badge>
               </td>
-              <td className="py-3 text-right align-top">
-                <div className="inline-flex items-center gap-1">
+              <td className="col-span-2 block text-right align-top md:table-cell md:py-3">
+                <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:gap-1">
                   {link ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
+                      className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                       onClick={() => void copyInviteLink(invite)}
                     >
                       {copiedId === invite.id ? (
@@ -623,6 +643,7 @@ export function HostedFamilyManager(props: {
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                     onClick={() =>
                       setPendingAction({
                         id: invite.id,

@@ -221,7 +221,7 @@ export function MurphAssistantStylePicker({
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
               {title}
             </DrawerTitle>
-            <DrawerDescription className="text-sm leading-6 text-muted-foreground">
+            <DrawerDescription className="text-left text-sm leading-6 text-muted-foreground">
               {description}
             </DrawerDescription>
           </DrawerHeader>
@@ -372,40 +372,30 @@ function VoiceChooser({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <div
-          className="grid flex-1 grid-cols-3 rounded-lg bg-muted p-1"
-          role="group"
-          aria-label="Filter Murph voices"
-        >
-          {VOICE_FILTER_OPTIONS.map((option) => {
-            const selected = option.id === filter;
-            return (
-              <button
-                key={option.id}
-                type="button"
-                onClick={() => setFilter(option.id)}
-                className={cn(
-                  "min-h-9 rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  selected
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-                aria-pressed={selected}
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-        <p
-          aria-live="polite"
-          className="shrink-0 text-xs text-muted-foreground"
-        >
-          {visibleOptions.length === 1
-            ? "1 voice"
-            : `${visibleOptions.length} voices`}
-        </p>
+      <div
+        className="grid grid-cols-3 rounded-lg bg-muted p-1"
+        role="group"
+        aria-label="Filter Murph voices"
+      >
+        {VOICE_FILTER_OPTIONS.map((option) => {
+          const selected = option.id === filter;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setFilter(option.id)}
+              className={cn(
+                "min-h-9 rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                selected
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              aria-pressed={selected}
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
       {selectedOption && !selectedOptionVisible ? (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2 text-sm">
@@ -521,6 +511,7 @@ function VoiceCard({
           src={option.previewPath}
           exclusiveGroupId={groupId}
           preload="none"
+          showDuration={false}
           unavailableLabel="Pending"
           containerClassName="rounded-lg bg-background px-2.5 py-1.5 ring-1 ring-border"
           accentClassName="bg-primary"

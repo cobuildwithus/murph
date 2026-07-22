@@ -61,6 +61,9 @@ interface VoiceMemoPlayerProps {
   bars?: number;
   exclusiveGroupId?: string;
   preload?: "none" | "metadata" | "auto";
+  // Keep playback status available while allowing dense pickers to omit the
+  // changing time label.
+  showDuration?: boolean;
   unavailableLabel?: string;
 }
 
@@ -80,6 +83,7 @@ export const VoiceMemoPlayer = forwardRef<
     bars = DEFAULT_BAR_COUNT,
     exclusiveGroupId,
     preload = "metadata",
+    showDuration = true,
     unavailableLabel = "Unavailable",
   },
   ref,
@@ -289,9 +293,11 @@ export const VoiceMemoPlayer = forwardRef<
           })}
         </button>
 
-        <span className="shrink-0 font-mono text-[11px] tabular-nums text-[#736a58]">
-          {unavailable ? unavailableLabel : formatTime(displayTime)}
-        </span>
+        {unavailable || showDuration ? (
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-[#736a58]">
+            {unavailable ? unavailableLabel : formatTime(displayTime)}
+          </span>
+        ) : null}
       </div>
 
       {caption ? (

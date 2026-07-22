@@ -226,7 +226,7 @@ export function MurphPersonalitySettingsDialog({
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
-        <DrawerContent>
+        <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-start gap-2 pb-3 text-left">
             {icon}
             <DrawerTitle
@@ -234,7 +234,7 @@ export function MurphPersonalitySettingsDialog({
             >
               {title}
             </DrawerTitle>
-            <DrawerDescription className="text-sm leading-6 text-muted-foreground">
+            <DrawerDescription className="text-left text-sm leading-6 text-muted-foreground">
               {description}
             </DrawerDescription>
           </DrawerHeader>
