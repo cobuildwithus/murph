@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import { resolveHealthCommonsBiomarkerEntityKey } from "@murphai/health-commons";
+import {
+  resolveHealthCommonsBiomarkerEntityKey,
+} from "@murphai/health-commons/biomarker-entity-mappings";
 import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
 
 import {
