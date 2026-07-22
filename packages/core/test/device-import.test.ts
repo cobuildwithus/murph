@@ -2147,10 +2147,24 @@ test("importDeviceBatch retains only changed evidence from a repeated multi-part
     provider: "junction",
     accountId: "jxn_acct_stable",
     importedAt,
-    events: [{
-      ...buildJunctionStyleWorkoutEvent(),
-      evidenceRoles: [unchangedRole, changedRole],
-    }],
+    events: [
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          resourceId: "activity-incremental-evidence",
+          sourceWorkoutId: "activity-incremental-evidence",
+        }),
+        evidenceRoles: [unchangedRole],
+      },
+      {
+        ...buildJunctionStyleWorkoutEvent({
+          occurredAt: "2026-06-03T22:00:00.000Z",
+          recordedAt: "2026-06-03T22:35:00.000Z",
+          resourceId: "sleep-incremental-evidence",
+          sourceWorkoutId: "sleep-incremental-evidence",
+        }),
+        evidenceRoles: [changedRole],
+      },
+    ],
     evidenceParts: [
       {
         role: unchangedRole,
@@ -2168,6 +2182,9 @@ test("importDeviceBatch retains only changed evidence from a repeated multi-part
   const first = await importDeviceBatch(buildInput("2026-06-03T21:00:00.000Z", 1));
   const changedInput = buildInput("2026-06-04T21:00:00.000Z", 2);
   const changed = await importDeviceBatch(changedInput);
+  assert.ok(changed.ingestId);
+  const changedIngest = await readRequiredIntegrationIngest(vaultRoot, changed.ingestId);
+  const beforeReplay = await snapshotVaultFiles(vaultRoot);
   const replay = await importDeviceBatch(changedInput);
 
   assert.ok(first.applied);
@@ -2179,12 +2196,12 @@ test("importDeviceBatch retains only changed evidence from a repeated multi-part
   assert.equal(replay.ingestId, null);
   assert.equal(replay.auditPath, null);
   assert.equal(replay.persistedEvidencePartCount, 0);
-  const changedIngest = await readRequiredIntegrationIngest(vaultRoot, changed.ingestId);
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeReplay);
   assert.deepEqual(changedIngest.parts.map((part) => part.role), [changedRole]);
-  assert.deepEqual(changedIngest.outputs.events, [{
-    id: first.events[0]?.id,
-    roles: [changedRole],
-  }]);
+  assert.deepEqual(changedIngest.outputs.events, [
+    { id: first.events[0]?.id, roles: [] },
+    { id: first.events[1]?.id, roles: [changedRole] },
+  ].sort((left, right) => (left.id ?? "").localeCompare(right.id ?? "")));
 });
 
 test("importDeviceBatch retains unchanged evidence for a newly appended event revision", async () => {
@@ -2236,64 +2253,65 @@ test.each(["earlier-shard", "complete-spine"] as const)(
       `murph-device-import-filtered-replay-${lossMode}`,
     );
     await initializeVault({ vaultRoot, createdAt: "2026-01-01T12:00:00.000Z" });
-    const contextRole = "junction-summary-activity";
-    const eventRole = "junction-summary-workouts";
-    const evidenceParts = [
-      {
-        role: contextRole,
-        fileName: "junction-summary-activity.json",
-        content: { date: "2026-01-03", steps: 8_000 },
-      },
-      {
-        role: eventRole,
-        fileName: "junction-summary-workouts.json",
-        content: { id: "filtered-replay-workout", sport: "running" },
-      },
-    ];
-    const buildInput = (input: {
-      durationMinutes: number;
-      importedAt: string;
-      occurredAt: string;
-    }) => ({
+    const unchangedRole = "junction-summary-activity";
+    const changedRole = "junction-summary-workouts";
+    const buildInput = (importedAt: string, workoutRevision: number) => ({
       vaultRoot,
       provider: "junction",
       accountId: "jxn_acct_filtered_replay",
-      importedAt: input.importedAt,
-      events: [{
-        ...buildJunctionStyleWorkoutEvent({
-          durationMinutes: input.durationMinutes,
-          occurredAt: input.occurredAt,
-          recordedAt: input.occurredAt,
-          resourceId: "filtered-replay-workout",
-        }),
-        evidenceRoles: [eventRole],
-      }],
-      evidenceParts,
+      importedAt,
+      events: [
+        {
+          ...buildJunctionStyleWorkoutEvent({
+            occurredAt: "2026-01-03T19:55:00.000Z",
+            recordedAt: "2026-01-03T20:30:00.000Z",
+            resourceId: "filtered-replay-activity",
+            sourceWorkoutId: "filtered-replay-activity",
+          }),
+          evidenceRoles: [unchangedRole],
+        },
+        {
+          ...buildJunctionStyleWorkoutEvent({
+            occurredAt: "2026-02-03T19:55:00.000Z",
+            recordedAt: "2026-02-03T20:30:00.000Z",
+            resourceId: "filtered-replay-workout",
+            sourceWorkoutId: "filtered-replay-workout",
+          }),
+          evidenceRoles: [changedRole],
+        },
+      ],
+      evidenceParts: [
+        {
+          role: unchangedRole,
+          fileName: "junction-summary-activity.json",
+          content: { date: "2026-01-03", steps: 8_000 },
+        },
+        {
+          role: changedRole,
+          fileName: "junction-summary-workouts.json",
+          content: {
+            id: "filtered-replay-workout",
+            revision: workoutRevision,
+            sport: "running",
+          },
+        },
+      ],
     });
 
-    const first = await importDeviceBatch(buildInput({
-      durationMinutes: 34,
-      importedAt: "2026-06-03T21:00:00.000Z",
-      occurredAt: "2026-01-03T19:55:00.000Z",
-    }));
-    const filteredInput = buildInput({
-      durationMinutes: 35,
-      importedAt: "2026-06-04T21:00:00.000Z",
-      occurredAt: "2026-02-03T19:55:00.000Z",
-    });
+    const first = await importDeviceBatch(buildInput("2026-06-03T21:00:00.000Z", 1));
+    const filteredInput = buildInput("2026-06-04T21:00:00.000Z", 2);
     const filtered = await importDeviceBatch(filteredInput);
-    const later = await importDeviceBatch(buildInput({
-      durationMinutes: 36,
-      importedAt: "2026-06-05T21:00:00.000Z",
-      occurredAt: "2026-03-03T19:55:00.000Z",
-    }));
 
     assert.equal(filtered.events[0]?.id, first.events[0]?.id);
-    assert.equal(later.events[0]?.id, first.events[0]?.id);
+    assert.equal(filtered.events[1]?.id, first.events[1]?.id);
     assert.equal(filtered.persistedEvidencePartCount, 1);
     assert.ok(filtered.ingestId);
     const filteredIngest = await readRequiredIntegrationIngest(vaultRoot, filtered.ingestId);
-    assert.deepEqual(filteredIngest.parts.map((part) => part.role), [eventRole]);
+    assert.deepEqual(filteredIngest.parts.map((part) => part.role), [changedRole]);
+    assert.deepEqual(filteredIngest.outputs.events, [
+      { id: first.events[0]?.id, roles: [] },
+      { id: first.events[1]?.id, roles: [changedRole] },
+    ].sort((left, right) => (left.id ?? "").localeCompare(right.id ?? "")));
     const beforeIntactReplay = await snapshotVaultFiles(vaultRoot);
     const intactReplay = await importDeviceBatch(filteredInput);
     assert.equal(intactReplay.applied, false);
@@ -2307,7 +2325,6 @@ test.each(["earlier-shard", "complete-spine"] as const)(
       for (const eventShardPath of new Set([
         ...first.eventShardPaths,
         ...filtered.eventShardPaths,
-        ...later.eventShardPaths,
       ])) {
         await fs.unlink(path.join(vaultRoot, eventShardPath));
       }
@@ -4332,12 +4349,19 @@ test.each([
       importedAt,
       ...(deliveryKind === "linked-output"
         ? {
-            events: [{
+            events: evidenceParts.map((part, index) => ({
               ...buildJunctionStyleWorkoutEvent({
-                resourceId: "filtered-evidence-repair",
+                occurredAt: index === 0
+                  ? "2026-06-03T19:55:00.000Z"
+                  : "2026-06-03T22:00:00.000Z",
+                recordedAt: index === 0
+                  ? "2026-06-03T20:30:00.000Z"
+                  : "2026-06-03T22:35:00.000Z",
+                resourceId: `filtered-evidence-repair-${part.role}`,
+                sourceWorkoutId: `filtered-evidence-repair-${part.role}`,
               }),
-              evidenceRoles: evidenceParts.map((part) => part.role),
-            }],
+              evidenceRoles: [part.role],
+            })),
           }
         : {}),
       evidenceParts,
@@ -4359,6 +4383,12 @@ test.each([
     assert.ok(filtered.ingestShardPath);
     const filteredRecord = await readRequiredIntegrationIngest(vaultRoot, filtered.ingestId);
     assert.deepEqual(filteredRecord.parts.map((part) => part.role), [partB.role]);
+    if (deliveryKind === "linked-output") {
+      assert.deepEqual(filteredRecord.outputs.events, [
+        { id: seed.events[0]?.id, roles: [] },
+        { id: filtered.events[1]?.id, roles: [partB.role] },
+      ].sort((left, right) => (left.id ?? "").localeCompare(right.id ?? "")));
+    }
 
     const unrelatedRows = markerPlacement === "beyond-tail"
       ? Array.from({ length: 65 }, (_, index) => ({

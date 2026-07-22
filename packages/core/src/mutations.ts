@@ -4318,7 +4318,7 @@ function preparedDeviceEventRetainsCurrentOutput(input: {
   );
 }
 
-function storedIntegrationIngestRetainsCurrentOutputs(input: {
+type StoredIntegrationIngestCurrentOutputInput = {
   allSamplesExist: boolean;
   associationEvidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   baselineRetainedPreparedIds: ReadonlySet<string>;
@@ -4328,7 +4328,11 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
   preparedEventOutputOwners: PreparedDeviceEventOutputOwners;
   sampleRecords: readonly SampleRecord[];
   storedDelivery: IntegrationIngestRecord;
-}): boolean {
+};
+
+function storedIntegrationIngestRetainsCurrentOutputLocators(
+  input: StoredIntegrationIngestCurrentOutputInput,
+): boolean {
   if (!input.allSamplesExist) {
     return false;
   }
@@ -4370,16 +4374,10 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
     const ownerEntries = [...owner.preparedIds]
       .map((preparedId) => preparedEventById.get(preparedId))
       .filter((entry): entry is PreparedDeviceEventEntry => entry !== undefined);
-    const outputRolesBelongToOwner = storedEventOutputRolesBelongToPreparedOwner({
-      evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
-      output,
-      owner,
-    });
     const retainedOwnerEntries = ownerEntries.filter((entry) =>
       input.baselineRetainedPreparedIds.has(entry.record.id)
     );
-    const retainsOutput = outputRolesBelongToOwner
-      && retainedOwnerEntries.length > 0
+    const retainsOutput = retainedOwnerEntries.length > 0
       && retainedOwnerEntries.every((entry) =>
         input.replayRetainedPreparedIds.has(entry.record.id)
       );
@@ -4393,6 +4391,24 @@ function storedIntegrationIngestRetainsCurrentOutputs(input: {
       input.storedDelivery.outputs.events.some((output) => output.id === eventId)
     )
     && stableStringify([...input.storedDelivery.outputs.sampleIds].sort()) === stableStringify(expectedSampleIds);
+}
+
+function storedIntegrationIngestRetainsCurrentOutputs(
+  input: StoredIntegrationIngestCurrentOutputInput,
+): boolean {
+  return storedIntegrationIngestRetainsCurrentOutputLocators(input)
+    && input.storedDelivery.outputs.events.every((output) => {
+      const owner = storedEventOutputMatchesPreparedOwner({
+        output,
+        preparedEventOutputOwners: input.preparedEventOutputOwners,
+      });
+      return owner !== undefined
+        && storedEventOutputRolesBelongToPreparedOwner({
+          evidenceRolesByPreparedRecordId: input.deviceBatchPlan.evidenceRolesByPreparedRecordId,
+          output,
+          owner,
+        });
+    });
 }
 
 function buildStoredEventRepairIds(input: {
@@ -4674,6 +4690,21 @@ export async function importDeviceBatch({
       sampleRecords,
       storedDelivery,
     });
+  const filteredMarkerRetainsCurrentOutputLocators = (
+    storedDelivery: IntegrationIngestRecord,
+  ): boolean =>
+    (currentEventOwners.allExist || storedDelivery.outputs.events.length === 0)
+    && storedIntegrationIngestRetainsCurrentOutputLocators({
+      allSamplesExist: sampleAppendPlan.appendedRecordIds.length === 0,
+      associationEvidenceRolesByPreparedRecordId,
+      baselineRetainedPreparedIds,
+      currentEventOwners,
+      deviceBatchPlan,
+      preparedEventOutputOwners,
+      replayRetainedPreparedIds,
+      sampleRecords,
+      storedDelivery,
+    });
   const authorizedStoredDelivery = () => {
     if (ingestIdInspection.unsafe) {
       return undefined;
@@ -4734,7 +4765,7 @@ export async function importDeviceBatch({
   const inspectExactDeliveryState = (): ExactDeliveryState => {
     assertNoCurrentImportIdConflict();
     const partial = partialStoredDelivery();
-    if (partial && !storedDeliveryRetainsCurrentOutputs(partial)) {
+    if (partial && !filteredMarkerRetainsCurrentOutputLocators(partial)) {
       throw new VaultError(
         "INTEGRATION_INGEST_EVENT_MAPPING_AMBIGUOUS",
         "Filtered device delivery marker cannot prove the current canonical outputs.",
