@@ -148,12 +148,11 @@ do not add a generic payment-modal framework.
 The target composition is:
 
 - Title: **Add usage**
-- Description: **Choose how much usage credit to add in a one-time payment.
-  Stripe confirms the payment before Murph adds it.**
+- Description: **Choose a one-time credit amount for your account.**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
 - Primary action after selection: **Continue to checkout · $10**
-- Pending action: **Opening Stripe…**
+- Pending action: **Opening checkout…**
 - Secondary action: **Cancel**
 - An inline accessible error for checkout-creation failure
 
@@ -178,7 +177,7 @@ The browser renders only server-read status:
 | State | Copy |
 | --- | --- |
 | Checkout canceled or expired | **Checkout canceled. No usage was added.** |
-| Payment processing | **Payment submitted. Stripe is confirming it.** |
+| Payment processing | **Payment submitted. We’re confirming it.** |
 | Fulfilled | **Usage added.** |
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
