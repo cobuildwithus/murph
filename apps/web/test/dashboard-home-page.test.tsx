@@ -67,14 +67,19 @@ vi.mock("@/src/components/home/upload-labs-action", () => ({
 
 vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
   HomeInitialVisitPersonaPickerClient({
-    showContactCard,
+    contactAction,
   }: {
-    showContactCard: boolean;
+    contactAction: {
+      href: string;
+      kind: string;
+    } | null;
   }) {
     return createElement(
       "section",
       {
-        "data-show-contact-card": showContactCard ? "true" : "false",
+        "data-contact-action-href": contactAction?.href ?? "none",
+        "data-contact-action-kind": contactAction?.kind ?? "none",
+        "data-show-contact-card": contactAction?.kind === "text" ? "true" : "false",
         "data-home-initial-visit-persona-picker": "shown",
       },
       "Persona onboarding",
@@ -553,9 +558,9 @@ test("HomePage opens persona onboarding for initial visits", async () => {
   assert.match(markup, /Welcome to Murph/);
   assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
   assert.match(markup, /data-show-contact-card="true"/);
+  assert.match(markup, /data-contact-action-href="sms:\+15555550123"/);
   assert.match(markup, /Persona onboarding/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
-  assert.doesNotMatch(markup, /data-home-initial-visit-dialog/);
 });
 
 test("HomePage skips the contact-card picker for Telegram-only members", async () => {
@@ -578,6 +583,7 @@ test("HomePage skips the contact-card picker for Telegram-only members", async (
 
   assert.match(markup, /data-home-initial-visit-persona-picker="shown"/);
   assert.match(markup, /data-show-contact-card="false"/);
+  assert.match(markup, /data-contact-action-kind="telegram"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
 });
 

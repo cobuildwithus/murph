@@ -2,7 +2,10 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
-import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
+import {
+  type HomeInitialVisitContactAction,
+  HomeInitialVisitPersonaPickerClient,
+} from "./initial-visit-persona-picker-client";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
@@ -64,7 +67,7 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
-    showInitialVisitContactCard,
+    initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member,
@@ -86,8 +89,8 @@ export default async function HomePage({
       searchParams: resolvedSearchParams,
     }),
     showInitialVisitPersonaPicker
-      ? resolveHomeInitialVisitShowsContactCard()
-      : Promise.resolve(false),
+      ? resolveHomeInitialVisitContactAction()
+      : Promise.resolve(null),
   ]);
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
@@ -139,7 +142,7 @@ export default async function HomePage({
 
       {showInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
-          showContactCard={showInitialVisitContactCard}
+          contactAction={initialVisitContactAction}
         />
       ) : null}
 
@@ -176,7 +179,9 @@ function readFirstSearchParamValue(
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function resolveHomeInitialVisitShowsContactCard(): Promise<boolean> {
+async function resolveHomeInitialVisitContactAction(): Promise<
+  HomeInitialVisitContactAction | null
+> {
   const option = await resolveHostedMurphContactOption({
     message: {
       body: "Hey Murph, do your thing",
@@ -184,5 +189,15 @@ async function resolveHomeInitialVisitShowsContactCard(): Promise<boolean> {
     },
   });
 
-  return option?.kind === "text";
+  if (!option) {
+    return null;
+  }
+
+  return {
+    href: option.href,
+    kind: option.kind,
+    label: option.label,
+    rel: option.rel,
+    target: option.target,
+  };
 }
