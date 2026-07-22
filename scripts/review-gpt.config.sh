@@ -4,13 +4,14 @@ review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pw
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 
 review_gpt_invalid_browser_lane() {
-  echo "Error: unsupported ReviewGPT browser lane '$1'. Use random, eragon, phlebas, or mountain." >&2
+  echo "Error: unsupported ReviewGPT browser lane '$1'. Use random, eragon, phlebas, hercules, or mountain." >&2
 }
 
 review_gpt_browser_lane_display_name() {
   case "$1" in
     eragon) printf '%s\n' "Eragon" ;;
     phlebas) printf '%s\n' "Phlebas" ;;
+    hercules) printf '%s\n' "Hercules" ;;
     mountain) printf '%s\n' "Mountain" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
@@ -23,6 +24,7 @@ review_gpt_browser_lane_port() {
   case "$1" in
     eragon) printf '%s\n' "9448" ;;
     phlebas) printf '%s\n' "9442" ;;
+    hercules) printf '%s\n' "9444" ;;
     mountain) printf '%s\n' "9450" ;;
     *)
       review_gpt_invalid_browser_lane "$1"
@@ -68,7 +70,7 @@ review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_
 
 case "$review_gpt_requested_browser_lane" in
   "" | auto | random)
-    review_gpt_browser_lanes=(eragon phlebas mountain)
+    review_gpt_browser_lanes=(eragon phlebas hercules mountain)
     review_gpt_usable_browser_lanes=()
 
     for review_gpt_candidate_browser_lane in "${review_gpt_browser_lanes[@]}"; do
@@ -87,7 +89,7 @@ case "$review_gpt_requested_browser_lane" in
   aragon | eragon)
     review_gpt_selected_browser_lane="eragon"
     ;;
-  phlebas | mountain)
+  phlebas | hercules | mountain)
     review_gpt_selected_browser_lane="$review_gpt_requested_browser_lane"
     ;;
   *)

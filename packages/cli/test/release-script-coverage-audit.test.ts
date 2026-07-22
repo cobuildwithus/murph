@@ -1268,6 +1268,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).toContain(
+      'review_gpt_browser_lanes=(eragon phlebas hercules mountain)',
+    )
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1429,9 +1434,13 @@ describe('monorepo release flow coverage audit', () => {
       'The `pr-review` prompt lives at',
     )
     expect(prReviewGptLoop).toContain(
-      'Both stages use the managed Eragon, Phlebas, and Mountain browser lanes',
+      'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
+    expect(prReviewGptLoop).toContain('`Hercules.app` on `9444`')
+    expect(prReviewGptLoop).toContain(
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+    )
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
@@ -1500,6 +1509,17 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const verificationAndRuntime = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
+      'utf8',
+    )
+    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
+    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
+    expect(verificationAndRuntime).toContain(
+      'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
+    )
+    expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
