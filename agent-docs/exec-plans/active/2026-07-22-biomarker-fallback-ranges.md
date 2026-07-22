@@ -108,3 +108,10 @@ Updated: 2026-07-22
   missing in-app Browser attachment must not block design proof when Playwright
   can reach the local catalog; rendered evidence and the valid preliminary retry
   remain open.
+- Two screenshot-bearing preliminary retries were rejected for completing below
+  the repository's 7.5-minute minimum. A third retry cleared the duration and
+  model guards but returned `INVALID`: the guarded ZIP named ignored evidence
+  copies that its pruned `audit-packages` directory did not include, and omitted
+  the frontend lens's required `agent-docs/FRONTEND.md`. The next retry uses the
+  supported `.artifacts/review-gpt` root and the packager now always includes the
+  required frontend guidance.
