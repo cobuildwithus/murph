@@ -204,7 +204,7 @@ current user explicitly asks for the loop.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   A marked concrete-model response that completes in under 10 minutes is
+   A marked concrete-model response that completes in under 7.5 minutes is
    untrusted and does not count. ReviewGPT must fail the run, preserve the
    response only as diagnostic output, and omit model-verification attestation.
    Retry the same substantive round number against the same pushed head; browser,
