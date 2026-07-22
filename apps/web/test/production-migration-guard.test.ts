@@ -7,12 +7,17 @@ import { fileURLToPath } from "node:url";
 import { describe, test, vi } from "vitest";
 
 import {
+  assertHostedWebMigrationOwner,
+  hostedWebMigrationOwnerRole,
+  withHostedWebMigrationOwner,
+} from "../scripts/hosted-web-migration-owner";
+import {
   applyHostedWebContractMigrations,
   listHostedWebContractMigrations,
   runHostedWebProductionContractMigrationsIfNeeded,
   shouldRunHostedWebProductionContractMigrations,
+  type HostedWebContractMigrationClient,
   type HostedWebContractMigration,
-  type HostedWebContractMigrationDatabase,
 } from "../scripts/run-production-contract-migrations";
 import {
   resolveVercelProductionAliasSha,
@@ -396,6 +401,48 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("pins every production migration connection to the canonical schema owner", () => {
+    const ownerUrl = withHostedWebMigrationOwner(
+      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c%20statement_timeout%3D5000",
+    );
+    const parsed = new URL(ownerUrl);
+
+    assert.equal(
+      parsed.searchParams.get("options"),
+      `-c statement_timeout=5000 -c role=${hostedWebMigrationOwnerRole}`,
+    );
+  });
+
+  test("fails closed on ownership drift while allowing canonical bootstrap", async () => {
+    const database = (
+      isCanonicalOwner: boolean,
+      ledgerExists: boolean,
+      ownsLedger: boolean,
+    ) => ({
+      async query() {
+        return {
+          rows: [
+            {
+              is_canonical_owner: isCanonicalOwner,
+              owns_prisma_migration_ledger: ownsLedger,
+              prisma_migration_ledger_exists: ledgerExists,
+            },
+          ],
+        };
+      },
+    });
+
+    await assert.rejects(
+      () => assertHostedWebMigrationOwner(database(false, true, true)),
+      /did not assume the canonical schema owner/u,
+    );
+    await assert.rejects(
+      () => assertHostedWebMigrationOwner(database(true, true, false)),
+      /does not own the Prisma migration ledger/u,
+    );
+    await assertHostedWebMigrationOwner(database(true, false, false));
+  });
+
   test("requires DIRECT_DATABASE_URL for Vercel production migrations", () => {
     assert.throws(
       () =>
@@ -428,13 +475,15 @@ describe("hosted web production migration guard", () => {
     );
   });
 
-  test("passes the selected direct migration URL to the Prisma child process", async () => {
+  test("verifies the canonical owner before passing the direct URL to Prisma", async () => {
     const calls: Array<{
       args: readonly string[];
       command: string;
       databaseUrl: string | undefined;
       directDatabaseUrl: string | undefined;
     }> = [];
+    const events: string[] = [];
+    const verifiedUrls: string[] = [];
 
     await runHostedWebPrismaMigrateDeploy(
       {
@@ -443,6 +492,7 @@ describe("hosted web production migration guard", () => {
           "postgresql://direct.example.com:5432/app?sslmode=require&sslrootcert=system",
       },
       async (command, args, environment) => {
+        events.push("run");
         calls.push({
           args,
           command,
@@ -450,14 +500,26 @@ describe("hosted web production migration guard", () => {
           directDatabaseUrl: environment.DIRECT_DATABASE_URL,
         });
       },
+      {
+        async verifyMigrationOwner(databaseUrl) {
+          events.push("verify:start");
+          await Promise.resolve();
+          events.push("verify:complete");
+          verifiedUrls.push(databaseUrl);
+        },
+      },
     );
 
+    const expectedOwnerUrl =
+      "postgresql://direct.example.com:5432/app?sslmode=require&options=-c+role%3Dpostgres";
+    assert.deepEqual(events, ["verify:start", "verify:complete", "run"]);
+    assert.deepEqual(verifiedUrls, [expectedOwnerUrl]);
     assert.deepEqual(calls, [
       {
         command: hostedWebPrismaMigrateDeployCommand.command,
         args: hostedWebPrismaMigrateDeployCommand.args,
-        databaseUrl: "postgresql://direct.example.com:5432/app?sslmode=require",
-        directDatabaseUrl: "postgresql://direct.example.com:5432/app?sslmode=require",
+        databaseUrl: expectedOwnerUrl,
+        directDatabaseUrl: expectedOwnerUrl,
       },
     ]);
   });
@@ -504,6 +566,53 @@ describe("hosted web production migration guard", () => {
       );
       assert.ok(migrations[0]!.checksum.length > 0);
       assert.notEqual(migrations[0]!.checksum, migrations[1]!.checksum);
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("checks the canonical owner before contract migration SQL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-contract-owner-"),
+    );
+    const database = new FakeContractMigrationDatabase();
+    let connectionString: string | undefined;
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        "20260707180000_owner_guard",
+        'ALTER TABLE "hosted_member_routing" DROP COLUMN IF EXISTS "legacy";',
+      );
+
+      assert.equal(
+        await runHostedWebProductionContractMigrationsIfNeeded(
+          {
+            DIRECT_DATABASE_URL: "postgresql://direct.example.com:5432/app",
+            MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1",
+          },
+          {
+            clientFactory(ownerUrl) {
+              connectionString = ownerUrl;
+              return database;
+            },
+            migrationsDir,
+          },
+        ),
+        "ran",
+      );
+
+      assert.equal(database.connected, true);
+      assert.equal(database.ended, true);
+      assert.equal(
+        new URL(connectionString ?? "").searchParams.get("options"),
+        `-c role=${hostedWebMigrationOwnerRole}`,
+      );
+      assert.ok(
+        database.queries.findIndex((query) => query.includes("is_canonical_owner"))
+          < database.queries.indexOf("BEGIN"),
+        "contract migrations must verify canonical ownership before opening a DDL transaction",
+      );
     } finally {
       await rm(migrationsDir, { force: true, recursive: true });
     }
@@ -1189,9 +1298,11 @@ function jsonFetchResponse(data: unknown): {
   };
 }
 
-class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabase {
+class FakeContractMigrationDatabase implements HostedWebContractMigrationClient {
   readonly checksums = new Map<string, string>();
   readonly queries: string[] = [];
+  connected = false;
+  ended = false;
 
   constructor(
     private readonly options: {
@@ -1199,11 +1310,31 @@ class FakeContractMigrationDatabase implements HostedWebContractMigrationDatabas
     } = {},
   ) {}
 
+  async connect(): Promise<void> {
+    this.connected = true;
+  }
+
+  async end(): Promise<void> {
+    this.ended = true;
+  }
+
   async query(
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Array<Record<string, unknown>> }> {
     this.queries.push(text);
+
+    if (text.includes("is_canonical_owner")) {
+      return {
+        rows: [
+          {
+            is_canonical_owner: true,
+            owns_prisma_migration_ledger: true,
+            prisma_migration_ledger_exists: true,
+          },
+        ],
+      };
+    }
 
     if (text.includes("pg_try_advisory_xact_lock")) {
       return {
