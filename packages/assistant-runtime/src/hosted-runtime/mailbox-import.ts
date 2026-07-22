@@ -129,10 +129,6 @@ export interface HostedMailboxPrefixPrefetch {
   response: Promise<HostedMailboxFetchResponse>;
 }
 
-export type HostedMailboxItemPrefixPredicate = (
-  item: HostedMailboxItem,
-) => boolean;
-
 export class HostedMailboxUserMismatchError extends Error {
   readonly itemId: string | null;
   readonly scope: "fetch_response" | "item";
@@ -188,7 +184,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
   deferConversationUntil?: HostedMailboxConversationDeferral | null;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
-  itemPrefix?: HostedMailboxItemPrefixPredicate | null;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -237,11 +232,6 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
 
   for (const { item, lane } of interleaveMailboxItemsByLane(lanes, itemsByLane)) {
     if (stoppedLanes.has(lane)) {
-      continue;
-    }
-
-    if (input.itemPrefix && !input.itemPrefix(item)) {
-      stoppedLanes.add(lane);
       continue;
     }
 

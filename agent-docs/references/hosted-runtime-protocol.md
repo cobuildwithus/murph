@@ -380,15 +380,6 @@ generation, and ten-minute expiry, appends one encrypted
 `assistant.ask.requested` item, then signals the existing group runtime. Exact
 retry reuses that item and cannot resolve a different target.
 
-If the target runtime is already dirty, the external mailbox wake inspects the
-already-fetched system prefix. It imports only the contiguous leading
-`assistant.ask.requested` prefix, stops at the first other system item, and
-admits only `joined_group` requests on this fast path. It then kicks the
-detached controller directly, without running an Ask-only foreground assistant
-pass, publishing a workspace snapshot, or shortening the idle checkpoint
-floor. Other system work and reverse `consented_member` reads remain on the
-ordinary lane.
-
 The target runtime rechecks expiry, membership generation, runtime identity,
 and the active write fence before context assembly. It snapshots bounded
 committed conversation evidence in memory and seals it with the live restored
@@ -406,6 +397,13 @@ pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child.
 
+When a request reaches a dirty warm runtime, the source-blind mailbox prefetch
+may import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes. Import kicks the existing
+detached controller; it does not start or advance the at-least-180-second idle
+snapshot. Any unrelated system wake in that prefix keeps the whole system
+prefix checkpoint-gated.
+
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
 the exact membership generation, runtime fence, expiry, and original private
@@ -413,41 +411,14 @@ route, then appends one deterministic encrypted `assistant.ask.completed` item
 to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
-or invoke side-effecting tools. When personal input is already pending, its
-pre-assistant barrier repeatedly selects the exact oldest completion that
-precedes the oldest pending personal input. Invalid or already-terminal work is
-discharged and the remaining older set is checked before personal work may
-start. A completion imported before any personal input exists is materialized
-through the same exact retained-row coordinator. That coordinator is the sole
-consumer of `continue-assistant-ask` rows: generic and deferred system-mailbox
-maintenance exclude them, so no caller can materialize an Ask and discard its
-occurrence anchor. Without pending personal input, the coordinator follows the
-ordinary globally-next due mailbox selection; a future Ask retry blocks only
-its own route and does not strand unrelated due work. Fresh personal input that
-appears after the no-input sample preempts Ask preparation or delivery, retains
-the row, and causes occurrence ordering to be re-evaluated on the next phase.
-Only an Ask proven strictly older than the oldest accepted personal input is a
-non-preemptible foreground prerequisite.
+or invoke side-effecting tools.
 
-Once a completion creates its stable-key outbox intent, the retained mailbox
-item remains the occurrence and ordering anchor while the outbox alone owns
-delivery state and retry timing. Automatically actionable pending, retryable,
-or in-flight delivery blocks later personal input and uses the outbox-owned
-wake, including non-idempotent confirmation grace and stale reconciliation. A
-non-idempotent confirmation-pending intent is deliberately parked without
-automatic resend; its mailbox ordering anchor is discharged so later accepted
-input cannot be stranded, while the outbox record remains for status and manual
-reconciliation. After terminal delivery the existing foreground loop rechecks
-the remaining older completion set before reaching the personal input. Replay
-reuses the same deterministic completion delivery key, and a first attempt
-delayed at least one minute emits only a redacted stuck-zero-attempt warning.
-This marks ordinary local runtime residue dirty for the existing idle boundary;
-it does not publish a workspace snapshot, add an Ask-only foreground pass, or
-pull forward the routine idle snapshot.
-The oldest-personal-input fact comes from the existing compacting pending-input
-index owner: stale ids are removed before comparison, and a compaction/read
-failure aborts the phase for ordinary runtime retry rather than admitting the
-personal reply without its ordering prerequisite.
+If that joined-group completion and a later private input are both pending, the
+completion uses the existing foreground-causal mailbox lane and owns the next
+assistant pass. The existing output-only continuation composes and queues one
+natural Murph response under its stable idempotency key; after the ordinary
+mailbox/outbox barrier, the still-pending private input runs on the next pass.
+The mailbox remains transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask

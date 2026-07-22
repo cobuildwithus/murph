@@ -57,7 +57,6 @@ import {
 import type {
   HostedMailboxAssistantInputRecord,
   HostedMailboxConversationDeferral,
-  HostedMailboxItemPrefixPredicate,
   HostedMailboxItemImportOutcome,
   HostedMailboxPrefixPrefetch,
   HostedMailboxPostCheckpointEffect,
@@ -325,7 +324,6 @@ const HOSTED_PRE_ASSISTANT_SYSTEM_IMPORT_MAX_PAGES = 4;
 const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
-  assistantAskRequestTargetKind?: "joined_group";
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onConversationInputStaged?: (() => void) | null;
   runtimeAttemptId?: string | null;
@@ -369,7 +367,6 @@ export interface HostedWorkspaceRunnerInput {
   initialMailboxConversationDeferral?: HostedMailboxConversationDeferral | null;
   initialMailboxImport?: HostedMailboxImportCheckpointResult | null;
   initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
-  initialMailboxItemPrefix?: HostedMailboxItemPrefixPredicate | null;
   initialMailboxImportLanes?: readonly ("conversation" | "system")[];
   initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
   limitPerLane: number;
@@ -713,7 +710,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         deferCheckpoint: true,
         importItemContext: input.initialMailboxImportContext ?? null,
         input,
-        itemPrefix: input.initialMailboxItemPrefix ?? null,
         lanes: input.initialMailboxImportLanes
           ?? (input.runAssistantPhase ? ["conversation"] : undefined),
         prefetch: input.initialMailboxPrefetch ?? null,
@@ -2043,7 +2039,6 @@ type HostedMailboxForWorkspaceRunnerImportInput = {
   deferCheckpoint?: boolean;
   importItem?: HostedWorkspaceRunnerMailboxImportItem | null;
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
-  itemPrefix?: HostedMailboxItemPrefixPredicate | null;
   input: HostedWorkspaceRunnerInput;
   lanes?: readonly ("conversation" | "system")[];
   limitPerLane?: number | null;
@@ -2098,7 +2093,6 @@ async function importHostedMailboxForWorkspaceRunnerUntracked(
     deferCheckpoint: input.deferCheckpoint === true,
     expectedUserId: input.input.expectedUserId,
     importItem: (item) => importItem(item, importItemContext ?? undefined),
-    itemPrefix: input.itemPrefix ?? null,
     lanes: input.lanes,
     limitPerLane: input.limitPerLane ?? input.input.limitPerLane,
     mailboxPort: input.input.platform.mailboxPort,

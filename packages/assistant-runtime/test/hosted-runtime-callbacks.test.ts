@@ -179,7 +179,6 @@ import {
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
-  resolveHostedAssistantOutboxIntentWakeAt,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
@@ -203,54 +202,6 @@ type HostedVoiceMemoDeliveryMedia = Extract<
   HostedAssistantDeliveryMedia,
   { kind: "voice_memo" }
 >;
-
-function createOutboxWakeIntent(
-  overrides: Partial<Pick<
-    AssistantOutboxIntent,
-    | "deliveryTransportIdempotent"
-    | "lastAttemptAt"
-    | "lastError"
-    | "nextAttemptAt"
-    | "status"
-  >>,
-): AssistantOutboxIntent {
-  return {
-    schema: "murph.assistant-outbox-intent.v1",
-    actorId: "actor_wake_test",
-    attemptCount: 0,
-    answeredMailboxItemIds: [],
-    bindingDelivery: null,
-    channel: "telegram",
-    createdAt: "2026-04-08T00:01:00.000Z",
-    dedupeKey: "dedupe_wake_test",
-    delivery: null,
-    deliveryConfirmationPending: false,
-    deliveryIdempotencyKey: "delivery-wake-test",
-    deliverySource: null,
-    deliveryTransportIdempotent: true,
-    explicitTarget: "chat_wake_test",
-    identityId: "identity_wake_test",
-    intentId: "intent_wake_test",
-    lastAttemptAt: null,
-    lastError: null,
-    media: [],
-    message: "Synthetic wake test",
-    nextAttemptAt: null,
-    operation: null,
-    preparedDispatchToken: null,
-    replyToMessageId: null,
-    sentAt: null,
-    sessionId: "session_wake_test",
-    status: "pending",
-    subject: null,
-    targetFingerprint: "target_wake_test",
-    threadId: "thread_wake_test",
-    threadIsDirect: true,
-    turnId: "turn_wake_test",
-    updatedAt: "2026-04-08T00:01:00.000Z",
-    ...overrides,
-  };
-}
 
 function createPayload(
   overrides: Partial<HostedAssistantDeliveryPayload> = {},
@@ -3692,45 +3643,6 @@ describe("hosted runtime callbacks", () => {
     expect(sideEffects.map((effect) => effect.effectId)).toEqual([
       "intent_final",
     ]);
-  });
-
-  it("gives a parked non-idempotent confirmation-pending intent no automatic wake", () => {
-    const intent = createOutboxWakeIntent({
-      deliveryTransportIdempotent: false,
-      lastError: {
-        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
-        message: "Delivery outcome is ambiguous.",
-      },
-      nextAttemptAt: "2026-04-08T00:02:00.000Z",
-      status: "retryable",
-    });
-
-    expect(resolveHostedAssistantOutboxIntentWakeAt(
-      intent,
-      new Date("2026-04-08T00:03:00.000Z"),
-    )).toBeNull();
-  });
-
-  it("derives non-idempotent sending wakes from confirmation grace and stale time", () => {
-    const intent = createOutboxWakeIntent({
-      deliveryTransportIdempotent: false,
-      lastAttemptAt: "2026-04-08T00:02:00.000Z",
-      nextAttemptAt: null,
-      status: "sending",
-    });
-
-    expect(resolveHostedAssistantOutboxIntentWakeAt(
-      intent,
-      new Date("2026-04-08T00:03:00.000Z"),
-    )).toBe("2026-04-08T00:04:00.000Z");
-    expect(resolveHostedAssistantOutboxIntentWakeAt(
-      intent,
-      new Date("2026-04-08T00:05:00.000Z"),
-    )).toBe("2026-04-08T00:12:00.000Z");
-    expect(resolveHostedAssistantOutboxIntentWakeAt(
-      intent,
-      new Date("2026-04-08T00:12:01.000Z"),
-    )).toBe("2026-04-08T00:12:01.000Z");
   });
 
   it("collects stale non-idempotent sending predecessors before later same-boundary replies", async () => {

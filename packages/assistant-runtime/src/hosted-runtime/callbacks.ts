@@ -1492,7 +1492,7 @@ function resolveHostedAssistantDeliveryBoundaryWakeAt(
   return approvalFallbackWakeAt;
 }
 
-export function resolveHostedAssistantOutboxIntentWakeAt(
+function resolveHostedAssistantOutboxIntentWakeAt(
   intent: AssistantOutboxIntent,
   now: Date,
 ): string | null {

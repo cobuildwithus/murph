@@ -10,7 +10,6 @@ import {
   fetchAndProcessHostedMailboxPrefix,
   type HostedMailboxConversationDeferral,
   type HostedMailboxImportLoopResult,
-  type HostedMailboxItemPrefixPredicate,
   type HostedMailboxPostCheckpointEffect,
   type HostedMailboxPrefixPrefetch,
   type HostedMailboxResolvedImportItem,
@@ -38,7 +37,6 @@ export interface HostedMailboxImportCheckpointInput {
   deferCheckpoint?: boolean;
   expectedUserId: string;
   importItem(item: HostedMailboxResolvedImportItem): Promise<HostedMailboxItemImportOutcome>;
-  itemPrefix?: HostedMailboxItemPrefixPredicate | null;
   lanes?: readonly HostedMailboxLane[];
   limitPerLane: number;
   mailboxPort: HostedRuntimeMailboxPort;
@@ -120,7 +118,6 @@ export async function importHostedMailboxPrefixAndCheckpoint(
       }
       return outcome;
     },
-    itemPrefix: input.itemPrefix ?? null,
     lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.mailboxPort,

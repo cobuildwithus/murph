@@ -204,17 +204,6 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   }
 
   if (
-    input.context?.assistantAskRequestTargetKind
-    && wake.kind === "assistant.ask.requested"
-    && wake.ask.target.kind !== input.context.assistantAskRequestTargetKind
-  ) {
-    return {
-      reasonCode: "assistant_ask.target_not_admitted",
-      status: "deferred",
-    };
-  }
-
-  if (
     input.item.route.action === "import-vault-share-delivery"
     || wake.kind === "vault-share.delivery"
   ) {

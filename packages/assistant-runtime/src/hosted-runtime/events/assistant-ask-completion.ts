@@ -33,8 +33,6 @@ export const HOSTED_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE;
 const HOSTED_ASSISTANT_ASK_REVIEWED_EXACT_INSTRUCTIONS =
   "Queue the already-reviewed exact response for the bound group conversation.";
-const HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
-  "assistant-ask-completion:";
 
 export async function executeHostedAssistantAskCompletedWake(input: {
   executionContext: AssistantExecutionContext;
@@ -324,9 +322,8 @@ export function buildHostedAssistantAskCompletionDeliveryKey(input: {
     .update(input.eventId)
     .digest("hex")
     .slice(0, 48);
-  return `${HOSTED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX}${digest}`;
+  return `assistant-ask-completion:${digest}`;
 }
-
 
 export class HostedAssistantAskCompletionPreemptedError extends Error {
   readonly code = "ASSISTANT_ASK_COMPLETION_PREEMPTED";

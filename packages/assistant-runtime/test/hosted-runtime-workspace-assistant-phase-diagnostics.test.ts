@@ -34,7 +34,6 @@ const mocks = vi.hoisted(() => ({
   recordHostedDeviceSyncDirtyPostCheckpointRecord: vi.fn(),
   recordHostedProviderCleanupBeforeCommit: vi.fn(),
   recordHostedSystemMailboxItemAfterCheckpoint: vi.fn(),
-  readHostedSystemMailboxState: vi.fn(),
   readHostedProviderCleanupCheckpoint: vi.fn(),
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
@@ -114,7 +113,6 @@ vi.mock("../src/hosted-runtime/system-mailbox.ts", () => ({
     mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord,
   recordHostedSystemMailboxItemAfterCheckpoint:
     mocks.recordHostedSystemMailboxItemAfterCheckpoint,
-  readHostedSystemMailboxState: mocks.readHostedSystemMailboxState,
   resolveHostedSystemMailboxNextWakeCandidate:
     mocks.resolveHostedSystemMailboxNextWakeCandidate,
   resolveHostedSystemMailboxNextWakeAt: mocks.resolveHostedSystemMailboxNextWakeAt,
@@ -180,7 +178,6 @@ beforeEach(() => {
     nextWakeAt: null,
     recorded: 1,
   });
-  mocks.readHostedSystemMailboxState.mockResolvedValue({ pending: [] });
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedProviderCleanupFirstDeferredWakeAt.mockImplementation((input = {}) => {
     const record = input as { nowMs?: number | null };

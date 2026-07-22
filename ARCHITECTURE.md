@@ -101,12 +101,15 @@ web-owned rows; the model supplies only the question and an optional visible
 group label. Web rechecks membership before the group read and completion
 append. The paired mailbox rows are the only durable operation state, and the
 answer remains untrusted data when the private runtime composes its follow-up.
-While a group runtime is already dirty, a mailbox wake may import the bounded
-Assistant Ask request prefix before the idle snapshot floor and start the
-existing detached one-shot reader without another foreground assistant pass.
-On the return path, an existing private-input pass imports and claims any older
-completion first and reuses its stable delivery key. Neither path publishes or
-pulls forward the routine idle snapshot.
+An Ask request is safe to admit through the runtime's narrow pre-checkpoint
+system prefix because the detached read has no resident write or delivery
+authority; this starts the separate read without publishing the routine idle
+snapshot early. A joined-group completion is an earlier private-conversation
+continuation, so it owns one foreground-causal assistant pass ahead of any
+later personal input, queues Murph's natural response through the ordinary
+idempotent outbox, and then leaves that personal input pending for the next
+pass. No Ask-specific coordinator, receipt state machine, or second queue owns
+this ordering.
 
 The reverse `consented_member` adapter lets an authenticated group Murph ask
 one current member's private Murph under a separate exact grant. Web/Postgres

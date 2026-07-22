@@ -1512,143 +1512,6 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   }, 60_000);
 
-  test("starts a late detached ask during the dirty window without an early idle snapshot", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    const shutdownController = new AbortController();
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const events: string[] = [];
-    const hotAskOccurredAt = new Date().toISOString();
-    const conversationItem = createMailboxItem({
-      id: "mailbox_item_entrypoint_before_hot_ask",
-      laneSeq: "1",
-    });
-    const askItem = createMailboxItem({
-      dedupeKey: "ask_event_entrypoint_hot_dirty_window",
-      id: "mailbox_item_entrypoint_hot_dirty_window_ask",
-      kind: "assistant.ask.requested",
-      lane: "system",
-      laneSeq: "1",
-      occurredAt: hotAskOccurredAt,
-    });
-    const mailboxItems = [conversationItem];
-    let assistantPhaseCalls = 0;
-    let snapshotStarted = false;
-
-    mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async () => {
-      events.push("hot-ask.started");
-      assert.equal(snapshotStarted, false);
-      assert.equal(checkpointRequests.length, 0);
-      assert.equal(assistantPhaseCalls, 1);
-      return { answer: "The synthetic group answer is ready.", outcome: "answered" };
-    });
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: "attempt_synthetic_hot_dirty_window_ask",
-              idleCheckpointDelayMs: 120_000,
-              leaseGeneration: "7",
-              userId: TEST_USER_ID,
-              workspaceVersion: "0",
-            },
-          }),
-          {
-            async createCheckpointSnapshot() {
-              snapshotStarted = true;
-              events.push("snapshot.started");
-              return {
-                snapshotRef: createBundleRef({
-                  hash: "7".repeat(64),
-                  key: "users/bundles/member-synthetic/hot-dirty-window-ask.bundle.json",
-                  size: 512,
-                }),
-              };
-            },
-            async importItem(item) {
-              if (item.route.action === "run-assistant-ask") {
-                return await enqueueHostedSystemMailboxItem({
-                  item,
-                  vaultRoot,
-                  wake: createAssistantAskRequestedWake({
-                    eventId: askItem.dedupeKey,
-                    occurredAt: askItem.occurredAt,
-                  }),
-                });
-              }
-              return {
-                assistantInputId: await stageAssistantInputEventForMailboxItem({
-                  item: item.item,
-                  vaultRoot,
-                }),
-                status: "imported",
-              };
-            },
-            platform: createPlatform({
-              assistantAskPort: {
-                async request(request) {
-                  if (request.action === "complete") {
-                    events.push("hot-ask.completed");
-                    assert.equal(snapshotStarted, false);
-                    assert.equal(checkpointRequests.length, 0);
-                    assert.equal(assistantPhaseCalls, 1);
-                    shutdownController.abort(new Error("Stop after hot ask completion."));
-                    return { action: "complete", status: "completed" };
-                  }
-                  return {
-                    action: "prepare",
-                    question: "What is the synthetic group plan?",
-                    status: "ready",
-                    targetLabel: "Synthetic group",
-                  };
-                },
-              },
-              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({ version: "0" }),
-              }),
-            }),
-            runtimeWakeSignal,
-            async runAssistantPhase() {
-              assistantPhaseCalls += 1;
-              events.push(`foreground.${assistantPhaseCalls}`);
-              if (assistantPhaseCalls === 1) {
-                mailboxItems.push(askItem);
-                runtimeWakeSignal.notify();
-              }
-              return {
-                checkpointReason: "assistant_runtime_commit",
-                progressed: true,
-              };
-            },
-            shutdownSignal: shutdownController.signal,
-            vaultRoot,
-          },
-        ),
-        45_000,
-        () => events.join(","),
-      );
-
-      assert.equal(assistantPhaseCalls, 1);
-      assert.ok(events.includes("hot-ask.completed"), events.join(","));
-      assert.ok(
-        requireEventIndex(events, "hot-ask.started")
-          < requireEventIndex(events, "snapshot.started"),
-      );
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.ok(result.status === "idle" || result.status === "scheduled");
-    } finally {
-      shutdownController.abort(new Error("Test cleanup."));
-      await removeTempRoot(vaultRoot);
-    }
-  }, 45_000);
-
   test("emits metadata-only phase boundary logs for runtime startup", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const previousStdIoLogSetting = process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -5730,7 +5593,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
-    const causalPendingEffectsOnlyValues: boolean[] = [];
+    const foregroundCausalOnlyValues: boolean[] = [];
     let assistantPhaseCalls = 0;
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
@@ -5775,7 +5638,7 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeWakeSignal,
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
-            causalPendingEffectsOnlyValues.push(input.causalPendingEffectsOnly === true);
+            foregroundCausalOnlyValues.push(input.foregroundCausalOnly === true);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               setTimeout(() => {
@@ -5805,7 +5668,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(assistantPhaseCalls, 2);
-      assert.deepEqual(causalPendingEffectsOnlyValues, [false, true]);
+      assert.deepEqual(foregroundCausalOnlyValues, [false, true]);
       assert.ok(
         requireEventIndex(
           events,
@@ -5813,6 +5676,106 @@ describe("hosted workspace runtime entrypoint", () => {
         ) < requireEventIndex(events, "snapshot:idle_shutdown"),
         events.join(","),
       );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("imports an assistant ask request before the dirty idle checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const foregroundCausalOnlyValues: boolean[] = [];
+    let assistantPhaseCalls = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_assistant_ask_dirty_wake",
+            idleCheckpointDelayMs: 500,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/assistant-ask-dirty-wake.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            assert.equal(item.route.action, "run-assistant-ask");
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: mailboxItems,
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            foregroundCausalOnlyValues.push(input.foregroundCausalOnly === true);
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_assistant_ask_dirty_wake",
+                  kind: "assistant.ask.requested",
+                  lane: "system",
+                  laneSeq: "1",
+                }));
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      const result = await withRealTimeout(
+        resultPromise,
+        2_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(foregroundCausalOnlyValues, [false, true]);
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_ask_dirty_wake",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      const idleCheckpointRequests = checkpointRequests.filter(
+        (request) => request.reason === "idle_shutdown",
+      );
+      assert.equal(idleCheckpointRequests.length, 1);
+      assert.equal(idleCheckpointRequests[0]?.idleCheckpointTrigger, "idle_window");
       assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);
@@ -25955,12 +25918,10 @@ async function importRuntimeControlSystemMailboxItemForTest(input: {
 
 function createAssistantAskRequestedWake(input: {
   eventId: string;
-  occurredAt?: string;
 }): HostedExecutionAssistantAskRequestedWake {
-  const occurredAt = input.occurredAt ?? TEST_NOW;
   return {
     ask: {
-      expiresAt: new Date(Date.parse(occurredAt) + 10 * 60_000).toISOString(),
+      expiresAt: "2026-04-27T00:10:00.000Z",
       originAssistantInputId: `ain_${"b".repeat(32)}`,
       originSessionId: "session_private",
       question: "What is today's group workout?",
@@ -25972,7 +25933,7 @@ function createAssistantAskRequestedWake(input: {
     },
     eventId: input.eventId,
     kind: "assistant.ask.requested",
-    occurredAt,
+    occurredAt: TEST_NOW,
     userId: TEST_USER_ID,
   };
 }
