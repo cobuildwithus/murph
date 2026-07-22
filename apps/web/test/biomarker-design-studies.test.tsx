@@ -49,17 +49,21 @@ vi.mock("@/src/components/biomarkers/lab-biomarker-history-chart", async () => {
       points,
       referenceRange,
       referenceRangeLabel,
+      referenceRangeSourceLabel,
+      referenceRangeTitle = "Latest lab range",
     }: {
       ariaDescribedBy?: string;
       displayName: string;
       points: readonly unknown[];
       referenceRange: { high: number | null; low: number | null };
       referenceRangeLabel?: string | null;
+      referenceRangeSourceLabel?: string | null;
+      referenceRangeTitle?: string;
       unit: string | null;
     }): ReactNode {
       return React.createElement("div", {
         "aria-describedby": ariaDescribedBy,
-        "aria-label": `${displayName} results over time; latest lab range ${referenceRangeLabel}`,
+        "aria-label": `${displayName} results over time; ${referenceRangeTitle.toLowerCase()} ${referenceRangeLabel}${referenceRangeSourceLabel ? ` from ${referenceRangeSourceLabel}` : ""}`,
         "data-high": referenceRange.high,
         "data-low": referenceRange.low,
         "data-point-count": points.length,
@@ -75,6 +79,7 @@ import {
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
   BiomarkerPreparingStateStudy,
+  BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -94,7 +99,8 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Group usage funding");
-  expect(sectionsMarkup).toContain("Biomarker detail");
+  expect(sectionsMarkup).toContain("Biomarker result detail");
+  expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
@@ -334,6 +340,18 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).not.toContain("invented midpoint");
   expect(markup).toContain("Source range not listed");
   expect(markup).not.toContain('role="img"');
+});
+
+test("reference context study covers an exact source limit and reviewed fallback", () => {
+  const markup = renderToStaticMarkup(createElement(BiomarkerReferenceContextStudy));
+
+  expect(markup).toContain('data-design-study="biomarker-reference-context"');
+  expect(markup).toContain("latest lab range");
+  expect(markup).toContain("&lt;5.7%");
+  expect(markup).toContain("general adult reference");
+  expect(markup).toContain("97 to 107 mmol/L");
+  expect(markup).toContain("CSCC harmonized adult reference interval");
+  expect(markup).not.toContain("Results over time");
 });
 
 function getButton(container: HTMLElement, label: string): HTMLButtonElement {

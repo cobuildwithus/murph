@@ -3,6 +3,7 @@ import {
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
   BiomarkerPreparingStateStudy,
+  BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { Separator } from "@/src/components/ui/separator";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
@@ -67,8 +68,14 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Biomarker detail">
+      <StudySection title="Biomarker result detail">
         <BiomarkerDetailStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Biomarker reference context">
+        <BiomarkerReferenceContextStudy />
       </StudySection>
 
       <Separator />

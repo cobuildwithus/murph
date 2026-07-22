@@ -185,16 +185,17 @@ test("a fallback bound uses a distinct general-reference label", () => {
     ],
     referenceRange: { high: 5.7, low: null },
     referenceRangeLabel: "<5.7%",
+    referenceRangeSourceLabel: "Reviewed source",
     referenceRangeTitle: "General reference",
     unit: "percent",
   }));
 
   expect(markup).toContain("General reference");
+  expect(markup).toContain("Reviewed source");
   expect(markup).not.toContain("Latest lab range");
   expect(captured.chartAriaLabel).toBe(
-    "HbA1c results over time; general reference <5.7%",
+    "HbA1c results over time; general reference <5.7% from Reviewed source",
   );
-  expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines.map((line) => line.y)).toEqual([5.7]);
   const [minimum, maximum] = captured.yAxisDomain as [
     (value: number) => number,

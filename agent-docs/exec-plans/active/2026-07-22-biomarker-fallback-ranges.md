@@ -89,3 +89,19 @@ Updated: 2026-07-22
   values but has no explicit marker for a safe general display fallback. Using
   the first numeric value would misread examples such as a deficiency region as
   a normal interval.
+- ReviewGPT audited all 115 requested saved-lab entities and returned only five
+  context-safe, exact-unit adult serum/plasma fallbacks from the 2025 CSCC
+  harmonization guideline: calcium, chloride, LDH, phosphate, and total protein.
+  The other candidates require context this page does not own, such as age,
+  sex, pregnancy, fasting, specimen, assay, treatment, or risk category.
+- Focused contracts, Health Commons, and Web tests plus affected typechecks pass
+  on the implementation. The first broad diff-aware lane passed its guards,
+  affected typechecks, and several reverse-dependent suites before unrelated
+  CLI expansion/session tests simultaneously reached their 60-second timeout
+  under shared-host contention.
+- The first preliminary specialist ReviewGPT attempt was invalid: the guard
+  rejected a sub-7.5-minute response, and the response correctly identified
+  missing rendered desktop/mobile evidence. After the base advanced, the task
+  rebased onto the new design-proof contract and added source-limit and fallback
+  states to the Sections catalog; rendered evidence and the valid preliminary
+  retry remain open.

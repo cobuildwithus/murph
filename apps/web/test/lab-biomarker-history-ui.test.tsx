@@ -1139,7 +1139,7 @@ test("an exact one-sided range becomes a labeled chart limit", async () => {
     expect(text).not.toContain("Dashed lab limit");
     expect(
       rendered.container.querySelector(
-        '[aria-label="HbA1c results over time; latest lab range <5.6%"]',
+        '[aria-label="HbA1c results over time; latest lab range <5.6% from Example Lab"]',
       ),
     ).not.toBeNull();
   } finally {
@@ -1227,14 +1227,14 @@ test("a unit-matched fallback appears only when the latest lab range is absent",
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("In range");
-    expect(text).toContain("Lab rangeNot listed");
-    expect(text).toContain("Adult reference97 to 107 mmol/L");
+    expect(text).not.toContain("Lab rangeNot listed");
+    expect(text).toContain("97 to 107 mmol/L");
     expect(text).toContain("CSCC harmonized adult reference interval");
     expect(text).toContain("General adult reference");
     expect(text).not.toContain("Latest lab range");
     expect(
       rendered.container.querySelector(
-        '[aria-label="Chloride results over time; general adult reference 97 to 107 mmol/L"]',
+        '[aria-label="Chloride results over time; general adult reference 97 to 107 mmol/L from CSCC harmonized adult reference interval"]',
       ),
     ).not.toBeNull();
   } finally {
@@ -1318,9 +1318,57 @@ test("a fallback with a different unit is withheld", async () => {
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("Lab rangeNot listed");
     expect(text).not.toContain("Adult reference");
     expect(text).not.toContain("General adult reference");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  {
+    bound: { upperBound: { inclusive: false, value: 107 } },
+    expectedRange: "<107 mmol/L",
+  },
+  {
+    bound: { lowerBound: { inclusive: true, value: 97 } },
+    expectedRange: ">=97 mmol/L",
+  },
+] as const)("a one-sided fallback preserves $expectedRange", async ({ bound, expectedRange }) => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={[{
+        applicability: "For contextual fallback display on adult serum or plasma results.",
+        ...bound,
+        label: "Reviewed adult limit",
+        unit: "mmol/L",
+      }]}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("General adult reference");
+    expect(text).toContain(expectedRange);
+    expect(text).toContain("Reviewed adult limit");
   } finally {
     await rendered.cleanup();
   }

@@ -133,8 +133,8 @@ Private measurements and conclusions never enter the server-rendered route paylo
 
 Saved lab-result pages keep the imported source flag and per-result laboratory
 range authoritative. A normalized latest source range may appear on the chart
-as a two-sided band or exact one-sided limit. If the latest comparable result
-has no usable numeric source range, the server may provide an exact-unit,
+as two dashed boundary rules or an exact one-sided limit. If the latest
+comparable result has no usable numeric source range, the server may provide an exact-unit,
 sourced Health Commons fallback labeled `General adult reference`; the browser
 does not infer ranges, convert fallback units, or use a fallback to relabel the
 result. The initial catalog covers calcium, chloride, LDH, phosphate, and total
