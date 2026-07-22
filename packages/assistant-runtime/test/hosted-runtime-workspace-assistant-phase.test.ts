@@ -11866,6 +11866,180 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
   });
 
+  it("keeps a retried ask ahead of personal input when preemption left an abandoned delivery", async () => {
+    const firstNow = "2026-04-27T00:03:00.000Z";
+    const retryNow = "2026-04-27T00:03:01.000Z";
+    const nextWakeAt = "2026-04-27T00:04:00.000Z";
+    const completionItem = createAssistantAskCompletionSystemMailboxItem();
+    const deliveryIdempotencyKey = buildHostedAssistantAskCompletionDeliveryKey({
+      eventId: completionItem.wake.eventId,
+    });
+    const abandonedIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: completionItem.occurredAt,
+        deliveryIdempotencyKey,
+        effectId: "effect_assistant_ask_preempted",
+        nextAttemptAt: null,
+      }),
+      status: "abandoned" as const,
+    };
+    const retryEffect = {
+      ...createDeliveryEffect(),
+      effectId: "effect_assistant_ask_preempted_retry",
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: deliveryIdempotencyKey,
+      },
+    };
+    const retryIntent = createAssistantAskOutboxIntent({
+      createdAt: retryNow,
+      deliveryIdempotencyKey,
+      effectId: retryEffect.effectId,
+      nextAttemptAt: retryNow,
+    });
+    let shouldYield = false;
+    mocks.readHostedSystemMailboxState.mockResolvedValue({
+      pending: [completionItem],
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async (request) => {
+        shouldYield = true;
+        expect(request.shouldYieldBackgroundMaintenance?.()).toBe(true);
+        return {
+          item: completionItem,
+          itemId: completionItem.itemId,
+          status: "preempted" as const,
+        };
+      },
+    );
+
+    const preempted = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      importedCount: 1,
+      now: () => firstNow,
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+    }));
+
+    expect(preempted).toEqual(expect.objectContaining({
+      nextWakeAt: firstNow,
+      progressed: false,
+    }));
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).not.toHaveBeenCalled();
+
+    shouldYield = false;
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      "2026-04-27T00:02:00.000Z",
+    );
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      ...createProcessedAssistantAskPreparation(completionItem),
+      status: "recording" as const,
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      abandonedIntent,
+      retryIntent,
+    ]);
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      retryEffect,
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createIncompleteDeliveryOutcome({
+        deliveryStatus: "retryable",
+        effectId: retryEffect.effectId,
+      }),
+    ]);
+    mocks.readAssistantOutboxIntent.mockResolvedValue({
+      ...retryIntent,
+      nextAttemptAt: nextWakeAt,
+      status: "retryable" as const,
+    });
+
+    const retried = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => retryNow,
+    }));
+
+    expect(mocks.resolveHostedAssistantOutboxIntentWakeAt).toHaveBeenCalledWith(
+      retryIntent,
+      new Date(retryNow),
+    );
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
+      actionApprovalPort: null,
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [retryIntent.intentId],
+      vaultRoot: "/tmp/murph-vault",
+    });
+    await retried.afterCheckpoint?.();
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).not.toHaveBeenCalled();
+    expect(mocks.updateHostedSystemMailboxPendingItem).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: completionItem.itemId,
+        nextAttemptAt: nextWakeAt,
+        status: "recording",
+      }),
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+  });
+
+  it("releases a retained ask when only failed delivery attempts remain", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const completionItem = {
+      ...createAssistantAskCompletionSystemMailboxItem(),
+      status: "recording" as const,
+    };
+    const deliveryIdempotencyKey = buildHostedAssistantAskCompletionDeliveryKey({
+      eventId: completionItem.wake.eventId,
+    });
+    const abandonedIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: completionItem.occurredAt,
+        deliveryIdempotencyKey,
+        effectId: "effect_assistant_ask_abandoned_only",
+        nextAttemptAt: null,
+      }),
+      status: "abandoned" as const,
+    };
+    const failedIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: "2026-04-27T00:01:00.000Z",
+        deliveryIdempotencyKey,
+        effectId: "effect_assistant_ask_failed_only",
+        nextAttemptAt: null,
+      }),
+      status: "failed" as const,
+    };
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      "2026-04-27T00:02:00.000Z",
+    );
+    mocks.readHostedSystemMailboxState
+      .mockResolvedValueOnce({ pending: [completionItem] })
+      .mockResolvedValue({ pending: [] });
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      abandonedIntent,
+      failedIntent,
+    ]);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).toHaveBeenCalledWith({
+      item: completionItem,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.resolveHostedAssistantOutboxIntentWakeAt).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredIntentIds: expect.arrayContaining([
+          abandonedIntent.intentId,
+          failedIntent.intentId,
+        ]),
+      }),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
   it("retains a no-input non-idempotent send through grace and stale reconciliation before releasing parked work", async () => {
     const firstNow = "2026-04-27T00:03:00.000Z";
     const startedAt = "2026-04-27T00:02:30.000Z";
@@ -12761,6 +12935,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       item: firstItem,
       vaultRoot: "/tmp/murph-vault",
     });
+    expect(mocks.resolveHostedAssistantOutboxIntentWakeAt).toHaveBeenCalledWith(
+      firstIntent,
+      new Date(now),
+    );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
       expect.objectContaining({ preferredIntentIds: [secondIntent.intentId] }),
     );

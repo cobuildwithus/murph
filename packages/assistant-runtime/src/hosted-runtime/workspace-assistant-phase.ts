@@ -4107,7 +4107,10 @@ async function runAssistantAskCompletionBarrierItem(input: {
   const deliveryKey = buildHostedAssistantAskCompletionItemDeliveryKey(barrierItem);
   const intent = deliveryKey
     ? (await listAssistantOutboxIntents(phaseInput.restored.vaultRoot)).find(
-        (stored) => stored.deliveryIdempotencyKey === deliveryKey,
+        (stored) =>
+          stored.deliveryIdempotencyKey === deliveryKey
+          && stored.status !== "failed"
+          && stored.status !== "abandoned",
       ) ?? null
     : null;
   if (!intent) {
