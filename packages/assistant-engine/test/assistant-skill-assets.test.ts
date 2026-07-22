@@ -1895,7 +1895,7 @@ describe('assistant skill assets', () => {
       'Immediately call `murph.send_progress_update` once',
     )
     expect(compact).toContain(
-      'This final response is voice-only',
+      'Only when they answered that invitation with a voice memo',
     )
     expect(compact).toContain(
       'Do not repeat this acknowledgement in the final reply',
@@ -2082,9 +2082,17 @@ How old are you and what's your gender?
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
-    expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
-      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
+      'You can type it out instead — either works just as well.',
+    )
+    expect(compact).toContain(
+      'I can walk you through sending a voice memo.',
+    )
+    expect(compact).toContain(
+      'Do not offer it based on guessed age, and do not make unknown age block or delay the invitation.',
+    )
+    expect(compact).toContain(
+      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and both input options',
     )
     expect(compact).toContain('Can you send me a voice memo covering a few things?')
     expect(compact).toContain(
@@ -2100,13 +2108,22 @@ How old are you and what's your gender?
       'murph.generate_voice_memo',
     )
     expect(compact).toContain(
-      'This specific closer is voice-welcome and privacy-safe.',
+      'Only when they answered that invitation with a voice memo',
+    )
+    expect(compact).toContain(
+      'have not since declined voice, and `murph.generate_voice_memo` is available',
+    )
+    expect(compact).toContain(
+      'That response is voice-only: do not duplicate the question or the already-sent delegation acknowledgement in text.',
     )
     expect(compact).toContain(
       "Okay, one last question and then I'll leave you alone, promise: have you had any blood tests or lab panels in the past year or two?",
     )
     expect(compact).toContain(
-      'This final response is voice-only: do not duplicate that question',
+      'When the user typed their foundation answer, used another input mode, skipped it, or has no visible voice-memo evidence, ask the same question in text.',
+    )
+    expect(compact).toContain(
+      'Also use text when voice generation is unavailable, fails, or the user prefers text.',
     )
     expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
