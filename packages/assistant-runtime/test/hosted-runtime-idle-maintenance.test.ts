@@ -38,6 +38,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -52,6 +53,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: null,
         providerName: "hosted-openai",
@@ -66,6 +68,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: " ",
@@ -100,6 +103,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "member",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-sol",
       providerName: "hosted-openai",
@@ -153,6 +157,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-sol",
       pendingWork: false,
@@ -184,6 +189,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -224,6 +230,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -264,6 +271,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -315,6 +323,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       materializeRetentionCandidatePaths,
       memberId: "member_1",
       model: "gpt-5.6-terra",
@@ -359,6 +368,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -398,6 +408,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -439,6 +450,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -481,6 +493,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       pendingWork: false,
@@ -527,6 +540,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -581,6 +595,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -621,6 +636,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     try {
       const outcome = await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -663,6 +679,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",
@@ -680,6 +697,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -708,6 +726,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       await expect(
         runHostedIdleCheckpointMaintenance({
           credentialSource: "platform",
+          externalChatGptAuth: false,
           memberId: "member_1",
           model: "gpt-5.6-terra",
           pendingWork: true,
@@ -741,6 +760,55 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     }
   });
 
+  it("runs retention but skips provider compaction for external ChatGPT auth", async () => {
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: "2026-07-18T00:00:00.000Z",
+      records: [],
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "compacted",
+      durationMs: 500,
+      model: "gpt-5.6-terra",
+      serviceTier: null,
+      threadContextTokensBefore: 120_000,
+      threadId: "thread_external_auth",
+      usage: {
+        cachedInputTokens: 0,
+        inputTokens: 120_000,
+        outputTokens: 400,
+        source: "provider",
+        totalTokens: 120_400,
+      },
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "member",
+      externalChatGptAuth: true,
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      pendingWork: false,
+      providerName: "hosted-chatgpt-openai",
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxMediaRetention).toHaveBeenCalledOnce();
+    expect(compactWarmCodexThread).not.toHaveBeenCalled();
+    expect(outcome).toEqual({
+      kind: "skipped",
+      nextWakeAt: "2026-07-18T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+      reason: "external_chatgpt_auth",
+      threadContextTokensBefore: null,
+    });
+  });
+
   it("skips unpriced models so usage can never be unaccountable", async () => {
     compactWarmCodexThread.mockResolvedValue({
       kind: "skipped",
@@ -751,6 +819,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-unpriced-experimental",
         providerName: "hosted-openai",
@@ -769,6 +838,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
     expect(
       await runHostedIdleCheckpointMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         memberId: "member_1",
         model: "gpt-5.6-terra",
         providerName: "hosted-openai",
@@ -800,6 +870,7 @@ describe("runHostedIdleCheckpointMaintenance", () => {
 
     const outcome = await runHostedIdleCheckpointMaintenance({
       credentialSource: "platform",
+      externalChatGptAuth: false,
       memberId: "member_1",
       model: "gpt-5.6-terra",
       providerName: "hosted-openai",

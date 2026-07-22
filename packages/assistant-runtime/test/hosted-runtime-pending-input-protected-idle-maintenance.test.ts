@@ -185,6 +185,7 @@ describe("runHostedPendingInputProtectedIdleMaintenance", () => {
 
       const outcome = await runHostedPendingInputProtectedIdleMaintenance({
         credentialSource: "platform",
+        externalChatGptAuth: false,
         materializeWorkspaceArtifacts: async () => ({
           materializedArtifactPaths: new Set<string>(),
           missingArtifactPaths: new Set<string>(),

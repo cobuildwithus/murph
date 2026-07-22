@@ -1592,6 +1592,7 @@ export type HostedCodexAuthSeedUnavailableReason =
 export interface HostedCodexAuthSeedRequest {
   schemaVersion: 1;
   knownConnectionVersion: string | null;
+  includeCredentials: boolean;
 }
 
 export interface HostedCodexAuthSeedAvailableResponse {
@@ -1601,6 +1602,12 @@ export interface HostedCodexAuthSeedAvailableResponse {
   expiresAt: string;
   accessToken: string;
   chatgptAccountId: string;
+}
+
+export interface HostedCodexAuthSeedAvailableMetadataResponse {
+  schemaVersion: 1;
+  status: "available_metadata";
+  connectionVersion: string;
 }
 
 export interface HostedCodexAuthSeedUnchangedResponse {
@@ -1618,6 +1625,7 @@ export interface HostedCodexAuthSeedUnavailableResponse {
 
 export type HostedCodexAuthSeedResponse =
   | HostedCodexAuthSeedAvailableResponse
+  | HostedCodexAuthSeedAvailableMetadataResponse
   | HostedCodexAuthSeedUnchangedResponse
   | HostedCodexAuthSeedUnavailableResponse;
 

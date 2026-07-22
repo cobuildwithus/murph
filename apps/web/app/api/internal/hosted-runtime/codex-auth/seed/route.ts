@@ -51,6 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       payloadText.trim() ? JSON.parse(payloadText) : {},
     );
     const response = await readHostedCodexAuthAccessSeedForRuntime({
+      includeCredentials: seedRequest.includeCredentials,
       knownConnectionVersion: seedRequest.knownConnectionVersion,
       memberId,
       prisma: getPrisma(),

@@ -59,6 +59,8 @@ import {
   type HostedMailboxItem,
   type HostedMailboxPayloadFetchRequest,
   type HostedMailboxPayloadFetchResponse,
+  type HostedCodexAuthSeedRequest,
+  type HostedCodexAuthSeedResponse,
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
@@ -100,6 +102,7 @@ const mocks = vi.hoisted(() => ({
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   runHostedIdleCheckpointMaintenance: vi.fn(),
+  stopWarmCodexAppServer: vi.fn(),
   summarizeWearableSleepRuntime: vi.fn(),
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
 }));
@@ -126,6 +129,10 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     runAssistantAutomationPass:
       mocks.runAssistantAutomationPass.mockImplementation(
         actual.runAssistantAutomationPass,
+      ),
+    stopWarmCodexAppServer:
+      mocks.stopWarmCodexAppServer.mockImplementation(
+        actual.stopWarmCodexAppServer,
       ),
   };
 });
@@ -218,6 +225,9 @@ import {
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
+import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_MAX_ENTRIES,
   hostedCanonicalWriteReceiptRecoveryStatusFields,
@@ -1798,7 +1808,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("loads the bounded ChatGPT seed before Codex config and passes only its resolver to the assistant phase", async () => {
+  test("selects ChatGPT mode before Codex config and loads credentials only through the turn resolver", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -1823,15 +1833,26 @@ describe("hosted workspace runtime entrypoint", () => {
 
     const readAccessSeed = vi.fn(async (request, context) => {
       seedReadCalls += 1;
-      events.push(seedReadCalls === 1 ? "seed.read.startup" : "seed.read.turn");
-      assert.deepEqual(request, {
-        knownConnectionVersion: null,
-        schemaVersion: 1,
-      });
+      events.push(
+        request.includeCredentials
+          ? "seed.read.turn"
+          : seedReadCalls === 1
+          ? "seed.read.startup"
+          : "seed.read.mode",
+      );
+      assert.equal(request.knownConnectionVersion, null);
+      assert.equal(request.schemaVersion, 1);
       if (seedReadCalls === 1) {
         assert.ok(context?.signal instanceof AbortSignal);
-      } else {
+      } else if (request.includeCredentials) {
         assert.equal(context?.signal, turnSignal);
+      }
+      if (!request.includeCredentials) {
+        return {
+          connectionVersion,
+          schemaVersion: 1 as const,
+          status: "available_metadata" as const,
+        };
       }
       return {
         accessToken: "fixture-memory-only-access-token",
@@ -1917,7 +1938,13 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.equal(readAccessSeed.mock.calls.length, 2);
+      expect(readAccessSeed.mock.calls[0]?.[0].includeCredentials).toBe(false);
+      expect(readAccessSeed.mock.calls.filter(([request]) =>
+        request.includeCredentials
+      )).toHaveLength(1);
+      expect(readAccessSeed.mock.calls.filter(([request]) =>
+        !request.includeCredentials
+      ).length).toBeGreaterThanOrEqual(2);
       expect(updateCodexAuth).toHaveBeenCalledWith({
         attemptId: connectionVersion,
         phase: "connected",
@@ -1928,6 +1955,10 @@ describe("hosted workspace runtime entrypoint", () => {
           < requireEventIndex(events, "codex.config"),
       );
       assert.ok(requireEventIndex(events, "codex.config") < requireEventIndex(events, "assistant.phase"));
+      assert.ok(
+        requireEventIndex(events, "seed.read.mode")
+          < requireEventIndex(events, "assistant.phase"),
+      );
       assert.ok(
         requireEventIndex(events, "assistant.phase")
           < requireEventIndex(events, "seed.read.turn"),
@@ -7601,6 +7632,1643 @@ describe("hosted workspace runtime entrypoint", () => {
       await removeTempRoot(vaultRoot);
     }
   });
+
+  test.each([
+    {
+      expectedModes: [
+        { externalResolver: false, provider: "hosted-openai" },
+        { externalResolver: true, provider: "hosted-chatgpt-openai" },
+      ],
+      initialSeed: {
+        connectionVersion: null,
+        reason: "unconfigured" as const,
+        schemaVersion: 1 as const,
+        status: "unavailable" as const,
+      },
+      label: "managed to external",
+      replacementCredential: {
+        accountId: "account_hot_external",
+        connectionVersion: `hca_${"c".repeat(16)}`,
+      },
+      nextSeed: {
+        accessToken: "fixture-hot-external-access",
+        chatgptAccountId: "account_hot_external",
+        connectionVersion: `hca_${"c".repeat(16)}`,
+        expiresAt: "2026-04-27T01:00:00.000Z",
+        schemaVersion: 1 as const,
+        status: "available" as const,
+      },
+    },
+    {
+      expectedModes: [
+        { externalResolver: true, provider: "hosted-chatgpt-openai" },
+        { externalResolver: false, provider: "hosted-openai" },
+      ],
+      initialSeed: {
+        accessToken: "fixture-hot-external-access",
+        chatgptAccountId: "account_hot_external",
+        connectionVersion: `hca_${"d".repeat(16)}`,
+        expiresAt: "2026-04-27T01:00:00.000Z",
+        schemaVersion: 1 as const,
+        status: "available" as const,
+      },
+      label: "external to managed",
+      replacementCredential: null,
+      nextSeed: {
+        connectionVersion: `hca_${"e".repeat(16)}`,
+        reason: "disconnected" as const,
+        schemaVersion: 1 as const,
+        status: "unavailable" as const,
+      },
+    },
+  ])(
+    "restarts across the dirty checkpoint boundary when payload-free recheck changes ChatGPT auth $label",
+    async ({ expectedModes, initialSeed, nextSeed, replacementCredential }) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hot-chatgpt-auth-mode-"));
+      const events: string[] = [];
+      const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const mailboxItems: HostedMailboxItem[] = [
+        createMailboxItem({
+          id: "mailbox_item_hot_chatgpt_auth_first",
+          laneSeq: "1",
+        }),
+      ];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const secondShutdownController = new AbortController();
+      const idleCheckpointDelayMs = 180_000;
+      const phaseObserved = [createDeferred<void>(), createDeferred<void>()];
+      const observedModes: Array<{
+        externalResolver: boolean;
+        provider: string | null;
+      }> = [];
+      const replacementCredentialResolutions: Array<{
+        accountId: string;
+        connectionVersion: string;
+      }> = [];
+      let currentSeed: HostedCodexAuthSeedResponse = initialSeed;
+      let firstInvocationPromise:
+        ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      try {
+        vi.setSystemTime(new Date(TEST_NOW));
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+        const readAccessSeed = vi.fn(async (request: HostedCodexAuthSeedRequest) =>
+          projectHostedCodexAuthSeedForTestRequest(currentSeed, request)
+        );
+        const updateCodexAuth = vi.fn(async (
+          _update: Parameters<
+            NonNullable<HostedRuntimePlatform["codexAuthPort"]>["update"]
+          >[0],
+        ) => ({
+          applied: true,
+          status: "applied" as const,
+        }));
+        const codexAuthPort = {
+          readAccessSeed,
+          update: updateCodexAuth,
+        };
+        const firstWorkspacePort = createWorkspacePort({
+          checkpointRequests: firstCheckpointRequests,
+          events,
+          workspace: createWorkspaceState({ version: "4" }),
+        });
+        const firstWorkspaceCheckpoint = vi.fn(
+          firstWorkspacePort.checkpoint.bind(firstWorkspacePort),
+        );
+        const stopWarmCallCountBefore = mocks.stopWarmCodexAppServer.mock.calls.length;
+        firstInvocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_hot_chatgpt_auth_mode_transition_first",
+              idleCheckpointDelayMs,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "9".repeat(64),
+                  key: "users/bundles/member-synthetic/hot-chatgpt-auth-mode.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              codexAuthPort,
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+              workspacePort: {
+                ...firstWorkspacePort,
+                checkpoint: firstWorkspaceCheckpoint,
+              },
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              const phaseIndex = observedModes.length;
+              observedModes.push({
+                externalResolver: input.codexChatGptAuthResolver !== null,
+                provider:
+                  input.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+              });
+              phaseObserved[phaseIndex]?.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true as const,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        );
+        void firstInvocationPromise.catch(() => undefined);
+
+        await withRealTimeout(phaseObserved[0]!.promise, 15_000, () => events.join(","));
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(firstCheckpointRequests.length, 0);
+
+        currentSeed = nextSeed;
+        // The auth recheck wake carries no mailbox pointer or credential. A
+        // mode change must end this dirty invocation without hot-running a
+        // second provider phase under the stale Codex config.
+        runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+        const firstResult = await withRealTimeout(
+          firstInvocationPromise,
+          15_000,
+          () => events.join(","),
+        );
+
+        assert.equal(Date.now(), Date.parse(TEST_NOW));
+        assert.equal(observedModes.length, 1);
+        assert.equal(firstCheckpointRequests.length, 1);
+        assert.equal(firstCheckpointRequests[0]?.reason, "idle_shutdown");
+        assert.equal(firstResult.immediateRecheckRequested, true);
+        expect(
+          mocks.stopWarmCodexAppServer.mock.calls.slice(stopWarmCallCountBefore),
+        ).toEqual([["chatgpt-auth-mode-changed"]]);
+        const firstCheckpointCallOrder = firstWorkspaceCheckpoint.mock.invocationCallOrder[0];
+        const stopWarmCallOrder =
+          mocks.stopWarmCodexAppServer.mock.invocationCallOrder[stopWarmCallCountBefore];
+        assert.ok(firstCheckpointCallOrder !== undefined);
+        assert.ok(stopWarmCallOrder !== undefined);
+        assert.ok(firstCheckpointCallOrder < stopWarmCallOrder);
+
+        // The next invocation starts from the committed workspace version and
+        // sees the coherently regenerated provider config plus auth resolver.
+        mailboxItems.push(createMailboxItem({
+          createdAt: "2026-04-27T00:00:01.000Z",
+          id: "mailbox_item_hot_chatgpt_auth_second",
+          laneSeq: "2",
+          occurredAt: "2026-04-27T00:00:01.000Z",
+        }));
+        const secondResult = await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_hot_chatgpt_auth_mode_transition_second",
+              idleCheckpointDelayMs,
+              leaseGeneration: "10",
+              userId: TEST_USER_ID,
+              workspaceVersion: "5",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:second:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/hot-chatgpt-auth-mode-second.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              codexAuthPort,
+              mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: secondCheckpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "5" }),
+              }),
+            }),
+            async runAssistantPhase(input) {
+              observedModes.push({
+                externalResolver: input.codexChatGptAuthResolver !== null,
+                provider:
+                  input.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+              });
+              if (input.codexChatGptAuthResolver) {
+                const resolution = await input.codexChatGptAuthResolver.resolve({
+                  knownConnectionVersion: null,
+                  reason: "turn_start",
+                });
+                assert.equal(resolution.kind, "login");
+                replacementCredentialResolutions.push({
+                  accountId: resolution.chatgptAccountId,
+                  connectionVersion: resolution.connectionVersion,
+                });
+                assert.ok(input.codexChatGptAuthResolver.reportLoginResult);
+                await expect(
+                  input.codexChatGptAuthResolver.reportLoginResult({
+                    connectionVersion: resolution.connectionVersion,
+                    result: "connected",
+                  }),
+                ).resolves.toBe("current");
+              }
+              phaseObserved[1]!.resolve();
+              secondShutdownController.abort();
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                progressed: true as const,
+                redactedStatus: {
+                  hostedAssistantProgressed: true,
+                },
+              };
+            },
+            shutdownSignal: secondShutdownController.signal,
+            vaultRoot,
+          },
+        );
+
+        await phaseObserved[1]!.promise;
+        expect(observedModes).toEqual(expectedModes);
+        expect(replacementCredentialResolutions).toEqual(
+          replacementCredential ? [replacementCredential] : [],
+        );
+        expect(updateCodexAuth.mock.calls.map(([update]) => update)).toEqual(
+          replacementCredential
+            ? [{
+                attemptId: replacementCredential.connectionVersion,
+                phase: "connected",
+              }]
+            : [],
+        );
+        expect(readAccessSeed.mock.calls.length).toBeGreaterThanOrEqual(3);
+        expect(readAccessSeed.mock.calls.every(([request]) =>
+          request.schemaVersion === 1
+          && request.knownConnectionVersion === null
+        )).toBe(true);
+        expect(readAccessSeed.mock.calls.some(([request]) =>
+          request.includeCredentials === false
+        )).toBe(true);
+        expect(readAccessSeed.mock.calls.filter(([request]) =>
+          request.includeCredentials === true
+        )).toHaveLength(replacementCredential ? 1 : 0);
+        assert.equal(secondResult.immediateRecheckRequested, undefined);
+      } finally {
+        secondShutdownController.abort();
+        await firstInvocationPromise?.catch(() => undefined);
+        vi.useRealTimers();
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
+
+  test("keeps a detached auth restart when an overlapping foreground probe resolves stale", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hot-auth-probe-race-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const shutdownController = new AbortController();
+    const foregroundProbeStarted = createDeferred<void>();
+    const detachedModeChangeObserved = createDeferred<void>();
+    const releaseStaleForegroundProbe = createDeferred<void>();
+    const conversationItem = createMailboxItem({
+      id: "mailbox_item_hot_auth_probe_race_conversation",
+      laneSeq: "1",
+    });
+    const askItem = createMailboxItem({
+      dedupeKey: "ask_event_hot_auth_probe_race",
+      id: "mailbox_item_hot_auth_probe_race_ask",
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const initialMode = {
+      connectionVersion: `hca_${"5".repeat(16)}`,
+      schemaVersion: 1 as const,
+      status: "available_metadata" as const,
+    };
+    const disconnectedMode = {
+      connectionVersion: `hca_${"6".repeat(16)}`,
+      reason: "disconnected" as const,
+      schemaVersion: 1 as const,
+      status: "unavailable" as const,
+    };
+    const assistantAskRequests: string[] = [];
+    const updateCodexAuth = vi.fn();
+    const executeAskCallCountBefore = mocks.executeReadOnlyAssistantAsk.mock.calls.length;
+    let assistantPhaseCalls = 0;
+    let metadataReadOrdinal = 0;
+    let invocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const readAccessSeed = vi.fn(async (
+        request: HostedCodexAuthSeedRequest,
+      ): Promise<HostedCodexAuthSeedResponse> => {
+        assert.deepEqual(request, {
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
+        });
+        metadataReadOrdinal += 1;
+        switch (metadataReadOrdinal) {
+          case 1:
+            events.push("auth.probe:startup");
+            return initialMode;
+          case 2:
+            events.push("auth.probe:foreground-started");
+            foregroundProbeStarted.resolve();
+            await releaseStaleForegroundProbe.promise;
+            events.push("auth.probe:foreground-stale");
+            return initialMode;
+          case 3:
+            events.push("auth.probe:detached-mode-change");
+            detachedModeChangeObserved.resolve();
+            return disconnectedMode;
+          default:
+            throw new Error("Unexpected extra ChatGPT auth metadata probe.");
+        }
+      });
+      invocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_hot_auth_probe_race",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "3".repeat(64),
+                key: "users/bundles/member-synthetic/hot-auth-probe-race.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+            await enqueueHostedSystemMailboxItem({
+              item: createResolvedAssistantAskSystemMailboxItem(askItem),
+              vaultRoot,
+              wake: createAssistantAskRequestedWake({ eventId: askItem.dedupeKey }),
+            });
+            return { status: "imported" as const };
+          },
+          platform: createPlatform({
+            assistantAskPort: {
+              async request(request) {
+                assistantAskRequests.push(request.action);
+                throw new Error("Stale detached provider admission reached its control port.");
+              },
+            },
+            codexAuthPort: {
+              readAccessSeed,
+              update: updateCodexAuth,
+            },
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push("assistant.phase:stale");
+            throw new Error("Stale foreground provider admission ran after auth rollover.");
+          },
+          shutdownSignal: shutdownController.signal,
+          vaultRoot,
+        },
+      );
+      void invocationPromise.catch(() => undefined);
+
+      await withRealTimeout(
+        foregroundProbeStarted.promise,
+        15_000,
+        () => events.join(","),
+      );
+      await withRealTimeout(
+        detachedModeChangeObserved.promise,
+        15_000,
+        () => events.join(","),
+      );
+      await withRealTimeout((async () => {
+        while (true) {
+          const pending = (await readHostedSystemMailboxState(vaultRoot)).pending[0];
+          if (pending?.attemptCount === 1 && pending.status === "pending") {
+            events.push("ask.requeued");
+            return;
+          }
+          await new Promise<void>((resolve) => REAL_SET_TIMEOUT(resolve, 5));
+        }
+      })(), 15_000, () => events.join(","));
+
+      releaseStaleForegroundProbe.resolve();
+      const result = await withRealTimeout(
+        invocationPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 0);
+      assert.equal(assistantAskRequests.length, 0);
+      assert.equal(
+        mocks.executeReadOnlyAssistantAsk.mock.calls.length,
+        executeAskCallCountBefore,
+      );
+      assert.equal(updateCodexAuth.mock.calls.length, 0);
+      assert.equal(readAccessSeed.mock.calls.length, 3);
+      assert.equal(
+        readAccessSeed.mock.calls.some(([request]) => request.includeCredentials),
+        false,
+      );
+      assert.ok(
+        requireEventIndex(events, "auth.probe:foreground-started")
+          < requireEventIndex(events, "auth.probe:detached-mode-change"),
+      );
+      assert.ok(
+        requireEventIndex(events, "auth.probe:detached-mode-change")
+          < requireEventIndex(events, "auth.probe:foreground-stale"),
+      );
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        [`mailbox.importItem:${conversationItem.id}`],
+      );
+      assert.equal(checkpointRequests.length, 1);
+      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      assert.equal(result.immediateRecheckRequested, true);
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+          attemptCount: item.attemptCount,
+          itemId: item.itemId,
+          status: item.status,
+        })),
+        [{
+          attemptCount: 1,
+          itemId: askItem.id,
+          status: "pending",
+        }],
+      );
+    } finally {
+      releaseStaleForegroundProbe.resolve();
+      shutdownController.abort();
+      await invocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("preserves initial mailbox cleanup across a ChatGPT auth mode restart", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-initial-auth-cleanup-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const activationItem = createMailboxItem({
+      id: "mailbox_item_initial_auth_cleanup_activation",
+      kind: "member.activated",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const mealPhotoItem = createMailboxItem({
+      id: "mailbox_item_initial_auth_cleanup_photo",
+      kind: "meal-photo.captured",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const cleanup = vi.fn(async () => {
+      events.push("meal-photo.cleanup");
+      return {
+        attachmentEvidenceUpdated: null,
+        kind: "meal_photo_cleanup" as const,
+        projectionUpdated: null,
+        reasonCode: "meal_photo.deleted",
+        status: "succeeded" as const,
+      };
+    });
+    const stopWarmCallCountBefore = mocks.stopWarmCodexAppServer.mock.calls.length;
+    let assistantPhaseCalls = 0;
+    let currentSeed: HostedCodexAuthSeedResponse = {
+      connectionVersion: null,
+      reason: "unconfigured",
+      schemaVersion: 1,
+      status: "unavailable",
+    };
+
+    try {
+      const readAccessSeed = vi.fn(async (
+        request: HostedCodexAuthSeedRequest,
+      ): Promise<HostedCodexAuthSeedResponse> =>
+        projectHostedCodexAuthSeedForTestRequest(currentSeed, request));
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_initial_auth_mode_cleanup",
+            budget: { maxMailboxItems: 10 },
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + "initial-auth-mode-cleanup.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.kind === "member.activated") {
+              await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+              return { status: "imported" as const };
+            }
+
+            assert.equal(item.item.kind, "meal-photo.captured");
+            currentSeed = {
+              accessToken: "fixture-initial-auth-mode-cleanup-access",
+              chatgptAccountId: "account_initial_auth_mode_cleanup",
+              connectionVersion: `hca_${"q".repeat(16)}`,
+              expiresAt: "2026-04-27T01:00:00.000Z",
+              schemaVersion: 1,
+              status: "available",
+            };
+            return {
+              afterCheckpoint: cleanup,
+              status: "imported" as const,
+            };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              readAccessSeed,
+              async update() {
+                throw new Error("Initial auth mode cleanup must not update auth state.");
+              },
+            },
+            mailboxPort: createMailboxPort({
+              events,
+              items: [activationItem, mealPhotoItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            throw new Error("Auth mode restart must block provider admission.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(assistantPhaseCalls, 0);
+      assert.equal(cleanup.mock.calls.length, 1);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        [
+          `mailbox.importItem:${activationItem.id}`,
+          `mailbox.importItem:${mealPhotoItem.id}`,
+        ],
+      );
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+        "idle_shutdown",
+      ]);
+      const cleanupEventIndex = requireEventIndex(events, "meal-photo.cleanup");
+      assert.ok(events.lastIndexOf("workspace.checkpoint") < cleanupEventIndex);
+      const cleanupCallOrder = cleanup.mock.invocationCallOrder[0];
+      const stopWarmCallOrder =
+        mocks.stopWarmCodexAppServer.mock.invocationCallOrder[stopWarmCallCountBefore];
+      assert.ok(cleanupCallOrder !== undefined);
+      assert.ok(stopWarmCallOrder !== undefined);
+      assert.ok(cleanupCallOrder < stopWarmCallOrder);
+      assert.equal(readAccessSeed.mock.calls.length, 2);
+      assert.equal(
+        readAccessSeed.mock.calls.every(([request]) => request.includeCredentials === false),
+        true,
+      );
+      assert.equal(result.immediateRecheckRequested, true);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      label: "hands one foreground-pending ChatGPT auth restart to a mailbox continuation",
+      repeatConflict: false,
+    },
+    {
+      label: "fails closed after a repeated foreground-pending ChatGPT auth restart conflict",
+      repeatConflict: true,
+    },
+  ])("$label", async ({ repeatConflict }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hot-auth-foreground-pending-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const phaseObserved = createDeferred<void>();
+    const idleCheckpointDelayMs = 180_000;
+    const initialItem = createMailboxItem({
+      id: "mailbox_item_hot_auth_foreground_pending_initial",
+      laneSeq: "1",
+    });
+    const pendingItem = createMailboxItem({
+      createdAt: "2026-04-27T00:00:01.000Z",
+      id: "mailbox_item_hot_auth_foreground_pending_late",
+      laneSeq: "2",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+    });
+    const mailboxItems = [initialItem];
+    let assistantPhaseCalls = 0;
+    let currentSeed: HostedCodexAuthSeedResponse = {
+      accessToken: "fixture-hot-auth-foreground-pending-access",
+      chatgptAccountId: "account_hot_auth_foreground_pending",
+      connectionVersion: `hca_${"6".repeat(16)}`,
+      expiresAt: "2026-04-27T01:00:00.000Z",
+      schemaVersion: 1,
+      status: "available",
+    };
+    let invocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const readAccessSeed = vi.fn(async (request: {
+        includeCredentials: boolean;
+      }): Promise<HostedCodexAuthSeedResponse> =>
+        request.includeCredentials === false && currentSeed.status === "available"
+          ? {
+              connectionVersion: currentSeed.connectionVersion,
+              schemaVersion: 1,
+              status: "available_metadata",
+            }
+          : currentSeed);
+      invocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_hot_auth_foreground_pending",
+            idleCheckpointDelayMs,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            const snapshotOrdinal = checkpointRequests.length + 1;
+            events.push(`snapshot:${snapshotOrdinal}:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: String(snapshotOrdinal).repeat(64).slice(0, 64),
+                key:
+                  "users/bundles/member-synthetic/"
+                  + `hot-auth-foreground-pending-${snapshotOrdinal}.bundle.json`,
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              readAccessSeed,
+              async update() {
+                return { applied: true, status: "applied" as const };
+              },
+            },
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: {
+              async read() {
+                events.push("workspace.read");
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({ version: "4" }),
+                };
+              },
+              async checkpoint(request) {
+                checkpointRequests.push(request);
+                events.push(
+                  `workspace.checkpoint:${checkpointRequests.length}:`
+                    + `${request.nextWakeReason ?? "none"}`,
+                );
+                if (checkpointRequests.length === 1 || repeatConflict) {
+                  return {
+                    checkpointConflictReason: "foreground_pending" as const,
+                    checkpointed: false,
+                    workspace: createWorkspaceState({ version: "4" }),
+                  };
+                }
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: "5",
+                  }),
+                };
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          shutdownSignal: shutdownController.signal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            phaseObserved.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true as const,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      void invocationPromise.catch(() => undefined);
+
+      await withRealTimeout(phaseObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      currentSeed = {
+        connectionVersion: `hca_${"7".repeat(16)}`,
+        reason: "disconnected",
+        schemaVersion: 1,
+        status: "unavailable",
+      };
+      mailboxItems.push(pendingItem);
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+
+      const resultPromise = withRealTimeout(invocationPromise, 15_000, () => events.join(","));
+
+      if (repeatConflict) {
+        await expect(resultPromise).rejects.toMatchObject({
+          checkpointConflictReason: "foreground_pending",
+          code: "runtime_wake_during_checkpoint",
+        });
+      } else {
+        const result = await resultPromise;
+        assert.equal(result.immediateRecheckRequested, true);
+        assert.equal(result.nextWakeReason, "mailbox");
+      }
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        [`mailbox.importItem:${initialItem.id}`],
+      );
+      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.ok(checkpointRequests[1]?.nextWakeAt);
+      assert.equal(checkpointRequests[1]?.nextWakeReason, "mailbox");
+    } finally {
+      shutdownController.abort();
+      await invocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      label: "reconciles one stale workspace version during a ChatGPT auth restart without provider work",
+      repeatConflict: false,
+    },
+    {
+      label: "fails closed after a repeated stale workspace version during a ChatGPT auth restart",
+      repeatConflict: true,
+    },
+  ])("$label", async ({ repeatConflict }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-hot-auth-stale-workspace-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const shutdownController = new AbortController();
+    const phaseObserved = createDeferred<void>();
+    const mailboxItem = createMailboxItem({
+      id: "mailbox_item_hot_auth_stale_workspace",
+      laneSeq: "1",
+    });
+    let assistantPhaseCalls = 0;
+    let snapshotAttempts = 0;
+    let workspaceReads = 0;
+    let currentSeed: HostedCodexAuthSeedResponse = {
+      accessToken: "fixture-hot-auth-stale-workspace-access",
+      chatgptAccountId: "account_hot_auth_stale_workspace",
+      connectionVersion: `hca_${"8".repeat(16)}`,
+      expiresAt: "2026-04-27T01:00:00.000Z",
+      schemaVersion: 1,
+      status: "available",
+    };
+    let invocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      invocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_hot_auth_stale_workspace",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            snapshotAttempts += 1;
+            events.push(
+              `snapshot:${snapshotAttempts}:${snapshotInput.expectedWorkspaceVersion}`,
+            );
+            if (snapshotAttempts === 1 || repeatConflict) {
+              throw new HostedRuntimeBridgeCheckpointLeaseError(
+                "stale_workspace_version",
+                "before_snapshot",
+              );
+            }
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/hot-auth-stale-workspace.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            codexAuthPort: {
+              async readAccessSeed(request) {
+                return request.includeCredentials === false
+                    && currentSeed.status === "available"
+                  ? {
+                      connectionVersion: currentSeed.connectionVersion,
+                      schemaVersion: 1 as const,
+                      status: "available_metadata" as const,
+                    }
+                  : currentSeed;
+              },
+              async update() {
+                return { applied: true, status: "applied" as const };
+              },
+            },
+            mailboxPort: createMailboxPort({ events, items: [mailboxItem] }),
+            workspacePort: {
+              async read() {
+                workspaceReads += 1;
+                events.push(`workspace.read:${workspaceReads}`);
+                return {
+                  fetchedAt: TEST_NOW,
+                  workspace: createWorkspaceState({
+                    version: workspaceReads === 1 ? "4" : "5",
+                  }),
+                };
+              },
+              async checkpoint(request) {
+                checkpointRequests.push(request);
+                events.push(`workspace.checkpoint:${request.expectedWorkspaceVersion}`);
+                return {
+                  checkpointed: true,
+                  workspace: createWorkspaceState({
+                    nextWakeAt: request.nextWakeAt ?? null,
+                    nextWakeReason: request.nextWakeReason ?? null,
+                    redactedStatus: request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: "6",
+                  }),
+                };
+              },
+            },
+          }),
+          runtimeWakeSignal,
+          shutdownSignal: shutdownController.signal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            phaseObserved.resolve();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              nextWakeAt: null,
+              nextWakeReason: null,
+              progressed: true as const,
+            };
+          },
+          vaultRoot,
+        },
+      );
+      void invocationPromise.catch(() => undefined);
+
+      await withRealTimeout(phaseObserved.promise, 15_000, () => events.join(","));
+      await waitForFakeTimerScheduled(() => events.join(","));
+      currentSeed = {
+        connectionVersion: `hca_${"9".repeat(16)}`,
+        reason: "disconnected",
+        schemaVersion: 1,
+        status: "unavailable",
+      };
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+
+      const resultPromise = withRealTimeout(invocationPromise, 15_000, () => events.join(","));
+
+      if (repeatConflict) {
+        await expect(resultPromise).rejects.toMatchObject({
+          code: "stale_workspace_version",
+          stage: "before_snapshot",
+        });
+      } else {
+        const result = await resultPromise;
+        assert.deepEqual(
+          checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+          ["5"],
+        );
+        assert.equal(result.immediateRecheckRequested, true);
+      }
+
+      assert.equal(assistantPhaseCalls, 1);
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("mailbox.importItem:")),
+        [`mailbox.importItem:${mailboxItem.id}`],
+      );
+      assert.equal(snapshotAttempts, 2);
+      assert.equal(workspaceReads, 2);
+      if (repeatConflict) {
+        assert.equal(checkpointRequests.length, 0);
+      }
+    } finally {
+      shutdownController.abort();
+      await invocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("fences an active foreground import before a ChatGPT disconnect restart", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-active-turn-auth-restart-"));
+    const events: string[] = [];
+    const importedItemIds: string[] = [];
+    const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const firstShutdownController = new AbortController();
+    const secondShutdownController = new AbortController();
+    const firstPhaseStarted = createDeferred<void>();
+    const releaseFirstPhase = createDeferred<void>();
+    const authModeProbeObserved = createDeferred<void>();
+    const secondImportObserved = createDeferred<void>();
+    const firstItem = createMailboxItem({
+      id: "mailbox_item_active_turn_auth_restart_first",
+      laneSeq: "1",
+    });
+    const secondItem = createMailboxItem({
+      createdAt: "2026-04-27T00:00:01.000Z",
+      id: "mailbox_item_active_turn_auth_restart_second",
+      laneSeq: "2",
+      occurredAt: "2026-04-27T00:00:01.000Z",
+      updatedAt: "2026-04-27T00:00:01.000Z",
+    });
+    const mailboxItems = [firstItem];
+    const initialConnectionVersion = `hca_${"3".repeat(16)}`;
+    const disconnectedConnectionVersion = `hca_${"4".repeat(16)}`;
+    let currentSeed: HostedCodexAuthSeedResponse = {
+      accessToken: "fixture-active-turn-external-access",
+      chatgptAccountId: "account_active_turn_external",
+      connectionVersion: initialConnectionVersion,
+      expiresAt: "2026-04-27T01:00:00.000Z",
+      schemaVersion: 1,
+      status: "available",
+    };
+    const observedModes: Array<{
+      externalResolver: boolean;
+      provider: string | null;
+    }> = [];
+    let firstInvocationPhaseCount = 0;
+    let seedReadCount = 0;
+    let firstInvocationPromise:
+      ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      const readAccessSeed = vi.fn(async (request: HostedCodexAuthSeedRequest) => {
+        seedReadCount += 1;
+        events.push(`seed.read:${seedReadCount}`);
+        if (seedReadCount === 2) {
+          authModeProbeObserved.resolve();
+        }
+        return projectHostedCodexAuthSeedForTestRequest(currentSeed, request);
+      });
+      const codexAuthPort = {
+        readAccessSeed,
+        async update() {
+          return { applied: true, status: "applied" as const };
+        },
+      };
+      const importItem = async (item: HostedMailboxResolvedImportItem) => {
+        importedItemIds.push(item.item.id);
+        events.push(`mailbox.importItem:${item.item.id}`);
+        if (item.item.id === secondItem.id) {
+          secondImportObserved.resolve();
+          // Keep the pre-fence regression bounded: the stale invocation has
+          // already violated the assertion once it imports this item.
+          firstShutdownController.abort();
+        }
+        return {
+          status: "imported" as const,
+        };
+      };
+
+      firstInvocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_active_turn_auth_restart_first",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "9",
+            userId: TEST_USER_ID,
+            workspaceVersion: "4",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:first:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: "users/bundles/member-synthetic/active-turn-auth-restart-first.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          importItem,
+          platform: createPlatform({
+            codexAuthPort,
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: firstCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "4" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase(input) {
+            firstInvocationPhaseCount += 1;
+            observedModes.push({
+              externalResolver: input.codexChatGptAuthResolver !== null,
+              provider:
+                input.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+            });
+            events.push(`assistant.first:${firstInvocationPhaseCount}`);
+            if (firstInvocationPhaseCount === 1) {
+              firstPhaseStarted.resolve();
+              await releaseFirstPhase.promise;
+              events.push("assistant.first:released");
+            } else {
+              // This makes the pre-hook regression terminate deterministically
+              // after it incorrectly imports and reruns under stale auth.
+              firstShutdownController.abort();
+            }
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true as const,
+            };
+          },
+          shutdownSignal: firstShutdownController.signal,
+          vaultRoot,
+        },
+      );
+      void firstInvocationPromise.catch(() => undefined);
+
+      await withRealTimeout(firstPhaseStarted.promise, 15_000, () => events.join(","));
+      currentSeed = {
+        connectionVersion: disconnectedConnectionVersion,
+        reason: "disconnected",
+        schemaVersion: 1,
+        status: "unavailable",
+      };
+      mailboxItems.push(secondItem);
+      runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+
+      await withRealTimeout(
+        Promise.race([
+          authModeProbeObserved.promise,
+          secondImportObserved.promise,
+        ]),
+        5_000,
+        () => events.join(","),
+      );
+      releaseFirstPhase.resolve();
+      const firstResult = await withRealTimeout(
+        firstInvocationPromise,
+        15_000,
+        () => events.join(","),
+      );
+
+      assert.equal(firstResult.immediateRecheckRequested, true);
+      assert.equal(firstInvocationPhaseCount, 1);
+      assert.deepEqual(importedItemIds, [firstItem.id]);
+      assert.equal(firstCheckpointRequests.length, 1);
+
+      const firstCheckpoint = firstCheckpointRequests[0];
+      assert.ok(firstCheckpoint);
+      const secondResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_active_turn_auth_restart_second",
+            idleCheckpointDelayMs: 180_000,
+            leaseGeneration: "10",
+            userId: TEST_USER_ID,
+            workspaceVersion: "5",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:second:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "4".repeat(64),
+                key: "users/bundles/member-synthetic/active-turn-auth-restart-second.bundle.json",
+                size: 640,
+              }),
+            };
+          },
+          async importItem(item) {
+            if (item.item.id === firstItem.id) {
+              // The synthetic snapshot fixture resets the local mailbox
+              // watermark. Replay the contiguous server prefix as already
+              // handled so this invocation can exercise the retained item.
+              return { status: "skipped" as const };
+            }
+            return await importItem(item);
+          },
+          platform: createPlatform({
+            codexAuthPort,
+            mailboxPort: createMailboxPort({ events, items: mailboxItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: secondCheckpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: firstCheckpoint.nextWakeAt ?? null,
+                nextWakeReason: firstCheckpoint.nextWakeReason ?? null,
+                redactedStatus: firstCheckpoint.redactedStatus ?? null,
+                version: "5",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            observedModes.push({
+              externalResolver: input.codexChatGptAuthResolver !== null,
+              provider:
+                input.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] ?? null,
+            });
+            events.push("assistant.second:1");
+            secondShutdownController.abort();
+            return {
+              checkpointReason: "assistant_runtime_commit" as const,
+              progressed: true as const,
+            };
+          },
+          shutdownSignal: secondShutdownController.signal,
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(importedItemIds, [firstItem.id, secondItem.id], events.join(","));
+      expect(observedModes).toEqual([
+        { externalResolver: true, provider: "hosted-chatgpt-openai" },
+        { externalResolver: false, provider: "hosted-openai" },
+      ]);
+      expect(readAccessSeed.mock.calls.length).toBeGreaterThanOrEqual(3);
+      expect(readAccessSeed.mock.calls.every(([request]) =>
+        request.includeCredentials === false
+        && request.knownConnectionVersion === null
+        && request.schemaVersion === 1
+      )).toBe(true);
+      assert.equal(secondResult.immediateRecheckRequested, undefined);
+    } finally {
+      releaseFirstPhase.resolve();
+      firstShutdownController.abort();
+      secondShutdownController.abort();
+      await firstInvocationPromise?.catch(() => undefined);
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      expectedModes: [
+        { externalResolver: false, provider: "hosted-openai" },
+        { externalResolver: true, provider: "hosted-chatgpt-openai" },
+      ],
+      initialSeed: {
+        connectionVersion: null,
+        reason: "unconfigured" as const,
+        schemaVersion: 1 as const,
+        status: "unavailable" as const,
+      },
+      label: "managed to external",
+      replacementCredential: {
+        accountId: "account_detached_hot_external",
+        connectionVersion: `hca_${"f".repeat(16)}`,
+      },
+      nextSeed: {
+        accessToken: "fixture-detached-hot-external-access",
+        chatgptAccountId: "account_detached_hot_external",
+        connectionVersion: `hca_${"f".repeat(16)}`,
+        expiresAt: "2026-04-27T01:00:00.000Z",
+        schemaVersion: 1 as const,
+        status: "available" as const,
+      },
+    },
+    {
+      expectedModes: [
+        { externalResolver: true, provider: "hosted-chatgpt-openai" },
+        { externalResolver: false, provider: "hosted-openai" },
+      ],
+      initialSeed: {
+        accessToken: "fixture-detached-hot-external-access",
+        chatgptAccountId: "account_detached_hot_external",
+        connectionVersion: `hca_${"1".repeat(16)}`,
+        expiresAt: "2026-04-27T01:00:00.000Z",
+        schemaVersion: 1 as const,
+        status: "available" as const,
+      },
+      label: "external to managed",
+      replacementCredential: null,
+      nextSeed: {
+        connectionVersion: `hca_${"2".repeat(16)}`,
+        reason: "disconnected" as const,
+        schemaVersion: 1 as const,
+        status: "unavailable" as const,
+      },
+    },
+  ])(
+    "requeues a detached ask across the payload-free ChatGPT auth $label restart",
+    async ({ expectedModes, initialSeed, nextSeed, replacementCredential }) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-detached-hot-auth-mode-"));
+      const events: string[] = [];
+      const firstCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const secondCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const secondShutdownController = new AbortController();
+      const askStarted = createDeferred<void>();
+      const foregroundStarted = createDeferred<void>();
+      const initialConversationItem = createMailboxItem({
+        id: "mailbox_item_detached_hot_auth_conversation",
+        laneSeq: "1",
+      });
+      const askItem = createMailboxItem({
+        dedupeKey: "ask_event_detached_hot_auth_mode",
+        id: "mailbox_item_detached_hot_auth_mode",
+        kind: "assistant.ask.requested",
+        lane: "system",
+        laneSeq: "1",
+      });
+      const observedModes: Array<{
+        externalResolver: boolean;
+        provider: string | null;
+      }> = [];
+      const replacementCredentialResolutions: Array<{
+        accountId: string;
+        connectionVersion: string;
+      }> = [];
+      const executeCallCountBefore = mocks.executeReadOnlyAssistantAsk.mock.calls.length;
+      const stopWarmCallCountBefore = mocks.stopWarmCodexAppServer.mock.calls.length;
+      let currentSeed: HostedCodexAuthSeedResponse = initialSeed;
+      let firstInvocationPromise:
+        ReturnType<typeof runHostedWorkspaceRuntimeJobInProcess> | null = null;
+
+      mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
+        observedModes.push({
+          externalResolver: askInput.codexChatGptAuthResolver !== null,
+          provider: askInput.modelProvider ?? null,
+        });
+        events.push("ask.first.started");
+        askStarted.resolve();
+        return await new Promise((_resolve, reject) => {
+          const abort = () => {
+            events.push("ask.first.aborted");
+            reject(askInput.abortSignal?.reason);
+          };
+          if (askInput.abortSignal?.aborted) {
+            abort();
+            return;
+          }
+          askInput.abortSignal?.addEventListener("abort", abort, { once: true });
+        });
+      });
+
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      try {
+        vi.setSystemTime(new Date(TEST_NOW));
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+        const readAccessSeed = vi.fn(async (request: HostedCodexAuthSeedRequest) =>
+          projectHostedCodexAuthSeedForTestRequest(currentSeed, request)
+        );
+        const updateCodexAuth = vi.fn(async (
+          _update: Parameters<
+            NonNullable<HostedRuntimePlatform["codexAuthPort"]>["update"]
+          >[0],
+        ) => ({
+          applied: true,
+          status: "applied" as const,
+        }));
+        const codexAuthPort = {
+          readAccessSeed,
+          update: updateCodexAuth,
+        };
+        const assistantAskPort = {
+          async request(request: {
+            action: "complete" | "prepare";
+          }) {
+            if (request.action === "complete") {
+              events.push("ask.completed");
+              secondShutdownController.abort();
+              return { action: "complete" as const, status: "completed" as const };
+            }
+            return {
+              action: "prepare" as const,
+              question: "What is today's group workout?",
+              status: "ready" as const,
+              targetLabel: "100 Club",
+            };
+          },
+        };
+        const importItem = async (item: HostedMailboxResolvedImportItem) => {
+          if (item.route.action !== "run-assistant-ask") {
+            return { status: "imported" as const };
+          }
+          await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+          return await enqueueHostedSystemMailboxItem({
+            item,
+            vaultRoot,
+            wake: createAssistantAskRequestedWake({
+              eventId: askItem.dedupeKey,
+            }),
+          });
+        };
+
+        firstInvocationPromise = runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_detached_hot_auth_mode_first",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:first:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "7".repeat(64),
+                  key: "users/bundles/member-synthetic/detached-hot-auth-first.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            importItem,
+            platform: createPlatform({
+              assistantAskPort,
+              codexAuthPort,
+              mailboxPort: createMailboxPort({
+                events,
+                items: [initialConversationItem, askItem],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: firstCheckpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase() {
+              events.push("foreground.first.started");
+              foregroundStarted.resolve();
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                progressed: true as const,
+              };
+            },
+            vaultRoot,
+          },
+        );
+        void firstInvocationPromise.catch(() => undefined);
+
+        await withRealTimeout(
+          Promise.all([askStarted.promise, foregroundStarted.promise]),
+          15_000,
+          () => events.join(","),
+        );
+        await waitForFakeTimerScheduled(() => events.join(","));
+        assert.equal(firstCheckpointRequests.length, 0);
+
+        currentSeed = nextSeed;
+        runtimeWakeSignal.notify(Date.parse(TEST_NOW) + 1);
+        const firstResult = await withRealTimeout(
+          firstInvocationPromise,
+          15_000,
+          () => events.join(","),
+        );
+
+        assert.equal(Date.now(), Date.parse(TEST_NOW));
+        assert.equal(firstResult.immediateRecheckRequested, true);
+        assert.equal(firstCheckpointRequests.length, 1);
+        expect(
+          mocks.stopWarmCodexAppServer.mock.calls.slice(stopWarmCallCountBefore),
+        ).toEqual([["chatgpt-auth-mode-changed"]]);
+        assert.equal(
+          mocks.executeReadOnlyAssistantAsk.mock.calls.length,
+          executeCallCountBefore + 1,
+        );
+        assert.ok(
+          requireEventIndex(events, "ask.first.aborted")
+            < requireEventIndex(events, "snapshot:first:idle_shutdown"),
+        );
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => ({
+            itemId: item.itemId,
+            status: item.status,
+          })),
+          [{ itemId: askItem.id, status: "pending" }],
+        );
+
+        mocks.executeReadOnlyAssistantAsk.mockImplementationOnce(async (askInput) => {
+          observedModes.push({
+            externalResolver: askInput.codexChatGptAuthResolver !== null,
+            provider: askInput.modelProvider ?? null,
+          });
+          if (askInput.codexChatGptAuthResolver) {
+            const resolution = await askInput.codexChatGptAuthResolver.resolve({
+              knownConnectionVersion: null,
+              reason: "turn_start",
+            });
+            assert.equal(resolution.kind, "login");
+            replacementCredentialResolutions.push({
+              accountId: resolution.chatgptAccountId,
+              connectionVersion: resolution.connectionVersion,
+            });
+            assert.ok(askInput.codexChatGptAuthResolver.reportLoginResult);
+            await expect(
+              askInput.codexChatGptAuthResolver.reportLoginResult({
+                connectionVersion: resolution.connectionVersion,
+                result: "connected",
+              }),
+            ).resolves.toBe("current");
+          }
+          events.push("ask.second.started");
+          return { answer: "The group workout is ready.", outcome: "answered" };
+        });
+        const firstCheckpoint = firstCheckpointRequests[0];
+        assert.ok(firstCheckpoint);
+        const secondResult = await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_detached_hot_auth_mode_second",
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "10",
+              userId: TEST_USER_ID,
+              workspaceVersion: "5",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:second:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "6".repeat(64),
+                  key: "users/bundles/member-synthetic/detached-hot-auth-second.bundle.json",
+                  size: 640,
+                }),
+              };
+            },
+            importItem,
+            platform: createPlatform({
+              assistantAskPort,
+              codexAuthPort,
+              mailboxPort: createMailboxPort({
+                events,
+                items: [initialConversationItem, askItem],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests: secondCheckpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  nextWakeAt: firstCheckpoint.nextWakeAt ?? null,
+                  nextWakeReason: firstCheckpoint.nextWakeReason ?? null,
+                  redactedStatus: firstCheckpoint.redactedStatus ?? null,
+                  version: "5",
+                }),
+              }),
+            }),
+            async runAssistantPhase() {
+              return {
+                progressed: false as const,
+                redactedStatus: {
+                  hostedAssistantProgressed: false,
+                },
+              };
+            },
+            shutdownSignal: secondShutdownController.signal,
+            vaultRoot,
+          },
+        );
+
+        expect(observedModes).toEqual(expectedModes);
+        expect(replacementCredentialResolutions).toEqual(
+          replacementCredential ? [replacementCredential] : [],
+        );
+        expect(updateCodexAuth.mock.calls.map(([update]) => update)).toEqual(
+          replacementCredential
+            ? [{
+                attemptId: replacementCredential.connectionVersion,
+                phase: "connected",
+              }]
+            : [],
+        );
+        expect(readAccessSeed.mock.calls.length).toBeGreaterThanOrEqual(3);
+        expect(readAccessSeed.mock.calls.every(([request]) =>
+          request.schemaVersion === 1
+          && request.knownConnectionVersion === null
+        )).toBe(true);
+        expect(readAccessSeed.mock.calls.some(([request]) =>
+          request.includeCredentials === false
+        )).toBe(true);
+        expect(readAccessSeed.mock.calls.filter(([request]) =>
+          request.includeCredentials === true
+        )).toHaveLength(replacementCredential ? 1 : 0);
+        assert.ok(events.includes("ask.second.started"));
+        assert.ok(events.includes("ask.completed"));
+        assert.equal(secondResult.immediateRecheckRequested, undefined);
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending,
+          [],
+        );
+      } finally {
+        secondShutdownController.abort();
+        await firstInvocationPromise?.catch(() => undefined);
+        vi.useRealTimers();
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
 
   test("confirmed assistant configuration updates apply to the next hot foreground phase", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-assistant-target-refresh-"));
@@ -25596,6 +27264,20 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
     userId: TEST_USER_ID,
     ...overrides,
   };
+}
+
+function projectHostedCodexAuthSeedForTestRequest(
+  seed: HostedCodexAuthSeedResponse,
+  request: HostedCodexAuthSeedRequest,
+): HostedCodexAuthSeedResponse {
+  if (!request.includeCredentials && seed.status === "available") {
+    return {
+      connectionVersion: seed.connectionVersion,
+      schemaVersion: 1,
+      status: "available_metadata",
+    };
+  }
+  return seed;
 }
 
 async function stageAssistantInputEventForMailboxItem(input: {

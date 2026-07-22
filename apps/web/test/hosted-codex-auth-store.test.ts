@@ -420,6 +420,7 @@ describe("hosted Codex auth store", () => {
 
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -436,6 +437,7 @@ describe("hosted Codex auth store", () => {
 
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: "hca_seedattempt12345",
       memberId: "member_123",
       now,
@@ -450,6 +452,7 @@ describe("hosted Codex auth store", () => {
     crypto.decrypt.mockRejectedValueOnce(new HostedCodexAuthAccessSeedPayloadError());
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: "hca_seedattempt12345",
       memberId: "member_123",
       now,
@@ -468,6 +471,7 @@ describe("hosted Codex auth store", () => {
     });
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -478,6 +482,35 @@ describe("hosted Codex auth store", () => {
       schemaVersion: 1,
       status: "unavailable",
     });
+  });
+
+  it("returns only connection metadata without decrypting credential plaintext", async () => {
+    const now = new Date("2026-07-21T20:00:00.000Z");
+    const prisma = createCodexAuthPrismaHarness({
+      accessSeedEncrypted: "encrypted:hca_metadataonly123",
+      accessSeedExpiresAt: new Date("2026-07-21T21:00:00.000Z"),
+      attemptId: "hca_metadataonly123",
+      memberId: "member_123",
+      state: "connected",
+      updatedAt: now,
+      userCode: null,
+      verificationUrl: null,
+    });
+    const crypto = createAccessSeedCrypto();
+
+    await expect(readHostedCodexAuthAccessSeedForRuntime({
+      crypto,
+      includeCredentials: false,
+      knownConnectionVersion: "hca_metadataonly123",
+      memberId: "member_123",
+      now,
+      prisma: prisma.client,
+    })).resolves.toEqual({
+      connectionVersion: "hca_metadataonly123",
+      schemaVersion: 1,
+      status: "available_metadata",
+    });
+    expect(crypto.decrypt).not.toHaveBeenCalled();
   });
 
   it("projects an expired server lease as off so the phone can safely reseed it", async () => {
@@ -506,6 +539,7 @@ describe("hosted Codex auth store", () => {
     });
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -562,6 +596,7 @@ describe("hosted Codex auth store", () => {
     });
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -596,6 +631,7 @@ describe("hosted Codex auth store", () => {
 
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -616,6 +652,7 @@ describe("hosted Codex auth store", () => {
     }));
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -640,6 +677,7 @@ describe("hosted Codex auth store", () => {
 
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now: new Date("2026-07-21T20:00:00.000Z"),
@@ -691,6 +729,7 @@ describe("hosted Codex auth store", () => {
 
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now: new Date("2026-07-21T20:00:00.000Z"),
@@ -724,6 +763,7 @@ describe("hosted Codex auth store", () => {
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       clock,
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       prisma: prisma.client,
@@ -739,6 +779,7 @@ describe("hosted Codex auth store", () => {
     transientCrypto.decrypt.mockRejectedValueOnce(new Error("crypto service unavailable"));
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto: transientCrypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,
@@ -1117,6 +1158,7 @@ describe("hosted Codex auth store", () => {
     });
     await expect(readHostedCodexAuthAccessSeedForRuntime({
       crypto,
+      includeCredentials: true,
       knownConnectionVersion: null,
       memberId: "member_123",
       now,

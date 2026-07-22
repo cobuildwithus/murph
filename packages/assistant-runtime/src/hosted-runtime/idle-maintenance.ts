@@ -46,6 +46,7 @@ export type HostedIdleMaintenanceOutcome =
   | ({
       kind: "skipped";
       reason:
+        | "external_chatgpt_auth"
         | "missing_model"
         | "missing_provider"
         | "pending_work"
@@ -62,6 +63,7 @@ export type HostedIdleMaintenanceOutcome =
 // as additional plain statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
+  externalChatGptAuth: boolean;
   materializeRetentionCandidatePaths?: ((
     storedPaths: readonly string[]
   ) => Promise<InboxMediaRetentionMaterializeResult | void>) | null;
@@ -150,6 +152,19 @@ export async function runHostedIdleCheckpointMaintenance(input: {
       // but Codex compaction would delay member-visible work.
       return attachInboxMediaRetentionWake(
         { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null },
+        retentionWake,
+      );
+    }
+    // External ChatGPT authority is reconciled only at the exact-version
+    // turn-start boundary. Idle compaction is a separate provider request and
+    // has no resolver seam, so it must never reuse a resident external bearer.
+    if (input.externalChatGptAuth) {
+      return attachInboxMediaRetentionWake(
+        {
+          kind: "skipped",
+          reason: "external_chatgpt_auth",
+          threadContextTokensBefore: null,
+        },
         retentionWake,
       );
     }

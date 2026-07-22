@@ -328,12 +328,19 @@ runtime recheck; expiry is enforced again by the Web read and turn-start
 reconciliation. Completion is acknowledged only when that exact connection
 version reaches its expected terminal state; a newer upload or disconnect wins
 and the superseded request receives a retryable conflict. No credential enters
-a mailbox item or Temporal state.
+a mailbox item or Temporal state. Public `connected` means the latest encrypted
+seed/version is durably stored and eligible to authorize the next admitted
+turn; it does not attest that a resident process already converged. Public
+`off` means no later turn can exact-version authorize the cleared/rotated seed;
+it does not claim synchronous erasure from an idle process before the accepted
+recheck is handled.
 
-At cold start and before a hosted Codex turn, the active runtime resolves the
-current connection version through a signed Web-control read carrying the active
-runtime write fence. Web rechecks the member's current access, consent, row
-version, and expiry before decrypting. After app-server login, an exact-version,
+At cold start and provider-mode admission, the active runtime performs an
+explicit metadata-only signed Web-control read carrying the active runtime
+write fence. Web rechecks current access, consent, row state, version, and
+lifetime without decrypting or returning the bearer. Immediately before a
+hosted Codex turn, the invocation-scoped resolver performs the separate
+credential read. After app-server login, an exact-version,
 credential-free callback re-locks and rechecks access, consent, usable lease
 lifetime, and authenticated ciphertext before any thread starts. Warm
 same-version reads also authenticate the ciphertext before returning
@@ -348,6 +355,21 @@ snapshot state, diagnostics, or logs. The separate hosted-local development
 seed harness is not a transport or compatibility path for this companion
 handoff.
 
+The prepared provider mode is invocation-scoped. Before a payload-free runtime
+wake may admit more ordinary or detached provider work, the dirty invocation
+re-reads metadata-only current mode from the same signed owner. If the
+managed/external or file-auth-clearing mode changed, it pauses and requeues
+detached work, checkpoints without running idle provider maintenance, stops the
+resident Codex App Server only after the background-work and snapshot barrier,
+and yields through
+the existing immediate owner-release edge. The next admitted provider turn
+therefore starts in a fresh invocation with one coherent provider config,
+resolver, and process launch identity. Unread mailbox work remains durable.
+Same-mode access-seed rotation does not restart the invocation; ordinary and
+detached turns use the per-turn exact-version resolver. External-ChatGPT
+invocations always skip idle provider compaction because that maintenance path
+has no resolver boundary and therefore cannot safely reuse a resident bearer.
+
 Server-lease expiry is terminal for that uploaded authority: Web projects the
 credential-free companion status as `off`, the runtime clears its in-memory
 external-auth binding, and preserves the expired seed's connection version so
@@ -356,11 +378,11 @@ then reseed from a still-valid local bearer or refresh it through OpenAI first.
 Invalid state and runtime rejection remain `needs_attention` and must not be
 treated as renewable expiry. Disconnect clears the encrypted seed and expiry,
 rotates the connection version, and prevents that generation from authorizing
-any subsequent turn. The next runtime invocation clears an idle bound process;
-disconnect does not preempt a turn whose authorization callback already
-linearized, even if its provider request has not started yet, and bearer bytes
-may remain in idle process memory until that invocation or normal idle
-destruction. The identity-only companion path remains available
+any subsequent turn. The accepted mode-change wake clears an idle bound process
+after the current dirty workspace is safely checkpointed; disconnect does not
+preempt a turn whose authorization callback already linearized, even if its
+provider request has not started yet, and `off` does not claim synchronous byte
+erasure before that wake is handled. The identity-only companion path remains available
 after hosted access or consent is lost because it only reduces authority. Murph
 account deletion cascade-deletes the connection row with its member and destroys
 the hosted runtime. Murph does not promise provider-side revocation without a

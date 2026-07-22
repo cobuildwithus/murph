@@ -355,6 +355,9 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
+  beforeForegroundRuntimeWakeImport?: ((input: {
+    signal: AbortSignal;
+  }) => Promise<boolean>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -1347,6 +1350,17 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
       try {
+        // Register the wake as active before the auth-mode fence awaits its
+        // control read. Pass teardown drains this completion, so a consumed
+        // payload-free wake cannot be lost between provider completion and
+        // the outer invocation's restart check.
+        if (
+          await input.input.beforeForegroundRuntimeWakeImport?.({
+            signal: waitController.signal,
+          }) === true
+        ) {
+          break;
+        }
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
         ): Promise<boolean> => {

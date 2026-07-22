@@ -58,7 +58,7 @@ describe("hosted Codex auth seed internal route", () => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
   });
 
-  it("checks the runtime fence before signed auth and returns a bounded no-store seed", async () => {
+  it("defaults a legacy request to a credential read after checking the runtime fence", async () => {
     const order: string[] = [];
     mocks.readHostedRuntimeWriteFence.mockImplementationOnce(() => {
       order.push("fence");
@@ -107,7 +107,37 @@ describe("hosted Codex auth seed internal route", () => {
       payloadText: body,
     });
     expect(mocks.readHostedCodexAuthAccessSeedForRuntime).toHaveBeenCalledWith({
+      includeCredentials: true,
       knownConnectionVersion: null,
+      memberId: "member_123",
+      prisma: PRISMA,
+    });
+  });
+
+  it("returns only authenticated connection metadata for a credential-free probe", async () => {
+    mocks.readHostedCodexAuthAccessSeedForRuntime.mockResolvedValueOnce({
+      connectionVersion: CONNECTION_VERSION,
+      schemaVersion: 1,
+      status: "available_metadata",
+    });
+    const body = JSON.stringify({
+      includeCredentials: false,
+      knownConnectionVersion: CONNECTION_VERSION,
+      schemaVersion: 1,
+    });
+
+    const response = await route.POST(signedRequest(body));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      connectionVersion: CONNECTION_VERSION,
+      schemaVersion: 1,
+      status: "available_metadata",
+    });
+    expect(mocks.readHostedCodexAuthAccessSeedForRuntime).toHaveBeenCalledWith({
+      includeCredentials: false,
+      knownConnectionVersion: CONNECTION_VERSION,
       memberId: "member_123",
       prisma: PRISMA,
     });
@@ -117,6 +147,7 @@ describe("hosted Codex auth seed internal route", () => {
     mocks.readHostedRuntimeWriteFence.mockReturnValueOnce(null);
 
     const response = await route.POST(signedRequest(JSON.stringify({
+      includeCredentials: false,
       knownConnectionVersion: null,
       schemaVersion: 1,
     })));
@@ -153,6 +184,7 @@ describe("hosted Codex auth seed internal route", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const response = await route.POST(signedRequest(JSON.stringify({
+      includeCredentials: false,
       knownConnectionVersion: null,
       refreshToken: sentinel,
       schemaVersion: 1,
@@ -180,6 +212,7 @@ describe("hosted Codex auth seed internal route", () => {
     mocks.readHostedCodexAuthAccessSeedForRuntime.mockRejectedValueOnce(new Error(sentinel));
 
     const response = await route.POST(signedRequest(JSON.stringify({
+      includeCredentials: true,
       knownConnectionVersion: CONNECTION_VERSION,
       schemaVersion: 1,
     })));

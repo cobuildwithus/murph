@@ -4360,6 +4360,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
       knownConnectionVersion: null,
       schemaVersion: 1,
     })).resolves.toEqual({
@@ -4381,7 +4382,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.method).toBe("POST");
     expectDefaultRuntimeWriteFenceHeaders(request);
     await expect(request.json()).resolves.toEqual({
+      includeCredentials: true,
       knownConnectionVersion: null,
+      schemaVersion: 1,
+    });
+  });
+
+  it("reads token-free Codex auth connection metadata without widening the response", async () => {
+    const connectionVersion = `hca_${"m".repeat(16)}`;
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      connectionVersion,
+      schemaVersion: 1,
+      status: "available_metadata",
+    }), {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    });
+
+    await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: false,
+      knownConnectionVersion: connectionVersion,
+      schemaVersion: 1,
+    })).resolves.toEqual({
+      connectionVersion,
+      schemaVersion: 1,
+      status: "available_metadata",
+    });
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "Codex auth metadata callback request",
+    );
+    await expect(request.json()).resolves.toEqual({
+      includeCredentials: false,
+      knownConnectionVersion: connectionVersion,
       schemaVersion: 1,
     });
   });
@@ -4402,6 +4448,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
       knownConnectionVersion: null,
       schemaVersion: 1,
     })).rejects.toMatchObject({
@@ -4429,6 +4476,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     await expect(platform.codexAuthPort!.readAccessSeed({
+      includeCredentials: true,
       knownConnectionVersion: null,
       schemaVersion: 1,
     })).rejects.toThrow(

@@ -39,36 +39,63 @@ describe("hosted Codex auth seed contract", () => {
     expect(HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES).toBe(16_384);
   });
 
-  it("parses an exact request with a nullable known connection version", () => {
+  it("parses an exact request and defaults legacy credential reads to true", () => {
     expect(parseHostedCodexAuthSeedRequest({
       schemaVersion: 1,
+      includeCredentials: false,
       knownConnectionVersion: null,
     })).toEqual({
       schemaVersion: 1,
+      includeCredentials: false,
       knownConnectionVersion: null,
     });
     expect(parseHostedCodexAuthSeedRequest({
       schemaVersion: 1,
+      includeCredentials: true,
       knownConnectionVersion: CONNECTION_VERSION,
     })).toEqual({
       schemaVersion: 1,
+      includeCredentials: true,
       knownConnectionVersion: CONNECTION_VERSION,
+    });
+    expect(parseHostedCodexAuthSeedRequest({
+      schemaVersion: 1,
+      knownConnectionVersion: null,
+    })).toEqual({
+      schemaVersion: 1,
+      includeCredentials: true,
+      knownConnectionVersion: null,
     });
 
     for (const invalid of [
       {},
-      { schemaVersion: 2, knownConnectionVersion: null },
-      { schemaVersion: 1 },
-      { schemaVersion: 1, knownConnectionVersion: 1 },
-      { schemaVersion: 1, knownConnectionVersion: "hca_too_short" },
-      { schemaVersion: 1, knownConnectionVersion: null, connectionVersion: CONNECTION_VERSION },
+      { schemaVersion: 2, includeCredentials: false, knownConnectionVersion: null },
+      { schemaVersion: 1, includeCredentials: undefined, knownConnectionVersion: null },
+      { schemaVersion: 1, includeCredentials: "false", knownConnectionVersion: null },
+      { schemaVersion: 1, includeCredentials: false, knownConnectionVersion: 1 },
+      { schemaVersion: 1, includeCredentials: false, knownConnectionVersion: "hca_too_short" },
+      {
+        schemaVersion: 1,
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        connectionVersion: CONNECTION_VERSION,
+      },
     ]) {
       expect(() => parseHostedCodexAuthSeedRequest(invalid)).toThrow(TypeError);
     }
   });
 
-  it("parses available, unchanged, and unavailable responses", () => {
+  it("parses available, token-free metadata, unchanged, and unavailable responses", () => {
     expect(parseHostedCodexAuthSeedResponse(availableSeed())).toEqual(availableSeed());
+    expect(parseHostedCodexAuthSeedResponse({
+      schemaVersion: 1,
+      status: "available_metadata",
+      connectionVersion: CONNECTION_VERSION,
+    })).toEqual({
+      schemaVersion: 1,
+      status: "available_metadata",
+      connectionVersion: CONNECTION_VERSION,
+    });
     expect(parseHostedCodexAuthSeedResponse({
       schemaVersion: 1,
       status: "unchanged",
@@ -127,6 +154,7 @@ describe("hosted Codex auth seed contract", () => {
     ]) {
       expect(() => parseHostedCodexAuthSeedRequest({
         schemaVersion: 1,
+        includeCredentials: false,
         knownConnectionVersion: null,
         [field]: "forbidden-value",
       })).toThrow(/not allowed/u);
@@ -135,6 +163,18 @@ describe("hosted Codex auth seed contract", () => {
       }))).toThrow(/not allowed/u);
     }
 
+    for (const [field, value] of [
+      ["accessToken", "forbidden-value"],
+      ["chatgptAccountId", "forbidden-account"],
+      ["expiresAt", EXPIRES_AT],
+    ]) {
+      expect(() => parseHostedCodexAuthSeedResponse({
+        schemaVersion: 1,
+        status: "available_metadata",
+        connectionVersion: CONNECTION_VERSION,
+        [field]: value,
+      })).toThrow(/not allowed/u);
+    }
     expect(() => parseHostedCodexAuthSeedResponse({
       schemaVersion: 1,
       status: "unchanged",

@@ -1043,12 +1043,14 @@ no auth-specific mailbox item, token, routing id, or connection payload. Tempora
 and the mailbox never own the operation. Web acknowledges completion only for
 the exact attempt that reached its expected terminal state; the same terminal
 attempt is idempotent, while a newer upload or disconnect makes the older HTTP
-request fail with a retryable conflict. At cold start and turn-start
-reconciliation, the runtime supplies its known connection version through the
-signed Web-control seed read. Cloudflare attaches the active attempt and lease
-write fence, treats the bounded response as sensitive, and does not persist or
-log its body. Web rechecks current member access, consent, row version, and
-expiry immediately before decrypting. After an app-server login or unchanged
+request fail with a retryable conflict. At cold start and provider admission,
+the runtime explicitly requests metadata only through the signed Web-control
+seed read. Cloudflare attaches the active attempt and lease write fence and does
+not persist or log the response body. Web rechecks current member access,
+consent, row state, version, and lifetime, then returns only the connection
+version without decrypting the ciphertext. Only the per-turn resolver requests
+credentials; Cloudflare treats that bounded response as sensitive. After an
+app-server login or unchanged
 warm binding, the runtime sends an exact-version, credential-free result
 callback. Web re-locks the member and sponsored-access rows and rechecks access,
 consent, connection generation, usable seed lifetime, and authenticated
@@ -1057,6 +1059,14 @@ current durable authority. A same-version read authenticates the ciphertext
 before returning token-free `unchanged`. The successful callback is the
 turn-authorization linearization point. An unchanged or unavailable response
 contains no credential.
+
+Companion `connected` is a durable-control-plane fact: the latest encrypted
+seed/version is stored and eligible to authorize the next admitted turn. It is
+not proof that a resident process already holds that bearer. `off` means the
+seed was cleared and its generation rotated so no later exact-version callback
+can authorize it; it is not a synchronous resident-memory erasure claim. The
+runtime mode boundary below guarantees convergence before the next provider
+admission without adding a second status or state owner.
 
 The available bearer and routing id pass through the invocation-scoped runtime
 resolver and engine login bridge directly into the resident Codex App Server's
@@ -1070,12 +1080,40 @@ or a newer version causes the resident process to reconcile and log out before
 it may authorize another turn. Disconnect does not preempt a turn whose
 authorization callback already linearized, even when the provider request has
 not started yet.
+
+Provider mode and config are immutable within one invocation. A payload-free
+runtime wake must re-read metadata-only signed auth mode before it imports new
+ordinary or system work. Provider admission also rechecks after a mailbox
+import and at direct projected or post-checkpoint seams. When that mode differs
+from the invocation's prepared mode, the runtime pauses and requeues detached
+Assistant Ask work, skips idle provider maintenance and all post-checkpoint
+provider admission, commits the dirty workspace, and requests the existing
+immediate owner-release recheck. Only after the background-work/snapshot barrier
+may it stop the resident Codex App Server. Unread mailbox work stays durable for
+a fresh invocation, which
+regenerates a coherent provider config, resolver, and process launch identity.
+Access-seed version changes that remain external do not require this boundary;
+ordinary and detached turns use the per-turn exact-version resolver. Every
+external-ChatGPT invocation skips idle provider compaction because that
+maintenance request has no resolver seam and cannot safely reuse a resident
+bearer after rotation, expiry, or policy loss.
+
+If that restart checkpoint meets the legacy `foreground_pending` response, the
+runtime stages one immediate mailbox continuation and retries without importing
+or running a provider. A stale workspace-version bridge conflict may rebase one
+strictly newer metadata version and retry once. Repeated or non-advancing
+conflicts fail the invocation instead of looping or admitting stale-mode work.
+
 The separate hosted-local environment-to-`auth.json` seed remains a development
 harness and is not a transport or compatibility path for this companion flow.
 
 Use a staged, additive rollout. Deploy Web's row fields and signed sensitive
-read first while companion ingestion remains disabled. Deploy the tolerant
-Cloudflare/runtime consumer second. Companion upload is enabled only when
+read first while companion ingestion remains disabled. During this compatibility
+window, Web accepts an omitted `includeCredentials` as legacy `true`; only the
+new Cloudflare/runtime consumer sends explicit `false` and accepts the
+credential-free `available_metadata` response. Deploy that consumer second with
+immediate container rollout. This order is mandatory because the old Web exact
+parser cannot accept the new request field. Companion upload is enabled only when
 `MURPH_COMPANION_CHATGPT_AUTH_ENABLED=1`; it defaults off, while credential-free
 status and authority-reducing disconnect remain available. Do not set that gate
 for a production release without OpenAI approval for the integration contract.

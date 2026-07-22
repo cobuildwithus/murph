@@ -293,6 +293,7 @@ export async function markHostedCodexAuthAccessSeedDisconnected(input: {
 export async function readHostedCodexAuthAccessSeedForRuntime(input: {
   clock?: () => Date;
   crypto?: HostedCodexAuthAccessSeedCrypto;
+  includeCredentials: boolean;
   knownConnectionVersion: string | null;
   memberId: string;
   now?: Date;
@@ -346,6 +347,13 @@ export async function readHostedCodexAuthAccessSeedForRuntime(input: {
         reason: "needs_attention",
         schemaVersion: 1,
         status: "unavailable",
+      };
+    }
+    if (!input.includeCredentials) {
+      return {
+        connectionVersion: record.attemptId,
+        schemaVersion: 1,
+        status: "available_metadata",
       };
     }
 

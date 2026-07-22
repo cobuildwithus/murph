@@ -404,6 +404,7 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
   },
   {
     body: {
+      includeCredentials: true,
       knownConnectionVersion: null,
       schemaVersion: 1,
     },
@@ -1283,6 +1284,7 @@ describe("handleRunnerOutboundRequest", () => {
     const response = await handleRunnerOutboundRequest(
       new Request(`http://web-control.worker${HOSTED_RUNTIME_CODEX_AUTH_SEED_PATH}`, {
         body: JSON.stringify({
+          includeCredentials: false,
           knownConnectionVersion: null,
           schemaVersion: 1,
         }),

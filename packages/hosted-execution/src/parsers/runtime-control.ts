@@ -3791,13 +3791,23 @@ export function parseHostedCodexAuthSeedRequest(
   value: unknown,
 ): HostedCodexAuthSeedRequest {
   const record = requireObject(value, "Hosted Codex auth seed request");
-  assertExactHostedCodexAuthSeedKeys(
+  assertAllowedObjectKeys(
     record,
-    ["knownConnectionVersion", "schemaVersion"],
+    new Set(["includeCredentials", "knownConnectionVersion", "schemaVersion"]),
     "Hosted Codex auth seed request",
+  );
+  const hasIncludeCredentials = Object.prototype.hasOwnProperty.call(
+    record,
+    "includeCredentials",
   );
   return {
     schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+    includeCredentials: hasIncludeCredentials
+      ? requireBoolean(
+          record.includeCredentials,
+          "Hosted Codex auth seed request includeCredentials",
+        )
+      : true,
     knownConnectionVersion: parseNullableHostedCodexAuthAttemptId(
       record.knownConnectionVersion,
       "Hosted Codex auth seed request knownConnectionVersion",
@@ -3841,6 +3851,22 @@ export function parseHostedCodexAuthSeedResponse(
         record.chatgptAccountId,
         HOSTED_CODEX_AUTH_SEED_CHATGPT_ACCOUNT_ID_MAX_LENGTH,
         "Hosted Codex auth seed available response chatgptAccountId",
+      ),
+    };
+  }
+
+  if (status === "available_metadata") {
+    assertExactHostedCodexAuthSeedKeys(
+      record,
+      ["connectionVersion", "schemaVersion", "status"],
+      "Hosted Codex auth seed available metadata response",
+    );
+    return {
+      schemaVersion: parseHostedCodexAuthSeedSchemaVersion(record.schemaVersion),
+      status,
+      connectionVersion: parseHostedCodexAuthAttemptId(
+        record.connectionVersion,
+        "Hosted Codex auth seed available metadata response connectionVersion",
       ),
     };
   }

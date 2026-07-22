@@ -22,6 +22,7 @@ vi.mock("@murphai/assistant-engine", async () => {
 
 import {
   prepareHostedCodexChatGptAuth,
+  readHostedCodexChatGptAuthModeChange,
 } from "../src/hosted-runtime/codex-chatgpt-auth.ts";
 import type {
   HostedRuntimeCodexAuthPort,
@@ -38,10 +39,7 @@ beforeEach(() => {
 describe("hosted Codex ChatGPT auth resolver", () => {
   test("uses the startup read only for mode selection and resolves every turn from fresh authority", async () => {
     const readAccessSeed = vi.fn()
-      .mockResolvedValueOnce(availableSeed(
-        CONNECTION_VERSION,
-        "fixture-startup-access-token",
-      ))
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
       .mockResolvedValueOnce(availableSeed(CONNECTION_VERSION))
       .mockResolvedValueOnce({
         connectionVersion: CONNECTION_VERSION,
@@ -72,14 +70,17 @@ describe("hosted Codex ChatGPT auth resolver", () => {
 
     expect(readAccessSeed).toHaveBeenCalledTimes(3);
     expect(readAccessSeed.mock.calls[0]?.[0]).toEqual({
+      includeCredentials: false,
       knownConnectionVersion: null,
       schemaVersion: 1,
     });
     expect(readAccessSeed.mock.calls[1]?.[0]).toEqual({
+      includeCredentials: true,
       knownConnectionVersion: null,
       schemaVersion: 1,
     });
     expect(readAccessSeed.mock.calls[2]?.[0]).toEqual({
+      includeCredentials: true,
       knownConnectionVersion: CONNECTION_VERSION,
       schemaVersion: 1,
     });
@@ -87,7 +88,7 @@ describe("hosted Codex ChatGPT auth resolver", () => {
 
   test("never returns the startup token when the warm process already has its version", async () => {
     const readAccessSeed = vi.fn()
-      .mockResolvedValueOnce(availableSeed(CONNECTION_VERSION))
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
       .mockResolvedValueOnce({
         connectionVersion: CONNECTION_VERSION,
         schemaVersion: 1,
@@ -103,7 +104,18 @@ describe("hosted Codex ChatGPT auth resolver", () => {
       knownConnectionVersion: CONNECTION_VERSION,
       reason: "turn_start",
     })).resolves.toEqual({ kind: "unchanged" });
-    expect(readAccessSeed).toHaveBeenCalledTimes(2);
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: true,
+        knownConnectionVersion: CONNECTION_VERSION,
+        schemaVersion: 1,
+      },
+    ]);
   });
 
   test.each(["expired", "needs_attention"] as const)(
@@ -134,20 +146,32 @@ describe("hosted Codex ChatGPT auth resolver", () => {
         connectionVersion: CONNECTION_VERSION,
         kind: "logout",
       });
-      expect(readAccessSeed).toHaveBeenCalledTimes(2);
+      expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+        {
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
+        },
+        {
+          includeCredentials: true,
+          knownConnectionVersion: CONNECTION_VERSION,
+          schemaVersion: 1,
+        },
+      ]);
     },
   );
 
   test.each(["unconfigured", "disconnected", "legacy_device_code"] as const)(
     "keeps initial %s state out of external mode",
     async (reason) => {
+      const readAccessSeed = vi.fn().mockResolvedValueOnce({
+        connectionVersion: reason === "unconfigured" ? null : CONNECTION_VERSION,
+        reason,
+        schemaVersion: 1,
+        status: "unavailable",
+      } satisfies HostedCodexAuthSeedResponse);
       const prepared = await prepareHostedCodexChatGptAuth({
-        port: createCodexAuthPort(vi.fn().mockResolvedValueOnce({
-          connectionVersion: reason === "unconfigured" ? null : CONNECTION_VERSION,
-          reason,
-          schemaVersion: 1,
-          status: "unavailable",
-        } satisfies HostedCodexAuthSeedResponse)),
+        port: createCodexAuthPort(readAccessSeed),
         subject: SUBJECT,
       });
 
@@ -158,12 +182,17 @@ describe("hosted Codex ChatGPT auth resolver", () => {
       assert.equal(prepared.externalChatGptAuth, false);
       assert.equal(prepared.resolver, null);
       expect(engineMocks.clearWarmCodexChatGptAuthForSubject).toHaveBeenCalledTimes(1);
+      expect(readAccessSeed).toHaveBeenCalledWith({
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      }, { signal: null });
     },
   );
 
   test("observes a disconnect that supersedes an available startup read before turn start", async () => {
     const readAccessSeed = vi.fn()
-      .mockResolvedValueOnce(availableSeed(CONNECTION_VERSION))
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
       .mockResolvedValueOnce({
         connectionVersion: NEXT_CONNECTION_VERSION,
         reason: "disconnected",
@@ -184,8 +213,173 @@ describe("hosted Codex ChatGPT auth resolver", () => {
       connectionVersion: NEXT_CONNECTION_VERSION,
       kind: "logout",
     });
-    expect(readAccessSeed).toHaveBeenCalledTimes(2);
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: true,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+    ]);
   });
+
+  test("detects managed-to-external mode changes without requesting a warm clear", async () => {
+    const readAccessSeed = vi.fn()
+      .mockResolvedValueOnce({
+        connectionVersion: null,
+        reason: "unconfigured",
+        schemaVersion: 1,
+        status: "unavailable",
+      } satisfies HostedCodexAuthSeedResponse)
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION));
+    const port = createCodexAuthPort(readAccessSeed);
+    const prepared = await prepareHostedCodexChatGptAuth({
+      port,
+      subject: SUBJECT,
+    });
+    engineMocks.clearWarmCodexChatGptAuthForSubject.mockClear();
+
+    await expect(readHostedCodexChatGptAuthModeChange({
+      port,
+      prepared,
+    })).resolves.toEqual({
+      changed: true,
+      clearWarmChatGptAuth: false,
+    });
+
+    expect(engineMocks.clearWarmCodexChatGptAuthForSubject).not.toHaveBeenCalled();
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+    ]);
+  });
+
+  test("defers an external warm clear until after the runtime mode boundary", async () => {
+    const readAccessSeed = vi.fn()
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
+      .mockResolvedValueOnce({
+        connectionVersion: NEXT_CONNECTION_VERSION,
+        reason: "disconnected",
+        schemaVersion: 1,
+        status: "unavailable",
+      } satisfies HostedCodexAuthSeedResponse);
+    const port = createCodexAuthPort(readAccessSeed);
+    const prepared = await prepareHostedCodexChatGptAuth({
+      port,
+      subject: SUBJECT,
+    });
+    engineMocks.clearWarmCodexChatGptAuthForSubject.mockClear();
+
+    await expect(readHostedCodexChatGptAuthModeChange({
+      port,
+      prepared,
+    })).resolves.toEqual({
+      changed: true,
+      clearWarmChatGptAuth: true,
+    });
+
+    expect(engineMocks.clearWarmCodexChatGptAuthForSubject).not.toHaveBeenCalled();
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+    ]);
+  });
+
+  test("keeps same-mode access-seed rotation on the per-turn resolver path", async () => {
+    const readAccessSeed = vi.fn()
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
+      .mockResolvedValueOnce(availableMetadata(NEXT_CONNECTION_VERSION));
+    const port = createCodexAuthPort(readAccessSeed);
+    const prepared = await prepareHostedCodexChatGptAuth({
+      port,
+      subject: SUBJECT,
+    });
+    engineMocks.clearWarmCodexChatGptAuthForSubject.mockClear();
+
+    await expect(readHostedCodexChatGptAuthModeChange({
+      port,
+      prepared,
+    })).resolves.toEqual({
+      changed: false,
+      clearWarmChatGptAuth: false,
+    });
+
+    expect(engineMocks.clearWarmCodexChatGptAuthForSubject).not.toHaveBeenCalled();
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+    ]);
+  });
+
+  test.each(["expired", "needs_attention"] as const)(
+    "keeps external metadata-to-%s changes on the resolver-owned path",
+    async (reason) => {
+      const readAccessSeed = vi.fn()
+        .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
+        .mockResolvedValueOnce({
+          connectionVersion: NEXT_CONNECTION_VERSION,
+          reason,
+          schemaVersion: 1,
+          status: "unavailable",
+        } satisfies HostedCodexAuthSeedResponse);
+      const port = createCodexAuthPort(readAccessSeed);
+      const prepared = await prepareHostedCodexChatGptAuth({
+        port,
+        subject: SUBJECT,
+      });
+      engineMocks.clearWarmCodexChatGptAuthForSubject.mockClear();
+
+      await expect(readHostedCodexChatGptAuthModeChange({
+        port,
+        prepared,
+      })).resolves.toEqual({
+        changed: false,
+        clearWarmChatGptAuth: false,
+      });
+
+      expect(engineMocks.clearWarmCodexChatGptAuthForSubject).not.toHaveBeenCalled();
+      expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+        {
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
+        },
+        {
+          includeCredentials: false,
+          knownConnectionVersion: null,
+          schemaVersion: 1,
+        },
+      ]);
+    },
+  );
 
   test.each([
     ["connected", "applied", "current"],
@@ -202,7 +396,7 @@ describe("hosted Codex ChatGPT auth resolver", () => {
       }));
       const prepared = await prepareHostedCodexChatGptAuth({
         port: createCodexAuthPort(
-          vi.fn().mockResolvedValueOnce(availableSeed(CONNECTION_VERSION)),
+          vi.fn().mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION)),
           update,
         ),
         subject: SUBJECT,
@@ -225,21 +419,101 @@ describe("hosted Codex ChatGPT auth resolver", () => {
   );
 
   test("fails closed when an initial read claims unchanged authority", async () => {
+    const readAccessSeed = vi.fn().mockResolvedValueOnce({
+      connectionVersion: CONNECTION_VERSION,
+      schemaVersion: 1,
+      status: "unchanged",
+    } satisfies HostedCodexAuthSeedResponse);
     await expect(prepareHostedCodexChatGptAuth({
-      port: createCodexAuthPort(vi.fn().mockResolvedValueOnce({
-        connectionVersion: CONNECTION_VERSION,
-        schemaVersion: 1,
-        status: "unchanged",
-      } satisfies HostedCodexAuthSeedResponse)),
+      port: createCodexAuthPort(readAccessSeed),
       subject: SUBJECT,
     })).rejects.toThrow("without a known connection version");
+    expect(readAccessSeed).toHaveBeenCalledWith({
+      includeCredentials: false,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    }, { signal: null });
+  });
+
+  test("fails closed when a startup metadata read returns credential material", async () => {
+    const readAccessSeed = vi.fn().mockResolvedValueOnce(
+      availableSeed(CONNECTION_VERSION, "fixture-forbidden-mode-token"),
+    );
+
+    await expect(prepareHostedCodexChatGptAuth({
+      port: createCodexAuthPort(readAccessSeed),
+      subject: SUBJECT,
+    })).rejects.toThrow("metadata read unexpectedly returned credentials");
+    expect(readAccessSeed).toHaveBeenCalledWith({
+      includeCredentials: false,
+      knownConnectionVersion: null,
+      schemaVersion: 1,
+    }, { signal: null });
+  });
+
+  test("fails closed when a hot metadata probe returns credential material", async () => {
+    const readAccessSeed = vi.fn()
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
+      .mockResolvedValueOnce(
+        availableSeed(NEXT_CONNECTION_VERSION, "fixture-forbidden-hot-mode-token"),
+      );
+    const port = createCodexAuthPort(readAccessSeed);
+    const prepared = await prepareHostedCodexChatGptAuth({
+      port,
+      subject: SUBJECT,
+    });
+
+    await expect(readHostedCodexChatGptAuthModeChange({
+      port,
+      prepared,
+    })).rejects.toThrow("metadata read unexpectedly returned credentials");
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+    ]);
+  });
+
+  test("fails closed when a credential read returns metadata without credentials", async () => {
+    const readAccessSeed = vi.fn()
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
+      .mockResolvedValueOnce(availableMetadata(NEXT_CONNECTION_VERSION));
+    const prepared = await prepareHostedCodexChatGptAuth({
+      port: createCodexAuthPort(readAccessSeed),
+      subject: SUBJECT,
+    });
+
+    assert.ok(prepared.resolver);
+    await expect(prepared.resolver.resolve({
+      knownConnectionVersion: CONNECTION_VERSION,
+      reason: "turn_start",
+    })).rejects.toThrow("credential read returned metadata without credentials");
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: true,
+        knownConnectionVersion: CONNECTION_VERSION,
+        schemaVersion: 1,
+      },
+    ]);
   });
 
   test("forwards startup and turn abort signals to their separate authority reads", async () => {
     const initialSignal = new AbortController().signal;
     const turnSignal = new AbortController().signal;
     const readAccessSeed = vi.fn()
-      .mockResolvedValueOnce(availableSeed(CONNECTION_VERSION))
+      .mockResolvedValueOnce(availableMetadata(CONNECTION_VERSION))
       .mockResolvedValueOnce(availableSeed(NEXT_CONNECTION_VERSION));
     const prepared = await prepareHostedCodexChatGptAuth({
       port: createCodexAuthPort(readAccessSeed),
@@ -256,8 +530,30 @@ describe("hosted Codex ChatGPT auth resolver", () => {
 
     expect(readAccessSeed.mock.calls[0]?.[1]).toEqual({ signal: initialSignal });
     expect(readAccessSeed.mock.calls[1]?.[1]).toEqual({ signal: turnSignal });
+    expect(readAccessSeed.mock.calls.map(([request]) => request)).toEqual([
+      {
+        includeCredentials: false,
+        knownConnectionVersion: null,
+        schemaVersion: 1,
+      },
+      {
+        includeCredentials: true,
+        knownConnectionVersion: CONNECTION_VERSION,
+        schemaVersion: 1,
+      },
+    ]);
   });
 });
+
+function availableMetadata(
+  connectionVersion: string,
+): HostedCodexAuthSeedResponse {
+  return {
+    connectionVersion,
+    schemaVersion: 1,
+    status: "available_metadata",
+  };
+}
 
 function availableSeed(
   connectionVersion: string,

@@ -17,6 +17,21 @@ export interface HostedCodexChatGptAuthPreparation {
   resolver: AssistantCodexChatGptAuthResolver | null;
 }
 
+type HostedCodexChatGptAuthMode = Omit<
+  HostedCodexChatGptAuthPreparation,
+  "resolver"
+>;
+
+interface HostedCodexChatGptAuthModeSelection {
+  clearWarmChatGptAuth: boolean;
+  mode: HostedCodexChatGptAuthMode;
+}
+
+export interface HostedCodexChatGptAuthModeChange {
+  changed: boolean;
+  clearWarmChatGptAuth: boolean;
+}
+
 export async function prepareHostedCodexChatGptAuth(input: {
   port: HostedRuntimeCodexAuthPort | null | undefined;
   signal?: AbortSignal | null;
@@ -43,38 +58,92 @@ export async function prepareHostedCodexChatGptAuth(input: {
   };
 }
 
+export async function readHostedCodexChatGptAuthModeChange(input: {
+  prepared: HostedCodexChatGptAuthPreparation;
+  port: HostedRuntimeCodexAuthPort | null | undefined;
+  signal?: AbortSignal | null;
+}): Promise<HostedCodexChatGptAuthModeChange> {
+  if (!input.port) {
+    return { changed: false, clearWarmChatGptAuth: false };
+  }
+
+  const selection = await readHostedCodexChatGptAuthModeSelection({
+    port: input.port,
+    signal: input.signal ?? null,
+  });
+  const changed = selection.mode.clearFileBackedChatGptAuth
+      !== input.prepared.clearFileBackedChatGptAuth
+    || selection.mode.externalChatGptAuth !== input.prepared.externalChatGptAuth;
+  return {
+    changed,
+    clearWarmChatGptAuth: changed && selection.clearWarmChatGptAuth,
+  };
+}
+
 async function selectHostedCodexChatGptAuthStartupMode(input: {
   port: HostedRuntimeCodexAuthPort;
   signal: AbortSignal | null;
   subject: string;
-}): Promise<Omit<HostedCodexChatGptAuthPreparation, "resolver">> {
+}): Promise<HostedCodexChatGptAuthMode> {
+  const selection = await readHostedCodexChatGptAuthModeSelection(input);
+  if (selection.clearWarmChatGptAuth) {
+    await clearWarmCodexChatGptAuthForSubject(input.subject);
+  }
+  return selection.mode;
+}
+
+async function readHostedCodexChatGptAuthModeSelection(input: {
+  port: HostedRuntimeCodexAuthPort;
+  signal: AbortSignal | null;
+}): Promise<HostedCodexChatGptAuthModeSelection> {
   const response = await input.port.readAccessSeed(
     {
+      includeCredentials: false,
       knownConnectionVersion: null,
       schemaVersion: 1,
     },
     { signal: input.signal },
   );
 
+  if (response.status === "available") {
+    throw new Error(
+      "Hosted Codex ChatGPT auth metadata read unexpectedly returned credentials.",
+    );
+  }
+
+  if (response.status === "available_metadata") {
+    return {
+      clearWarmChatGptAuth: false,
+      mode: {
+        clearFileBackedChatGptAuth: true,
+        externalChatGptAuth: true,
+      },
+    };
+  }
+
   if (response.status === "unchanged") {
     throw new Error(
-      "Hosted Codex ChatGPT auth seed read returned unchanged without a known connection version.",
+      "Hosted Codex ChatGPT auth metadata read returned unchanged without a known connection version.",
     );
   }
 
   if (response.status === "unavailable") {
     switch (response.reason) {
       case "unconfigured":
-        await clearWarmCodexChatGptAuthForSubject(input.subject);
         return {
-          clearFileBackedChatGptAuth: false,
-          externalChatGptAuth: false,
+          clearWarmChatGptAuth: true,
+          mode: {
+            clearFileBackedChatGptAuth: false,
+            externalChatGptAuth: false,
+          },
         };
       case "disconnected":
-        await clearWarmCodexChatGptAuthForSubject(input.subject);
         return {
-          clearFileBackedChatGptAuth: true,
-          externalChatGptAuth: false,
+          clearWarmChatGptAuth: true,
+          mode: {
+            clearFileBackedChatGptAuth: true,
+            externalChatGptAuth: false,
+          },
         };
       case "legacy_device_code":
         // Temporary deploy compatibility: keep the existing file-backed auth
@@ -82,21 +151,25 @@ async function selectHostedCodexChatGptAuthStartupMode(input: {
         // flow. Stop any warm access-seed process first so switching auth modes
         // cannot retain its bearer; the replacement process may then load the
         // legacy auth.json normally.
-        await clearWarmCodexChatGptAuthForSubject(input.subject);
         return {
-          clearFileBackedChatGptAuth: false,
-          externalChatGptAuth: false,
+          clearWarmChatGptAuth: true,
+          mode: {
+            clearFileBackedChatGptAuth: false,
+            externalChatGptAuth: false,
+          },
         };
       case "expired":
       case "needs_attention":
-        await clearWarmCodexChatGptAuthForSubject(input.subject);
         break;
     }
   }
 
   return {
-    clearFileBackedChatGptAuth: true,
-    externalChatGptAuth: true,
+    clearWarmChatGptAuth: response.status === "unavailable",
+    mode: {
+      clearFileBackedChatGptAuth: true,
+      externalChatGptAuth: true,
+    },
   };
 }
 
@@ -120,6 +193,7 @@ function createHostedCodexChatGptAuthResolver(
     async resolve(resolveInput) {
       const response = await port.readAccessSeed(
         {
+          includeCredentials: true,
           knownConnectionVersion: resolveInput.knownConnectionVersion,
           schemaVersion: 1,
         },
@@ -138,6 +212,10 @@ function projectHostedCodexChatGptAuthResolution(
   knownConnectionVersion: string | null,
 ): AssistantCodexChatGptAuthResolution {
   switch (response.status) {
+    case "available_metadata":
+      throw new Error(
+        "Hosted Codex ChatGPT auth credential read returned metadata without credentials.",
+      );
     case "available":
       return {
         accessToken: response.accessToken,
