@@ -35,7 +35,6 @@ import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   formatLabDate,
   formatLabFlag,
-  formatLabReferenceRange,
   formatLabResultReferenceRange,
   formatLabUnit,
   labResultYear,
@@ -44,10 +43,13 @@ import {
   useBrowserVault,
   useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
+import { cn } from "@/src/lib/utils";
 
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
+  chatAction?: ReactNode;
   metricKey: string;
+  summary?: string | null;
   uploadLabsAction?: ReactNode;
 }
 
@@ -58,7 +60,9 @@ interface LabResultYearGroup {
 
 export function LabBiomarkerDetailClient({
   authenticated,
+  chatAction = null,
   metricKey,
+  summary = null,
   uploadLabsAction = null,
 }: LabBiomarkerDetailClientProps) {
   const {
@@ -134,32 +138,42 @@ export function LabBiomarkerDetailClient({
   }
 
   return (
-    <BiomarkerDetailShell detail={visibleDetail}>
+    <BiomarkerDetailShell chatAction={chatAction} detail={visibleDetail} summary={summary}>
       {content}
     </BiomarkerDetailShell>
   );
 }
 
 function BiomarkerDetailShell({
+  chatAction,
   children,
   detail,
+  summary,
 }: {
+  chatAction: ReactNode;
   children: ReactNode;
   detail: BrowserVaultLabBiomarkerDetail | null;
+  summary: string | null;
 }) {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-4">
         <BackToBiomarkersLink />
         <header>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance text-foreground sm:text-5xl">
+          <h1 className="font-serif text-4xl font-semibold tracking-tight text-balance text-foreground sm:text-5xl">
             {detail?.displayName ?? "Biomarker history"}
           </h1>
           <p className="mt-3 max-w-3xl text-base leading-relaxed text-pretty text-muted-foreground sm:text-lg">
             {detail
-              ? formatDetailSummary(detail)
+              ? summary ?? formatDetailSummary(detail)
               : "Review your saved results for one lab biomarker over time."}
           </p>
+          {detail && summary ? (
+            <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              {formatDetailSummary(detail)}
+            </p>
+          ) : null}
+          {chatAction ? <div className="mt-5">{chatAction}</div> : null}
         </header>
       </div>
       {children}
@@ -184,14 +198,10 @@ function BiomarkerDetailContent({
     id: point.rowId,
     value: point.value,
   }));
-  const chartNotes = buildChartNotes(detail);
   const chartRange = resolveChartedReferenceRange(detail);
-  const chartCaption = formatChartCaption(
-    chartPoints.length,
-    detail.comparableUnit,
-    chartRange,
-  );
   const latestStatus = resolveLatestResultStatus(detail.latest.flag);
+  const latestReferenceRange = formatLabResultReferenceRange(detail.latest);
+  const latestSource = detail.latest.labName ?? detail.latest.sourceLabel;
 
   return (
     <>
@@ -205,84 +215,95 @@ function BiomarkerDetailContent({
 
       <section
         aria-labelledby="biomarker-latest-result-heading"
-        className="border-y border-border/70 py-8 sm:py-10"
+        className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
       >
-        <h2
-          className={latestStatus.tone === "in-range"
-            ? "text-2xl font-semibold tracking-tight text-primary"
-            : latestStatus.tone === "review"
-              ? "text-2xl font-semibold tracking-tight text-destructive"
-              : "text-2xl font-semibold tracking-tight text-foreground"}
-          id="biomarker-latest-result-heading"
-        >
-          {latestStatus.label}
-        </h2>
-        <div className="mt-3 flex min-w-0 items-baseline gap-3">
-          <span
-            aria-hidden="true"
-            className={latestStatus.tone === "in-range"
-              ? "size-3 shrink-0 self-center rounded-full bg-primary/80"
-              : latestStatus.tone === "review"
-                ? "size-3 shrink-0 self-center rounded-full bg-destructive/80"
-                : "size-3 shrink-0 self-center rounded-full bg-muted-foreground/70"}
-          />
-          <LabResultValue
-            presentation="hero"
-            result={detail.latest}
-          />
-        </div>
-        <time
-          className="mt-4 block text-sm text-muted-foreground"
-          dateTime={detail.latest.date}
-        >
-          {formatLabDate(detail.latest.date)}
-        </time>
-
-        {chartPoints.length > 0 ? (
-          <div className="mt-9 min-w-0 border-t border-border/70 pt-5">
-            <p
-              className="mb-3 text-xs text-muted-foreground"
-              id="biomarker-chart-caption"
-            >
-              {chartCaption}
+        <div className={cn(
+          "grid",
+          chartPoints.length > 0
+            && "lg:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.28fr)]",
+        )}>
+          <div className={cn(
+            "px-5 py-8 sm:px-8 sm:py-10",
+            chartPoints.length > 0 && "lg:border-r lg:border-border/70",
+          )}>
+            <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              Latest reading
             </p>
-            <LabBiomarkerHistoryChart
-              ariaDescribedBy="biomarker-chart-caption"
-              displayName={detail.displayName}
-              points={chartPoints}
-              referenceRange={chartRange}
-              unit={detail.comparableUnit}
-            />
-          </div>
-        ) : (
-          <div className="mt-9 border-t border-border/70 pt-5">
-            <Card size="sm">
-              <CardHeader>
-                <CardTitle>No comparable numeric trend</CardTitle>
-                <CardDescription>
-                  Qualitative results, boundary values, and units that cannot be compared remain in the history below.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-          </div>
-        )}
+            <h2
+              className={cn(
+                "mt-4 text-xl font-semibold tracking-tight",
+                latestStatus.tone === "in-range" && "text-primary",
+                latestStatus.tone === "review" && "text-destructive",
+                latestStatus.tone === "reported" && "text-foreground",
+              )}
+              id="biomarker-latest-result-heading"
+            >
+              {latestStatus.label}
+            </h2>
+            <div className="mt-3 flex min-w-0 items-baseline gap-3">
+              <span
+                aria-hidden="true"
+                className={latestStatus.tone === "in-range"
+                  ? "size-3 shrink-0 self-center rounded-full bg-primary/80"
+                  : latestStatus.tone === "review"
+                    ? "size-3 shrink-0 self-center rounded-full bg-destructive/80"
+                    : "size-3 shrink-0 self-center rounded-full bg-muted-foreground/70"}
+              />
+              <LabResultValue
+                presentation="hero"
+                result={detail.latest}
+              />
+            </div>
+            <time
+              className="mt-4 block text-sm text-muted-foreground"
+              dateTime={detail.latest.date}
+            >
+              {formatLabDate(detail.latest.date)}
+            </time>
 
-        {chartPoints.length === 1 ? (
-          <p className="text-sm text-muted-foreground">
-            One comparable numeric result is available. A second comparable numeric result will show a change over time.
-          </p>
-        ) : null}
-
-        {chartNotes.length > 0 ? (
-          <div className="mt-5 border-t border-border/70 pt-4">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Chart context
-            </span>
-            <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground">
-              {chartNotes.map((note) => <li key={note}>{note}</li>)}
-            </ul>
+            <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
+              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+                <dt className="text-muted-foreground">Lab range</dt>
+                <dd className="break-words font-medium text-foreground">
+                  {latestReferenceRange ?? "Not listed"}
+                </dd>
+              </div>
+              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+                <dt className="text-muted-foreground">Source</dt>
+                <dd className="break-words font-medium text-foreground">
+                  {latestSource ?? "Not listed"}
+                </dd>
+              </div>
+              <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+                <dt className="text-muted-foreground">History</dt>
+                <dd className="font-medium text-foreground">
+                  {detail.rows.length} {detail.rows.length === 1 ? "result" : "results"}
+                </dd>
+              </div>
+            </dl>
           </div>
-        ) : null}
+
+          {chartPoints.length > 0 ? (
+            <div className="min-w-0 border-t border-border/70 px-5 py-8 sm:px-8 sm:py-10 lg:border-t-0">
+              <h3 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+                Results over time
+              </h3>
+              <div className="mt-4 min-w-0">
+                <LabBiomarkerHistoryChart
+                  displayName={detail.displayName}
+                  points={chartPoints}
+                  referenceRange={chartRange}
+                  unit={detail.comparableUnit}
+                />
+              </div>
+              {chartPoints.length === 1 ? (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  A second comparable numeric result will show a change over time.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </section>
 
       <section aria-labelledby="biomarker-history-heading" className="flex flex-col gap-6">
@@ -561,31 +582,6 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
   return `${detail.rows.length} saved ${detail.rows.length === 1 ? "result" : "results"}, ${span}.`;
 }
 
-function formatChartCaption(
-  pointCount: number,
-  unit: string | null,
-  range: LabBiomarkerChartRange | null,
-): string {
-  const plottedUnit = unit ? ` in ${formatLabUnit(unit)}` : "";
-  const plotted = `${pointCount} ${pointCount === 1 ? "result" : "results"} plotted${plottedUnit}`;
-  if (!range) {
-    return plotted;
-  }
-
-  const formattedRange = formatLabReferenceRange({
-    ...(range.high === null ? {} : { high: range.high }),
-    ...(range.low === null ? {} : { low: range.low }),
-  }, unit);
-  if (!formattedRange) {
-    return plotted;
-  }
-
-  const rangeStyle = range.low !== null && range.high !== null
-    ? "Shaded lab range"
-    : "Dashed lab limit";
-  return `${plotted} · ${rangeStyle}: ${formattedRange}`;
-}
-
 /**
  * The chart plots normalized comparable values, so a reference band is only
  * truthful when every charted row has the same normalized numeric bounds.
@@ -635,26 +631,6 @@ function resolveChartedReferenceRange(
   }
 
   return range;
-}
-
-function buildChartNotes(detail: BrowserVaultLabBiomarkerDetail): string[] {
-  const notes: string[] = [];
-  const comparatorCount = detail.rows.filter((row) => row.comparator !== null).length;
-  const qualitativeCount = detail.rows.filter((row) =>
-    row.value === null && row.textValue !== null
-  ).length;
-
-  if (comparatorCount > 0) {
-    notes.push(`${comparatorCount} ${comparatorCount === 1 ? "result was" : "results were"} reported as a limit and ${comparatorCount === 1 ? "is" : "are"} kept in history rather than plotted as an exact value.`);
-  }
-  if (qualitativeCount > 0) {
-    notes.push(`${qualitativeCount} qualitative ${qualitativeCount === 1 ? "result is" : "results are"} shown in history but not on the numeric chart.`);
-  }
-  if (detail.hasIncompatibleHistory) {
-    notes.push("Results in units that could not be compared are kept in history; no single numeric series includes them.");
-  }
-
-  return notes;
 }
 
 function isAuthRequiredBrowserVaultError(error: string | null): boolean {

@@ -1,4 +1,5 @@
 import {
+  BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
@@ -24,7 +25,7 @@ function StudySection({
 
 export function SectionsContent() {
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-16 px-6 py-12 sm:px-10 lg:px-16">
+    <div className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12">
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
@@ -45,6 +46,12 @@ export function SectionsContent() {
 
       <StudySection title="Biomarker detail">
         <BiomarkerDetailStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Boundary result detail">
+        <BiomarkerBoundaryResultStudy />
       </StudySection>
     </div>
   );

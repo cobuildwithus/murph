@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:serum-25-hydroxyvitamin-d
 slug: biomarkers/serum-25-hydroxyvitamin-d
 title: Serum 25-Hydroxyvitamin D
-summary: The primary lab marker for vitamin D status and the clearest measurable endpoint for daily vitamin D3 supplementation experiments, with thresholds and assay interpretation requiring context.
+summary: "Serum 25-hydroxyvitamin D measures the main circulating vitamin D status marker, which can add bone and nutrition context while testing indications and target thresholds differ across guidance."
 status: draft
 quality: usable
 aliases:
@@ -69,6 +69,40 @@ biomarker:
       - adherence
       - supplement stacking
       - kidney disease or calcium disorders
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for Vitamin D; use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies only to the named specimen, assay, units, collection conditions, supplements, diet, inflammation, kidney function, and source laboratory interpretation."
+      source:
+        title: "Vitamin D for the Prevention of Disease: An Endocrine Society Clinical Practice Guideline"
+        organization: "Endocrine Society; Journal of Clinical Endocrinology & Metabolism"
+        year: 2024
+        sourceType: "clinical_guideline"
+        url: "https://www.endocrine.org/clinical-practice-guidelines/vitamin-d-for-prevention-of-disease"
+    - kind: decision_limit
+      guidance: "The National Academies concluded that 20 ng/mL, equivalent to 50 nmol/L, meets the needs of nearly all people for bone-health outcomes, while the 2024 Endocrine Society guideline found no outcome-specific threshold for routine testing in generally healthy populations."
+      applicability: "This records a real scope difference rather than choosing a false consensus: the National Academies threshold addresses population bone-health adequacy, while the Endocrine Society guidance addresses disease prevention and routine testing in generally healthy people."
+      numericValues:
+        - label: "National Academies concentration meeting needs of nearly all people for bone health"
+          unit: "ng/mL"
+          lowerBound:
+            value: 20
+            inclusive: true
+        - label: "National Academies concentration meeting needs of nearly all people for bone health"
+          unit: "nmol/L"
+          lowerBound:
+            value: 50
+            inclusive: true
+      source:
+        title: "Dietary Reference Intakes for Calcium and Vitamin D"
+        organization: "National Academies of Sciences, Engineering, and Medicine"
+        year: 2011
+        sourceType: "academic_reference"
+        url: "https://nap.nationalacademies.org/catalog/13050/dietary-reference-intakes-for-calcium-and-vitamin-d"
 ---
 
 Serum 25-hydroxyvitamin D is the main outcome for Daily Vitamin D3 Supplementation because direct daily-D3 trials repeatedly measure a change in this biomarker over weeks to months.

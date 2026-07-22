@@ -1894,11 +1894,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         });
       },
       codexHome: hostedCodexRuntime.codexHome,
+      deferUsageUntilAfterDurableCheckpoint(effect) {
+        pendingDurableCheckpointEffects.push(effect);
+      },
       env: hostedCodexRuntime.runtimeEnv,
+      memberId: input.request.userId,
+      model: hostedCodexRuntime.runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+      modelProvider:
+        hostedCodexRuntime.runtimeEnv[
+          HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV
+        ] ?? null,
       onStateMutation() {
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
       },
+      usageRecordPort: runtime.platform.usageRecordPort ?? null,
+      userEnvKeys: Object.keys(runtime.userEnv),
       vaultRoot: restored.vaultRoot,
     });
     pauseDetachedAssistantAskBeforeWorkspaceBoundary = async () => {

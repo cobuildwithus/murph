@@ -1,146 +1,41 @@
 "use client";
 
 import Link from "next/link";
-import {
-  Activity,
-  ChevronRight,
-  Droplets,
-  Search,
-  TestTubes,
-} from "lucide-react";
-import { useMemo, useState, type ComponentType } from "react";
+import { ArrowLeft, ChevronDown, Search } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
-import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
-import { Button } from "@/src/components/ui/button";
+import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
 import { Input } from "@/src/components/ui/input";
+import {
+  BIOMARKER_DEVICE_STUDIES,
+  BIOMARKER_STUDY_GROUPS,
+  type BiomarkerStudyGroup,
+  type BiomarkerStudyResult,
+  type BiomarkerStudyStatus,
+} from "@/src/components/biomarkers/biomarker-design-data";
 import { cn } from "@/src/lib/utils";
 
-type BiomarkerStudyStatus = "attention" | "in-range";
-type BiomarkerStudyFilter = "all" | BiomarkerStudyStatus;
-
-interface BiomarkerStudyResult {
-  id: string;
-  metricKey: string;
-  name: string;
-  status: BiomarkerStudyStatus;
-  statusLabel: string;
-  unit: string;
-  value: string;
-}
-
-interface BiomarkerStudyGroup {
-  icon: ComponentType<{ className?: string }>;
-  id: string;
-  label: string;
-  results: readonly BiomarkerStudyResult[];
-}
-
-const BIOMARKER_STUDY_GROUPS: readonly BiomarkerStudyGroup[] = [
-  {
-    icon: Droplets,
-    id: "blood",
-    label: "Blood",
-    results: [
-      {
-        id: "hemoglobin",
-        metricKey: "hemoglobin",
-        name: "Hemoglobin",
-        status: "attention",
-        statusLabel: "Above range",
-        unit: "g/dL",
-        value: "18.0",
-      },
-      {
-        id: "hematocrit",
-        metricKey: "hematocrit",
-        name: "Hematocrit",
-        status: "attention",
-        statusLabel: "Above range",
-        unit: "%",
-        value: "52.0",
-      },
-      {
-        id: "mch",
-        metricKey: "mean-corpuscular-hemoglobin",
-        name: "Mean corpuscular hemoglobin",
-        status: "in-range",
-        statusLabel: "In range",
-        unit: "pg",
-        value: "30.0",
-      },
-    ],
-  },
-  {
-    icon: Activity,
-    id: "metabolic",
-    label: "Metabolic",
-    results: [
-      {
-        id: "glucose",
-        metricKey: "glucose",
-        name: "Glucose",
-        status: "in-range",
-        statusLabel: "In range",
-        unit: "mg/dL",
-        value: "90",
-      },
-      {
-        id: "hemoglobin-a1c",
-        metricKey: "hba1c",
-        name: "Hemoglobin A1c",
-        status: "in-range",
-        statusLabel: "In range",
-        unit: "%",
-        value: "5.0",
-      },
-    ],
-  },
-  {
-    icon: TestTubes,
-    id: "thyroid",
-    label: "Thyroid",
-    results: [
-      {
-        id: "tsh",
-        metricKey: "thyroid-stimulating-hormone",
-        name: "Thyroid stimulating hormone",
-        status: "in-range",
-        statusLabel: "In range",
-        unit: "µIU/mL",
-        value: "2.0",
-      },
-      {
-        id: "free-t4",
-        metricKey: "free-t4",
-        name: "Free T4",
-        status: "in-range",
-        statusLabel: "In range",
-        unit: "ng/dL",
-        value: "1.0",
-      },
-    ],
-  },
-] as const;
-
-const HEMOGLOBIN_HISTORY: readonly LabBiomarkerChartPoint[] = [
-  { date: "2023-01-01", id: "synthetic-hgb-2023", value: 15 },
-  { date: "2024-01-01", id: "synthetic-hgb-2024", value: 16 },
-  { date: "2025-01-01", id: "synthetic-hgb-2025", value: 17 },
-  { date: "2026-01-01", id: "synthetic-hgb-2026", value: 18 },
-] as const;
+type BiomarkerStudyFilter = "all" | Exclude<BiomarkerStudyStatus, "reported">;
 
 const FILTERS: readonly {
   label: string;
-  tone?: BiomarkerStudyStatus;
+  tone?: "in-range" | "review";
   value: BiomarkerStudyFilter;
 }[] = [
   { label: "All", value: "all" },
-  { label: "Review", tone: "attention", value: "attention" },
+  { label: "Review", tone: "review", value: "review" },
   { label: "In range", tone: "in-range", value: "in-range" },
+] as const;
+
+const HEMOGLOBIN_HISTORY: readonly LabBiomarkerChartPoint[] = [
+  { date: "2023-02-17", displayValue: "15.4", id: "synthetic-hgb-2023", value: 15.4 },
+  { date: "2024-02-21", displayValue: "16.1", id: "synthetic-hgb-2024", value: 16.1 },
+  { date: "2025-02-19", displayValue: "17.2", id: "synthetic-hgb-2025", value: 17.2 },
+  { date: "2026-02-17", displayValue: "18.0", id: "synthetic-hgb-2026", value: 18 },
 ] as const;
 
 export function BiomarkerIndexStudy() {
@@ -153,9 +48,10 @@ export function BiomarkerIndexStudy() {
   const allResults = BIOMARKER_STUDY_GROUPS.flatMap((group) => group.results);
   const counts = {
     all: allResults.length,
-    attention: allResults.filter((result) => result.status === "attention").length,
     "in-range": allResults.filter((result) => result.status === "in-range").length,
-  } satisfies Record<BiomarkerStudyFilter, number>;
+    reported: allResults.filter((result) => result.status === "reported").length,
+    review: allResults.filter((result) => result.status === "review").length,
+  } satisfies Record<BiomarkerStudyStatus | "all", number>;
   const visibleGroups = useMemo(
     () => BIOMARKER_STUDY_GROUPS.flatMap((group) => {
       const results = group.results
@@ -165,12 +61,13 @@ export function BiomarkerIndexStudy() {
             || `${result.name} ${group.label}`.toLocaleLowerCase().includes(normalizedQuery);
           return matchesFilter && matchesQuery;
         })
-        .sort((left, right) => Number(left.status !== "attention") - Number(right.status !== "attention"));
+        .sort(compareBiomarkerStudyResults);
 
       return results.length > 0 ? [{ ...group, results }] : [];
     }),
     [filter, normalizedQuery],
   );
+
   function handleGroupToggle(groupId: string, open: boolean) {
     setOpenGroups((current) => {
       const next = new Set(current);
@@ -184,32 +81,90 @@ export function BiomarkerIndexStudy() {
   }
 
   return (
-    <section
+    <article
       aria-labelledby="biomarker-index-study-heading"
-      className="overflow-hidden rounded-xl border border-border/70 bg-card/80"
+      className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
       data-design-study="biomarker-index"
     >
-      <div className="px-5 py-6 sm:px-7 sm:py-8">
-        <h3
-          className="scroll-mt-20 font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl"
-          id="biomarker-index-study-heading"
-        >
-          Biomarkers
-        </h3>
-      </div>
+      <header className="grid gap-8 border-b border-border/70 px-5 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Synthetic interface study
+          </p>
+          <h3
+            className="mt-3 scroll-mt-20 font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+            id="biomarker-index-study-heading"
+          >
+            Your biomarkers
+          </h3>
+          <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Example device readings and lab-result identities, filed by what they describe rather than by which report they arrived in. Values and flags are fabricated for this layout study.
+          </p>
+        </div>
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground lg:text-right">
+          {BIOMARKER_DEVICE_STUDIES.length} device metrics<br />
+          {counts.all} lab markers
+        </p>
+      </header>
 
-      <div className="border-t border-border/70 px-5 py-5 sm:px-7 sm:py-6">
-        <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_auto] lg:items-center">
+      <section aria-labelledby="device-study-heading">
+        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
+            From your devices
+          </h4>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Latest reading
+          </span>
+        </div>
+        <ol>
+          {BIOMARKER_DEVICE_STUDIES.map((metric) => (
+            <li className="border-b border-border/70 last:border-b-0" key={metric.metricKey}>
+              <Link
+                className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+                href={`/biomarkers/${metric.metricKey}`}
+              >
+                <BiomarkerIcon className="size-9" routeId={metric.metricKey} />
+                <div className="min-w-0">
+                  <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
+                    {metric.category}
+                  </p>
+                  <p className="text-base font-semibold text-foreground md:mt-1">{metric.name}</p>
+                </div>
+                <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
+                  {metric.summary}
+                </p>
+                <p className="col-span-2 min-w-24 text-left md:col-span-1 md:text-right">
+                  <span className="font-serif text-3xl font-semibold tabular-nums text-foreground">
+                    {metric.value}
+                  </span>{" "}
+                  <span className="text-xs text-muted-foreground">{metric.unit}</span>
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      <section aria-labelledby="lab-study-heading" className="border-t border-border/70">
+        <div className="px-5 pt-8 sm:px-8 sm:pt-10">
+          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="lab-study-heading">
+            From the lab
+          </h4>
+        </div>
+
+        <div className="grid gap-3 px-5 py-6 sm:px-8 lg:grid-cols-[minmax(18rem,1fr)_auto] lg:items-center">
           <label className="relative block">
-            <span className="sr-only">Search illustrative lab biomarkers</span>
+            <span className="sr-only">
+              Search biomarkers
+            </span>
             <Search
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+              className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
               strokeWidth={1.75}
             />
             <Input
-              className="bg-background/45 pl-9"
-              onChange={(event) => setQuery(event.target.value)}
+              className="h-12 rounded-full border-border/80 bg-background/45 pl-11 pr-5 shadow-none"
+              onInput={(event) => setQuery(event.currentTarget.value)}
               placeholder="Search biomarkers"
               type="search"
               value={query}
@@ -217,66 +172,58 @@ export function BiomarkerIndexStudy() {
           </label>
           <div aria-label="Filter illustrative lab biomarkers" className="flex flex-wrap gap-2" role="group">
             {FILTERS.map((option) => (
-              <Button
+              <button
                 aria-label={`${option.label}, ${counts[option.value]}`}
                 aria-pressed={filter === option.value}
                 className={cn(
-                  "rounded-full bg-card/40 px-6 text-base text-foreground hover:bg-muted/30",
+                  "inline-flex h-12 items-center justify-center gap-2 rounded-full border px-5 text-sm font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                   filter === option.value
-                    ? "border-2 border-foreground"
-                    : "border border-border/90",
+                    ? "border-foreground bg-background text-foreground ring-1 ring-foreground"
+                    : "border-border/80 text-muted-foreground hover:border-foreground/40 hover:text-foreground",
                 )}
                 key={option.value}
                 onClick={() => setFilter(option.value)}
-                size="lg"
                 type="button"
-                variant="unstyled"
               >
                 {option.tone ? (
                   <span
                     aria-hidden="true"
                     className={cn(
                       "size-2.5 shrink-0 rounded-full",
-                      option.tone === "attention" ? "bg-destructive/80" : "bg-primary",
+                      option.tone === "review" ? "bg-destructive" : "bg-primary",
                     )}
                   />
                 ) : null}
-                <span className={cn(
-                  option.tone === "attention" && "text-destructive",
-                  option.tone === "in-range" && "text-primary",
-                )}>
-                  {option.label}
-                </span>
+                <span>{option.label}</span>
                 <span aria-hidden="true" className="text-muted-foreground">·</span>
-                <span className="text-sm font-normal tabular-nums text-muted-foreground">
+                <span className="inline-flex min-w-4 items-center justify-center self-center font-mono text-xs font-normal leading-none tabular-nums text-muted-foreground">
                   {counts[option.value]}
                 </span>
-              </Button>
+              </button>
             ))}
           </div>
         </div>
 
-      </div>
-
-      {visibleGroups.length > 0 ? (
-        <div className="border-t border-border/70">
-          {visibleGroups.map((group) => (
-            <BiomarkerStudyDisclosure
-              group={group}
-              key={group.id}
-              forcedOpen={normalizedQuery.length > 0}
-              onToggle={(open) => handleGroupToggle(group.id, open)}
-              open={normalizedQuery.length > 0 || openGroups.has(group.id)}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="border-t border-border/70 px-5 py-12 text-center sm:px-7">
-          <p className="font-serif text-xl font-semibold text-foreground">No matching biomarkers</p>
-          <p className="mt-1 text-sm text-muted-foreground">Try another name or status.</p>
-        </div>
-      )}
-    </section>
+        {visibleGroups.length > 0 ? (
+          <div className="border-t border-border/70">
+            {visibleGroups.map((group) => (
+              <BiomarkerStudyDisclosure
+                forcedOpen={normalizedQuery.length > 0}
+                group={group}
+                key={group.id}
+                onToggle={(open) => handleGroupToggle(group.id, open)}
+                open={normalizedQuery.length > 0 || openGroups.has(group.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="border-t border-border/70 px-5 py-14 text-center sm:px-8">
+            <p className="font-serif text-xl font-semibold text-foreground">No matching biomarkers</p>
+            <p className="mt-1 text-sm text-muted-foreground">Try another name or source status.</p>
+          </div>
+        )}
+      </section>
+    </article>
   );
 }
 
@@ -291,7 +238,6 @@ function BiomarkerStudyDisclosure({
   onToggle: (open: boolean) => void;
   open: boolean;
 }) {
-  const Icon = group.icon;
   const headingId = `biomarker-study-area-${group.id}`;
 
   return (
@@ -305,60 +251,76 @@ function BiomarkerStudyDisclosure({
       }}
       open={open}
     >
-      <summary className="flex min-h-20 cursor-pointer list-none items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 sm:px-7 [&::-webkit-details-marker]:hidden">
-        <Icon aria-hidden="true" className="size-5 shrink-0 text-foreground" />
-        <span className="min-w-0 flex-1">
-          <span
-            aria-level={4}
-            className="block font-serif text-xl font-semibold tracking-tight text-foreground"
-            id={headingId}
-            role="heading"
-          >
-            {group.label}
-          </span>
+      <summary className="flex min-h-16 cursor-pointer list-none items-center gap-4 bg-muted/10 px-5 py-3 transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 [&::-webkit-details-marker]:hidden">
+        <span
+          aria-level={5}
+          className="min-w-0 flex-1 font-serif text-xl font-semibold tracking-tight text-foreground"
+          id={headingId}
+          role="heading"
+        >
+          {group.label}
         </span>
-        <ChevronRight
+        <ChevronDown
           aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-90"
+          className="size-4 shrink-0 -rotate-90 text-muted-foreground transition-transform duration-200 group-open:rotate-0"
           strokeWidth={1.75}
         />
       </summary>
-
-      <div className="flex flex-col">
+      <ol>
         {group.results.map((result) => (
-          <BiomarkerStudyRow
-            key={result.id}
-            result={result}
-          />
+          <li key={`${result.metricKey}:${result.name}`}>
+            <BiomarkerStudyRow result={result} />
+          </li>
         ))}
-      </div>
+      </ol>
     </details>
   );
 }
 
-function BiomarkerStudyRow({
-  result,
-}: {
-  result: BiomarkerStudyResult;
-}) {
-  const needsAttention = result.status === "attention";
-
+function BiomarkerStudyRow({ result }: { result: BiomarkerStudyResult }) {
   return (
     <Link
-      className="flex min-h-20 w-full cursor-pointer flex-col justify-center gap-1 border-t border-border/70 bg-card px-5 py-3 text-left transition-colors hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:min-h-24 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-7"
+      className="grid min-h-16 w-full gap-2 border-t border-border/60 px-5 py-3.5 transition-colors duration-200 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-8"
       href={`/biomarkers/results/${encodeURIComponent(result.metricKey)}`}
       prefetch={false}
     >
-      <span className="block min-w-0 break-words text-lg font-medium tracking-tight text-foreground">
-        {result.name}
+      <span className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden="true"
+          className={cn(
+            "h-8 w-1 shrink-0 rounded-full",
+            result.status === "in-range" && "bg-primary",
+            result.status === "reported" && "bg-muted-foreground/50",
+            result.status === "review" && "bg-destructive",
+          )}
+        />
+        <span className="min-w-0 break-words text-[15px] font-medium text-foreground sm:text-base">
+          {result.name}
+        </span>
       </span>
-      <span className="block min-w-0 break-words text-sm sm:ml-auto sm:max-w-[50%] sm:text-right">
-        <strong className={needsAttention ? "text-destructive" : "text-primary"}>
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm sm:justify-end sm:text-right">
+        <span className={cn(
+          "inline-flex items-center gap-1.5 font-medium",
+          result.status === "in-range" && "text-primary",
+          result.status === "reported" && "text-muted-foreground",
+          result.status === "review" && "text-destructive",
+        )}>
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-1.5 rounded-full",
+              result.status === "in-range" && "bg-primary",
+              result.status === "reported" && "bg-muted-foreground/60",
+              result.status === "review" && "bg-destructive",
+            )}
+          />
           {result.statusLabel}
-        </strong>
-        <span aria-hidden="true" className="text-muted-foreground"> · </span>
-        <strong className="tabular-nums text-foreground">{result.value}</strong>{" "}
-        <small className="text-xs text-muted-foreground">{result.unit}</small>
+        </span>
+        <span aria-hidden="true" className="text-border">/</span>
+        <span className="font-serif text-lg font-semibold tabular-nums text-foreground">
+          {result.value}
+        </span>
+        {result.unit ? <span className="text-xs text-muted-foreground">{result.unit}</span> : null}
       </span>
     </Link>
   );
@@ -368,55 +330,153 @@ export function BiomarkerDetailStudy() {
   return (
     <article
       aria-labelledby="biomarker-detail-study-heading"
-      className="border-y border-border/70 bg-card/40"
+      className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
       data-design-study="biomarker-detail"
     >
-      <header className="px-5 py-8 sm:px-7 sm:py-10">
+      <header className="px-5 py-8 sm:px-8 sm:py-10">
+        <Link className="inline-flex items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#biomarker-index-study-heading">
+          <ArrowLeft aria-hidden="true" className="size-4" />
+          Your biomarkers
+        </Link>
+        <p className="mt-10 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Synthetic interface study / Blood
+        </p>
         <h3
-          className="scroll-mt-20 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+          className="mt-2 scroll-mt-20 font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
           id="biomarker-detail-study-heading"
         >
           Hemoglobin
         </h3>
-        <p className="mt-3 max-w-3xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-          A protein in red blood cells that carries oxygen through the body.
+        <p className="mt-3 max-w-[68ch] text-base leading-relaxed text-muted-foreground sm:text-lg">
+          The oxygen-carrying protein inside red blood cells, used with hematocrit and red-cell indices to understand oxygen transport and blood concentration.
         </p>
       </header>
 
-      <section aria-label="Latest illustrative result" className="border-t border-border/70 px-5 py-9 sm:px-7 sm:py-10">
-        <h4 className="text-2xl font-semibold tracking-tight text-destructive">Above range</h4>
-        <div className="mt-3 flex items-baseline gap-3">
-          <span aria-hidden="true" className="size-3 self-center rounded-full bg-destructive/80" />
-          <LabResultValue
-            presentation="hero"
-            result={{
-              comparator: null,
-              textValue: null,
-              unit: "g/dL",
-              value: 18,
-            }}
-          />
-        </div>
-        <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-01-01">
-          Jan 1, 2026
-        </time>
-
-        <div className="mt-9 min-w-0 border-y border-border/70 py-5">
-          <p
-            className="mb-3 text-xs text-muted-foreground"
-            id="illustrative-biomarker-chart-caption"
-          >
-            {HEMOGLOBIN_HISTORY.length} results plotted in g/dL · Shaded lab range: 13 to 17 g/dL
+      <section aria-labelledby="latest-reading-study-heading" className="grid border-t border-border/70 lg:grid-cols-[minmax(17rem,0.72fr)_minmax(0,1.28fr)]">
+        <div className="px-5 py-8 sm:px-8 sm:py-10 lg:border-r lg:border-border/70">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground" id="latest-reading-study-heading">
+            Latest reading
           </p>
-          <LabBiomarkerHistoryChart
-            ariaDescribedBy="illustrative-biomarker-chart-caption"
-            displayName="Illustrative hemoglobin"
-            points={HEMOGLOBIN_HISTORY}
-            referenceRange={{ high: 17, low: 13 }}
-            unit="g/dL"
-          />
+          <p className="mt-4 text-xl font-semibold tracking-tight text-destructive">Above range</p>
+          <p className="mt-3 flex flex-wrap items-baseline gap-2">
+            <span className="font-serif text-5xl font-semibold tracking-tight tabular-nums text-foreground sm:text-6xl">18.0</span>
+            <span className="text-lg text-muted-foreground">g/dL</span>
+          </p>
+          <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-02-17">
+            Feb 17, 2026
+          </time>
+
+          <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
+            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+              <dt className="text-muted-foreground">Lab range</dt>
+              <dd className="font-medium text-foreground">13.0 to 17.0 g/dL</dd>
+            </div>
+            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+              <dt className="text-muted-foreground">Source</dt>
+              <dd className="font-medium text-foreground">Example laboratory</dd>
+            </div>
+            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
+              <dt className="text-muted-foreground">History</dt>
+              <dd className="font-medium text-foreground">4 comparable results</dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+              Results over time
+            </h4>
+            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-2"><span className="size-2 rounded-full bg-primary" />Result</span>
+              <span className="inline-flex items-center gap-2"><span className="h-2 w-5 bg-primary/10" />Lab range</span>
+            </div>
+          </div>
+          <div className="mt-4 min-w-0">
+            <LabBiomarkerHistoryChart
+              displayName="Illustrative hemoglobin"
+              points={HEMOGLOBIN_HISTORY}
+              referenceRange={{ high: 17, low: 13 }}
+              unit="g/dL"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="result-ledger-study-heading" className="border-t border-border/70 py-8 sm:py-10">
+        <div className="flex items-baseline justify-between gap-4 px-5 sm:px-8">
+          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="result-ledger-study-heading">
+            All results
+          </h4>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">2023 to 2026</span>
+        </div>
+        <div className="mt-5 overflow-hidden border-y border-border/70">
+          <div className="hidden grid-cols-[8rem_minmax(8rem,0.65fr)_minmax(12rem,1fr)_minmax(10rem,0.85fr)] gap-4 border-b border-border/70 bg-muted/15 px-4 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground sm:px-5 lg:grid">
+            <span>Date</span><span>Result</span><span>Reference range</span><span>Source</span>
+          </div>
+          <ol>
+            {[...HEMOGLOBIN_HISTORY].reverse().map((result) => (
+              <li className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 border-b border-border/60 px-4 py-3.5 last:border-b-0 sm:px-5 lg:grid-cols-[8rem_minmax(8rem,0.65fr)_minmax(12rem,1fr)_minmax(10rem,0.85fr)] lg:items-center lg:gap-4" key={result.id}>
+                <time className="order-2 text-xs text-muted-foreground lg:order-none lg:text-sm lg:text-foreground" dateTime={result.date}>{formatStudyDate(result.date)}</time>
+                <span className="order-1 font-serif text-lg font-semibold tabular-nums text-foreground lg:order-none">{result.displayValue} g/dL</span>
+                <span className="order-3 col-span-2 text-xs text-muted-foreground lg:col-span-1 lg:text-sm">13.0 to 17.0 g/dL</span>
+                <span className="order-4 col-span-2 text-xs text-muted-foreground lg:col-span-1 lg:text-sm">Example laboratory</span>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
     </article>
   );
+}
+
+export function BiomarkerBoundaryResultStudy() {
+  return (
+    <article className="overflow-hidden rounded-xl border border-border/70 bg-card/70" data-design-study="biomarker-boundary-result">
+      <header className="grid gap-6 px-5 py-8 sm:px-8 sm:py-10 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Synthetic boundary result</p>
+          <h3 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">Rheumatoid Factor</h3>
+          <p className="mt-3 max-w-[68ch] text-sm leading-relaxed text-muted-foreground sm:text-base">
+            An antibody test used as one piece of evidence when clinicians evaluate inflammatory autoimmune conditions, especially rheumatoid arthritis.
+          </p>
+        </div>
+        <div className="md:text-right">
+          <p className="font-medium text-primary">In range</p>
+          <p className="mt-1 font-serif text-4xl font-semibold tracking-tight text-foreground">&lt;10</p>
+          <p className="mt-1 text-xs text-muted-foreground">Feb 17, 2026</p>
+        </div>
+      </header>
+      <div className="grid gap-2 border-t border-border/70 px-5 py-4 text-sm sm:px-8 lg:grid-cols-[8rem_minmax(8rem,0.6fr)_minmax(12rem,1fr)_minmax(10rem,0.85fr)] lg:items-center lg:gap-4">
+        <time className="text-muted-foreground" dateTime="2026-02-17">Feb 17, 2026</time>
+        <span className="font-serif text-lg font-semibold text-foreground">&lt;10</span>
+        <span className="text-muted-foreground">Source range not listed</span>
+        <span className="text-muted-foreground">Example laboratory</span>
+      </div>
+    </article>
+  );
+}
+
+function formatStudyDate(date: string): string {
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(new Date(`${date}T00:00:00.000Z`));
+}
+
+function compareBiomarkerStudyResults(
+  left: BiomarkerStudyResult,
+  right: BiomarkerStudyResult,
+): number {
+  const rank: Readonly<Record<BiomarkerStudyStatus, number>> = {
+    review: 0,
+    "in-range": 1,
+    reported: 2,
+  };
+
+  return rank[left.status] - rank[right.status]
+    || left.name.localeCompare(right.name)
+    || left.metricKey.localeCompare(right.metricKey);
 }

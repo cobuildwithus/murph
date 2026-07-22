@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:creatine-kinase"
 slug: "biomarkers/creatine-kinase"
 title: "Creatine Kinase"
-summary: "Safety lab used when muscle symptoms or clinician guidance indicate monitoring."
+summary: "Creatine kinase measures enzyme activity released mainly from muscle, which can add muscle-injury and exertion context but varies with exercise, muscle mass, sex, ancestry, medications, and assay."
 status: "draft"
 quality: "usable"
 aliases:
@@ -64,5 +64,20 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Community outcome summaries will appear once enough opted-in experiment runs are available."
+referenceGuidance:
+  classification: source_range_only
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: reference_interval
+      guidance: "Use the reporting laboratory’s reference interval for Creatine Kinase; Commons does not replace the source range because reference limits depend on assay, specimen, and reference population."
+      applicability: "Applies with assay, exercise, muscle mass, symptoms, medications, hemolysis, and timing recorded; the reporting laboratory’s interval remains authoritative."
+      source:
+        title: "Defining, Establishing, and Verifying Reference Intervals in the Clinical Laboratory (EP28-A3c)"
+        organization: "Clinical and Laboratory Standards Institute and IFCC"
+        year: 2020
+        sourceType: "consensus_statement"
+        url: "https://clsi.org/shop/standards/ep28/"
 ---
+
 Safety lab used when muscle symptoms or clinician guidance indicate monitoring.

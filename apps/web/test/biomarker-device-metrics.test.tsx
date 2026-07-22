@@ -131,16 +131,24 @@ test("only device-derived readings decide the latest card value without history 
     expect(link).not.toBeNull();
     expect(link?.querySelector("svg")).not.toBeNull();
     expect(link?.querySelector("time")).toBeNull();
-    expect(link?.querySelector("p")?.className).toContain("mb-5");
-    expect(link?.textContent).toContain("HEART HEALTH");
+    expect(link?.querySelector("p")?.className).toContain("hidden");
+    expect(link?.querySelector("p")?.className).toContain("md:block");
+    expect(link?.textContent).toContain("heart health");
     expect(link?.textContent).toContain("Resting heart rate reflects recovery load.");
+    const summary = [...(link?.querySelectorAll("p") ?? [])].find((paragraph) =>
+      paragraph.textContent?.includes("Resting heart rate reflects recovery load."),
+    );
+    expect(summary?.className).toContain("line-clamp-2");
+    expect(summary?.className).toContain("md:line-clamp-none");
     expect(link?.textContent).not.toContain("2 readings");
     expect(link?.textContent).not.toContain("Jul 14, 2026");
     expect(link?.textContent).not.toContain("2025 to 2026");
 
     const section = rendered.container.querySelector('[aria-labelledby="biomarker-devices-heading"]');
-    expect(section?.querySelector("ul")?.className).toContain("md:grid-cols-2");
-    expect(section?.querySelector("ul")?.className).toContain("xl:grid-cols-3");
+    const deviceHeading = rendered.container.querySelector("#biomarker-devices-heading");
+    expect(deviceHeading?.className).toContain("text-2xl");
+    expect(section?.querySelector("ul")?.className).not.toContain("grid-cols-");
+    expect(link?.className).toContain("md:grid-cols-");
 
     expect(text).toContain("1 metric");
     expect(text).not.toContain("No lab results yet");
@@ -173,20 +181,23 @@ test("device biomarkers remain first while lab sections start expanded", async (
     const deviceSection = rendered.container.querySelector(
       '[aria-labelledby="biomarker-devices-heading"]',
     );
+    const labRegion = rendered.container.querySelector(
+      'section[aria-labelledby="lab-biomarkers-heading"]',
+    );
+    const labHeading = rendered.container.querySelector("#lab-biomarkers-heading");
     const labSection = rendered.container.querySelector("details");
     expect(deviceSection).not.toBeNull();
+    expect(labRegion).not.toBeNull();
     expect(labSection).not.toBeNull();
-    if (!deviceSection || !labSection) {
+    expect(labHeading?.className).toContain("text-2xl");
+    if (!deviceSection || !labRegion || !labSection) {
       throw new Error("Expected device and lab sections");
     }
     expect(labSection.hasAttribute("open")).toBe(true);
-    const labGroupContainer = labSection.parentElement;
-    if (!labGroupContainer) {
-      throw new Error("Expected lab group container");
-    }
+    expect(labRegion.contains(labSection)).toBe(true);
     const pageSections = [...(deviceSection.parentElement?.children ?? [])];
     expect(pageSections.indexOf(deviceSection)).toBeLessThan(
-      pageSections.indexOf(labGroupContainer),
+      pageSections.indexOf(labRegion),
     );
   } finally {
     await rendered.cleanup();

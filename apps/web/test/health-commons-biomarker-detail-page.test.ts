@@ -396,7 +396,7 @@ describe("BiomarkerPage", () => {
         biomarkerId: "resting-heart-rate",
       }),
     })).resolves.toEqual(expect.objectContaining({
-      description: expect.stringContaining("full rest"),
+      description: expect.stringContaining("quiet rest"),
       openGraph: expect.objectContaining({
         images: [
           expect.objectContaining({

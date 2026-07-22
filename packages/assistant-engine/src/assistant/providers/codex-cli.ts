@@ -205,6 +205,7 @@ export async function executeCodexAssistantTurnAttempt(
     developerInstructions,
     dynamicTools: input.dynamicTools,
     environments: input.environments ?? undefined,
+    ephemeral: input.providerThreadEphemeral ?? undefined,
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides:

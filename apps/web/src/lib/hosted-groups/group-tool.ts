@@ -12,6 +12,7 @@ import {
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
+  type HostedRuntimeGroupSummary,
   type HostedRuntimeGroupToolSelfOptOutContext,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
@@ -65,8 +66,20 @@ import { assertHostedLinqRouteEgressAuthority } from "../hosted-routing/thread-r
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
+import {
+  requestHostedGroupAssistantAsk,
+  requestHostedGroupMemberAssistantAsk,
+} from "./group-assistant-ask";
+import {
+  admitHostedGroupDisclosurePermissionAppendTx,
+  canonicalizeHostedGroupDisclosurePermissionText,
+  createHostedGroupDisclosurePermissionProviderIdempotencyKey,
+  readActiveHostedGroupDisclosureGrantsForGroup,
+  readActiveHostedGroupDisclosureGrantsForMember,
+  recordHostedGroupDisclosurePermissionTx,
+  revokeHostedGroupDisclosureGrantForMemberTx,
+} from "./group-disclosure-store";
 import { readHostedGroupUsageStatus } from "./group-usage-funding";
-import { requestHostedGroupAssistantAsk } from "./group-assistant-ask";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -80,6 +93,7 @@ import {
   readHostedGroupSharedDataByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  type HostedGroupSummary,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
 import {
@@ -126,13 +140,16 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  ask_member: "participant_aware",
   create_join_link: "owner_active",
   leave_membership: "participant_aware",
-  list_memberships: "participant_aware",
+  list_memberships: "personal_active",
+  post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_participants: "participant_aware",
   read_current: "participant_aware",
+  revoke_disclosure_grant: "personal_active",
   read_usage: "participant_aware",
   read_shared: "participant_aware",
   revoke_own_email_share: "participant_aware",
@@ -164,6 +181,35 @@ export async function handleHostedRuntimeGroupTool(input: {
       input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "ask_member") {
+    const admission = await requestHostedGroupMemberAssistantAsk({
+      grantId: input.request.grantId,
+      memberId: input.memberId,
+      origin: input.request.origin,
+      question: input.request.question,
+    });
+    if (admission.mailboxWake) {
+      input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "ask_member", result: admission.result };
+  }
+
+  if (input.request.action === "post_disclosure_request") {
+    return handleHostedRuntimeGroupPostDisclosureRequest({
+      linqThread: input.request.linqThread ?? null,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+      permissionText: input.request.permissionText,
+    });
+  }
+
+  if (input.request.action === "revoke_disclosure_grant") {
+    return handleHostedRuntimeGroupRevokeDisclosureGrant({
+      grantId: input.request.grantId,
+      memberId: input.memberId,
+    });
   }
 
   if (input.request.action === "list_memberships") {
@@ -287,11 +333,19 @@ export async function handleHostedRuntimeGroupTool(input: {
   const group = await readHostedGroupByRuntimeMemberId({
     runtimeMemberId: input.memberId,
   });
+  const disclosureGrants = group
+    ? await readActiveHostedGroupDisclosureGrantsForGroup({
+        groupId: group.id,
+      })
+    : [];
 
   return {
     action: "read_current",
     result: group
-      ? { status: "ok", group }
+      ? {
+          status: "ok",
+          group: toHostedRuntimeGroupSummary(group, disclosureGrants),
+        }
       : { status: "none", group: null },
   };
 }
@@ -336,24 +390,47 @@ async function handleHostedRuntimeGroupLeaveMembership(input: {
 async function handleHostedRuntimeGroupListMemberships(input: {
   memberId: string;
 }): Promise<HostedRuntimeGroupToolResponse> {
-  if (!await hasHostedRuntimeActiveAccess(input.memberId)) {
+  const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
+  if (access.status !== "ok") {
     return {
       action: "list_memberships",
       result: {
         memberships: null,
         status: "unavailable",
-        unavailableReason: "runtime_inactive",
+        unavailableReason: access.unavailableReason,
       },
     };
   }
 
   const { memberships, truncated } = await readHostedGroupMembershipsForMember({
     memberId: input.memberId,
+    prisma: access.prisma,
   });
+  let grants: Awaited<ReturnType<typeof readActiveHostedGroupDisclosureGrantsForMember>>;
+  try {
+    grants = await readActiveHostedGroupDisclosureGrantsForMember({
+      memberId: input.memberId,
+      prisma: access.prisma,
+    });
+  } catch {
+    return {
+      action: "list_memberships",
+      result: {
+        memberships: null,
+        status: "unavailable",
+        unavailableReason: "grants_unavailable",
+      },
+    };
+  }
   const publicBaseUrl = resolveHostedPublicBaseUrl();
   return {
     action: "list_memberships",
     result: {
+      disclosureGrants: grants.map(({ grantId, groupLabel, permissionText }) => ({
+        grantId,
+        groupLabel,
+        permissionText,
+      })),
       memberships: memberships.map(({ ownerJoinCode, ...membership }) => ({
         ...membership,
         permissionsUrl: ownerJoinCode
@@ -363,6 +440,96 @@ async function handleHostedRuntimeGroupListMemberships(input: {
       status: "ok",
       truncated,
     },
+  };
+}
+
+async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {
+  grantId: string;
+  memberId: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "revoke_disclosure_grant",
+    result: { status: "unavailable", unavailableReason },
+  });
+  const access = await readHostedRuntimePersonalActiveAccess(input.memberId);
+  if (access.status !== "ok") {
+    return unavailable(access.unavailableReason);
+  }
+
+  const grantId = input.grantId.trim();
+  if (!grantId) {
+    return unavailable("grant_unavailable");
+  }
+  let result: Awaited<ReturnType<typeof revokeHostedGroupDisclosureGrantForMemberTx>>;
+  try {
+    result = await access.prisma.$transaction(async (tx) =>
+      revokeHostedGroupDisclosureGrantForMemberTx({
+        grantId,
+        memberId: input.memberId,
+        now: new Date(),
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch {
+    return unavailable("grant_unavailable");
+  }
+
+  if (result.kind === "not_found") {
+    return unavailable("grant_unavailable");
+  }
+  return {
+    action: "revoke_disclosure_grant",
+    result: { status: result.kind },
+  };
+}
+
+type HostedRuntimePersonalActiveAccess =
+  | { status: "ok"; prisma: PrismaClient }
+  | { status: "unavailable"; unavailableReason: string };
+
+async function readHostedRuntimePersonalActiveAccess(
+  memberId: string,
+): Promise<HostedRuntimePersonalActiveAccess> {
+  const prisma = getPrisma();
+  if (!await hasHostedRuntimeActiveAccess(memberId, { prisma })) {
+    return { status: "unavailable", unavailableReason: "runtime_inactive" };
+  }
+  const threadContainer = await prisma.hostedThreadContainer.findUnique({
+    where: { memberId },
+    select: { memberId: true },
+  });
+  return threadContainer
+    ? { status: "unavailable", unavailableReason: "personal_runtime_required" }
+    : { status: "ok", prisma };
+}
+
+function toHostedRuntimeGroupSummary(
+  group: HostedGroupSummary,
+  disclosureGrants: Awaited<
+    ReturnType<typeof readActiveHostedGroupDisclosureGrantsForGroup>
+  >,
+): HostedRuntimeGroupSummary {
+  const disclosureGrantsByMemberId = new Map<
+    string,
+    typeof disclosureGrants
+  >();
+  for (const grant of disclosureGrants) {
+    disclosureGrantsByMemberId.set(
+      grant.memberId,
+      [...(disclosureGrantsByMemberId.get(grant.memberId) ?? []), grant],
+    );
+  }
+
+  return {
+    ...group,
+    members: group.members.map((member) => ({
+      ...member,
+      disclosureGrants: (
+        disclosureGrantsByMemberId.get(member.memberId) ?? []
+      ).map((grant) => ({
+        grantId: grant.grantId,
+        permissionText: grant.permissionText,
+      })),
+    })),
   };
 }
 
@@ -407,18 +574,24 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
-  const prisma = getPrisma();
-  const updated = await prisma.$transaction(async (tx) =>
-    updateHostedGroupDisplayNameByRuntimeMemberIdTx({
-      displayName,
-      runtimeMemberId: input.memberId,
-      tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const updated = await getPrisma().$transaction(
+    async (tx) => {
+      return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
+        displayName,
+        runtimeMemberId: input.memberId,
+        tx,
+      });
+    },
+    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  );
 
   return {
     action: "update_display_name",
     result: updated
-      ? { group: updated, status: "ok" }
+      ? {
+          group: updated,
+          status: "ok",
+        }
       : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
   };
 }
@@ -575,7 +748,11 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
       requestedVaultShareProjectionScopes,
       tx,
     });
-    return { kind: "ok" as const, ownerMemberId: ownerAccess.ownerMemberId, ...result };
+    return {
+      kind: "ok" as const,
+      ownerMemberId: ownerAccess.ownerMemberId,
+      ...result,
+    };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   if (created.kind !== "ok") {
@@ -606,8 +783,137 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
 
   return {
     action: "create_join_link",
-    result: { group: created.group, joinUrl, status: "ok" },
+    result: {
+      group: created.group,
+      joinUrl,
+      status: "ok",
+    },
   };
+}
+
+async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
+  linqThread: HostedRuntimeGroupToolLinqThreadContext | null;
+  memberId: string;
+  originAssistantInputId: string;
+  permissionText: string;
+}): Promise<HostedRuntimeGroupToolResponse> {
+  const unavailable = (unavailableReason: string): HostedRuntimeGroupToolResponse => ({
+    action: "post_disclosure_request",
+    result: { status: "unavailable", unavailableReason },
+  });
+
+  let permissionText: string;
+  try {
+    permissionText = canonicalizeHostedGroupDisclosurePermissionText(
+      input.permissionText,
+    );
+  } catch {
+    return unavailable("permission_text_unavailable");
+  }
+
+  const authorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in authorized) {
+    return unavailable(authorized.unavailableReason);
+  }
+
+  const prisma = getPrisma();
+  const authority = await prisma.$transaction(async (tx) => {
+    const ownerAccess = await readHostedRuntimeGroupOwnerActiveAccess({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    if (ownerAccess.status !== "ok") {
+      return { kind: ownerAccess.unavailableReason };
+    }
+    const groupId = await readHostedGroupIdByRuntimeMemberId({
+      prisma: tx,
+      runtimeMemberId: input.memberId,
+    });
+    if (!groupId) {
+      return { kind: "group_not_found" as const };
+    }
+    const admission = await admitHostedGroupDisclosurePermissionAppendTx({
+      groupId,
+      originAssistantInputId: input.originAssistantInputId,
+      permissionText,
+      tx,
+    });
+    return admission.kind === "limit_reached"
+      ? { kind: "permission_history_limit_reached" as const }
+      : { groupId, kind: "ok" as const };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (authority.kind !== "ok") {
+    return unavailable(authority.kind);
+  }
+
+  const consentMessage = buildHostedGroupDisclosureConsentMessage(permissionText);
+  const providerIdempotencyKey =
+    createHostedGroupDisclosurePermissionProviderIdempotencyKey({
+      consentMessage,
+      groupId: authority.groupId,
+      originAssistantInputId: input.originAssistantInputId,
+    });
+  const postedAt = new Date();
+  const sendAuthorized = await authorizeHostedRuntimeGroupLinqThread({
+    linqThread: input.linqThread,
+    memberId: input.memberId,
+  });
+  if ("unavailableReason" in sendAuthorized) {
+    return unavailable(sendAuthorized.unavailableReason);
+  }
+  let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
+  try {
+    sent = await sendHostedLinqChatMessage({
+      chatId: sendAuthorized.chatId,
+      idempotencyKey: providerIdempotencyKey,
+      message: consentMessage,
+    });
+  } catch {
+    return unavailable("send_failed");
+  }
+  if (!sent.messageId) {
+    return unavailable("provider_message_unavailable");
+  }
+
+  let binding: Awaited<ReturnType<typeof recordHostedGroupDisclosurePermissionTx>>;
+  try {
+    binding = await prisma.$transaction(
+      async (tx) => {
+        return recordHostedGroupDisclosurePermissionTx({
+          groupId: authority.groupId,
+          messageId: sent.messageId,
+          originAssistantInputId: input.originAssistantInputId,
+          permissionText,
+          postedAt,
+          tx,
+        });
+      },
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+  } catch {
+    return unavailable("permission_binding_failed");
+  }
+  if (binding.kind === "limit_reached") {
+    return unavailable("permission_history_limit_reached");
+  }
+
+  return {
+    action: "post_disclosure_request",
+    result: { status: "sent" },
+  };
+}
+
+function buildHostedGroupDisclosureConsentMessage(permissionText: string): string {
+  return [
+    "Like this message to let this group ask your Murph for:",
+    "",
+    permissionText,
+    "",
+    "Only this exact permission is granted. Before an answer from your Murph is shared here, a separate outgoing reviewer checks it against this permission. Incoming questions do not go through a separate reviewer. You can revoke this permission at any time.",
+  ].join("\n");
 }
 
 async function handleHostedRuntimeGroupPostJoinOffer(input: {
@@ -692,7 +998,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   ) {
     return {
       action: "post_join_offer",
-      result: { group: created.group, joinUrl, status: "sent" },
+      result: {
+        group: created.group,
+        joinUrl,
+        status: "sent",
+      },
     };
   }
 
@@ -746,7 +1056,11 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   return {
     action: "post_join_offer",
-    result: { group: created.group, joinUrl, status: "sent" },
+    result: {
+      group: created.group,
+      joinUrl,
+      status: "sent",
+    },
   };
 }
 

@@ -201,6 +201,25 @@ describe("hosted execution wake guards", () => {
       },
       userId: "user_guard",
     });
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member-preferences-wake-legacy-persona",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-07T00:00:00.000Z",
+        preferences: {
+          persona: "medical-detective",
+        },
+        userId: "user_guard",
+      }),
+    ).toEqual({
+      eventId: "member-preferences-wake-legacy-persona",
+      kind: "member.preferences.updated",
+      occurredAt: "2026-07-07T00:00:00.000Z",
+      preferences: {
+        persona: "scientist",
+      },
+      userId: "user_guard",
+    });
     expect(() =>
       parseHostedExecutionWake({
         eventId: "member-preferences-wake-empty",

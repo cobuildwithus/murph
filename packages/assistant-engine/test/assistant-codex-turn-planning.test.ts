@@ -507,14 +507,14 @@ describe('assistant Codex turn planning', () => {
     expect(scheduledNewsletterPlan.systemPrompt).toContain(
       'Assistant tone preference:',
     )
-    expect(scheduledNewsletterPlan.systemPrompt).not.toContain(
+    expect(scheduledNewsletterPlan.systemPrompt).toContain(
       'Be direct, disciplined, and accountable.',
     )
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Humor 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Push 10/10')
     expect(scheduledNewsletterPlan.systemPrompt).toContain('Detail 10/10')
     expect(scheduledNewsletterPlan.assistantPreferredElevenLabsVoiceId).toBe(
-      resolveAssistantVoiceOptionElevenLabsVoiceId(null),
+      resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
       ordinaryToolNames,
@@ -545,10 +545,10 @@ describe('assistant Codex turn planning', () => {
       session: createSession(),
       sharedPlan: createSharedPlan(),
     })
-    expect(scheduledNewsletterPlan.developerInstructions).toBe(
+    expect(scheduledNewsletterPlan.developerInstructions).not.toBe(
       scheduledWithoutPersonaPlan.developerInstructions,
     )
-    expect(scheduledNewsletterPlan.assistantContractFingerprint).toBe(
+    expect(scheduledNewsletterPlan.assistantContractFingerprint).not.toBe(
       scheduledWithoutPersonaPlan.assistantContractFingerprint,
     )
 
@@ -1851,6 +1851,7 @@ describe('assistant Codex turn planning', () => {
         deliverResponse: true,
       },
       preferenceContext: {
+        assistantPersona: 'navy-seal',
         assistantPersonality: {
           detail: 7,
           humor: 9,
@@ -1892,6 +1893,9 @@ describe('assistant Codex turn planning', () => {
     expect(plan.developerInstructions).toContain('Humor 9/10')
     expect(plan.developerInstructions).toContain('Push 8/10')
     expect(plan.developerInstructions).toContain('Detail 7/10')
+    expect(plan.developerInstructions).not.toContain(
+      'Be direct, disciplined, and accountable.',
+    )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
     )

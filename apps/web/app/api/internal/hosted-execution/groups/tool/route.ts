@@ -2,7 +2,10 @@ import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
+  isHostedRuntimeAssistantAskDiagnosticCode,
 } from "@murphai/hosted-execution/runtime-control";
 import { after } from "next/server";
 
@@ -10,12 +13,15 @@ import {
   handleHostedRuntimeGroupTool,
 } from "@/src/lib/hosted-groups/group-tool";
 import {
+  createHostedAssistantAskRequestId,
+} from "@/src/lib/hosted-groups/group-assistant-ask";
+import {
   filterHostedRuntimeGroupToolResponseProjectionScopes,
 } from "@/src/lib/hosted-groups/group-tool-scope-filter";
 import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { jsonError, jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import {
   readHostedVaultShareSupportedProjectionScopeKeysFromRequest,
@@ -32,16 +38,52 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseHostedRuntimeGroupToolRequest(payload);
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
-
-  return jsonOk(filterHostedRuntimeGroupToolResponseProjectionScopes(
+  const executeTool = async () => filterHostedRuntimeGroupToolResponseProjectionScopes(
     await handleHostedRuntimeGroupTool({
       memberId,
       request: body,
       scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
     }),
     supportedProjectionScopeKeys,
-  ));
+  );
+
+  if (body.action !== "ask") {
+    return jsonOk(await executeTool());
+  }
+
+  const responseHeaders = {
+    [HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER]:
+      createHostedAssistantAskRequestId({
+        memberId,
+        originAssistantInputId: body.originAssistantInputId,
+      }),
+  };
+
+  try {
+    return jsonOk(await executeTool(), 200, responseHeaders);
+  } catch (error) {
+    const diagnosticCode = readHostedAssistantAskDiagnosticCode(error);
+    return jsonError(error, {
+      ...responseHeaders,
+      ...(diagnosticCode
+        ? { [HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER]: diagnosticCode }
+        : {}),
+    });
+  }
 });
+
+function readHostedAssistantAskDiagnosticCode(error: unknown): string | undefined {
+  if ((typeof error !== "object" && typeof error !== "function") || error === null) {
+    return undefined;
+  }
+
+  try {
+    const code = Reflect.get(error, "code");
+    return isHostedRuntimeAssistantAskDiagnosticCode(code) ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function scheduleMailboxWakeAfterResponse(input: {
   expectedUserId: string;

@@ -482,7 +482,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
   const explicitAssistantPersona = privateInteractiveProviderTurn
-    && input.input.scheduledOccurrenceAt == null
     ? preferenceContext.assistantPersona ?? null
     : null
   const effectiveAssistantStyle = explicitAssistantPersona
@@ -520,9 +519,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
   // domains) and hosted dynamic context prompts must not reach their system
   // prompt, or the prompt itself would hand the model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
-  const hostedDynamicContextPrompts = maintenanceTurn || outputOnlyTurn
-    ? []
-    : input.executionContext?.hosted?.dynamicContextPrompts ?? []
+  const hostedDynamicContextPrompts =
+    maintenanceTurn || outputOnlyTurn
+      ? []
+      : input.executionContext?.hosted?.dynamicContextPrompts ?? []
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -553,8 +553,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
-    ? null
-    : await measureRoutePlanningAsync(
+      ? null
+      : await measureRoutePlanningAsync(
         routePlanningSpans,
         'assistantContextSnapshotElapsedMs',
         () => readAssistantContextSnapshotPrompt({
@@ -695,14 +695,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.assistantConfigurationTool != null,
-        automationAvailable:
-          input.hostedToolContext?.automationTool != null,
+        automationAvailable: input.hostedToolContext?.automationTool != null,
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
         progressUpdatesAvailable: input.progressDelivery != null,
-        connectedAppsAvailable:
-          input.hostedToolContext?.connectedApps != null,
+        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
         deviceAvailable:
           privateInteractiveAudience &&
@@ -724,16 +722,14 @@ export async function resolveAssistantRouteTurnPlan(input: {
           privateInteractiveAudience &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.subscriptionTool != null,
-        groupAvailable:
-          input.hostedToolContext?.groupTool != null,
+        groupAvailable: input.hostedToolContext?.groupTool != null,
         groupPermissionOfferAvailable:
           hostedGroupRuntime &&
           input.hostedToolContext?.groupPermissionOfferTool != null,
         groupSharedReadAvailable:
           hostedGroupRuntime &&
           input.hostedToolContext?.groupSharedReader != null,
-        newsletterAvailable:
-          input.hostedToolContext?.newsletterTool != null,
+        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         personalizationAvailable:
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,

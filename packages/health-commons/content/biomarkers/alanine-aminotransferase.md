@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:alanine-aminotransferase"
 slug: "biomarkers/alanine-aminotransferase"
 title: "ALT"
-summary: "Safety lab for liver-enzyme monitoring when clinician guidance indicates it."
+summary: "ALT measures alanine aminotransferase activity, which can add liver-cell injury context while exercise, medications, metabolic factors, and the laboratory interval affect interpretation."
 status: "draft"
 quality: "usable"
 aliases:
@@ -63,5 +63,22 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Community outcome summaries will appear once enough opted-in experiment runs are available."
+referenceGuidance:
+  classification: source_range_only
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: reference_interval
+      guidance: "Use the reporting laboratory’s reference interval for ALT; Commons does not replace the source range because reference limits depend on assay, specimen, and reference population."
+      applicability: "Applies with the reporting assay, age, sex, symptoms, medications, alcohol, exercise, and related liver or blood-count results considered."
+      source:
+        title: "ACG Clinical Guideline: Evaluation of Abnormal Liver Chemistries"
+        organization: "American College of Gastroenterology; American Journal of Gastroenterology"
+        year: 2017
+        sourceType: "clinical_guideline"
+        url: "https://pubmed.ncbi.nlm.nih.gov/27995906/"
+        doi: "10.1038/ajg.2016.517"
+        pmid: "27995906"
 ---
+
 Safety lab for liver-enzyme monitoring when clinician guidance indicates it.

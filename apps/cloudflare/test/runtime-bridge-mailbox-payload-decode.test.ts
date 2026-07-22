@@ -70,6 +70,43 @@ describe("createCloudflareHostedMailboxPayloadDecoder", () => {
     expect(call?.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER)).toBe("9");
   });
 
+  it("normalizes persisted legacy persona ids before they enter the container runtime", async () => {
+    const decoder = createCloudflareHostedMailboxPayloadDecoder({
+      fetchImpl: async () => Response.json({
+        status: "decoded",
+        wake: {
+          eventId: "event_decode_legacy_persona",
+          kind: "member.preferences.updated",
+          occurredAt: "2026-07-07T00:00:00.000Z",
+          preferences: {
+            persona: "medical-detective",
+          },
+          userId: "member_decode",
+        },
+      }),
+      readCurrentLease: () => ({
+        attemptId: "attempt_decode",
+        leaseGeneration: "4",
+        userId: "member_decode",
+        workspaceVersion: "9",
+      }),
+      timeoutMs: 1000,
+    });
+
+    await expect(decoder.decode(createDecodeInput())).resolves.toEqual({
+      status: "decoded",
+      wake: {
+        eventId: "event_decode_legacy_persona",
+        kind: "member.preferences.updated",
+        occurredAt: "2026-07-07T00:00:00.000Z",
+        preferences: {
+          persona: "scientist",
+        },
+        userId: "member_decode",
+      },
+    });
+  });
+
   it("fails closed without a current write fence before calling fetch", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     const decoder = createCloudflareHostedMailboxPayloadDecoder({

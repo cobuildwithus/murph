@@ -1163,6 +1163,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         assistantPhaseResult,
         latestAssistantInputBatch:
           checkpointRequestSession.latestAssistantInputBatch(),
+        now: input.now,
         selectedInitialAssistantInputIds,
         signal: input.signal ?? null,
         vaultRoot: input.vaultRoot,
@@ -1831,15 +1832,33 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   acceptedInitialAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
   assistantPhaseResult: HostedWorkspaceRunnerAssistantPhaseResult;
   latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null;
+  now?: (() => string) | null;
   selectedInitialAssistantInputIds: readonly string[];
   signal: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedWorkspaceRunnerAssistantInputBatch | null> {
+  const foregroundReplyDeferredForImmediateAssistantWork =
+    input.assistantPhaseResult.foregroundReplyFailed === undefined
+    && input.assistantPhaseResult.nextWakeReason === "assistant"
+    && typeof input.assistantPhaseResult.nextWakeAt === "string"
+    && hostedWorkspaceRunnerWakeIsImmediate(
+      input.assistantPhaseResult.nextWakeAt,
+      input.now,
+    );
+  const foregroundReplyCompletedCleanly =
+    input.assistantPhaseResult.foregroundReplyFailed === 0;
   if (
     input.acceptedInitialAssistantInputBatch === null
     || input.assistantPhaseResult.progressed !== true
-    || input.assistantPhaseResult.foregroundReplyFailed !== 0
-    || input.selectedInitialAssistantInputIds.length < 2
+    || (
+      !foregroundReplyDeferredForImmediateAssistantWork
+      && !foregroundReplyCompletedCleanly
+    )
+    || input.selectedInitialAssistantInputIds.length === 0
+    || (
+      foregroundReplyCompletedCleanly
+      && input.selectedInitialAssistantInputIds.length < 2
+    )
     || new Set(input.selectedInitialAssistantInputIds).size
       !== input.selectedInitialAssistantInputIds.length
   ) {
@@ -1853,9 +1872,17 @@ async function rebuildHostedWorkspaceRunnerAssistantInputBatchAfterSelectedPrefi
   const pendingSelectedInputIds = input.selectedInitialAssistantInputIds.filter(
     (inputId) => pendingInputIds.has(inputId),
   );
+  // Bounded assistant-owned system work can make durable progress and yield an
+  // immediate wake before the foreground reply phase starts. In that case every
+  // selected input is still pending and must be restored to the invocation-local
+  // rerun batch. Once a reply phase has run, retain the narrower handled-prefix
+  // repair behavior below.
   if (
     pendingSelectedInputIds.length === 0
-    || pendingSelectedInputIds.length === input.selectedInitialAssistantInputIds.length
+    || (
+      pendingSelectedInputIds.length === input.selectedInitialAssistantInputIds.length
+      && !foregroundReplyDeferredForImmediateAssistantWork
+    )
   ) {
     return input.latestAssistantInputBatch;
   }

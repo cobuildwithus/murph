@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:apolipoprotein-b"
 slug: "biomarkers/apolipoprotein-b"
 title: "Apolipoprotein B"
-summary: "A blood marker reflecting the number of apoB-containing atherogenic lipoprotein particles; an optional higher-resolution secondary endpoint."
+summary: "ApoB measures the concentration of apolipoprotein B carried one per atherogenic particle, which can add particle-number context when standard cholesterol measures are discordant."
 status: "field-testing"
 hidden: true
 quality: "usable"
@@ -41,13 +41,13 @@ biomarker:
 
     -
       title: "Why people care"
-      body: "Each atherogenic lipoprotein carries exactly one ApoB molecule, making it a direct particle count and a stronger predictor of cardiovascular risk than LDL-C alone; in 20-30% of people LDL-C looks normal while ApoB is elevated."
+      body: "Each atherogenic lipoprotein particle carries one ApoB molecule, so ApoB can add particle-number context when it and LDL-C do not tell the same story."
     -
       title: "How to measure it"
-      body: "A standard blood draw (fasting not required); desirable is below 100 mg/dL, optimal for higher-risk individuals is below 80 mg/dL, and above 130 mg/dL is elevated. Track over 3-6 month intervals."
+      body: "ApoB is measured in blood; any decision limit or treatment goal depends on the person’s cardiovascular-risk setting, treatment status, assay, and the guidance being applied."
     -
       title: "What moves it"
-      body: "Saturated fat, excess body fat, refined sugar, inactivity, and poor sleep raise it; Mediterranean-style diet, fiber, weight loss, and exercise can lower it 5-15% over 12 weeks. Hypothyroidism, insulin resistance, and certain medications can confound readings."
+      body: "Diet, body composition, metabolic health, thyroid function, illness, and lipid-lowering medications can change ApoB, so comparisons should preserve that context."
   measurement:
     bestContext: "A blood lipid panel drawn before the intervention and repeated after the planned intervention window, ideally with similar lab and fasting conditions."
     howToMeasure:
@@ -73,5 +73,27 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Opted-in lipid experiment summaries will appear once enough comparable runs are available."
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: decision_limit
+      guidance: "The 2026 dyslipidemia guideline lists persistent ApoB at or above 120 mg/dL among selected cardiovascular risk-enhancing lipid findings, while treatment goals depend on overall risk and clinical context."
+      applicability: "Use only in the cardiovascular risk context described by guideline-based assessment; assay, lipid treatment, diabetes, triglycerides, kidney disease, and discordance with LDL-C matter."
+      numericValues:
+        - label: "Risk-enhancing factor"
+          unit: "mg/dL"
+          lowerBound:
+            value: 120
+            inclusive: true
+      source:
+        title: "2026 ACC/AHA/Multisociety Guideline on the Management of Dyslipidemia"
+        organization: "American College of Cardiology, American Heart Association, and collaborating societies; Circulation"
+        year: 2026
+        sourceType: "clinical_guideline"
+        url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001423"
+        doi: "10.1161/CIR.0000000000001423"
 ---
+
 Apolipoprotein B is used here as a lab-measured lipid marker. These cholesterol protocols treat LDL-C as the primary endpoint and use other lipid markers as supportive or contextual measures.

@@ -25,6 +25,7 @@ export type HostedBlindIndexKind =
   | "email"
   | "external-thread"
   | "external-thread-identity"
+  | "group-disclosure-permission"
   | "linq-chat"
   | "linq-message"
   | "phone"
@@ -58,6 +59,24 @@ export function createHostedAssistantInputLookupKeyReadCandidates(
 ): string[] {
   return createHostedLookupKeyReadCandidates(
     "assistant-input",
+    normalizeHostedOpaqueInput(value),
+  );
+}
+
+export function createHostedGroupDisclosurePermissionLookupKey(
+  value: string | null | undefined,
+): string | null {
+  return createHostedLookupKey(
+    "group-disclosure-permission",
+    normalizeHostedOpaqueInput(value),
+  );
+}
+
+export function createHostedGroupDisclosurePermissionLookupKeyReadCandidates(
+  value: string | null | undefined,
+): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "group-disclosure-permission",
     normalizeHostedOpaqueInput(value),
   );
 }

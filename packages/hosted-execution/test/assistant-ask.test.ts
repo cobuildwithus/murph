@@ -11,8 +11,8 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   isHostedExecutionAssistantAskCompletedWake,
   isHostedExecutionAssistantAskRequestedWake,
-  type HostedExecutionAssistantAskCompletedPayload,
-  type HostedExecutionAssistantAskRequestedPayload,
+  type HostedExecutionAssistantAskJoinedGroupCompletedPayload,
+  type HostedExecutionAssistantAskJoinedGroupRequestedPayload,
 } from "../src/contracts.ts";
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
@@ -34,8 +34,8 @@ const EXPIRES_AT = new Date(
 const COMPLETED_AT = "2026-07-15T12:05:00.000Z";
 
 function createRequestedAsk(
-  overrides: Partial<HostedExecutionAssistantAskRequestedPayload> = {},
-): HostedExecutionAssistantAskRequestedPayload {
+  overrides: Partial<HostedExecutionAssistantAskJoinedGroupRequestedPayload> = {},
+): HostedExecutionAssistantAskJoinedGroupRequestedPayload {
   return {
     expiresAt: EXPIRES_AT,
     originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -51,8 +51,8 @@ function createRequestedAsk(
 }
 
 function createCompletedAsk(
-  overrides: Partial<HostedExecutionAssistantAskCompletedPayload> = {},
-): HostedExecutionAssistantAskCompletedPayload {
+  overrides: Partial<HostedExecutionAssistantAskJoinedGroupCompletedPayload> = {},
+): HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   return {
     expiresAt: EXPIRES_AT,
     originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -77,6 +77,9 @@ describe("hosted Assistant Ask contracts", () => {
       memberId: "member_group_runtime",
       occurredAt: REQUESTED_AT,
     });
+    if (requestedAsk.target.kind !== "joined_group") {
+      throw new Error("Expected the legacy joined-group target.");
+    }
     requestedAsk.target.membershipId = "hgrpm_mutated";
     requestedAsk.target.requestedLabel = "Mutated";
 

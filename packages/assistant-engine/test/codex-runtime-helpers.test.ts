@@ -2610,6 +2610,63 @@ describe('Codex assistant registry helpers', () => {
     expect(appServerInput?.codexHome).toBe('/tmp/provider-tests/shared-codex-home')
   })
 
+  it('forwards ephemeral read-only turns while preserving dynamic tools', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Completed isolated reviewed turn.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Completed isolated reviewed turn.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'ephemeral-reviewed-thread',
+      stderr: '',
+      stdout: '',
+      threadId: 'ephemeral-reviewed-thread',
+      turnId: 'turn-ephemeral-reviewed',
+    })
+    const dynamicTools = resolveMurphDynamicTools({
+      groupAvailable: true,
+      progressUpdatesAvailable: false,
+    })
+    const codexConfigOverrides = [
+      'memories.use_memories=false',
+      'memories.generate_memories=false',
+      'features.shell_tool=false',
+      'web_search="disabled"',
+      'features.web_search_request=false',
+      'features.standalone_web_search=false',
+      'features.apps=false',
+      'features.enable_mcp_apps=false',
+      'features.browser_use=false',
+      'features.plugins=false',
+      'features.multi_agent=false',
+      'features.multi_agent_v2=false',
+      'features.tool_suggest=false',
+    ]
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: {
+        provider: 'codex-cli',
+        sandbox: 'read-only',
+      },
+      turn: {
+        codexConfigOverrides,
+        dynamicTools,
+        prompt: 'Reason once over the reviewed group answer.',
+        providerThreadEphemeral: true,
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    const appServerInput =
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+    expect(appServerInput?.configOverrides).toEqual(codexConfigOverrides)
+    expect(appServerInput?.dynamicTools).toEqual(dynamicTools)
+    expect(appServerInput?.ephemeral).toBe(true)
+    expect(appServerInput?.sandbox).toBe('read-only')
+  })
+
   it('does not replay committed history after stale native resume fails', async () => {
     const traceEvents: AssistantProviderTraceEvent[] = []
 

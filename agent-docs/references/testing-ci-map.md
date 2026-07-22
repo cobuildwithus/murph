@@ -22,6 +22,7 @@ Last verified: 2026-07-21
 | `MURPH_SAFE_E2E_PRODUCT_REF=... MURPH_SAFE_E2E_PRODUCT_NAME=... MURPH_SAFE_E2E_QUERY=... MURPH_SAFE_E2E_EXPECTED_TEST_ID=... pnpm --dir apps/web exec playwright test e2e/murph-safe-production-seam.spec.ts` | Opt-in rendered production-seam proof against an explicitly seeded local labels database. It uses the real POST search route, validates the public detail contract and exact selected-record test id, renders the server detail at phone and desktop widths, and checks detail overflow. `MURPH_SAFE_E2E_EXCLUDED_TEST_ID` can prove that a same-canonical sibling observation is absent. | Murph Safe public search route, shared service, labels SQL, contract, and server-rendered detail page |
 | `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL proof for bounded Messages credential rotation and enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Repeated enrollment rotates one Messages-owned row while invalidating prior bearers and preserving ordinary sessions, including stale-generation self-revocation, re-enrollment after revocation and expiry, plus both deletion-first and enrollment-first serialization orders with final absence of the member and its device-agent session |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for the usage-credit beneficiary lock, replay, and deletion boundaries. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Concurrent grant replay converges on one immutable grant, grant/debit ordering preserves the projection, the member-before-purchase lock order is observable under contention, and deletion-first ordering cannot append an orphaned grant |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-assistant-ask-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for the reviewed Assistant Ask mailbox-retention boundary. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | Production retention SQL physically deletes the expired request and completion rows while the outbox-carried completion id, delivery key, and expiry still authorize only the fixed terminal copy |
 
 For local Codex parents, the canonical root `pnpm test:diff` and
 `pnpm verify:acceptance` commands may execute this same coverage surface through
@@ -224,8 +225,10 @@ exact admitted group thread.
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
-  it does not send a real private-to-group ask through deployed Web, Temporal,
-  Cloudflare, a live model provider, and the user messaging channel.
+  it does not send a real private-to-group ask, an accepted-input
+  group-to-member ask, or a scheduled same-turn ask/replay
+  through deployed Web, Temporal, Cloudflare, a live model provider, and the
+  applicable messaging or no-delivery destination.
 
 - Clinical Records has focused hosted-web proof for the committed Epic
   directory v2 and acquisition policy (including exact source hashing,

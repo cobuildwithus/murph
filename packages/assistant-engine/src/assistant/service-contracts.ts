@@ -47,6 +47,7 @@ import type {
 } from './codex-thread-route.js'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import type { finalizeAssistantTurnReceipt } from './turns.js'
@@ -135,6 +136,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   deliveryIdempotencyKey?: string | null
   answeredMailboxItemIds?: readonly string[] | null
+  reviewedAssistantAskCompletionExpiresAt?: string | null
   deliveryMessageReactionsAvailable?: boolean | null
   deliveryNativeReplyRequested?: true
   deliveryReplyToMessageId?: string | null
@@ -153,12 +155,18 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean
+  // Existing App Server per-turn thread option. Never enters session identity
+  // or persisted provider config.
+  providerThreadEphemeral?: boolean | null
   prompt: string
   suppressProviderFailureTranscriptAudit?: boolean
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
   scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
+  // Generic engine-owned invocation identity. Unlike the newsletter authority,
+  // this grants no side effect by itself and is never model supplied.
+  scheduledInvocationAuthority?: HostedRuntimeScheduledAutomationAuthority | null
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.
   scheduledOccurrenceAt?: string | null
