@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Current Repo Checks
 
@@ -57,13 +57,16 @@ the required frontend and coverage specialist audits, the review-only Fable UI
 pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
 
-Hosted personal usage-credit coverage is split across focused hosted-web unit
+Hosted usage-credit coverage is split across focused hosted-web unit
 and component tests. The allowance suites exercise enforced exhaustion,
 included-first settlement, carryover balance, and crossing-operation behavior;
 credit-ledger suites exercise beneficiary-lock call ordering, unique
 grants/debits, and projection updates; route and purchase-service suites
 exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
-request idempotency; reconciliation suites exercise live Stripe re-fetch,
+request idempotency. Family coverage additionally proves owner/group/member
+authorization, use of the Family billing Customer, distinct owner-self target
+identity, exact frozen replay after membership changes, per-member Settings
+routing, and former-member recovery; reconciliation suites exercise live Stripe re-fetch,
 one-time/subscription dispatch separation, replay-safe grants, refund/dispute
 signed adjustments in both directions; component suites exercise the Settings
 dialog selection, redirect, return polling, and error states. A guarded

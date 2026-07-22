@@ -39,7 +39,10 @@ import {
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedPersonalUsageCreditOfferCodes } from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
+import {
+  readHostedConfiguredUsageCreditOfferCodes,
+  readHostedPersonalUsageCreditOfferCodes,
+} from "@/src/lib/hosted-onboarding/personal-usage-credit-eligibility";
 import { getPrisma } from "@/src/lib/prisma";
 import { readHostedSecureApprovalStatus } from "@/src/lib/sensitive-actions/secure-approval-status";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -49,7 +52,10 @@ import {
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
-import { readHostedActiveUsageCreditPurchaseForPayer } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
+import {
+  readHostedActiveUsageCreditPurchaseForPayer,
+  readHostedUsageCreditPurchaseTargetForPayer,
+} from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
 import { resolveMurphContactOptions } from "@/src/lib/murph-contact-routing";
 
 export const metadata: Metadata = createMurphPageMetadata({
@@ -62,6 +68,8 @@ type SettingsSearchParams = {
   addUsage?: string | string[] | undefined;
   startPulse?: string | string[] | undefined;
   usageCheckout?: string | string[] | undefined;
+  usageFamily?: string | string[] | undefined;
+  usageMember?: string | string[] | undefined;
   usagePurchase?: string | string[] | undefined;
   voice?: string | string[] | undefined;
 };
@@ -107,6 +115,7 @@ export default async function SettingsPage({
         memberId: authenticatedMember.id,
         prisma,
         privyUserId: session?.privyUserId,
+        usageReturnPurchaseId: usageTopUpPurchaseReturn?.purchaseId ?? null,
       })
     : null;
   const settingsSnapshot = settingsData?.settingsSnapshot ?? null;
@@ -119,12 +128,48 @@ export default async function SettingsPage({
   const usageCreditProjection = settingsData?.usageCreditProjection ?? null;
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
+  const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const usageTopUpOffers = projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
+  const familyUsageTopUpOffers = activeFamilyOwner
+    ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodes())
+    : [];
+  const personalUsageTopUpActivePurchase =
+    usageTopUpActivePurchase?.target.kind === "personal"
+      ? usageTopUpActivePurchase
+      : null;
+  const familyUsageTopUpActivePurchase =
+    usageTopUpActivePurchase?.target.kind === "family"
+    && usageTopUpActivePurchase.target.familyGroupId === familyOwner?.groupId
+      ? usageTopUpActivePurchase
+      : null;
+  const familyUsageTopUpActiveMemberId =
+    familyUsageTopUpActivePurchase?.target.beneficiaryMemberId ?? null;
+  const personalUsageTopUpPurchaseReturn =
+    usageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.kind === "personal"
+    && resolvedSearchParams.usageFamily === undefined
+    && resolvedSearchParams.usageMember === undefined
+      ? usageTopUpPurchaseReturn
+      : null;
+  const familyUsageTopUpPurchaseReturn =
+    usageTopUpPurchaseReturn
+    && usageTopUpReturnTarget?.kind === "family"
+    && usageTopUpReturnTarget.familyGroupId === familyOwner?.groupId
+    && readOnlySearchParamValue(resolvedSearchParams.usageFamily)
+      === usageTopUpReturnTarget.familyGroupId
+    && readOnlySearchParamValue(resolvedSearchParams.usageMember)
+      === usageTopUpReturnTarget.beneficiaryMemberId
+      ? usageTopUpPurchaseReturn
+      : null;
+  const familyUsageTopUpReturnMemberId =
+    familyUsageTopUpPurchaseReturn
+      ? usageTopUpReturnTarget?.beneficiaryMemberId ?? null
+      : null;
   const canStartFamily =
     authenticatedMember != null &&
     !activeFamilyOwner &&
@@ -224,10 +269,10 @@ export default async function SettingsPage({
             usageCreditProjection?.balanceUsdMicros.toString() ?? null
           }
           usageStatus={usageStatus}
-          usageTopUpActivePurchase={usageTopUpActivePurchase}
+          usageTopUpActivePurchase={personalUsageTopUpActivePurchase}
           usageTopUpInitialOpen={openUsageTopUp}
           usageTopUpOffers={usageTopUpOffers}
-          usageTopUpPurchaseReturn={usageTopUpPurchaseReturn}
+          usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
         />
       </section>
 
@@ -251,7 +296,14 @@ export default async function SettingsPage({
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Family
           </div>
-          <HostedFamilySettings ownerSnapshot={familyOwner} />
+          <HostedFamilySettings
+            ownerSnapshot={familyOwner}
+            usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
+            usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
+            usageTopUpOffers={familyUsageTopUpOffers}
+            usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
+            usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}
+          />
         </section>
       ) : null}
 
@@ -330,6 +382,7 @@ async function readSettingsPageData(input: {
   memberId: string;
   prisma: ReturnType<typeof getPrisma>;
   privyUserId: string | null | undefined;
+  usageReturnPurchaseId: string | null;
 }) {
   const { memberId, prisma } = input;
   // The Privy reads are network calls with no database cost, so they overlap
@@ -367,10 +420,16 @@ async function readSettingsPageData(input: {
     prisma,
   }).catch(() => []);
   const usageTopUpActivePurchase = await readHostedActiveUsageCreditPurchaseForPayer({
-    beneficiaryMemberId: memberId,
     payerMemberId: memberId,
     prisma,
   }).catch(() => null);
+  const usageTopUpReturnTarget = input.usageReturnPurchaseId
+    ? await readHostedUsageCreditPurchaseTargetForPayer({
+        payerMemberId: memberId,
+        prisma,
+        purchaseId: input.usageReturnPurchaseId,
+      }).catch(() => null)
+    : null;
 
   return {
     familyAccess,
@@ -382,6 +441,7 @@ async function readSettingsPageData(input: {
     usageStatus,
     usageTopUpActivePurchase,
     usageTopUpOfferCodes,
+    usageTopUpReturnTarget,
   };
 }
 

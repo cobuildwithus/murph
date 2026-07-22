@@ -31,10 +31,12 @@ interface HostedUsageTopUpReturn {
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
   checkoutUrl?: string;
+  deferTerminalRefreshUntilClose?: boolean;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   purchaseReturn?: HostedUsageTopUpReturn | null;
-  scope?: "group" | "personal";
+  scope?: "family" | "group" | "personal";
+  targetLabel?: string;
 }
 
 interface HostedUsageTopUpPurchaseResponse {
@@ -116,8 +118,9 @@ function readStatusContent(input: {
   canRetryCheckout: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
-  scope?: "group" | "personal";
+  scope?: "family" | "group" | "personal";
   status: HostedUsageTopUpPurchaseStatus | null;
+  targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
   if (input.targetConflict) {
@@ -216,6 +219,8 @@ function readStatusContent(input: {
         "Usage added",
         input.scope === "group"
           ? "This group's available usage has been updated."
+          : input.scope === "family" && input.targetLabel
+            ? `The available usage for ${input.targetLabel} has been updated.`
           : "Your available usage has been updated.",
       );
     case "expired":

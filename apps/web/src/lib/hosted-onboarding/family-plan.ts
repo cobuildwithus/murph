@@ -372,6 +372,12 @@ export interface HostedFamilyOwnerSnapshot {
   suspendedAt: Date | null;
 }
 
+export interface HostedFamilyUsageCreditCheckoutTarget {
+  beneficiaryMemberId: string;
+  groupId: string;
+  stripeCustomerId: string;
+}
+
 export interface HostedFamilyOwnerPlanStatus {
   active: number;
   billed: number;
@@ -855,6 +861,62 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
   });
 
   return billingRef ? projectHostedAccountGroupBillingRefSnapshot(billingRef, prisma) : null;
+}
+
+export async function resolveHostedFamilyUsageCreditCheckoutTargetTx(input: {
+  beneficiaryMemberId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedFamilyUsageCreditCheckoutTarget | null> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: { ownerMemberId: input.ownerMemberId },
+  });
+  if (!group || !hasHostedAccountGroupAccess(group)) {
+    return null;
+  }
+
+  if (input.beneficiaryMemberId !== input.ownerMemberId) {
+    await lockHostedMemberRow(input.tx, input.beneficiaryMemberId);
+  }
+  const [beneficiary, membership, billingRef] = await Promise.all([
+    input.tx.hostedMember.findUnique({
+      select: {
+        suspendedAt: true,
+        threadContainer: { select: { memberId: true } },
+      },
+      where: { id: input.beneficiaryMemberId },
+    }),
+    input.tx.hostedAccountGroupMembership.findFirst({
+      select: { id: true },
+      where: {
+        groupId: group.id,
+        memberId: input.beneficiaryMemberId,
+        status: "active",
+      },
+    }),
+    readHostedAccountGroupStripeBillingRef({
+      groupId: group.id,
+      prisma: input.tx,
+    }),
+  ]);
+  if (
+    !beneficiary
+    || beneficiary.suspendedAt
+    || beneficiary.threadContainer
+    || !membership
+    || !billingRef?.stripeCustomerId
+    || !billingRef.stripeSubscriptionId
+  ) {
+    return null;
+  }
+
+  return {
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    groupId: group.id,
+    stripeCustomerId: billingRef.stripeCustomerId,
+  };
 }
 
 export async function lookupHostedAccountGroupStripeBillingRefByStripeCustomerId(input: {

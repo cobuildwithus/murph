@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Current Guardrails
 
@@ -26,6 +26,12 @@ Last verified: 2026-07-21
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Family usage-credit creation rechecks owner, group billing, active membership,
+  and beneficiary status inside the purchase transaction. Exact request-key
+  replay recovers the already-frozen purchase without consulting mutable Family
+  membership, while every fresh key reauthorizes current state. Personal,
+  hosted-group, and Family return scopes are frozen distinctly so payer-wide
+  active-purchase recovery cannot confuse an owner self top-up across targets.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked

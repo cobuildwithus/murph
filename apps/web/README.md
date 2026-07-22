@@ -1245,6 +1245,7 @@ Hosted onboarding surfaces:
 Authenticated Settings usage-credit surfaces:
 
 - `POST /api/settings/billing/usage-credit/checkout`
+- `POST /api/settings/billing/family/members/:memberId/usage-credit/checkout`
 - `GET /api/settings/billing/usage-credit/purchases/:purchaseId`
 - `POST /api/settings/billing/usage-credit/purchases/:purchaseId/expire`
 
@@ -1274,8 +1275,9 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted onboarding Checkout uses Stripe subscription mode. The only current
-  one-time Checkout is the fixed personal usage-credit catalog in Settings.
+- Hosted onboarding Checkout uses Stripe subscription mode. Current one-time
+  Checkout uses the fixed usage-credit catalog for eligible personal, hosted
+  group, and Family-member destinations.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
 - `checkout.session.completed` normally binds refs only, except for the

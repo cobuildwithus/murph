@@ -38,6 +38,7 @@ interface OwnedCheckoutRequest {
 function useHostedUsageTopUpDialog({
   activePurchase = null,
   checkoutUrl = CHECKOUT_URL,
+  deferTerminalRefreshUntilClose = false,
   initialOpen = false,
   offers,
   purchaseReturn = null,
@@ -70,6 +71,12 @@ function useHostedUsageTopUpDialog({
       : state.screen.operation !== "idle";
 
   function refreshPurchaseOnce(purchaseId: string) {
+    // A recovery-only host has no trigger after terminal reconciliation. Keep
+    // its confirmation visible until the owner closes it, then refresh away
+    // the host instead of unmounting the result immediately.
+    if (deferTerminalRefreshUntilClose) {
+      return;
+    }
     if (refreshedPurchaseIdsRef.current.has(purchaseId)) {
       return;
     }
@@ -121,7 +128,9 @@ function useHostedUsageTopUpDialog({
   useEffect(() => {
     const queryKeys = [
       ...(initialOpen ? ["addUsage"] : []),
-      ...(purchaseReturn ? ["usagePurchase", "usageCheckout"] : []),
+      ...(purchaseReturn
+        ? ["usagePurchase", "usageCheckout", "usageFamily", "usageMember"]
+        : []),
     ];
     const cleanupKey = `${queryKeys.join(":")}:${returnKey ?? ""}`;
     if (queryKeys.length === 0 || cleanedQueryKeyRef.current === cleanupKey) {
@@ -290,6 +299,11 @@ function useHostedUsageTopUpDialog({
 
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
+      const refreshRecoveryHost =
+        deferTerminalRefreshUntilClose &&
+        state.screen.kind === "purchase" &&
+        state.screen.status !== null &&
+        !shouldPollPurchaseStatus(state.screen.status);
       const request = checkoutRequestRef.current;
       if (request) {
         request.abortReason = "dismissed";
@@ -297,6 +311,9 @@ function useHostedUsageTopUpDialog({
       }
       statusControllerRef.current?.abort();
       dispatch({ type: "close" });
+      if (refreshRecoveryHost) {
+        refresh();
+      }
       return;
     }
 
