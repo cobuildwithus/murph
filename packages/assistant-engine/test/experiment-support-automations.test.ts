@@ -1,4 +1,4 @@
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 
 import {
   buildAutomationSupportSeriesTag,
@@ -13,6 +13,7 @@ const vaultServicesMocks = vi.hoisted(() => ({
   writeExperimentOutcome: vi.fn(),
   showExperiment: vi.fn(),
   useShowExperimentMock: false,
+  useWriteExperimentOutcomeMock: true,
 }))
 const coreMocks = vi.hoisted(() => ({
   patchAutomation: vi.fn(),
@@ -38,7 +39,11 @@ vi.mock('@murphai/vault-usecases/vault-services', async (importOriginal) => {
         ...services,
         core: {
           ...services.core,
-          writeExperimentOutcome: vaultServicesMocks.writeExperimentOutcome,
+          writeExperimentOutcome: (
+            input: Parameters<typeof services.core.writeExperimentOutcome>[0]
+          ) => vaultServicesMocks.useWriteExperimentOutcomeMock
+            ? vaultServicesMocks.writeExperimentOutcome(input)
+            : services.core.writeExperimentOutcome(input),
         },
         query: {
           ...services.query,
@@ -63,6 +68,7 @@ import {
   initializeVault,
   resolveVaultPath,
   scaffoldAutomationPayload,
+  stopExperiment,
   updateExperiment,
   upsertAutomation,
   upsertRegimen,
@@ -86,6 +92,7 @@ const cleanupRoots: string[] = []
 
 afterEach(async () => {
   vaultServicesMocks.useShowExperimentMock = false
+  vaultServicesMocks.useWriteExperimentOutcomeMock = true
   vaultServicesMocks.listExperimentLifecycleFrontmatter.mockReset()
   await Promise.all(
     cleanupRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
@@ -736,7 +743,10 @@ function buildShowExperimentResult(frontmatter: Record<string, unknown>) {
 
 function resetPreconditionMocks() {
   vaultServicesMocks.useShowExperimentMock = true
-  vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({})
+  vaultServicesMocks.useWriteExperimentOutcomeMock = true
+  vaultServicesMocks.writeExperimentOutcome.mockReset().mockResolvedValue({
+    outcome: { experiment: { status: 'completed' } },
+  })
   vaultServicesMocks.showExperiment.mockReset()
   coreMocks.patchAutomation.mockReset().mockResolvedValue({})
 }
@@ -1113,6 +1123,87 @@ it('persists the deterministic outcome with a pinned asOf for an eligible final-
   ).toBeLessThan(
     vaultServicesMocks.writeExperimentOutcome.mock.invocationCallOrder[0] ?? 0,
   )
+})
+
+it('skips final-results delivery when the canonical writer preserves an active interim after plan shortening', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'experiment-final-results-active-interim-',
+  )
+  cleanupRoots.push(parentRoot)
+  await initializeVault({ vaultRoot, timezone: 'UTC' })
+  coreMocks.patchAutomation.mockReset().mockResolvedValue({})
+  const created = await createExperiment({
+    assistantSupport: { notificationStyle: 'send_scheduled_summary' },
+    runPlan: {
+      interventionStart: '2026-06-01',
+      interventionEnd: '2026-06-07',
+    },
+    slug: 'active-interim-final-results',
+    startedOn: '2026-06-01T12:00:00.000Z',
+    title: 'Active Interim Final Results',
+    vaultRoot,
+  })
+  const finalResultsSeed = (await buildExperimentLifecycleSeeds({
+    now: new Date('2026-06-02T12:00:00.000Z'),
+    vaultRoot,
+  })).find((seed) => seed.tags?.includes('final-results'))
+  if (!finalResultsSeed) {
+    throw new Error('Expected a final-results automation seed.')
+  }
+
+  vaultServicesMocks.useWriteExperimentOutcomeMock = false
+  const services = createIntegratedVaultServices()
+  const interim = await services.core.writeExperimentOutcome({
+    asOf: '2026-06-04',
+    lookup: created.experiment.id,
+    requestId: null,
+    vault: vaultRoot,
+  })
+  expect(interim.outcome.experiment.status).toBe('active')
+  if (!interim.outcomePath) {
+    throw new Error('Expected the interim outcome to have a canonical path.')
+  }
+  const interimPath = resolveVaultPath(vaultRoot, interim.outcomePath).absolutePath
+  const interimBytes = await readFile(interimPath, 'utf8')
+
+  await stopExperiment({
+    occurredAt: '2026-06-06T20:00:00.000Z',
+    relativePath: created.experiment.relativePath,
+    title: 'Stopped',
+    vaultRoot,
+  })
+  await updateExperiment({
+    relativePath: created.experiment.relativePath,
+    runPlan: {
+      interventionStart: '2026-06-01',
+      interventionEnd: '2026-06-06',
+    },
+    vaultRoot,
+  })
+
+  await expect(runExperimentLifecycleOutcomePrecondition({
+    automationId: finalResultsSeed.automationId,
+    tags: finalResultsSeed.tags ?? [],
+    vault: vaultRoot,
+  })).resolves.toEqual({
+    kind: 'skip',
+    reason: 'canonical experiment outcome is not completed',
+  })
+  expect(await readFile(interimPath, 'utf8')).toBe(interimBytes)
+
+  const shown = await services.query.showExperiment({
+    lookup: created.experiment.id,
+    requestId: null,
+    vault: vaultRoot,
+  })
+  expect(shown.entity.data).toMatchObject({
+    endedOn: '2026-06-06',
+    outcomeRef: {
+      outcomeId: interim.outcome.outcomeId,
+      relativePath: interim.outcomePath,
+    },
+    status: 'completed',
+  })
 })
 
 it('rechecks final delivery authority without mutating outcome or automation state', async () => {

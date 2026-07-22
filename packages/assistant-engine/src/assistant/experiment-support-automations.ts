@@ -670,12 +670,18 @@ async function runExperimentLifecyclePrecondition(
   await archiveActivityNudge()
   // The write-once owner validates an existing link or creates the missing
   // deterministic result without coupling persistence to delivery.
-  await services.core.writeExperimentOutcome({
+  const outcomeResult = await services.core.writeExperimentOutcome({
     vault: input.vault,
     lookup: experimentLookup,
     asOf: interventionEnd,
     requestId: null,
   })
+  if (outcomeResult.outcome.experiment.status !== 'completed') {
+    return {
+      kind: 'skip',
+      reason: 'canonical experiment outcome is not completed',
+    }
+  }
 
   if (!hasScheduledSummaryConsent(experiment)) {
     return {
