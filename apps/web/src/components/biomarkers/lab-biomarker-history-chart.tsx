@@ -5,7 +5,6 @@ import {
   CartesianGrid,
   Line,
   LineChart,
-  ReferenceArea,
   ReferenceLine,
   XAxis,
   YAxis,
@@ -53,6 +52,7 @@ export function LabBiomarkerHistoryChart({
   points,
   referenceRange = null,
   referenceRangeLabel = null,
+  referenceRangeSourceLabel = null,
   unit,
 }: {
   ariaDescribedBy?: string;
@@ -60,6 +60,7 @@ export function LabBiomarkerHistoryChart({
   points: readonly LabBiomarkerChartPoint[];
   referenceRange?: LabBiomarkerChartRange | null;
   referenceRangeLabel?: string | null;
+  referenceRangeSourceLabel?: string | null;
   unit: string | null;
 }) {
   const data = useMemo(
@@ -83,6 +84,7 @@ export function LabBiomarkerHistoryChart({
   const xDomain = useMemo(() => resolveTimeDomain(data.map((point) => point.time)), [data]);
   const range = normalizeRange(referenceRange);
   const rangeLabel = range ? referenceRangeLabel?.trim() || null : null;
+  const rangeSourceLabel = rangeLabel ? referenceRangeSourceLabel?.trim() || null : null;
   const rangeIsBand = range !== null && range.low !== null && range.high !== null;
 
   return (
@@ -92,16 +94,22 @@ export function LabBiomarkerHistoryChart({
           <span
             aria-hidden="true"
             className={rangeIsBand
-              ? "h-2 w-5 shrink-0 bg-primary/10"
+              ? "h-2 w-5 shrink-0 border-y border-dashed border-primary/50"
               : "h-0 w-5 shrink-0 border-t border-dashed border-primary/50"}
           />
           <span>Latest lab range</span>
           <span className="font-mono tabular-nums text-foreground">{rangeLabel}</span>
+          {rangeSourceLabel ? (
+            <>
+              <span aria-hidden="true" className="text-border">/</span>
+              <span>{rangeSourceLabel}</span>
+            </>
+          ) : null}
         </div>
       ) : null}
       <ChartContainer
         aria-describedby={ariaDescribedBy}
-        aria-label={`${displayName} results over time${rangeLabel ? `; latest lab range ${rangeLabel}` : ""}`}
+        aria-label={`${displayName} results over time${rangeLabel ? `; latest lab range ${rangeLabel}${rangeSourceLabel ? ` from ${rangeSourceLabel}` : ""}` : ""}`}
         className="h-72 w-full sm:h-80"
         config={chartConfig}
         initialDimension={{ height: 320, width: 760 }}
@@ -112,7 +120,7 @@ export function LabBiomarkerHistoryChart({
           data={data}
           margin={{ bottom: 0, left: 0, right: 12, top: 12 }}
         >
-          {range ? null : <CartesianGrid vertical={false} strokeDasharray="3 5" />}
+          <CartesianGrid vertical={false} strokeDasharray="3 5" />
           <XAxis
             axisLine={false}
             dataKey="time"
@@ -133,16 +141,6 @@ export function LabBiomarkerHistoryChart({
             tickMargin={6}
             width="auto"
           />
-          {range && range.low !== null && range.high !== null ? (
-            <ReferenceArea
-              fill="var(--color-value)"
-              fillOpacity={0.08}
-              ifOverflow="hidden"
-              stroke="none"
-              y1={range.low}
-              y2={range.high}
-            />
-          ) : null}
           {range && range.low !== null ? (
             <ReferenceLine
               {...RANGE_LINE_STYLE}

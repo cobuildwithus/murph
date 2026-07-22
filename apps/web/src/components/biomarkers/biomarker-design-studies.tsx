@@ -135,7 +135,7 @@ export function BiomarkerIndexStudy() {
       </header>
 
       <section aria-labelledby="device-study-heading" className="border-y border-border/70">
-        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
             From your devices
           </h4>
@@ -392,21 +392,6 @@ export function BiomarkerDetailStudy() {
           <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-02-17">
             Feb 17, 2026
           </time>
-
-          <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Lab range</dt>
-              <dd className="font-medium text-foreground">13.0 to 17.0 g/dL</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Source</dt>
-              <dd className="font-medium text-foreground">Example laboratory</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">History</dt>
-              <dd className="font-medium text-foreground">4 comparable results</dd>
-            </div>
-          </dl>
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
@@ -419,6 +404,7 @@ export function BiomarkerDetailStudy() {
               points={HEMOGLOBIN_HISTORY}
               referenceRange={{ high: 17, low: 13 }}
               referenceRangeLabel="13.0 to 17.0 g/dL"
+              referenceRangeSourceLabel="Example laboratory"
               unit="g/dL"
             />
           </div>

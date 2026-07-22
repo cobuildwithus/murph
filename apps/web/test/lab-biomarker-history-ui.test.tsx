@@ -412,6 +412,12 @@ test("a numeric result with source text remains plotted without a qualitative om
     expect(
       rendered.container.querySelector('[aria-label="HbA1c results over time"]'),
     ).not.toBeNull();
+    expect(
+      rendered.container
+        .querySelector("#biomarker-latest-result-heading")
+        ?.parentElement
+        ?.querySelector("dl"),
+    ).toBeNull();
   } finally {
     await rendered.cleanup();
   }
@@ -1064,7 +1070,7 @@ test("the latest lab-reported range yields a labeled chart band without summary 
     expect(text).not.toContain("Shaded lab range");
     expect(
       rendered.container.querySelector(
-        '[aria-label="HbA1c results over time; latest lab range 4 to 5.6%"]',
+        '[aria-label="HbA1c results over time; latest lab range 4 to 5.6% from Example Lab"]',
       )
         ?.getAttribute("aria-describedby"),
     ).toBeNull();

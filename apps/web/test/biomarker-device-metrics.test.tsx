@@ -147,6 +147,9 @@ test("only device-derived readings decide the latest card value without history 
     const section = rendered.container.querySelector('[aria-labelledby="biomarker-devices-heading"]');
     const deviceHeading = rendered.container.querySelector("#biomarker-devices-heading");
     expect(deviceHeading?.className).toContain("text-2xl");
+    const deviceHeadingRowClassTokens = deviceHeading?.parentElement?.className.split(/\s+/u) ?? [];
+    expect(deviceHeadingRowClassTokens).not.toContain("px-5");
+    expect(deviceHeadingRowClassTokens).not.toContain("sm:px-8");
     const deviceSectionClassTokens = section?.className.split(/\s+/u) ?? [];
     expect(deviceSectionClassTokens).toContain("border-y");
     expect(deviceSectionClassTokens).not.toContain("rounded-xl");
