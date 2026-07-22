@@ -7,6 +7,9 @@ import {
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
 import {
+  writeAssistantAutoReplySuppressionEvidence,
+} from "@murphai/assistant-engine/assistant-automation";
+import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 
@@ -18,6 +21,7 @@ import {
   resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
+  resolveHostedOldestAssistantInputOccurredAt,
   resolveHostedOldestPendingAssistantInputAt,
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
@@ -182,6 +186,61 @@ describe("resolveHostedOldestPendingAssistantInputAt", () => {
 
     await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
       .resolves.toBe("2026-04-23T00:00:02.000Z");
+  });
+
+  it("uses the fresh batch without mutating an index retaining terminal input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+    const older = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent(),
+      vault: vaultRoot,
+    });
+    const laterEvent = createAssistantInputEvent();
+    const later = await upsertAssistantInputEvent({
+      event: {
+        ...laterEvent,
+        occurredAt: "2026-04-23T00:00:06.000Z",
+        receivedAt: "2026-04-23T00:00:07.000Z",
+        replyTarget: {
+          ...laterEvent.replyTarget,
+          messageId: "msg_pending_later",
+        },
+        sourceRef: {
+          ...laterEvent.sourceRef,
+          dedupeKey: "dedupe_pending_later",
+          eventId: "evt_pending_later",
+          itemId: "item_pending_later",
+          laneSeq: "43",
+        },
+      },
+      vault: vaultRoot,
+    });
+    await compactHostedPendingAssistantInputIds({ vaultRoot });
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([older.inputId, later.inputId]);
+    await writeAssistantAutoReplySuppressionEvidence({
+      captureIds: [],
+      inputIds: [older.inputId],
+      reason: "test",
+      vault: vaultRoot,
+    });
+
+    await expect(resolveHostedOldestAssistantInputOccurredAt({
+      assistantInputIds: [later.inputId],
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:06.000Z");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([older.inputId, later.inputId]);
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
   });
 
   it("leaves a missing foreground index untouched and fails closed", async () => {

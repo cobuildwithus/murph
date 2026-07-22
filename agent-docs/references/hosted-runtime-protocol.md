@@ -418,17 +418,19 @@ or invoke side-effecting tools.
 
 If that joined-group completion and private input are both pending, the
 completion uses the existing foreground-causal mailbox lane only when its
-occurrence timestamp predates the oldest pending input. The cutoff is read from
-the existing complete pending-input index and uses the input's `occurredAt`, not
-its later receipt time. Missing, incomplete, or invalid index evidence fails
-closed without backfill or compaction on the foreground reply path; existing
-background maintenance remains the only repair owner. The completion then owns
-the next assistant pass, and the existing output-only continuation composes and
-durably queues one natural Murph response under its stable idempotency key before
-the still-pending input runs on the next pass. A newer completion does not
-overtake older personal input. This ordering contract ends at durable intent
-creation; ordinary carrier retry ordering remains scoped to one assistant turn
-so a retrying Ask send cannot block all newer personal replies. The mailbox
+occurrence timestamp predates the oldest pending input. A fresh turn derives
+that cutoff from the bounded accepted-input batch it already owns. A pass with
+no fresh batch reads the existing complete pending-input index. Both paths use
+the input's `occurredAt`, not its later receipt time. Missing, incomplete, or
+invalid evidence fails closed without backfill or compaction on the foreground
+reply path; existing background maintenance remains the only repair owner. The
+completion then owns the next assistant pass, and the existing output-only
+continuation composes and durably queues one natural Murph response under its
+stable idempotency key before the still-pending input runs on the next pass. A
+newer completion does not overtake older personal input. This ordering contract
+ends at durable intent creation; ordinary carrier retry ordering remains scoped
+to one assistant turn so a retrying Ask send cannot block all newer personal
+replies. The mailbox
 remains transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in

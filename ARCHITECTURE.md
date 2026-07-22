@@ -111,8 +111,10 @@ idle snapshot early. When a joined-group completion predates pending personal
 input, it owns one foreground-causal assistant pass, queues Murph's natural
 response through the ordinary idempotent outbox, and leaves that personal input
 pending for the next pass. The cutoff uses the input's occurrence time from the
-existing complete pending-input index; missing, incomplete, or invalid index
-evidence fails closed without repairing or compacting state on the reply path.
+bounded accepted-input batch already owned by a fresh turn. When no fresh batch
+exists, the cutoff reads the existing complete pending-input index; missing,
+incomplete, or invalid index evidence fails closed without repairing or
+compacting state on the reply path.
 That ordering ends at durable intent creation: the outbox retains its
 established same-turn predecessor boundary, so a cross-turn carrier retry does
 not freeze later live conversation. No Ask-specific coordinator, receipt state

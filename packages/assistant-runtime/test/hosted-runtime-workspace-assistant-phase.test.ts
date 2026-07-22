@@ -79,6 +79,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedProviderCleanupCheckpointWakeAt: vi.fn(),
   resolveHostedProviderCleanupFirstDeferredWakeAt: vi.fn(),
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
+  resolveHostedOldestAssistantInputOccurredAt: vi.fn(),
   resolveHostedOldestPendingAssistantInputAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
@@ -179,6 +180,8 @@ vi.mock("../src/hosted-runtime/device-sync-maintenance-import.ts", () => ({
 }));
 
 vi.mock("../src/hosted-runtime/pending-assistant-input.ts", () => ({
+  resolveHostedOldestAssistantInputOccurredAt:
+    mocks.resolveHostedOldestAssistantInputOccurredAt,
   resolveHostedOldestPendingAssistantInputAt:
     mocks.resolveHostedOldestPendingAssistantInputAt,
   resolveHostedPendingAssistantInputWakeAt:
@@ -643,6 +646,7 @@ beforeEach(() => {
   mocks.readHostedProviderCleanupCheckpoint.mockResolvedValue(null);
   mocks.resolveHostedAssistantOutboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedDeviceSyncNextWakeAt.mockReturnValue(null);
+  mocks.resolveHostedOldestAssistantInputOccurredAt.mockResolvedValue(null);
   mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeAt.mockResolvedValue(null);
   mocks.resolveHostedSystemMailboxNextWakeCandidate.mockImplementation(async (input) => {
@@ -11881,7 +11885,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const completionItem = createAssistantAskCompletionSystemMailboxItem();
     const deliveryEffect = createDeliveryEffect();
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(now);
-    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(pendingInputAt);
+    mocks.resolveHostedOldestAssistantInputOccurredAt.mockResolvedValue(pendingInputAt);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
       item: completionItem,
       itemId: completionItem.itemId,
@@ -11916,6 +11920,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         assistantAskCompletionOccurredBefore: pendingInputAt,
       }),
     );
+    expect(mocks.resolveHostedOldestAssistantInputOccurredAt).toHaveBeenCalledWith({
+      assistantInputIds: ["ain_00000000000000000000000000000001"],
+      signal: null,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       afterCheckpointKeepsForegroundImportLoop: true,
@@ -12019,6 +12029,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     );
     expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
   });
 
   it("keeps due cron work out of a causal-only zero-effect pass", async () => {

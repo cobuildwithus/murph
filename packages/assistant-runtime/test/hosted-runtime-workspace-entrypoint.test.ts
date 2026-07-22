@@ -5688,12 +5688,13 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("imports an assistant ask request before the dirty idle checkpoint", async () => {
+  test("preserves joined-group ask admission in an active dirty pre-checkpoint pass", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
     const foregroundCausalOnlyValues: boolean[] = [];
+    const activeTurnAskImportObserved = createDeferred<void>();
     let assistantPhaseCalls = 0;
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
@@ -5727,6 +5728,9 @@ describe("hosted workspace runtime entrypoint", () => {
               "joined_group",
             );
             events.push(`mailbox.importItem:${item.item.id}`);
+            if (item.item.id === "mailbox_item_entrypoint_assistant_ask_active_turn") {
+              activeTurnAskImportObserved.resolve();
+            }
             return { status: "imported" };
           },
           platform: createPlatform({
@@ -5760,6 +5764,22 @@ describe("hosted workspace runtime entrypoint", () => {
                 progressed: true,
               };
             }
+            if (assistantPhaseCalls === 2) {
+              setTimeout(() => {
+                mailboxItems.push(createMailboxItem({
+                  id: "mailbox_item_entrypoint_assistant_ask_active_turn",
+                  kind: "assistant.ask.requested",
+                  lane: "system",
+                  laneSeq: "2",
+                }));
+                runtimeWakeSignal.notify();
+              }, 0);
+              await withRealTimeout(
+                activeTurnAskImportObserved.promise,
+                2_000,
+                () => events.join(","),
+              );
+            }
             return { progressed: false };
           },
           vaultRoot,
@@ -5778,6 +5798,13 @@ describe("hosted workspace runtime entrypoint", () => {
         requireEventIndex(
           events,
           "mailbox.importItem:mailbox_item_entrypoint_assistant_ask_dirty_wake",
+        ) < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(
+          events,
+          "mailbox.importItem:mailbox_item_entrypoint_assistant_ask_active_turn",
         ) < requireEventIndex(events, "snapshot:idle_shutdown"),
         events.join(","),
       );

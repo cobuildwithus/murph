@@ -1347,6 +1347,8 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
       });
       const foregroundConversationImportItem =
         input.input.foregroundImportItem ?? input.input.importItem;
+      const assistantAskRequestTargetKind =
+        input.input.initialMailboxImportContext?.assistantAskRequestTargetKind;
       try {
         const handleForegroundImportResult = async (
           result: HostedMailboxImportCheckpointResult,
@@ -1386,6 +1388,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               deferCheckpoint: true,
               importItem: foregroundConversationImportItem,
               importItemContext: {
+                ...(assistantAskRequestTargetKind
+                  ? { assistantAskRequestTargetKind }
+                  : {}),
                 latencyMilestones,
                 onConversationInputStaged: observeForegroundConversationWork,
                 runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
@@ -1423,6 +1428,9 @@ function startHostedForegroundConversationMailboxImportLoop(input: {
               deferCheckpoint: true,
               importItem: input.input.importItem,
               importItemContext: {
+                ...(assistantAskRequestTargetKind
+                  ? { assistantAskRequestTargetKind }
+                  : {}),
                 latencyMilestones,
                 runtimeAttemptId: input.input.runtimeLogContext?.attemptId ?? null,
               },

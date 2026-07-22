@@ -10,6 +10,33 @@ import {
 
 const HOSTED_PENDING_ASSISTANT_INPUT_INDEX_MAINTENANCE_DELAY_MS = 30_000;
 
+export async function resolveHostedOldestAssistantInputOccurredAt(input: {
+  assistantInputIds: readonly string[];
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  let oldestOccurredAt: string | null = null;
+  let oldestOccurredAtMs = Number.POSITIVE_INFINITY;
+  for (const inputId of input.assistantInputIds) {
+    input.signal?.throwIfAborted();
+    const event = await readAssistantInputEvent({
+      inputId,
+      vault: input.vaultRoot,
+    });
+    input.signal?.throwIfAborted();
+    const occurredAt = event?.occurredAt ?? null;
+    const occurredAtMs = Date.parse(occurredAt ?? "");
+    if (!Number.isFinite(occurredAtMs)) {
+      return null;
+    }
+    if (occurredAtMs < oldestOccurredAtMs) {
+      oldestOccurredAt = occurredAt;
+      oldestOccurredAtMs = occurredAtMs;
+    }
+  }
+  return oldestOccurredAt;
+}
+
 export async function resolveHostedOldestPendingAssistantInputAt(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
@@ -30,14 +57,11 @@ export async function resolveHostedOldestPendingAssistantInputAt(input: {
     return null;
   }
 
-  const event = await readAssistantInputEvent({
-    inputId: firstInputId,
-    vault: input.vaultRoot,
+  return await resolveHostedOldestAssistantInputOccurredAt({
+    assistantInputIds: [firstInputId],
+    signal: input.signal ?? null,
+    vaultRoot: input.vaultRoot,
   });
-  const occurredAt = event?.occurredAt ?? null;
-  return occurredAt && Number.isFinite(Date.parse(occurredAt))
-    ? occurredAt
-    : null;
 }
 
 export async function resolveHostedPendingAssistantInputWakeAt(input: {
