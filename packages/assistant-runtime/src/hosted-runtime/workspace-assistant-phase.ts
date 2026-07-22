@@ -1231,6 +1231,27 @@ export async function runHostedWorkspaceAssistantPhase(
     triggerKind: "runtime_timer",
     userId: input.request.userId,
   });
+  if (input.causalPendingEffectsOnly === true) {
+    try {
+      const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
+        executionContext: { hosted: null },
+        hasFreshConversationInput: false,
+        input,
+        pendingAssistantInputWakeAt: null,
+        wake,
+      });
+      if (!systemMailboxMaintenance.result) {
+        return { progressed: false };
+      }
+      return withHostedDeviceSyncMaintenanceRan(
+        systemMailboxMaintenance.result,
+        systemMailboxMaintenance.deviceSyncMaintenanceRan,
+      );
+    } finally {
+      releaseChannelAbortRelay();
+      channelAbortController.abort();
+    }
+  }
   const deviceConnectProviders = resolveHostedWorkspaceDeviceConnectProviders(input.runtime);
   const deviceTool = resolveHostedWorkspaceDeviceTool({
     deviceConnectProviders,
@@ -1425,15 +1446,6 @@ export async function runHostedWorkspaceAssistantPhase(
       wake,
     });
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
-    if (input.causalPendingEffectsOnly === true) {
-      if (!systemMailboxMaintenance.result) {
-        return { progressed: false };
-      }
-      return withHostedDeviceSyncMaintenanceRan(
-        systemMailboxMaintenance.result,
-        systemMailboxMaintenance.deviceSyncMaintenanceRan,
-      );
-    }
     const hasAssistantInputAtPassStart =
       hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null;

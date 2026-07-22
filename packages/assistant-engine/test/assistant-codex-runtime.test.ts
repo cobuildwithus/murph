@@ -2655,13 +2655,6 @@ describe('assistant codex runtime', () => {
       expectedFinalMessage: `Approval is required.\n\nhttps://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
       expectedTranscriptMessage: 'Approval is required.',
       name: 'appends the exact owner URL outside model context',
-      selectNoReplyBeforeApproval: false,
-    },
-    {
-      expectedFinalMessage: `https://www.withmurph.ai/approve/haa_${'a'.repeat(32)}`,
-      expectedTranscriptMessage: null,
-      name: 'overrides an earlier no-reply selection',
-      selectNoReplyBeforeApproval: true,
     },
     {
       approvalCount: 2,
@@ -2672,7 +2665,6 @@ describe('assistant codex runtime', () => {
       ].join('\n\n'),
       expectedTranscriptMessage: 'Approval is required.',
       name: 'preserves every exact owner URL when multiple vault approvals are pending',
-      selectNoReplyBeforeApproval: false,
     },
   ] as const
 
@@ -2726,22 +2718,6 @@ describe('assistant codex runtime', () => {
             id: 3,
             result: { turn: { id: 'turn-vault-approval-url' } },
           }))
-
-          if (scenario.selectNoReplyBeforeApproval) {
-            child.stdout.write(jsonLine({
-              id: 70,
-              method: 'item/tool/call',
-              params: {
-                arguments: {},
-                namespace: 'murph',
-                tool: 'finish_without_reply',
-              },
-            }))
-            await expect(waitForRpcResponse(child, 70)).resolves.toMatchObject({
-              id: 70,
-              result: { success: true },
-            })
-          }
 
           for (let approvalIndex = 0; approvalIndex < approvalCount; approvalIndex += 1) {
             const requestId = 71 + approvalIndex
@@ -2944,7 +2920,7 @@ describe('assistant codex runtime', () => {
             id: 94,
             result: {
               contentItems: [{
-                text: 'response media cannot be changed after a vault-file send',
+                text: 'response media unavailable after finish_without_reply',
                 type: 'inputText',
               }],
               success: false,
@@ -2991,7 +2967,139 @@ describe('assistant codex runtime', () => {
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
 
-  it('leaves an earlier no-reply unsettled when the provider fails after creating a vault approval', async () => {
+  it('allows response media for a later steered message after an approved vault send', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-vault-send-steer-work-',
+    )
+    const media = {
+      alt: 'Later steered attachment',
+      kind: 'image' as const,
+      source: 'later-steered-attachment',
+      url: 'https://cdn.example.test/assistant/later-steered.png',
+    }
+    const sendVaultFile = vi.fn(async () => ({
+      filename: 'report.pdf',
+      status: 'approved' as const,
+    }))
+    const hostedToolContext = createHostedToolContext({
+      computerToolsAvailable: false,
+      sendVaultFile,
+      vaultFileSendAvailable: true,
+    })
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: { thread: { id: 'thread-vault-send-steer' } },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: { turn: { id: 'turn-vault-send-steer' } },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-vault-send-steer-1',
+                message: 'Send the report.',
+                type: 'user_message',
+              },
+            },
+          }))
+
+          child.stdout.write(jsonLine({
+            id: 95,
+            method: 'item/tool/call',
+            params: {
+              arguments: { ref: 'documents/report.pdf' },
+              callId: 'call-vault-send-steer',
+              namespace: 'murph',
+              tool: 'send_vault_file',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 95)).resolves.toMatchObject({
+            id: 95,
+            result: { success: true },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'user-vault-send-steer-2',
+                message: 'Now attach a different image.',
+                type: 'user_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 96,
+            method: 'item/tool/call',
+            params: {
+              arguments: { media: [media] },
+              namespace: 'murph',
+              tool: 'attach_response_media',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 96)).resolves.toEqual({
+            id: 96,
+            result: {
+              contentItems: [{
+                text: '1 response image attached',
+                type: 'inputText',
+              }],
+              success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-vault-send-steer-2',
+                message: 'Here is the separate image.',
+                type: 'assistant_message',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-vault-send-steer',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    await expect(executeCodexAppServerTurn({
+      allowFinishWithoutReply: true,
+      hostedToolContext,
+      prompt: 'send the report',
+      workingDirectory,
+    })).resolves.toMatchObject({
+      acceptedNoReplyDeliveryContextOrdinals: [0],
+      finalAction: null,
+      finalMessage: 'Here is the separate image.',
+      responseDeliveryContextOrdinal: 1,
+      responseMedia: [media],
+    })
+    expect(sendVaultFile).toHaveBeenCalledOnce()
+  })
+
+  it('does not settle no-reply when the provider fails after creating a vault approval', async () => {
     const workingDirectory = await createTempDir(
       'assistant-codex-vault-approval-failure-work-',
     )
@@ -3024,19 +3132,6 @@ describe('assistant codex runtime', () => {
             turnId: 'turn-vault-approval-failure',
           })
           child.stdout.write(jsonLine({
-            id: 81,
-            method: 'item/tool/call',
-            params: {
-              arguments: {},
-              namespace: 'murph',
-              tool: 'finish_without_reply',
-            },
-          }))
-          await expect(waitForRpcResponse(child, 81)).resolves.toMatchObject({
-            id: 81,
-            result: { success: true },
-          })
-          child.stdout.write(jsonLine({
             id: 82,
             method: 'item/tool/call',
             params: {
@@ -3056,6 +3151,25 @@ describe('assistant codex runtime', () => {
                 type: 'inputText',
               }],
               success: true,
+            },
+          })
+          child.stdout.write(jsonLine({
+            id: 81,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 81)).resolves.toEqual({
+            id: 81,
+            result: {
+              contentItems: [{
+                text: 'finish_without_reply is unavailable while a vault-file approval link must be delivered',
+                type: 'inputText',
+              }],
+              success: false,
             },
           })
           child.stdout.write(jsonLine({

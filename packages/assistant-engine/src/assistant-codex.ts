@@ -2796,7 +2796,6 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
-  let vaultFileSendClaimedResponseMedia = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3814,7 +3813,7 @@ async function runCodexAppServerTurnOnProcess(
       hostedCanonicalWritePort,
       async () => {
         if (
-          vaultFileSendClaimedResponseMedia &&
+          shouldSuppressDeliveryContext(dynamicToolRequestDeliveryContextOrdinal) &&
           isResponseMediaDynamicToolRequest(dynamicToolRequest)
         ) {
           return {
@@ -3822,7 +3821,7 @@ async function runCodexAppServerTurnOnProcess(
               contentItems: [{
                 text: dynamicToolRequest.kind === 'send-vault-file'
                   ? 'vault-file sending cannot be combined with other response media'
-                  : 'response media cannot be changed after a vault-file send',
+                  : 'response media unavailable after finish_without_reply',
                 type: 'inputText' as const,
               }],
               success: false,
@@ -3868,12 +3867,6 @@ async function runCodexAppServerTurnOnProcess(
               ? input.voiceMemoRuntime ?? null
               : null,
         })
-        if (
-          dynamicToolRequest.kind === 'send-vault-file' &&
-          result.vaultFileSendOwnsResponseMedia === true
-        ) {
-          vaultFileSendClaimedResponseMedia = true
-        }
         return result
       },
     ).then(async (result) => {
@@ -3918,7 +3911,7 @@ async function runCodexAppServerTurnOnProcess(
       if (result.finalActionPatch) {
         const applied = await applyFinalActionPatch(
           result.finalActionPatch,
-          dynamicToolDeliveryContextOrdinal ?? 0,
+          dynamicToolRequestDeliveryContextOrdinal,
         )
         if (!applied) {
           void tryWriteRpcMessage({

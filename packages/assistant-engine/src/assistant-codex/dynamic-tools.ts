@@ -1800,7 +1800,6 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
-  vaultFileSendOwnsResponseMedia?: boolean
 }
 
 interface ParsedDynamicToolCallRequest {
@@ -2680,7 +2679,7 @@ export async function executeMurphDynamicToolRequest(input: {
                   status: result.status,
                 }),
               ),
-              vaultFileSendOwnsResponseMedia: true,
+              finalActionPatch: { kind: 'none' },
             }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
@@ -2701,7 +2700,7 @@ export async function executeMurphDynamicToolRequest(input: {
                 status: 'already_in_progress',
               }),
             ),
-            vaultFileSendOwnsResponseMedia: true,
+            finalActionPatch: { kind: 'none' },
           }
         }
         return toolTextResult(false, 'secure vault-file approval could not be prepared')

@@ -233,6 +233,7 @@ import {
   enqueueHostedPendingAssistantInputId,
   inspectHostedPendingAssistantInputWakeCandidate,
   readExistingHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import type {
   HostedMailboxResolvedImportItem,
@@ -11907,6 +11908,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
     );
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.hydrateHostedExecutionDefaultTarget).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedPendingAssistantInputWakeAt).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(mocks.prepareHostedProviderCleanupPlan).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
@@ -12045,6 +12048,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       });
       expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+      expect(mocks.createHostedAssistantChannelTypingDependencies).not.toHaveBeenCalled();
+      expect(mocks.createHostedAssistantProgressDeliveryDependencies).not.toHaveBeenCalled();
+      expect(mocks.hydrateHostedExecutionDefaultTarget).not.toHaveBeenCalled();
+      expect(mocks.resolveHostedPendingAssistantInputWakeAt).not.toHaveBeenCalled();
       expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).not.toHaveBeenCalled();
       expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
       expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
@@ -12177,7 +12184,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hasCandidate: true,
         indexComplete: false,
       });
-      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:30.000Z");
+      expect(scenario.pendingWakeReads).toEqual([]);
+      expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
       expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
@@ -12212,7 +12220,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         hasCandidate: true,
         indexComplete: false,
       });
-      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:30.000Z");
+      expect(scenario.pendingWakeReads).toEqual([]);
+      expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
       expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
@@ -14733,6 +14742,8 @@ async function runRealForegroundApprovalAdmissionScenario(input: {
     const pendingInputIds = await readExistingHostedPendingAssistantInputIds({
       vaultRoot,
     });
+    const pendingInputStatePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    const pendingIndexStateBeforeRun = await readFile(pendingInputStatePath, "utf8");
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [assistantInput.inputId],
@@ -14754,6 +14765,8 @@ async function runRealForegroundApprovalAdmissionScenario(input: {
       pendingInputIdsAfterRun: await readExistingHostedPendingAssistantInputIds({
         vaultRoot,
       }),
+      pendingIndexStateAfterRun: await readFile(pendingInputStatePath, "utf8"),
+      pendingIndexStateBeforeRun,
       pendingIndexInspectionAfterRun:
         await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
       pendingWakeReads,
