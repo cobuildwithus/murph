@@ -20,7 +20,7 @@ Use it with `chronic-illness-support` or `chronic-pain-support` when the user wa
 ## Operating stance
 
 - Recommend an experiment when action is safe and the answer could change what the user does.
-- Do not wait for perfect certainty or a long baseline when a low-risk reversible test can start now.
+- Do not wait for perfect certainty before starting a low-risk reversible test; follow `experiment-onboarding`'s normal 14-day prospective baseline for repeated-measurement runs unless the design has a concrete reason to shorten or omit it.
 - Prefer one strong question over broad tracking.
 - Optimize for expected benefit, information, feasibility, and low burden—not scientific theater.
 - A personal experiment can support a personal decision even when it cannot prove a universal causal claim.
@@ -188,7 +188,7 @@ Example:
 
 ### Short baseline plus intervention
 
-Use when natural variation is high and the intervention effect is not immediate.
+Use only when natural variation warrants a comparison but a concrete design reason makes the normal 14-day prospective baseline disproportionate, such as a fast reversible effect with comparable repeated conditions.
 
 Example:
 

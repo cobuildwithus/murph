@@ -38,6 +38,21 @@ describe('experiment onboarding skill guidance', () => {
     )
   }
 
+  async function readSelfManagementExperimentsSkill() {
+    const skill = ASSISTANT_SKILLS.find(
+      (candidate) => candidate.slug === 'self-management-experiments',
+    )
+    expect(skill).toBeTruthy()
+    if (!skill) {
+      throw new Error('self-management-experiments skill is not registered')
+    }
+
+    return readFile(
+      path.join(resolveAssistantSkillsRoot(), skill.slug, 'SKILL.md'),
+      'utf8',
+    )
+  }
+
   it('requires every resolved safety question before any active start', async () => {
     const raw = await readExperimentOnboardingSkill()
 
@@ -50,6 +65,28 @@ describe('experiment onboarding skill guidance', () => {
       'write `--onboarding-completed-at` only after every question was answered',
     )
     expect(raw).toContain('Never activate a run with a blocking disposition')
+  })
+
+  it('prefers a two-week baseline for custom repeated-measurement runs', async () => {
+    const onboarding = await readExperimentOnboardingSkill()
+    const selfManagement = await readSelfManagementExperimentsSkill()
+
+    expect(onboarding).toContain(
+      'For a custom repeated-measurement run, prefer a 14-day prospective baseline',
+    )
+    expect(onboarding).toContain('pass `--baseline-days 14`')
+    expect(onboarding).toContain(
+      'Use a shorter or absent prospective baseline only when the design has a concrete reason',
+    )
+    expect(onboarding).toContain(
+      'Preserve the planned intervention window when changing baseline length.',
+    )
+    expect(selfManagement).toContain(
+      "follow `experiment-onboarding`'s normal 14-day prospective baseline for repeated-measurement runs",
+    )
+    expect(selfManagement).toContain(
+      'a concrete design reason makes the normal 14-day prospective baseline disproportionate',
+    )
   })
 
   it('requires first-session prep to include a compact walkthrough', async () => {
