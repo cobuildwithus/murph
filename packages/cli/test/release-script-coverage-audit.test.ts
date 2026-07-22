@@ -1449,7 +1449,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
     expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
     expect(agentWorkflowRouting).toContain(
-      "For prompt-primary changes, run the completion workflow's `prompt-review` pass",
+      "For prompt-primary changes, always run the completion workflow's `prompt-review` pass",
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
     expect(agentsGuide).toContain('later rounds verify only remediation deltas')
@@ -1575,6 +1575,12 @@ describe('monorepo release flow coverage audit', () => {
       '| Any product-owned dimension | Run `product-experience-review` |',
     )
     expect(completionWorkflow).toContain(
+      '| Prompt-primary change with a product-owned dimension | Run `product-experience-review` alongside `prompt-review` |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Prompt-primary change with no product-owned dimension | No product decision changed; run `prompt-review` only |',
+    )
+    expect(completionWorkflow).toContain(
       '| Meaning-preserving tiny static-copy correction | No product decision changed;',
     )
     expect(completionWorkflow).toContain(
@@ -1603,6 +1609,30 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(agentWorkflowRouting).not.toContain(
       '`product-experience-review` for materially changed user-facing behavior',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'for prompt-primary changes, run only `prompt-review`',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'Run `coverage-write` only for independently changed non-prompt scope',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'Run `coverage-write` whenever the verification lane includes owner coverage',
+    )
+    expect(completionWorkflow).not.toContain(
+      'skip `product-experience-review`, `frontend-review`, `coverage-write`, and cross-cutting review unless the non-prompt part',
+    )
+    expect(completionWorkflow).toContain(
+      'prompt-primary work adds it only for independently changed non-prompt scope',
+    )
+    expect(completionWorkflow).toContain(
+      'When step 4 selects `coverage-write` for independently changed non-prompt scope',
+    )
+    expect(completionWorkflow).not.toContain(
+      'When step 7 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass',
+    )
+    expect(completionWorkflow).toContain(
+      'which product-owned dimensions it changes, and which additional audit passes',
     )
     expect(frontendReview).toContain(
       'Meaning-preserving tiny static-copy corrections',

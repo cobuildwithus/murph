@@ -39,7 +39,8 @@ ReviewGPT is a proportional risk gate, not a requirement for every PR. Skip it
 when the meaningful diff is low-risk and limited to one or more of:
 
 - docs or process text;
-- prompt-primary changes covered by the required local `prompt-review` pass;
+- prompt-primary changes covered by `prompt-review` and, when they change a
+  product-owned dimension, `product-experience-review`;
 - tests, fixtures, or developer tooling that do not change production behavior;
 - static copy or content; or
 - minor frontend presentation polish such as spacing, typography, color,
@@ -67,6 +68,8 @@ or the journey's timing, delivery, permission, and recovery contract.
 | Changed dimension | Product-decision owner | Rendered-implementation route |
 | --- | --- | --- |
 | Any product-owned dimension | Run `product-experience-review` | For `apps/web`, also run `frontend-review` and the Claude UI double-check |
+| Prompt-primary change with a product-owned dimension | Run `product-experience-review` alongside `prompt-review` | Run rendered review only when an `apps/web` surface changes |
+| Prompt-primary change with no product-owned dimension | No product decision changed; run `prompt-review` only | Run rendered review only when an `apps/web` surface changes |
 | Meaning-preserving tiny static-copy correction | No product decision changed; use the tiny copy-only fast path | Run the Claude UI double-check; explicit credit exhaustion uses `frontend-review` |
 | Implementation-only presentation with no product-owned dimension changed | No product-decision review | Run `frontend-review` and the Claude UI double-check |
 | Cross-runtime or non-frontend user journey | Run `product-experience-review` | Run a rendered review only when the journey includes an `apps/web` surface |
@@ -86,15 +89,15 @@ ReviewGPT never become fallback product-decision owners.
 4. Decide the audit path required by the routed task class:
    - docs/process-only work normally skips audit subagents unless the user explicitly asks for them
    - really low-impact `apps/web` copy-only edits may skip audit subagents only when they are meaning-preserving corrections and meet the tiny copy-only fast path below; use local readback and focused checks instead
-   - prompt-primary changes use the prompt review path below instead of the normal completion audit stack
+   - prompt-primary changes always use the prompt review path below; when the prompt changes a product-owned dimension, also run `product-experience-review` under the admission matrix
    - any change to a product-owned dimension defined above adds the dedicated `product-experience-review` pass, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows; internal-only behavior, docs/process work, meaning-preserving copy corrections, and implementation-only presentation do not trigger it
    - user-facing `apps/web` UI changes add the dedicated `frontend-review` pass and, for a Codex-native parent with available Claude credits, the Claude Code UI double-check below; material frontend workflow changes run both `product-experience-review` and `frontend-review`, while explicit Claude credit or quota exhaustion uses the ordinary `frontend-review` pass as the non-blocking substitute
-   - repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass
+   - non-prompt repo code/test/config changes whose verification lane includes owner-level coverage or truthful `pnpm test:diff <path ...>` coverage require the dedicated `coverage-write` pass; prompt-primary work adds it only for independently changed non-prompt scope
    - when the cross-cutting conditions below apply, select exactly one gate: ReviewGPT for an eligible PR lane that will run it, otherwise local `deep-review`
-5. When the prompt review path applies, spawn one dedicated audit subagent, hand it `agent-docs/prompts/prompt-review.md` plus the audit handoff packet below, and skip `product-experience-review`, `frontend-review`, `coverage-write`, and cross-cutting review unless the non-prompt part of the diff independently meets those passes' triggers. The prompt-review pass is review-only and is the final completion audit for prompt-primary work.
+5. When the prompt review path applies, spawn one dedicated audit subagent and hand it `agent-docs/prompts/prompt-review.md` plus the audit handoff packet below. Keep that pass review-only. Apply the product and rendered admission matrix to the prompt's changed behavior: add `product-experience-review` when the prompt changes a product-owned dimension, and add rendered review only for a changed `apps/web` surface. Skip `coverage-write` and cross-cutting review unless non-prompt scope independently triggers them.
 6. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it before final review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`. At the end of step 9, run the separate Claude Code UI double-check or use the `frontend-review` substitute on explicit Claude credit or quota exhaustion.
 7. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there. When the canonical command dispatches through Crabbox to Blacksmith, retain the Testbox ID, timing summary, and linked Actions run with the verification evidence.
-8. When step 7 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass using the audit worker routing below. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
+8. When step 4 selects `coverage-write` for independently changed non-prompt scope, run it after the step 7 verification lane using the audit worker routing below. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
 9. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. When `product-experience-review` applies, run it now against the stable implementation, direct scenario evidence, and rendered evidence for any frontend surface; hand it `agent-docs/prompts/product-experience-review.md` plus the audit handoff packet below. After specialized review and coverage/proof work is stable, select exactly one required cross-cutting gate: ReviewGPT on an eligible PR lane that will use it, otherwise local `deep-review` when the trigger below applies. Never run both for the same completed change. Run a selected local `deep-review` now; a selected ReviewGPT gate runs after push in step 14. For user-facing `apps/web` UI work completed by a Codex-native parent, finish this step with the Claude Code UI double-check after the rendered evidence and any accepted UI fixes are stable, or use the credit-exhaustion `frontend-review` substitute defined below.
 10. Run the final review locally as the parent agent: re-read the full diff with fresh eyes, walk the changed call paths, and check for remaining coverage or proof gaps, residual risks, and handoff completeness. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass. Do not spawn a final-review subagent; if the change feels too large or risky to final-review locally, that is a signal it belongs on the worktree/PR lane, where the external loop reviews it.
 11. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
@@ -185,13 +188,24 @@ Stop the loop when every required audit finding is either fixed/proven or consci
 
 ## Prompt Review Path
 
-Use `prompt-review` as the only required completion audit when all of the following are true:
+Every prompt-primary change runs `prompt-review`. It is the only required
+completion audit when all of the following are true:
 
 1. The meaningful behavior change is prompt text, system/developer instructions, agent workflow prompts, tool descriptions, prompt assembly guidance, or regression tests that prove prompt content.
 2. Any non-prompt code changes are only mechanical support for prompt assembly, prompt export, or prompt regression proof.
 3. The change does not independently alter runtime behavior, schemas, persisted state, app/package APIs, auth/session authority, external ingress/egress, deploy surfaces, billing, frontend layout/interaction, or trust boundaries outside the prompt itself.
+4. The prompt itself does not change a product-owned dimension defined in
+   `Product and Rendered Review Admission`.
 
-Do not add `product-experience-review`, `frontend-review`, `coverage-write`, or cross-cutting review solely because the prompt mentions sensitive topics, user-facing behavior, tools, retrieval, or validation. The prompt-review worker owns prompt-level privacy, security, safety, evidence, validation, simplicity, clarity, and instruction-conflict concerns for prompt-primary work.
+Do not add `product-experience-review`, rendered review, `coverage-write`, or
+cross-cutting review solely because the prompt mentions sensitive topics,
+user-facing behavior, tools, retrieval, or validation. When the prompt changes
+semantic user-facing copy, action count or priority, state or element
+selection, or journey timing, delivery, permission, or recovery, run
+`product-experience-review` alongside `prompt-review`. The prompt-review worker
+owns prompt construction, privacy, security, safety, evidence, validation,
+simplicity, clarity, and instruction conflicts; the product-experience worker
+owns the changed product decision.
 
 If the change is mixed and the non-prompt part independently triggers another pass, run the normal specialized audit path for that non-prompt surface. `prompt-review` is not a substitute for reviewing real runtime, UI, persisted-state, deploy, or trust-boundary changes.
 
@@ -323,7 +337,7 @@ For the required `coverage-write` pass, also provide:
 For the required `prompt-review` pass, also provide:
 
 - The exact prompt surfaces under review, including files, exported prompt builders, tool descriptions, or tests that prove prompt content.
-- Why the change qualifies as prompt-primary and which normal audit passes are being skipped under this path.
+- Why the change qualifies as prompt-primary, which product-owned dimensions it changes, and which additional audit passes the admission matrix requires or why none apply.
 - The intended prompt behavior and any product, safety, evidence, retrieval, tool-use, validation, or output-contract invariants the prompt must preserve.
 - An explicit instruction to read `agent-docs/prompts/prompt-review.md` and the current OpenAI prompt guidance before reviewing.
 
