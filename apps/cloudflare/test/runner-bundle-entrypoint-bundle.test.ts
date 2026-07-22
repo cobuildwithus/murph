@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -161,6 +161,10 @@ const ROOMY_TEST_BUDGETS = {
   staticClosureBytes: 10_000,
   totalBytes: 10_000,
 };
+const RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS = [
+  ["@murphai/contracts", "packages/contracts/package.json"],
+  ["@murphai/query", "packages/query/package.json"],
+] as const;
 
 afterEach(async () => {
   await Promise.all(
@@ -217,6 +221,26 @@ async function createFakeRunnerBundle(): Promise<string> {
 }
 
 describe("runner bundle container-entrypoint esbuild step", () => {
+  it.each(RUNNER_TREE_SHAKE_REQUIRED_PACKAGE_MANIFESTS)(
+    "requires %s to declare side-effect-free modules for tree shaking",
+    async (packageName, manifestPath) => {
+      const manifest: unknown = JSON.parse(
+        await readFile(
+          path.resolve(import.meta.dirname, "../../..", manifestPath),
+          "utf8",
+        ),
+      );
+      if (typeof manifest !== "object" || manifest === null) {
+        throw new Error(`${manifestPath} must contain a JSON object.`);
+      }
+
+      expect(
+        "sideEffects" in manifest ? manifest.sideEffects : undefined,
+        `${packageName} must declare \"sideEffects\": false so the runner bundle can remove unused exports.`,
+      ).toBe(false);
+    },
+  );
+
   it("bundles the staged entrypoint, resolves externals at boot, and passes the boot probe", async () => {
     const bundleDir = await createFakeRunnerBundle();
 
