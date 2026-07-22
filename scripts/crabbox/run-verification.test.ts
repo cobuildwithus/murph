@@ -118,6 +118,7 @@ describe("Crabbox verification environment", () => {
           CI: "source-ci-must-not-reach-verifier",
           CUSTOM_PROVIDER_TOKEN: "secret-custom-token",
           HOME: path.join(tempRoot, "home"),
+          MURPH_CRABBOX_TRUSTED_ENTRYPOINT: "1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-verifier",
           PATH: `${binDir}${path.delimiter}/usr/bin:/bin`,
         },
@@ -155,6 +156,17 @@ describe("Crabbox verification environment", () => {
       "parseRemoteVerificationRequest",
       ["release:patch"],
     )).toContain("supports only");
+  });
+
+  it("rejects direct candidate execution outside the trusted Testbox entrypoint", () => {
+    expect(callModuleFailure(
+      "assertTrustedEntrypoint",
+      {
+        ACTIONS_RUNTIME_TOKEN: "ambient-actions-token",
+        HOME: "/home/crabbox",
+        PATH: "/usr/bin:/bin",
+      },
+    )).toContain("trusted Testbox entrypoint");
   });
 });
 

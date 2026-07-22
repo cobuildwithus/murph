@@ -61,9 +61,13 @@ Testbox ID, timing summary, and linked Actions run when delegation starts.
 
 The default Crabbox/Blacksmith lane is synthetic and secret-free:
 
-- Blacksmith Testbox rejects Crabbox environment forwarding, and the dispatcher
-  removes any inherited `CRABBOX_ENV_ALLOW` before invoking the direct provider.
-  Do not add `--allow-env`, `--env-from-profile`, or workflow secrets to this lane.
+- Blacksmith Testbox rejects Crabbox environment forwarding. Before invoking
+  either the Crabbox or Blacksmith CLI, the dispatcher replaces its inherited
+  local environment with a small allowlist of host path, account, terminal, and
+  XDG config locations. Provider, model, production, GitHub, billing, messaging,
+  and application credentials never enter the Crabbox CLI process, so neither
+  user-level allowlists nor command flags have a credential value to forward. Do not add
+  `--allow-env`, `--env-from-profile`, or credential variables to this lane.
 - Blacksmith owns sync and can transfer Git-tracked plus untracked non-ignored
   paths. Before delegation, the dispatcher derives authorization from one
   `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
@@ -76,10 +80,24 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   the host so the Testbox verifies the exact candidate change rather than only
   the pushed commit. `.gitignore` carries the matching normal exclusions,
   including local Crabbox run artifacts.
-- `scripts/crabbox/run-verification.mjs` discards the received process environment,
-  preserves only basic host paths, and supplies deterministic CI-style placeholder
-  values required by hosted-web build and smoke checks. Blacksmith authentication
-  remains in the local Blacksmith CLI and never enters the test process.
+- The default-branch hydration workflow has read-only repository contents
+  permission, attaches no GitHub Environment, requests no OIDC authority, and
+  references no Actions secrets. It copies
+  `scripts/crabbox/trusted-verification-entrypoint.mjs` into a root-owned path
+  outside the synced workspace before opening the delegated Testbox session.
+  Canonical commands invoke only that installed entrypoint. The trusted copy
+  validates the two allowed verification commands, erases its own ambient
+  Actions/Blacksmith environment, and launches candidate-controlled repository
+  code with only basic host paths plus a one-bit trusted-entry marker.
+- Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
+  and hydration job on the command line. Local `CRABBOX_CONFIG`, profile, ref,
+  workflow, or job overrides are not trusted routing inputs.
+- `scripts/crabbox/run-verification.mjs` fails closed without that marker, then
+  independently rebuilds the process environment with deterministic CI-style
+  placeholder values required by hosted-web build and smoke checks. Candidate
+  changes can still be verified, but they never receive the Testbox orchestration
+  environment first. Blacksmith authentication remains in the local Blacksmith
+  CLI and never enters the test process.
 - The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
   `.vercel`, provider, model, billing, messaging, or production credentials.
 - Canonical completion tests are expected to pass under this synthetic contract.
@@ -87,7 +105,19 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   must set `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1`, remain local on an authorized
   host, and be reported separately. Do not weaken the default Crabbox boundary;
   a future remote live-env lane requires its own reviewed Testbox workflow with
-  repository-managed, step-scoped secrets.
+  repository-managed, step-scoped secrets. This secret-free workflow bootstrap
+  is itself a trust root: a change to it or the installed entrypoint must use
+  local verification until that exact trusted version exists on the default
+  branch, followed by a post-landing remote proof.
+
+This boundary prevents ambient credential inheritance in the canonical Murph
+verification path. It is not an operating-system sandbox: a process that can
+already read a production secret and make arbitrary network requests can
+exfiltrate that secret without Crabbox. Keep production credentials out of
+ordinary local process environments and never use ad-hoc Crabbox or Blacksmith
+commands to carry secret values. GitHub production secrets must live only in a
+protected-branch environment, never as repository-scoped duplicates that an
+alternate workflow ref could request.
 
 When Crabbox runs, record the command, result, Testbox ID, timing summary, and
 linked GitHub Actions run in the completion evidence.

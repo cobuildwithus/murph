@@ -48,6 +48,37 @@ jobs:
           done
           sudo ln -sf "$(command -v pnpm)" /usr/local/bin/pnpm
 
+      - name: Install the secret-free delegated verification entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo install -d -o root -g root -m 0755 /usr/local/libexec
+          sudo install -o root -g root -m 0555 \
+            scripts/crabbox/trusted-verification-entrypoint.mjs \
+            /usr/local/libexec/murph-crabbox-trusted-entrypoint.mjs
+          entrypoint="$(mktemp)"
+          trap 'rm -f "$entrypoint"' EXIT
+          cat >"$entrypoint" <<'EOF'
+          #!/bin/sh
+          set -eu
+          trusted_home="${HOME:?}"
+          trusted_user="${USER:-crabbox}"
+          exec /usr/bin/env -i \
+            HOME="$trusted_home" \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            LOGNAME="${LOGNAME:-$trusted_user}" \
+            PATH=/usr/local/bin:/usr/bin:/bin \
+            SHELL=/bin/bash \
+            TERM="${TERM:-dumb}" \
+            TMPDIR=/tmp \
+            USER="$trusted_user" \
+            /usr/local/bin/node \
+            /usr/local/libexec/murph-crabbox-trusted-entrypoint.mjs "$@"
+          EOF
+          sudo install -o root -g root -m 0555 \
+            "$entrypoint" /usr/local/bin/murph-crabbox-verify
+
       - name: Keep Testbox available for delegated commands
         if: success()
         uses: useblacksmith/run-testbox@3f60ff9ceb2c10c3feefa87dc0c6490cffae059d

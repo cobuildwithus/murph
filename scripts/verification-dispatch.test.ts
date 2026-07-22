@@ -101,11 +101,39 @@ describe("verification dispatcher", () => {
     }, false)).toContain("Crabbox and Blacksmith CLIs are unavailable");
   });
 
+  it("rebuilds the local Crabbox CLI environment from non-secret host paths", () => {
+    expect(callDispatcherExport(
+      "buildCrabboxCliEnvironment",
+      {
+        ACTIONS_RUNTIME_TOKEN: "actions-secret",
+        CI: "1",
+        CRABBOX_ENV_ALLOW: "OPENAI_API_KEY",
+        CUSTOM_PROVIDER_TOKEN: "provider-secret",
+        GITHUB_TOKEN: "github-secret",
+        HOME: "/safe/home",
+        NODE_OPTIONS: "--require=malicious-bootstrap",
+        OPENAI_API_KEY: "model-secret",
+        PATH: "/safe/bin:/usr/bin:/bin",
+        STRIPE_SECRET_KEY: "billing-secret",
+        TERM: "xterm-256color",
+        USER: "crabbox-user",
+        XDG_CONFIG_HOME: "/safe/config",
+      },
+    )).toEqual({
+      HOME: "/safe/home",
+      PATH: "/safe/bin:/usr/bin:/bin",
+      TERM: "xterm-256color",
+      USER: "crabbox-user",
+      XDG_CONFIG_HOME: "/safe/config",
+    });
+  });
+
   it("uses the direct Blacksmith provider without environment forwarding", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const capturePath = path.join(tempRoot, "args.txt");
     const envCapturePath = path.join(tempRoot, "env-allow.txt");
+    const secretCapturePath = path.join(tempRoot, "secret-env.txt");
     const sentinelCapturePath = path.join(tempRoot, "sentinel.txt");
     const fakeCrabboxPath = path.join(binDir, "crabbox");
     const fakeBlacksmithPath = path.join(binDir, "blacksmith");
@@ -114,9 +142,10 @@ describe("verification dispatcher", () => {
       [
         "#!/bin/sh",
         'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        'printf "%s\\n" "$@" > "$MURPH_TEST_CRABBOX_CAPTURE"',
-        'printf "%s" "${CRABBOX_ENV_ALLOW-unset}" > "$MURPH_TEST_CRABBOX_ENV_CAPTURE"',
-        'printf "%s" "${MURPH_CRABBOX_NO_FORWARD-unset}" > "$MURPH_TEST_CRABBOX_SENTINEL_CAPTURE"',
+        `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
+        `printf "%s" "\${CRABBOX_ENV_ALLOW-unset}" > ${shellQuote(envCapturePath)}`,
+        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(secretCapturePath)}`,
+        `printf "%s" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(sentinelCapturePath)}`,
       ].join("\n"),
     );
     writeExecutable(fakeBlacksmithPath, "#!/bin/sh\nexit 0");
@@ -132,12 +161,16 @@ describe("verification dispatcher", () => {
           ...withoutVerificationRoutingEnvironment(process.env),
           CODEX_THREAD_ID: "thread-1",
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
+          CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
+          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
+          GITHUB_TOKEN: "must-not-reach-crabbox",
           MURPH_CRABBOX_BLACKSMITH: "1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_TEST_CRABBOX_CAPTURE: capturePath,
-          MURPH_TEST_CRABBOX_ENV_CAPTURE: envCapturePath,
-          MURPH_TEST_CRABBOX_SENTINEL_CAPTURE: sentinelCapturePath,
+          MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
+          NODE_OPTIONS: "--trace-warnings",
+          OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
         },
       },
     );
@@ -145,18 +178,27 @@ describe("verification dispatcher", () => {
     expect(result.status, result.stderr).toBe(0);
     const args = readFileSync(capturePath, "utf8").trim().split("\n");
     expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
+    expect(readFileSync(secretCapturePath, "utf8")).toBe(
+      "unset\nunset\nunset\nunset\nunset\nunset\n",
+    );
     expect(readFileSync(sentinelCapturePath, "utf8")).toBe("unset");
     const providerIndex = args.indexOf("--provider");
     expect(providerIndex).toBeGreaterThan(-1);
     expect(args[providerIndex + 1]).toBe("blacksmith-testbox");
+    expect(flagValue(args, "--profile")).toBe("murph-verification");
+    expect(flagValue(args, "--blacksmith-org")).toBe("cobuildwithus");
+    expect(flagValue(args, "--blacksmith-ref")).toBe("main");
+    expect(flagValue(args, "--blacksmith-workflow")).toBe(
+      ".github/workflows/crabbox.yml",
+    );
+    expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
     expect(args).not.toContain("--id");
     expect(args).not.toContain("--pool");
     expect(args).not.toContain("--pool-return");
     expect(args).not.toContain("--allow-env");
     expect(args).not.toContain("--env-from-profile");
-    expect(args.slice(-4)).toEqual([
-      "node",
-      "scripts/crabbox/run-verification.mjs",
+    expect(args.slice(-3)).toEqual([
+      "/usr/local/bin/murph-crabbox-verify",
       "test:diff",
       "packages/assistant-engine",
     ]);
@@ -171,12 +213,14 @@ describe("verification dispatcher", () => {
           ...withoutVerificationRoutingEnvironment(process.env),
           CODEX_THREAD_ID: "thread-1",
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
+          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
+          GITHUB_TOKEN: "must-not-reach-crabbox",
           MURPH_CRABBOX_LEASE_ID: "lease-1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_TEST_CRABBOX_CAPTURE: capturePath,
-          MURPH_TEST_CRABBOX_ENV_CAPTURE: envCapturePath,
-          MURPH_TEST_CRABBOX_SENTINEL_CAPTURE: sentinelCapturePath,
+          NODE_OPTIONS: "--trace-warnings",
+          OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
         },
       },
     );
@@ -187,12 +231,14 @@ describe("verification dispatcher", () => {
     expect(leaseIdIndex).toBeGreaterThan(-1);
     expect(leaseArgs[leaseIdIndex + 1]).toBe("lease-1");
     expect(leaseArgs).not.toContain("--pool");
-    expect(leaseArgs.slice(-3)).toEqual([
-      "node",
-      "scripts/crabbox/run-verification.mjs",
+    expect(leaseArgs.slice(-2)).toEqual([
+      "/usr/local/bin/murph-crabbox-verify",
       "verify:acceptance",
     ]);
     expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
+    expect(readFileSync(secretCapturePath, "utf8")).toBe(
+      "unset\nunset\nunset\nunset\nunset\nunset\n",
+    );
     expect(readFileSync(sentinelCapturePath, "utf8")).toBe("unset");
   });
 
@@ -519,6 +565,11 @@ function callDispatcherExport<T>(exportName: string, argument: unknown): T {
   });
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as T;
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
 }
 
 function callDispatcherVoidExport(exportName: string, argument: unknown): string {

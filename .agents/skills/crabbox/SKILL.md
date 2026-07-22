@@ -68,6 +68,12 @@ commands above, never an ad-hoc remote command.
 - Never add `--allow-env`, `--env-from-profile`, broad env globs, `.env` files,
   Vercel tokens, provider tokens, model keys, or product credentials. Blacksmith
   Testbox deliberately rejects Crabbox environment forwarding.
+- The dispatcher launches the local Crabbox and Blacksmith CLIs with only
+  non-secret host path, account, terminal, and XDG config variables. Do not
+  weaken that allowlist to accommodate a credential-bearing local environment.
+- Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
+  and hydration job. Do not replace those arguments with mutable local profile
+  or config routing.
 - Blacksmith can sync Git-tracked and untracked non-ignored paths. The dispatcher
   admits only modified tracked files, tracked renames/deletions, ignored files,
   and new files whose current contents are fully staged. Ordinary untracked,
@@ -78,8 +84,16 @@ commands above, never an ad-hoc remote command.
 - Fully staged new source and modified tracked content leave the host so the
   Testbox verifies the exact candidate change. Never stage private data to bypass
   the Git-state refusal.
-- The remote bootstrap independently discards its process environment before
-  reconstructing deterministic test-only values for pnpm and the verifier.
+- The default-branch workflow installs a root-owned verification entrypoint
+  outside the synced workspace before opening the delegated session. That
+  trusted copy erases ambient Actions/Blacksmith state before candidate code
+  starts; the candidate bootstrap then independently reconstructs deterministic
+  test-only values for pnpm and the verifier and fails closed without the
+  trusted-entry marker.
+- Changes to `.github/workflows/crabbox.yml` or the trusted entrypoint use local
+  verification until the exact trust root lands on the default branch. Run a
+  post-landing remote proof afterward; do not claim the pre-landing Testbox
+  exercised the new boundary.
 - Canonical completion verification does not need Vercel development variables.
   When a separate direct scenario truly requires Vercel development state, set
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.

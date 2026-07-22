@@ -6,7 +6,25 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const BLACKSMITH_PROVIDER = "blacksmith-testbox";
+const BLACKSMITH_ORG = "cobuildwithus";
+const BLACKSMITH_REF = "main";
+const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox.yml";
+const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
+const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
+const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+];
 const VALID_EXECUTORS = new Set(["auto", "local", "crabbox"]);
 const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
@@ -121,17 +139,21 @@ export function buildLocalInvocation(request) {
   };
 }
 
-export function buildCrabboxInvocation(request, target, env = process.env) {
-  const profile = readOptionalValue(
-    env.MURPH_CRABBOX_PROFILE,
-    "MURPH_CRABBOX_PROFILE",
-  ) ?? DEFAULT_CRABBOX_PROFILE;
+export function buildCrabboxInvocation(request, target) {
   const args = [
     "run",
     "--profile",
-    profile,
+    DEFAULT_CRABBOX_PROFILE,
     "--provider",
     BLACKSMITH_PROVIDER,
+    "--blacksmith-org",
+    BLACKSMITH_ORG,
+    "--blacksmith-ref",
+    BLACKSMITH_REF,
+    "--blacksmith-workflow",
+    BLACKSMITH_WORKFLOW,
+    "--blacksmith-job",
+    BLACKSMITH_JOB,
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
@@ -143,8 +165,7 @@ export function buildCrabboxInvocation(request, target, env = process.env) {
 
   args.push(
     "--",
-    "node",
-    "scripts/crabbox/run-verification.mjs",
+    TRUSTED_CRABBOX_ENTRYPOINT,
     request.verificationCommand,
     ...request.commandArgs,
   );
@@ -156,7 +177,7 @@ export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
   const invocation = resolution.executor === "crabbox"
-    ? buildCrabboxInvocation(request, resolution.target, env)
+    ? buildCrabboxInvocation(request, resolution.target)
     : buildLocalInvocation(request);
 
   const targetLabel = resolution.executor === "crabbox"
@@ -178,9 +199,20 @@ export async function runVerification(argv, env = process.env) {
 }
 
 export function buildCrabboxCliEnvironment(env) {
-  const childEnvironment = { ...env };
-  delete childEnvironment.CRABBOX_ENV_ALLOW;
-  delete childEnvironment.MURPH_CRABBOX_NO_FORWARD;
+  const childEnvironment = {};
+  for (const name of SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES) {
+    const value = env[name];
+    if (value === undefined || value === "") {
+      continue;
+    }
+    if (/[\0\r\n]/u.test(value)) {
+      throw new Error(`Crabbox CLI environment ${name} must not contain control characters.`);
+    }
+    childEnvironment[name] = value;
+  }
+  if (!childEnvironment.HOME || !childEnvironment.PATH) {
+    throw new Error("Crabbox CLI execution requires HOME and PATH.");
+  }
   return childEnvironment;
 }
 
@@ -346,11 +378,14 @@ function isSensitiveBlacksmithSyncPath(filePath) {
 }
 
 function detectCrabboxStack() {
-  return isCommandAvailable("crabbox") && isCommandAvailable("blacksmith");
+  const environment = buildCrabboxCliEnvironment(process.env);
+  return isCommandAvailable("crabbox", environment) &&
+    isCommandAvailable("blacksmith", environment);
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command, environment) {
   const result = spawnSync(command, ["--version"], {
+    env: environment,
     stdio: "ignore",
   });
   return result.status === 0;
