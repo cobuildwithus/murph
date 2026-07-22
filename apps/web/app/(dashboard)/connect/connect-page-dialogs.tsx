@@ -28,7 +28,7 @@ export function GarminHistoricalDataDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+      <DialogContent className="gap-6 p-6 sm:max-w-md md:p-7">
         <DialogHeader className="pr-10">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
             Garmin

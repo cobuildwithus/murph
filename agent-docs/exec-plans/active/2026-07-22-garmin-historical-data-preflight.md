@@ -56,6 +56,8 @@ Updated: 2026-07-22
   6,140 tests, lint with pre-existing warnings only, dev smoke, typecheck, and
   production build.
 - The required product-experience remediation review returned `NO FINDINGS`.
-- Rendered desktop and phone evidence is unavailable because the in-app browser
-  runtime reported no available browsers. The Claude UI double-check is also
-  unavailable because Fable reported explicit credit exhaustion.
+- Standalone Playwright rendered the production dialog from the Components
+  design page at 1440x1000 and 390x844. The mobile pass caught and corrected a
+  max-width override so the shared 16px dialog gutter remains intact.
+- The Claude UI double-check remains unavailable because Fable reported
+  explicit credit exhaustion.
