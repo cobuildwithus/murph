@@ -3943,7 +3943,9 @@ async function runSystemMailboxMaintenancePhase(input: {
   );
   let pendingAssistantInputWakeAt = hasPendingAssistantInputWakeOverride
     ? input.pendingAssistantInputWakeAt ?? null
-    : await resolvePendingAssistantInputWakeAt(phaseInput);
+    : await resolvePendingAssistantInputWakeAt(phaseInput, {
+        inspectOnly: input.hasFreshConversationInput,
+      });
   const foregroundPendingEffectsPreparation =
     pendingAssistantInputWakeAt !== null
       ? await prepareHostedSystemMailboxItemForCheckpoint({

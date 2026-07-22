@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => ({
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   findAssistantAutoReplyDeliveryIntentIds: vi.fn(),
   getAssistantCronStatus: vi.fn(),
+  hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
@@ -96,6 +97,8 @@ vi.mock("@murphai/assistant-engine/assistant-automation", async (importOriginal)
     ...actual,
     findAssistantAutoReplyDeliveryIntentIds:
       mocks.findAssistantAutoReplyDeliveryIntentIds,
+    hasCompleteAssistantAutoReplyTerminalEvidence:
+      mocks.hasCompleteAssistantAutoReplyTerminalEvidence,
     listPendingAssistantAutoReplyLinqCleanupEvidence:
       mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
     markAssistantAutoReplyLinqCleanupQueued: mocks.markAssistantAutoReplyLinqCleanupQueued,
@@ -228,6 +231,7 @@ import {
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import {
   enqueueHostedPendingAssistantInputId,
+  inspectHostedPendingAssistantInputWakeCandidate,
   readExistingHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import type {
@@ -429,6 +433,7 @@ beforeEach(() => {
     totalJobs: 0,
   });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
+  mocks.hasCompleteAssistantAutoReplyTerminalEvidence.mockResolvedValue(false);
   mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(new Set());
   mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(null);
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
@@ -11925,8 +11930,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     try {
       expect(scenario.pendingInputIds).toEqual([scenario.inputId]);
-      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:00.000Z");
+      expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
+      expect(scenario.pendingInputIdsAfterRun).not.toContain(scenario.oldInputId);
+      expect(scenario.pendingIndexInspectionAfterRun).toEqual({
+        hasCandidate: true,
+        indexComplete: false,
+      });
+      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:30.000Z");
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: true,
@@ -11953,8 +11965,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     try {
       expect(scenario.pendingInputIds).toEqual([scenario.inputId]);
-      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:00.000Z");
+      expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
+      expect(scenario.pendingInputIdsAfterRun).not.toContain(scenario.oldInputId);
+      expect(scenario.pendingIndexInspectionAfterRun).toEqual({
+        hasCandidate: true,
+        indexComplete: false,
+      });
+      expect(scenario.pendingWakeReads[0]).toBe("2026-04-27T00:00:30.000Z");
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
         expect.objectContaining({
           preferredEffectIds: [scenario.effectId],
@@ -11978,6 +11997,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     try {
+      expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
+      expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -12009,6 +12031,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
 
     try {
+      expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
+      expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -12648,6 +12673,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       progressed: false,
     }));
     expect(mocks.resolveHostedPendingAssistantInputWakeAt).toHaveBeenCalledWith({
+      inspectOnly: false,
       now: expect.any(Function),
       vaultRoot: "/tmp/murph-vault",
     });
@@ -14301,6 +14327,46 @@ async function runRealForegroundApprovalAdmissionScenario(input: {
       updatedAt: now,
       version: 1,
     });
+    const oldAssistantInput = await upsertAssistantInputEvent({
+      event: {
+        content: {
+          text: "older unindexed pending input",
+          transcriptText: "older unindexed pending input",
+          userMessageContent: [{
+            text: "older unindexed pending input",
+            type: "text" as const,
+          }],
+        },
+        conversation: {
+          accountId: "acct_approval_admission",
+          actorId: "actor_approval_admission",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "thread_approval_admission",
+          threadIsDirect: true,
+        },
+        occurredAt: "2026-04-26T23:59:00.000Z",
+        receivedAt: "2026-04-26T23:59:00.000Z",
+        replyTarget: {
+          channel: "linq",
+          messageId: "msg_old_approval_admission",
+          threadId: "thread_approval_admission",
+        },
+        sourceRef: {
+          dedupeKey: "dedupe_old_approval_admission",
+          eventId: "evt_old_approval_admission",
+          itemId: "mailbox_item_old_approval_admission_conversation",
+          kind: "hosted-mailbox" as const,
+          lane: "conversation" as const,
+          laneSeq: "0",
+          payloadSchema: "murph.hosted-mailbox-payload.v1",
+          payloadSource: "inline" as const,
+          source: "hosted-mailbox" as const,
+          wakeSchema: "murph.hosted-execution-wake.v1",
+        },
+      },
+      vault: vaultRoot,
+    });
     const assistantInput = await upsertAssistantInputEvent({
       event: {
         content: {
@@ -14441,7 +14507,13 @@ async function runRealForegroundApprovalAdmissionScenario(input: {
       cleanup: async () => rm(parentRoot, { force: true, recursive: true }),
       effectId,
       inputId: assistantInput.inputId,
+      oldInputId: oldAssistantInput.inputId,
       pendingInputIds,
+      pendingInputIdsAfterRun: await readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      }),
+      pendingIndexInspectionAfterRun:
+        await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
       pendingWakeReads,
       result,
       systemMailboxPreparationStatuses,
