@@ -158,12 +158,11 @@ do not add a generic payment-modal framework.
 The target composition is:
 
 - Title: **Add usage**
-- Description: **Choose how much usage credit to add in a one-time payment.
-  Stripe confirms the payment before Murph adds it.**
+- Description: **Choose a one-time credit amount for your account.**
 - Three equal choices: **$5**, **$10**, and **$25**
 - No default selection and no “popular” badge
 - Primary action after selection: **Continue to checkout · $10**
-- Pending action: **Opening Stripe…**
+- Pending action: **Opening checkout…**
 - Secondary action: **Cancel**
 - An inline accessible error for checkout-creation failure
 
@@ -188,7 +187,7 @@ The browser renders only server-read status:
 | State | Copy |
 | --- | --- |
 | Checkout canceled or expired | **Checkout canceled. No usage was added.** |
-| Payment processing | **Payment submitted. Stripe is confirming it.** |
+| Payment processing | **Payment submitted. We’re confirming it.** |
 | Fulfilled | **Usage added.** |
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
@@ -716,7 +715,11 @@ from that same owner as a Family member and prevents a historical group from
 being reinterpreted as a new Family relationship. Exact request-key replay may
 recover status and cancellation after membership removal, but it rechecks
 current Family authority before releasing payment capability; a fresh request
-key also requires current authority.
+key also requires current authority. The service uses the same exact-target
+capability projection again after Stripe returns and in ambiguous-provider
+recovery before decrypting a Checkout URL or offering retry. If membership
+changes while provider I/O is in flight, the bound purchase remains visible for
+status and cancellation but exposes no payable capability.
 
 Only one payer-wide nonterminal purchase may exist. While it does, Family
 Settings hides every new amount picker and places recovery controls only on the

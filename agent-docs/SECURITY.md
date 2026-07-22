@@ -61,8 +61,11 @@ Last verified: 2026-07-22
   remain distinct even when payer and beneficiary ids coincide. Mutable Family
   membership gates every payable request. Exact request-key replay identifies
   the immutable purchase, but a Family replay rechecks current authority before
-  releasing payment capability; fulfillment remains bound to the frozen
-  purchase. Family admission first binds the
+  releasing payment capability. Family creation rechecks that same exact target
+  after Stripe returns and before decrypting a Checkout URL or projecting retry
+  permission, so membership removal during provider I/O degrades to
+  status/cancel-only recovery; fulfillment remains bound to the frozen purchase.
+  Family admission first binds the
   opaque selector to the owner's roster before locking the beneficiary. A
   payer-wide conflict with another frozen target may be inspected or canceled
   but must never return a payable URL or retry permission, regardless of the

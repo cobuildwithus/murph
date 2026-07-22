@@ -68,6 +68,14 @@ export interface HostedActiveUsageCreditPurchaseProjection
   url?: string;
 }
 
+export interface HostedUsageCreditCheckoutCapabilityProjection {
+  checkout: HostedUsageCreditCheckoutResult;
+  payerAuthorized: boolean;
+  retryAllowed: boolean;
+  target: HostedUsageCreditPurchaseTargetProjection;
+  targetAuthorized: boolean;
+}
+
 export type HostedUsageCreditPurchaseTargetProjection =
   | {
       beneficiaryMemberId: string;
@@ -165,54 +173,83 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   if (!purchase.payer) {
     throw buildHostedUsageCreditInvariantError("purchase_payer_missing");
   }
-  const target = projectHostedUsageCreditPurchaseTarget(purchase);
   const targetApprovedByCaller =
     input.serverApprovedPayableTargets?.some((payableTarget) =>
-      hostedUsageCreditPurchaseTargetsMatch(target, payableTarget)
+      hostedUsageCreditPurchaseTargetsMatch(
+        projectHostedUsageCreditPurchaseTarget(purchase),
+        payableTarget,
+      )
     ) === true;
-  const mayExposePayableCapability =
-    purchase.payer.suspendedAt === null &&
-    targetApprovedByCaller &&
-    await hasCurrentHostedUsageCreditPayableAuthority({
-      payerMemberId: input.payerMemberId,
-      prisma,
-      target,
-    });
-  const checkout = mayExposePayableCapability
-    ? await projectHostedUsageCreditCheckoutResult({
-        prisma,
-        purchase,
-      })
-    : projectHostedUsageCreditPurchaseStatusResult(purchase);
+  const capability = await projectHostedUsageCreditCheckoutCapability({
+    now,
+    payerMemberId: input.payerMemberId,
+    prisma,
+    purchase,
+    targetApprovedByCaller,
+  });
 
   return {
-    ...checkout,
+    ...capability.checkout,
     offerCode,
-    retryAllowed:
-      mayExposePayableCapability &&
-      canRetryHostedUsageCreditCheckoutCreate({ now, purchase }),
-    target,
+    retryAllowed: capability.retryAllowed,
+    target: capability.target,
   };
 }
 
-async function hasCurrentHostedUsageCreditPayableAuthority(input: {
+export async function projectHostedUsageCreditCheckoutCapability(input: {
+  now: Date;
   payerMemberId: string;
   prisma: PrismaClient;
-  target: HostedUsageCreditPurchaseTargetProjection;
-}): Promise<boolean> {
-  const target = input.target;
-  if (target.kind !== "family") {
-    return true;
-  }
-  return input.prisma.$transaction(async (tx) => {
+  purchase: HostedUsageCreditPurchase;
+  targetApprovedByCaller: boolean;
+}): Promise<HostedUsageCreditCheckoutCapabilityProjection> {
+  const target = projectHostedUsageCreditPurchaseTarget(input.purchase);
+  const authority = await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.payerMemberId);
+    const payer = await tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.payerMemberId },
+    });
+    if (!payer || payer.suspendedAt) {
+      return { payerAuthorized: false, targetAuthorized: false };
+    }
+    if (target.kind !== "family") {
+      return { payerAuthorized: true, targetAuthorized: true };
+    }
     const currentTarget = await resolveHostedFamilyUsageCreditCheckoutTargetTx({
       beneficiaryMemberId: target.beneficiaryMemberId,
       ownerMemberId: input.payerMemberId,
       tx,
     });
-    return currentTarget?.groupId === target.familyGroupId;
+    return {
+      payerAuthorized: true,
+      targetAuthorized: currentTarget?.groupId === target.familyGroupId,
+    };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const mayExposePayableCapability =
+    input.targetApprovedByCaller &&
+    authority.payerAuthorized &&
+    authority.targetAuthorized;
+  const checkout = mayExposePayableCapability
+    ? await projectHostedUsageCreditCheckoutResult({
+        prisma: input.prisma,
+        purchase: input.purchase,
+      })
+    : projectHostedUsageCreditPurchaseStatusResult(input.purchase);
+
+  return {
+    checkout,
+    payerAuthorized: authority.payerAuthorized,
+    retryAllowed:
+      mayExposePayableCapability &&
+      canRetryHostedUsageCreditCheckoutCreate({
+        now: input.now,
+        purchase: input.purchase,
+      }),
+    target,
+    targetAuthorized:
+      input.targetApprovedByCaller && authority.targetAuthorized,
+  };
 }
 
 export async function readHostedUsageCreditPurchaseTargetForPayer(input: {

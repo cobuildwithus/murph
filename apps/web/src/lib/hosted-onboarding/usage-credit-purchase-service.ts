@@ -41,9 +41,9 @@ import {
   buildHostedUsageCreditPurchaseNotFoundError,
   canRetryHostedUsageCreditCheckoutCreate,
   closeExpiredUnattachedHostedUsageCreditPurchasesTx,
+  projectHostedUsageCreditCheckoutCapability,
   projectHostedUsageCreditPurchaseStatusResult,
   projectHostedUsageCreditPurchaseTarget,
-  projectHostedUsageCreditCheckoutResult,
   type HostedUsageCreditCheckoutResult,
 } from "./usage-credit-purchase-status-service";
 import {
@@ -532,14 +532,15 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         prisma,
         purchase: resolution.purchase,
       });
-      const checkout = await projectHostedUsageCreditCheckoutResult({
+      const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+        now,
         prisma,
         purchase,
       });
       return {
-        ...checkout,
+        ...projection.checkout,
         recovered: true,
-        ...(canRetryHostedUsageCreditCheckoutCreate({ now, purchase })
+        ...(projection.retryAllowed
           ? { retryAllowed: true as const }
           : {}),
       };
@@ -558,7 +559,8 @@ async function continueHostedUsageCreditCheckout(input: {
     prisma: input.prisma,
     purchase: input.purchase,
   });
-  const projected = await projectHostedUsageCreditCheckoutResult({
+  const initialProjection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+    now: input.now,
     prisma: input.prisma,
     purchase,
   });
@@ -569,7 +571,7 @@ async function continueHostedUsageCreditCheckout(input: {
       purchase,
     })
   ) {
-    return projected;
+    return initialProjection.checkout;
   }
 
   const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
@@ -615,15 +617,44 @@ async function continueHostedUsageCreditCheckout(input: {
     purchase,
     session,
   });
-  await assertHostedUsageCreditCheckoutCanBeReturned({
-    memberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
-    prisma: input.prisma,
-  });
-
-  return projectHostedUsageCreditCheckoutResult({
+  const finalProjection = await projectHostedUsageCreditCheckoutForCurrentTarget({
+    now: input.now,
     prisma: input.prisma,
     purchase: attached,
   });
+  return finalProjection.checkout;
+}
+
+async function projectHostedUsageCreditCheckoutForCurrentTarget(input: {
+  now: Date;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+}): Promise<{
+  checkout: HostedUsageCreditCheckoutResult;
+  retryAllowed: boolean;
+}> {
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
+  const capability = await projectHostedUsageCreditCheckoutCapability({
+    now: input.now,
+    payerMemberId,
+    prisma: input.prisma,
+    purchase: input.purchase,
+    targetApprovedByCaller: true,
+  });
+  if (!capability.payerAuthorized) {
+    throw buildHostedUsageCreditNotEligibleError();
+  }
+  return {
+    checkout: capability.targetAuthorized
+      ? capability.checkout
+      : {
+          ...capability.checkout,
+          targetConflict: true,
+        },
+    retryAllowed: capability.retryAllowed,
+  };
 }
 
 async function prepareHostedUsageCreditPurchaseForCheckout(input: {
@@ -688,22 +719,6 @@ async function prepareHostedUsageCreditPurchaseForCheckout(input: {
       };
     }
     return current;
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-}
-
-async function assertHostedUsageCreditCheckoutCanBeReturned(input: {
-  memberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  await input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.memberId);
-    const member = await tx.hostedMember.findUnique({
-      select: { suspendedAt: true },
-      where: { id: input.memberId },
-    });
-    if (!member || member.suspendedAt) {
-      throw buildHostedUsageCreditNotEligibleError();
-    }
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 

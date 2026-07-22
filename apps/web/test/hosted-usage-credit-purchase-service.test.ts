@@ -485,7 +485,7 @@ describe("createHostedUsageCreditCheckout", () => {
     });
     expect(replay).not.toHaveProperty("url");
     expect(replay).not.toHaveProperty("retryAllowed");
-    expect(mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx).toHaveBeenCalledTimes(4);
 
     await expect(createHostedFamilyMemberUsageCreditCheckout({
       beneficiaryMemberId: "hbm_familymember1",
@@ -498,6 +498,125 @@ describe("createHostedUsageCreditCheckout", () => {
       code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
       httpStatus: 403,
     });
+  });
+
+  it("withholds a Family Checkout URL when membership ends during Stripe creation", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) => {
+      mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValue(null);
+      return buildStripeSession(request);
+    });
+
+    const checkout = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(checkout).toMatchObject({
+      status: "checkout_open",
+      targetConflict: true,
+    });
+    expect(checkout).not.toHaveProperty("url");
+    expect(checkout).not.toHaveProperty("retryAllowed");
+    expect(fake.purchases.size).toBe(1);
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      status: "checkout_open",
+      stripeCheckoutSessionIdEncrypted: expect.any(String),
+      stripeCheckoutSessionLookupKey: expect.any(String),
+    });
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks Family authority after exact request-key replay resolution", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    const first = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    const currentTarget = {
+      beneficiaryMemberId: "hbm_familymember1",
+      groupId: "hbag_abcdefghijklmnop",
+      stripeCustomerId: "cus_family_owner",
+    };
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockReset();
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx
+      .mockResolvedValueOnce(currentTarget)
+      .mockResolvedValue(null);
+
+    const replay = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(replay).toMatchObject({
+      purchaseId: first.purchaseId,
+      status: "checkout_open",
+      targetConflict: true,
+    });
+    expect(replay).not.toHaveProperty("url");
+    expect(replay).not.toHaveProperty("retryAllowed");
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("withholds Family retry capability when authority ends after Stripe failure", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockRejectedValue(new Error("connection lost"));
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+    });
+    const currentTarget = {
+      beneficiaryMemberId: "hbm_familymember1",
+      groupId: "hbag_abcdefghijklmnop",
+      stripeCustomerId: "cus_family_owner",
+    };
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockReset();
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx
+      .mockResolvedValueOnce(currentTarget)
+      .mockResolvedValueOnce(currentTarget)
+      .mockResolvedValue(null);
+
+    const recovered = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: "fresh_family_key_12",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(recovered).toMatchObject({
+      recovered: true,
+      status: "reconciling",
+      targetConflict: true,
+    });
+    expect(recovered).not.toHaveProperty("url");
+    expect(recovered).not.toHaveProperty("retryAllowed");
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
   });
 
   it("funds the server-resolved group beneficiary without requiring a paid plan", async () => {
