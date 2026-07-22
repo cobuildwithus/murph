@@ -40,14 +40,14 @@ export function SourceCard({
   const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
-  // Any of these branches renders a wide (max-w-[22rem]) message beside the
-  // source details. That message is too wide to share the base-breakpoint row,
-  // so the card stacks vertically on phone widths to keep the text from
-  // overlapping the description.
+  // These branches add message content beside the source details. Stack the
+  // card on phone widths so the message and action never squeeze the
+  // description into a narrow column.
   const showsSideMessage = requiresConnectionReset
     || source.requiresReconnect
     || historicalResetIncomplete
-    || Boolean(unavailableMessage);
+    || Boolean(unavailableMessage)
+    || Boolean(errorMessage);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
@@ -83,6 +83,11 @@ export function SourceCard({
 
         {source.connected && !source.requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
             {canDisconnect ? (
               <button
                 type="button"
@@ -94,14 +99,15 @@ export function SourceCard({
                 {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
             ) : null}
-            {errorMessage ? (
-              <p role="alert" className="text-xs leading-snug text-destructive">
-                {errorMessage}
-              </p>
-            ) : null}
           </div>
         ) : (
-          <div className="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink">
+          <div
+            className={
+              showsSideMessage
+                ? "flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"
+                : "ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"
+            }
+          >
             {requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {connectionOfferEnabled
@@ -124,6 +130,11 @@ export function SourceCard({
             {unavailableMessage ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-muted-foreground">
                 {unavailableMessage}
+              </p>
+            ) : null}
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
               </p>
             ) : null}
             {source.unavailableActionUrl && source.unavailableActionLabel ? (
@@ -183,11 +194,6 @@ export function SourceCard({
               >
                 {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
-            ) : null}
-            {errorMessage ? (
-              <p role="alert" className="text-xs leading-snug text-destructive">
-                {errorMessage}
-              </p>
             ) : null}
           </div>
         )}

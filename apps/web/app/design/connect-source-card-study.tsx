@@ -3,44 +3,113 @@
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 
-const DESIGN_CONNECT_SOURCES: ConnectSource[] = [
+type ConnectSourceCardStudyCase = {
+  authenticated: boolean;
+  errorMessage: string | null;
+  source: ConnectSource;
+};
+
+const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
-    description: "Workouts, sleep, stress, heart rate, and body battery.",
-    connected: true,
-    disconnectConnectionId: "design-garmin-connection",
-    id: "garmin",
-    logo: {
-      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-      height: 36,
-      src: "/brand-logos/connect/garmin.png",
-      width: 128,
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      description: "Workouts, sleep, stress, heart rate, and body battery.",
+      connected: true,
+      disconnectConnectionId: "design-garmin-connection",
+      id: "garmin",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/garmin.png",
+        width: 128,
+      },
+      name: "Garmin",
     },
-    name: "Garmin",
   },
   {
-    description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
-    id: "apple-health",
-    logo: {
-      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-      height: 36,
-      src: "/brand-logos/connect/apple-health.png",
-      width: 128,
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      id: "apple-health",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/apple-health.png",
+        width: 128,
+      },
+      name: "Apple Health",
+      unavailableActionLabel: "Download app",
+      unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
     },
-    name: "Apple Health",
-    unavailableActionLabel: "Download app",
-    unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
   },
   {
-    connectTarget: "fitbit",
-    description: "Sleep, activity, heart rate, and daily readiness.",
-    id: "fitbit",
-    logo: {
-      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-      height: 36,
-      src: "/brand-logos/connect/fitbit.svg",
-      width: 128,
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectTarget: "fitbit",
+      description: "Sleep, activity, heart rate, and daily readiness.",
+      id: "fitbit",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/fitbit.svg",
+        width: 128,
+      },
+      name: "Fitbit",
     },
-    name: "Fitbit",
+  },
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      connectTarget: "oura",
+      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+      id: "oura-signed-out",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/oura.png",
+        width: 128,
+      },
+      name: "Oura",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      connectTarget: "whoop",
+      description: "Recovery, strain, sleep, heart rate, and daily readiness.",
+      disconnectConnectionId: "design-whoop-recovery",
+      disconnectScope: "junction_account",
+      id: "whoop-recovery",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/whoop.svg",
+        width: 128,
+      },
+      name: "Whoop",
+      recoveryKind: "connection_reset",
+    },
+  },
+  {
+    authenticated: true,
+    errorMessage: "Peloton could not open. Please try again.",
+    source: {
+      connectTarget: "peloton",
+      description: "Rides, runs, strength, and workout output.",
+      id: "peloton-error",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/peloton.svg",
+        width: 128,
+      },
+      name: "Peloton",
+    },
   },
 ];
 
@@ -52,11 +121,11 @@ export function ConnectSourceCardStudy() {
       id="connect-source-card-actions"
     >
       <div className="grid items-stretch gap-4 lg:grid-cols-3">
-        {DESIGN_CONNECT_SOURCES.map((source) => (
+        {DESIGN_CONNECT_SOURCE_CASES.map(({ authenticated, errorMessage, source }) => (
           <SourceCard
             key={source.id}
-            authenticated
-            errorMessage={null}
+            authenticated={authenticated}
+            errorMessage={errorMessage}
             pending={false}
             pendingDisconnect={false}
             source={source}
