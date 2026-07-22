@@ -57,6 +57,7 @@ import {
 import {
   readHostedSystemMailboxState,
   type HostedSystemMailboxPendingItem,
+  updateHostedSystemMailboxPendingItem,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -275,10 +276,18 @@ describe("hosted system mailbox notification execution context", () => {
           attemptCount: 1,
           lastAttemptAt: FIXED_NOW,
           routeAction: "continue-assistant-ask",
+          status: "recording",
         }),
       }));
       expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
-        pending: [],
+        pending: [
+          expect.objectContaining({
+            attemptCount: 1,
+            itemId: "mailbox_item_system_assistant_ask_completed",
+            routeAction: "continue-assistant-ask",
+            status: "recording",
+          }),
+        ],
       });
       const executionInput = mocks.executeHostedMailboxEvent.mock.calls[0]?.[0];
       expect(executionInput).toEqual(
@@ -297,6 +306,144 @@ describe("hosted system mailbox notification execution context", () => {
       expect(executionInput?.executionContext.hosted).not.toHaveProperty(
         "groupTool",
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("preserves a future ask wake while generic work continues", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const nextWakeAt = "2026-04-27T00:01:00.000Z";
+    const completionItem = createResolvedAssistantAskCompletionItem();
+    const completionWake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        originAssistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        originSessionId: "session_private",
+        question: "What is the synthetic group plan?",
+        requestId: "aask_req_generic_owner_boundary",
+        result: {
+          answer: "The synthetic plan is ready.",
+          outcome: "answered",
+        },
+        targetLabel: "Synthetic group",
+      },
+      eventId: "aask_done_generic_owner_boundary",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+    });
+    const unrelatedItem = createResolvedNotificationItem({
+      id: "mailbox_item_unrelated_after_ask_completion",
+      laneSeq: "2",
+    });
+    const unrelatedWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:after-ask-completion",
+      memberId: "member_123",
+      notification: {
+        instructions: "Handle this unrelated due work.",
+        route: {
+          actorId: "+15550001111",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq_thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "linq_thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: completionItem,
+        vaultRoot: workspace.vaultRoot,
+        wake: completionWake,
+      });
+      const queuedCompletion = (
+        await readHostedSystemMailboxState(workspace.vaultRoot)
+      ).pending[0];
+      assert.ok(queuedCompletion);
+      await updateHostedSystemMailboxPendingItem({
+        item: {
+          ...queuedCompletion,
+          nextAttemptAt: nextWakeAt,
+        },
+        vaultRoot: workspace.vaultRoot,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: unrelatedItem,
+        vaultRoot: workspace.vaultRoot,
+        wake: unrelatedWake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toEqual(expect.objectContaining({
+        item: expect.objectContaining({
+          itemId: unrelatedItem.item.id,
+          routeAction: "dispatch-assistant-notification",
+        }),
+        status: "processed",
+      }));
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          sourceMailboxItemId: unrelatedItem.item.id,
+        }),
+      );
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [
+          expect.objectContaining({
+            attemptCount: 0,
+            itemId: completionItem.item.id,
+            lastAttemptAt: null,
+            nextAttemptAt: nextWakeAt,
+            routeAction: "continue-assistant-ask",
+            status: "pending",
+          }),
+        ],
+      });
+      expect(await resolveHostedSystemMailboxNextWakeAt({
+        now: () => FIXED_NOW,
+        vaultRoot: workspace.vaultRoot,
+      })).toBe(nextWakeAt);
+
+      const askOnly = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(askOnly).toBeNull();
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
+        pending: [
+          expect.objectContaining({
+            attemptCount: 0,
+            itemId: completionItem.item.id,
+            lastAttemptAt: null,
+            nextAttemptAt: nextWakeAt,
+            routeAction: "continue-assistant-ask",
+            status: "pending",
+          }),
+        ],
+      });
+      expect(await resolveHostedSystemMailboxNextWakeAt({
+        now: () => FIXED_NOW,
+        vaultRoot: workspace.vaultRoot,
+      })).toBe(nextWakeAt);
     } finally {
       await workspace.cleanup();
     }
@@ -364,7 +511,6 @@ describe("hosted system mailbox notification execution context", () => {
         allowedWakeKinds: ["assistant.ask.completed"],
         executionContext: null,
         now: () => FIXED_NOW,
-        retainProcessedItem: true,
         runtime: createRuntime({}),
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,

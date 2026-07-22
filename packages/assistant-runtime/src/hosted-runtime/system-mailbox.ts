@@ -240,7 +240,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
-  retainProcessedItem?: boolean;
   signal?: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   vaultRoot: string;
@@ -253,7 +252,10 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         pending: state.pending.filter((item) =>
           (
             input.allowedRouteActions != null
-            || item.routeAction !== "run-assistant-ask"
+            || (
+              item.routeAction !== "run-assistant-ask"
+              && item.routeAction !== "continue-assistant-ask"
+            )
           )
           && (
             input.allowedItemIds == null
@@ -336,7 +338,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         metrics,
         status: "processed",
       };
-    } else if (input.retainProcessedItem === true) {
+    } else if (prepared.routeAction === "continue-assistant-ask") {
       const processedItem: HostedSystemMailboxPendingItem = {
         ...prepared,
         status: "recording",

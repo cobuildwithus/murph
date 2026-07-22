@@ -418,23 +418,32 @@ pre-assistant barrier repeatedly selects the exact oldest completion that
 precedes the oldest pending personal input. Invalid or already-terminal work is
 discharged and the remaining older set is checked before personal work may
 start. A completion imported before any personal input exists is materialized
-through the same exact retained-row lane instead of the generic mailbox
-consumer, so a retry or in-flight restart cannot lose its later ordering
-prerequisite. Once a completion creates its stable-key outbox intent, the
-retained mailbox item remains the occurrence and ordering anchor while the
-outbox alone owns delivery state and retry timing. Automatically actionable
-pending, retryable, or in-flight delivery blocks the personal input and uses
-the outbox-owned wake, including non-idempotent confirmation grace and stale
-reconciliation. A non-idempotent confirmation-pending intent is deliberately
-parked without automatic resend; its mailbox ordering anchor is discharged so
-later accepted input cannot be stranded, while the outbox record remains for
-status and manual reconciliation. After terminal delivery the existing
-foreground loop rechecks the remaining older completion set before reaching the
-personal input. Replay reuses the same deterministic completion delivery key,
-and a first attempt delayed at least one minute emits only a redacted
-stuck-zero-attempt warning. This marks ordinary local runtime residue dirty for
-the existing idle boundary; it does not publish a workspace snapshot, add an
-Ask-only foreground pass, or pull forward the routine idle snapshot.
+through the same exact retained-row coordinator. That coordinator is the sole
+consumer of `continue-assistant-ask` rows: generic and deferred system-mailbox
+maintenance exclude them, so no caller can materialize an Ask and discard its
+occurrence anchor. Without pending personal input, the coordinator follows the
+ordinary globally-next due mailbox selection; a future Ask retry blocks only
+its own route and does not strand unrelated due work. Fresh personal input that
+appears after the no-input sample preempts Ask preparation or delivery, retains
+the row, and causes occurrence ordering to be re-evaluated on the next phase.
+Only an Ask proven strictly older than the oldest accepted personal input is a
+non-preemptible foreground prerequisite.
+
+Once a completion creates its stable-key outbox intent, the retained mailbox
+item remains the occurrence and ordering anchor while the outbox alone owns
+delivery state and retry timing. Automatically actionable pending, retryable,
+or in-flight delivery blocks later personal input and uses the outbox-owned
+wake, including non-idempotent confirmation grace and stale reconciliation. A
+non-idempotent confirmation-pending intent is deliberately parked without
+automatic resend; its mailbox ordering anchor is discharged so later accepted
+input cannot be stranded, while the outbox record remains for status and manual
+reconciliation. After terminal delivery the existing foreground loop rechecks
+the remaining older completion set before reaching the personal input. Replay
+reuses the same deterministic completion delivery key, and a first attempt
+delayed at least one minute emits only a redacted stuck-zero-attempt warning.
+This marks ordinary local runtime residue dirty for the existing idle boundary;
+it does not publish a workspace snapshot, add an Ask-only foreground pass, or
+pull forward the routine idle snapshot.
 The oldest-personal-input fact comes from the existing compacting pending-input
 index owner: stale ids are removed before comparison, and a compaction/read
 failure aborts the phase for ordinary runtime retry rather than admitting the

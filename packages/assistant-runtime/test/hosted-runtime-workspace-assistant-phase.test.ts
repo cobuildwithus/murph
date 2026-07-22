@@ -11674,7 +11674,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
       expect.objectContaining({
         allowedItemIds: [completionItem.itemId],
-        retainProcessedItem: true,
       }),
     );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
@@ -11772,6 +11771,99 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets unrelated due mailbox work pass a future no-input ask retry", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const nextWakeAt = "2026-04-27T00:04:00.000Z";
+    const completionItem = {
+      ...createAssistantAskCompletionSystemMailboxItem(),
+      nextAttemptAt: nextWakeAt,
+      status: "recording" as const,
+    };
+    const unrelatedItem = {
+      ...createSystemMailboxItem(),
+      itemId: "system_mailbox_item_due_after_future_ask",
+      mailboxDedupeKey: "dedupe_system_mailbox_item_due_after_future_ask",
+    };
+    mocks.readHostedSystemMailboxState.mockResolvedValue({
+      pending: [completionItem, unrelatedItem],
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: unrelatedItem,
+      itemId: unrelatedItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.resolveHostedSystemMailboxNextWakeCandidate.mockResolvedValue({
+      at: nextWakeAt,
+      reason: "assistant",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        allowedItemIds: [completionItem.itemId],
+      }),
+    );
+    expect(mocks.listAssistantOutboxIntents).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt,
+      progressed: true,
+    }));
+  });
+
+  it("preempts a no-input ask when fresh input arrives during exact preparation", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const completionItem = createAssistantAskCompletionSystemMailboxItem();
+    let shouldYield = false;
+    mocks.readHostedSystemMailboxState.mockImplementationOnce(async () => {
+      shouldYield = true;
+      return { pending: [completionItem] };
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(
+      async (request) => {
+        expect(request.shouldYieldBackgroundMaintenance?.()).toBe(true);
+        return {
+          item: completionItem,
+          itemId: completionItem.itemId,
+          status: "preempted" as const,
+        };
+      },
+    );
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => shouldYield,
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: now,
+      progressed: false,
+    }));
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedItemIds: [completionItem.itemId],
+        shouldYieldBackgroundMaintenance: expect.any(Function),
+      }),
+    );
+    expect(mocks.listAssistantOutboxIntents).not.toHaveBeenCalled();
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
   });
 
   it("retains a no-input non-idempotent send through grace and stale reconciliation before releasing parked work", async () => {
@@ -11964,7 +12056,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       status: "sent" as const,
     };
     mocks.readHostedSystemMailboxState.mockResolvedValue({
-      pending: [secondItem, firstItem],
+      pending: [firstItem, secondItem],
     });
     mocks.prepareHostedSystemMailboxItemForCheckpoint
       .mockResolvedValueOnce(createProcessedAssistantAskPreparation(firstItem))
@@ -12428,7 +12520,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "assistant.ask.completed",
         ],
         allowedItemIds: [completionItem.itemId],
-        retainProcessedItem: true,
+        shouldYieldBackgroundMaintenance: null,
         vaultRoot: "/tmp/murph-vault",
       }),
     );
@@ -14102,11 +14194,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("attempts pending assistant input before due system mailbox work", async () => {
+  it("attempts pending input before generic work without claiming a newer ask", async () => {
     const callOrder: string[] = [];
+    const pendingInputAt = "2026-04-27T00:10:00.000Z";
+    const newerCompletionItem = {
+      ...createAssistantAskCompletionSystemMailboxItem(),
+      occurredAt: "2026-04-27T00:10:01.000Z",
+    };
     mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValueOnce(
-      "2026-04-27T00:10:00.000Z",
+      pendingInputAt,
     );
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValueOnce(
+      pendingInputAt,
+    );
+    mocks.readHostedSystemMailboxState.mockResolvedValue({
+      pending: [newerCompletionItem],
+    });
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(async (input) => {
       if (input.allowedWakeKinds?.includes("runtime.pending-effects-reconcile-requested")) {
         return null;
@@ -14140,6 +14243,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(callOrder).toEqual(["assistant", "system-mailbox"]);
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedItemIds: [newerCompletionItem.itemId],
+      }),
+    );
+    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        allowedRouteActions: expect.any(Array),
+      }),
+    );
     expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
     expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
     expect(result).toEqual(expect.objectContaining({
