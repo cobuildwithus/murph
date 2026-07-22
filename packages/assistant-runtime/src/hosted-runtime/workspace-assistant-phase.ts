@@ -93,6 +93,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   resetHostedPreparedAssistantDeliveryEffects,
+  resolveHostedAssistantOutboxIntentWakeAt,
   resolveHostedAssistantOutboxNextWakeAt,
   type HostedAssistantDeliveryPreparation,
 } from "./callbacks.ts";
@@ -159,7 +160,6 @@ import {
 } from "./system-mailbox.ts";
 import {
   buildHostedAssistantAskCompletionDeliveryKey,
-  isHostedAssistantAskCompletionDeliveryKey,
 } from "./events/assistant-ask-completion.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
@@ -1436,7 +1436,6 @@ export async function runHostedWorkspaceAssistantPhase(
         executionContext,
         input,
         pendingInputAt: oldestPendingAssistantInputAt,
-        wake,
       });
     if (assistantAskCompletionBarrier) {
       return assistantAskCompletionBarrier;
@@ -3942,7 +3941,6 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   pendingInputAt: string | null;
-  wake: ReturnType<typeof buildHostedExecutionRuntimeTimerWake>;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
   const phaseInput = input.input;
   const pendingInputAt = input.pendingInputAt;
@@ -3950,16 +3948,38 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
     return null;
   }
 
-  const systemMailboxState = await readHostedSystemMailboxState(
-    phaseInput.restored.vaultRoot,
-  );
-  const completionItem = systemMailboxState.pending.reduce<
-    HostedSystemMailboxPendingItem | null
-  >((oldest, item) => {
+  for (;;) {
+    const systemMailboxState = await readHostedSystemMailboxState(
+      phaseInput.restored.vaultRoot,
+    );
+    const completionItem = findOldestAssistantAskCompletionMailboxItem({
+      items: systemMailboxState.pending,
+      pendingInputAt,
+    });
+    if (!completionItem) {
+      return null;
+    }
+
+    const result = await runAssistantAskCompletionBarrierItem({
+      completionItem,
+      executionContext: input.executionContext,
+      input: phaseInput,
+    });
+    if (result) {
+      return result;
+    }
+  }
+}
+
+function findOldestAssistantAskCompletionMailboxItem(input: {
+  items: readonly HostedSystemMailboxPendingItem[];
+  pendingInputAt: string;
+}): HostedSystemMailboxPendingItem | null {
+  return input.items.reduce<HostedSystemMailboxPendingItem | null>((oldest, item) => {
     if (
       item.routeAction !== "continue-assistant-ask"
       || item.wake.kind !== "assistant.ask.completed"
-      || !hostedTimestampPrecedes(item.occurredAt, pendingInputAt)
+      || !hostedTimestampPrecedes(item.occurredAt, input.pendingInputAt)
     ) {
       return oldest;
     }
@@ -3967,44 +3987,44 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
       ? item
       : oldest;
   }, null);
-  if (!completionItem) {
-    const existingIntent = findOldestPendingAssistantAskCompletionIntent({
-      intents: await listAssistantOutboxIntents(phaseInput.restored.vaultRoot),
-      pendingInputAt,
-    });
-    return existingIntent
-      ? await prepareAssistantAskCompletionIntentBarrier({
-          input: phaseInput,
-          intent: existingIntent,
-          item: null,
-          progressed: false,
-          providerCleanupWake: input.wake,
-          stuckAtZeroAttempts: false,
-        })
-      : null;
-  }
+}
+
+async function runAssistantAskCompletionBarrierItem(input: {
+  completionItem: HostedSystemMailboxPendingItem;
+  executionContext: AssistantExecutionContext;
+  input: HostedWorkspaceRuntimeAssistantPhaseInput;
+}): Promise<HostedWorkspaceRunnerAssistantPhaseResult | null> {
+  const phaseInput = input.input;
+  const completionItem = input.completionItem;
 
   const now = new Date(resolveHostedAssistantPhaseNowMs(phaseInput)).toISOString();
   const itemWakeAt = resolveHostedSystemMailboxBarrierWakeAt(completionItem, now);
   if (!hostedAssistantPhaseWakeIsDueAt(itemWakeAt, now)) {
     return buildHostedAssistantAskCompletionBarrierWaitResult(itemWakeAt);
   }
-  const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
-    allowedItemIds: [completionItem.itemId],
-    allowedRouteActions: ["continue-assistant-ask"],
-    allowedWakeKinds: ["assistant.ask.completed"],
-    executionContext: input.executionContext,
-    ...(phaseInput.now ? { now: phaseInput.now } : {}),
-    operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
-    retainProcessedItem: true,
-    runtime: phaseInput.runtime,
-    runtimeEnv: phaseInput.runtimeEnv,
-    signal: phaseInput.signal ?? null,
-    shouldYieldBackgroundMaintenance: null,
-    vaultRoot: phaseInput.restored.vaultRoot,
-  });
+  const preparation: HostedSystemMailboxCheckpointPreparation | null =
+    completionItem.status === "recording"
+      ? {
+          item: completionItem,
+          itemId: completionItem.itemId,
+          status: "recording",
+        }
+      : await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedItemIds: [completionItem.itemId],
+          allowedRouteActions: ["continue-assistant-ask"],
+          allowedWakeKinds: ["assistant.ask.completed"],
+          executionContext: input.executionContext,
+          ...(phaseInput.now ? { now: phaseInput.now } : {}),
+          operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+          retainProcessedItem: true,
+          runtime: phaseInput.runtime,
+          runtimeEnv: phaseInput.runtimeEnv,
+          signal: phaseInput.signal ?? null,
+          shouldYieldBackgroundMaintenance: null,
+          vaultRoot: phaseInput.restored.vaultRoot,
+        });
   if (!preparation) {
-    return buildHostedAssistantAskCompletionBarrierWaitResult(itemWakeAt);
+    return null;
   }
   if (preparation.status === "retryable_failed") {
     await writeHostedSystemMailboxRuntimeLog({
@@ -4051,7 +4071,18 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
         (stored) => stored.deliveryIdempotencyKey === deliveryKey,
       ) ?? null
     : null;
-  if (!intent || isTerminalHostedAssistantOutboxIntent(intent)) {
+  if (!intent) {
+    await removeHostedSystemMailboxPendingItemIfCurrent({
+      item: barrierItem,
+      vaultRoot: phaseInput.restored.vaultRoot,
+    });
+    return null;
+  }
+  const intentWakeAt = resolveHostedAssistantOutboxIntentWakeAt(
+    intent,
+    new Date(now),
+  );
+  if (!intentWakeAt) {
     await removeHostedSystemMailboxPendingItemIfCurrent({
       item: barrierItem,
       vaultRoot: phaseInput.restored.vaultRoot,
@@ -4063,38 +4094,18 @@ async function runAssistantAskCompletionBarrierBeforePendingInput(input: {
     input: phaseInput,
     intent,
     item: barrierItem,
+    nextWakeAt: intentWakeAt,
     progressed: preparation.status === "processed",
-    providerCleanupWake: barrierItem.wake,
     stuckAtZeroAttempts,
   });
-}
-
-function findOldestPendingAssistantAskCompletionIntent(input: {
-  intents: readonly HostedAssistantOutboxIntent[];
-  pendingInputAt: string;
-}): HostedAssistantOutboxIntent | null {
-  return input.intents.reduce<HostedAssistantOutboxIntent | null>((oldest, intent) => {
-    if (
-      isTerminalHostedAssistantOutboxIntent(intent)
-      || !isHostedAssistantAskCompletionDeliveryKey(intent.deliveryIdempotencyKey)
-      || !hostedTimestampPrecedes(intent.createdAt, input.pendingInputAt)
-    ) {
-      return oldest;
-    }
-    return !oldest || Date.parse(intent.createdAt) < Date.parse(oldest.createdAt)
-      ? intent
-      : oldest;
-  }, null);
 }
 
 async function prepareAssistantAskCompletionIntentBarrier(input: {
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
   intent: HostedAssistantOutboxIntent;
-  item: HostedSystemMailboxPendingItem | null;
+  item: HostedSystemMailboxPendingItem;
+  nextWakeAt: string;
   progressed: boolean;
-  providerCleanupWake: Parameters<
-    typeof drainHostedPreparedAssistantDeliveries
-  >[0]["wake"];
   stuckAtZeroAttempts: boolean;
 }): Promise<HostedWorkspaceRunnerAssistantPhaseResult> {
   const phaseInput = input.input;
@@ -4107,24 +4118,18 @@ async function prepareAssistantAskCompletionIntentBarrier(input: {
     vaultRoot: phaseInput.restored.vaultRoot,
   });
   if (deliveryEffects.length === 0) {
-    const nextWakeAt = await resolveHostedAssistantAskCompletionBarrierWakeAt({
-      intent,
-      phaseInput,
+    await updateHostedSystemMailboxPendingItem({
+      item: {
+        ...input.item,
+        nextAttemptAt: input.nextWakeAt,
+        status: "recording",
+      },
+      vaultRoot: phaseInput.restored.vaultRoot,
     });
-    if (input.item) {
-      await updateHostedSystemMailboxPendingItem({
-        item: {
-          ...input.item,
-          nextAttemptAt: nextWakeAt,
-          status: "recording",
-        },
-        vaultRoot: phaseInput.restored.vaultRoot,
-      });
-    }
     if (input.progressed) {
       return {
         checkpointReason: "system_mailbox_receipt",
-        nextWakeAt,
+        nextWakeAt: input.nextWakeAt,
         nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
         progressed: true,
         redactedStatus: {
@@ -4132,7 +4137,7 @@ async function prepareAssistantAskCompletionIntentBarrier(input: {
         },
       };
     }
-    return buildHostedAssistantAskCompletionBarrierWaitResult(nextWakeAt);
+    return buildHostedAssistantAskCompletionBarrierWaitResult(input.nextWakeAt);
   }
 
   const deliveryPreparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
@@ -4166,15 +4171,13 @@ async function prepareAssistantAskCompletionIntentBarrier(input: {
             : {}),
         },
         shouldYieldBackgroundDrain: null,
-        wake: input.providerCleanupWake,
+        wake: input.item.wake,
       });
-      if (input.item) {
-        await reconcileHostedAssistantAskCompletionBarrierItem({
-          intentId: intent.intentId,
-          item: input.item,
-          phaseInput,
-        });
-      }
+      await reconcileHostedAssistantAskCompletionBarrierItem({
+        intentId: intent.intentId,
+        item: input.item,
+        phaseInput,
+      });
       return postDelivery;
     },
     checkpointReason: "outbox_sending",
@@ -4211,18 +4214,13 @@ function buildHostedAssistantAskCompletionItemDeliveryKey(
   });
 }
 
-function isTerminalHostedAssistantOutboxIntent(
-  intent: HostedAssistantOutboxIntent,
-): boolean {
-  return intent.status === "sent"
-    || intent.status === "failed"
-    || intent.status === "abandoned";
-}
-
 function resolveHostedSystemMailboxBarrierWakeAt(
   item: HostedSystemMailboxPendingItem,
   now: string,
 ): string {
+  if (item.status === "recording") {
+    return now;
+  }
   const nextAttemptMs = Date.parse(item.nextAttemptAt ?? "");
   return Number.isFinite(nextAttemptMs) && nextAttemptMs > Date.parse(now)
     ? item.nextAttemptAt!
@@ -4242,14 +4240,6 @@ function buildHostedAssistantAskCompletionBarrierWaitResult(
   };
 }
 
-async function resolveHostedAssistantAskCompletionBarrierWakeAt(input: {
-  intent: HostedAssistantOutboxIntent;
-  phaseInput: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): Promise<string> {
-  return input.intent.nextAttemptAt
-    ?? new Date(resolveHostedAssistantPhaseNowMs(input.phaseInput)).toISOString();
-}
-
 async function reconcileHostedAssistantAskCompletionBarrierItem(input: {
   intentId: string;
   item: HostedSystemMailboxPendingItem;
@@ -4259,17 +4249,19 @@ async function reconcileHostedAssistantAskCompletionBarrierItem(input: {
     input.phaseInput.restored.vaultRoot,
     input.intentId,
   );
-  if (!intent || isTerminalHostedAssistantOutboxIntent(intent)) {
+  const nextAttemptAt = intent
+    ? resolveHostedAssistantOutboxIntentWakeAt(
+        intent,
+        new Date(resolveHostedAssistantPhaseNowMs(input.phaseInput)),
+      )
+    : null;
+  if (!nextAttemptAt) {
     await removeHostedSystemMailboxPendingItemIfCurrent({
       item: input.item,
       vaultRoot: input.phaseInput.restored.vaultRoot,
     });
     return;
   }
-  const nextAttemptAt = await resolveHostedAssistantAskCompletionBarrierWakeAt({
-    intent,
-    phaseInput: input.phaseInput,
-  });
   await updateHostedSystemMailboxPendingItem({
     item: {
       ...input.item,

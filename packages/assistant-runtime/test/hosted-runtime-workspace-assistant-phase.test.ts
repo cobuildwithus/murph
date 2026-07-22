@@ -84,6 +84,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedProviderCleanupScheduledWakeAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
   resolveHostedOldestPendingAssistantInputAt: vi.fn(),
+  resolveHostedAssistantOutboxIntentWakeAt: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -150,6 +151,8 @@ vi.mock("../src/hosted-runtime/callbacks.ts", () => ({
     mocks.prepareHostedAssistantDeliveryEffectsForDispatch,
   resetHostedPreparedAssistantDeliveryEffects:
     mocks.resetHostedPreparedAssistantDeliveryEffects,
+  resolveHostedAssistantOutboxIntentWakeAt:
+    mocks.resolveHostedAssistantOutboxIntentWakeAt,
   resolveHostedAssistantOutboxNextWakeAt: mocks.resolveHostedAssistantOutboxNextWakeAt,
 }));
 
@@ -454,6 +457,47 @@ beforeEach(() => {
   mocks.listAssistantOutboxIntents.mockResolvedValue([]);
   mocks.resolveHostedPendingAssistantInputWakeAt.mockResolvedValue(null);
   mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(null);
+  mocks.resolveHostedAssistantOutboxIntentWakeAt.mockImplementation(
+    (intent: AssistantOutboxIntent, now: Date) => {
+      if (
+        intent.status === "sent"
+        || intent.status === "failed"
+        || intent.status === "abandoned"
+      ) {
+        return null;
+      }
+      if (
+        intent.status === "retryable"
+        && !intent.deliveryTransportIdempotent
+        && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+      ) {
+        return null;
+      }
+      if (intent.status === "sending") {
+        const startedAtMs = intent.lastAttemptAt
+          ? Date.parse(intent.lastAttemptAt)
+          : Number.NaN;
+        if (!Number.isFinite(startedAtMs)) {
+          return now.toISOString();
+        }
+        if (!intent.deliveryTransportIdempotent) {
+          const graceWakeMs = startedAtMs + 2 * 60 * 1000;
+          if (graceWakeMs > now.getTime()) {
+            return new Date(graceWakeMs).toISOString();
+          }
+        }
+        return new Date(
+          Math.max(startedAtMs + 10 * 60 * 1000, now.getTime()),
+        ).toISOString();
+      }
+      const nextAttemptMs = intent.nextAttemptAt
+        ? Date.parse(intent.nextAttemptAt)
+        : Number.NaN;
+      return Number.isFinite(nextAttemptMs)
+        ? new Date(nextAttemptMs).toISOString()
+        : now.toISOString();
+    },
+  );
   mocks.readAssistantOutboxIntent.mockResolvedValue(null);
   mocks.readHostedSystemMailboxState.mockResolvedValue({ pending: [] });
   mocks.removeHostedSystemMailboxPendingItemIfCurrent.mockResolvedValue(true);
@@ -12067,95 +12111,240 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("keeps an older completed ask outbox ahead after its mailbox item was removed", async () => {
+  it("continues past an invalid older ask before claiming the next older completion", async () => {
     const now = "2026-04-27T00:03:00.000Z";
-    const deliveryIdempotencyKey = buildHostedAssistantAskCompletionDeliveryKey({
-      eventId: "aask_done_already_materialized",
+    const firstItem = createAssistantAskCompletionSystemMailboxItem({
+      eventId: "aask_done_invalid_first",
+      itemId: "system_mailbox_item_assistant_ask_invalid_first",
+      occurredAt: "2026-04-27T00:00:00.000Z",
     });
-    const deliveryEffect = {
+    const secondItem = createAssistantAskCompletionSystemMailboxItem({
+      eventId: "aask_done_active_second",
+      itemId: "system_mailbox_item_assistant_ask_active_second",
+      occurredAt: "2026-04-27T00:01:00.000Z",
+    });
+    const secondDeliveryKey = buildHostedAssistantAskCompletionDeliveryKey({
+      eventId: secondItem.wake.eventId,
+    });
+    const secondEffect = {
       ...createDeliveryEffect(),
-      effectId: "effect_assistant_ask_already_materialized",
+      effectId: "effect_assistant_ask_active_second",
       payload: {
         ...createDeliveryEffect().payload,
-        idempotencyKey: deliveryIdempotencyKey,
+        idempotencyKey: secondDeliveryKey,
       },
     };
-    const intent = createAssistantAskOutboxIntent({
-      createdAt: "2026-04-27T00:01:00.000Z",
-      deliveryIdempotencyKey,
-      effectId: deliveryEffect.effectId,
+    const secondIntent = createAssistantAskOutboxIntent({
+      createdAt: secondItem.occurredAt,
+      deliveryIdempotencyKey: secondDeliveryKey,
+      effectId: secondEffect.effectId,
       nextAttemptAt: now,
     });
     mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
       "2026-04-27T00:02:00.000Z",
     );
-    mocks.readHostedSystemMailboxState.mockResolvedValue({ pending: [] });
-    mocks.listAssistantOutboxIntents.mockResolvedValue([intent]);
+    mocks.readHostedSystemMailboxState
+      .mockResolvedValueOnce({ pending: [secondItem, firstItem] })
+      .mockResolvedValueOnce({ pending: [secondItem] });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint
+      .mockResolvedValueOnce(createProcessedAssistantAskPreparation(firstItem))
+      .mockResolvedValueOnce(createProcessedAssistantAskPreparation(secondItem));
+    mocks.listAssistantOutboxIntents
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([secondIntent]);
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      deliveryEffect,
+      secondEffect,
     ]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        ...createSentDeliveryOutcome(),
-        effectId: deliveryEffect.effectId,
-      },
-    ]);
-    mocks.readAssistantOutboxIntent.mockResolvedValue({
-      ...intent,
-      sentAt: now,
-      status: "sent",
-    });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       importedCount: 1,
       now: () => now,
     }));
 
-    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
-      actionApprovalPort: null,
-      includeBackgroundDueIntents: false,
-      preferredIntentIds: [intent.intentId],
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls
+        .map(([request]) => request.allowedItemIds),
+    ).toEqual([[firstItem.itemId], [secondItem.itemId]]);
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).toHaveBeenCalledWith({
+      item: firstItem,
       vaultRoot: "/tmp/murph-vault",
     });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredIntentIds: [secondIntent.intentId] }),
+    );
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
-      afterCheckpointKeepsForegroundImportLoop: true,
       checkpointReason: "outbox_sending",
       progressed: true,
     }));
-
-    await result.afterCheckpoint?.();
-
-    expect(mocks.drainHostedPreparedAssistantDeliveries).toHaveBeenCalledWith(
-      expect.objectContaining({
-        assistantDeliveryEffects: [
-          expect.objectContaining({
-            payload: expect.objectContaining({
-              idempotencyKey: deliveryIdempotencyKey,
-            }),
-          }),
-        ],
-        shouldYieldBackgroundDelivery: null,
-        vaultRoot: "/tmp/murph-vault",
-      }),
-    );
   });
 
-  it("keeps an older not-yet-due ask outbox ahead without its mailbox item", async () => {
-    const nextWakeAt = "2026-04-27T00:04:00.000Z";
-    const intent = createAssistantAskOutboxIntent({
-      createdAt: "2026-04-27T00:01:00.000Z",
-      deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
-        eventId: "aask_done_already_materialized_retry",
+  it("continues past a retained terminal ask before claiming the next older completion", async () => {
+    const now = "2026-04-27T00:03:00.000Z";
+    const firstItem = {
+      ...createAssistantAskCompletionSystemMailboxItem({
+        eventId: "aask_done_terminal_first",
+        itemId: "system_mailbox_item_assistant_ask_terminal_first",
+        occurredAt: "2026-04-27T00:00:00.000Z",
       }),
-      effectId: "effect_assistant_ask_already_materialized_retry",
-      nextAttemptAt: nextWakeAt,
+      status: "recording" as const,
+    };
+    const secondItem = createAssistantAskCompletionSystemMailboxItem({
+      eventId: "aask_done_active_after_restart",
+      itemId: "system_mailbox_item_assistant_ask_active_after_restart",
+      occurredAt: "2026-04-27T00:01:00.000Z",
+    });
+    const firstDeliveryKey = buildHostedAssistantAskCompletionDeliveryKey({
+      eventId: firstItem.wake.eventId,
+    });
+    const secondDeliveryKey = buildHostedAssistantAskCompletionDeliveryKey({
+      eventId: secondItem.wake.eventId,
+    });
+    const firstIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: firstItem.occurredAt,
+        deliveryIdempotencyKey: firstDeliveryKey,
+        effectId: "effect_assistant_ask_terminal_first",
+        nextAttemptAt: null,
+      }),
+      sentAt: now,
+      status: "sent" as const,
+    };
+    const secondEffect = {
+      ...createDeliveryEffect(),
+      effectId: "effect_assistant_ask_active_after_restart",
+      payload: {
+        ...createDeliveryEffect().payload,
+        idempotencyKey: secondDeliveryKey,
+      },
+    };
+    const secondIntent = createAssistantAskOutboxIntent({
+      createdAt: secondItem.occurredAt,
+      deliveryIdempotencyKey: secondDeliveryKey,
+      effectId: secondEffect.effectId,
+      nextAttemptAt: now,
     });
     mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
       "2026-04-27T00:02:00.000Z",
     );
-    mocks.readHostedSystemMailboxState.mockResolvedValue({ pending: [] });
-    mocks.listAssistantOutboxIntents.mockResolvedValue([intent]);
+    mocks.readHostedSystemMailboxState
+      .mockResolvedValueOnce({ pending: [secondItem, firstItem] })
+      .mockResolvedValueOnce({ pending: [secondItem] });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(
+      createProcessedAssistantAskPreparation(secondItem),
+    );
+    mocks.listAssistantOutboxIntents
+      .mockResolvedValueOnce([firstIntent, secondIntent])
+      .mockResolvedValueOnce([secondIntent]);
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      secondEffect,
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => now,
+    }));
+
+    expect(
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mock.calls
+        .map(([request]) => request.allowedItemIds),
+    ).toEqual([[secondItem.itemId]]);
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).toHaveBeenCalledWith({
+      item: firstItem,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({ preferredIntentIds: [secondIntent.intentId] }),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+  });
+
+  it("releases personal input behind a parked non-idempotent ask without resending", async () => {
+    const completionItem = {
+      ...createAssistantAskCompletionSystemMailboxItem(),
+      nextAttemptAt: "2026-04-27T00:10:00.000Z",
+      status: "recording" as const,
+    };
+    const parkedIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: completionItem.occurredAt,
+        deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
+          eventId: completionItem.wake.eventId,
+        }),
+        effectId: "effect_assistant_ask_confirmation_pending",
+        nextAttemptAt: "2026-04-27T00:04:00.000Z",
+      }),
+      deliveryTransportIdempotent: false,
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        message: "Delivery outcome is ambiguous.",
+      },
+      status: "retryable" as const,
+    };
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      "2026-04-27T00:02:00.000Z",
+    );
+    mocks.readHostedSystemMailboxState
+      .mockResolvedValueOnce({ pending: [completionItem] })
+      .mockResolvedValue({ pending: [] });
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([parkedIntent]);
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      now: () => "2026-04-27T00:03:00.000Z",
+    }));
+
+    expect(mocks.resolveHostedAssistantOutboxIntentWakeAt).toHaveBeenCalledWith(
+      parkedIntent,
+      new Date("2026-04-27T00:03:00.000Z"),
+    );
+    expect(mocks.removeHostedSystemMailboxPendingItemIfCurrent).toHaveBeenCalledWith({
+      item: completionItem,
+      vaultRoot: "/tmp/murph-vault",
+    });
+    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
+      expect.objectContaining({ preferredIntentIds: [parkedIntent.intentId] }),
+    );
+    expect(mocks.updateHostedSystemMailboxPendingItem).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        item: expect.objectContaining({ itemId: completionItem.itemId }),
+      }),
+    );
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses outbox confirmation grace for a non-idempotent sending ask", async () => {
+    const completionItem = {
+      ...createAssistantAskCompletionSystemMailboxItem(),
+      nextAttemptAt: "2026-04-27T00:10:00.000Z",
+      status: "recording" as const,
+    };
+    const startedAt = "2026-04-27T00:02:00.000Z";
+    const graceWakeAt = "2026-04-27T00:04:00.000Z";
+    const sendingIntent = {
+      ...createAssistantAskOutboxIntent({
+        createdAt: completionItem.occurredAt,
+        deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
+          eventId: completionItem.wake.eventId,
+        }),
+        effectId: "effect_assistant_ask_sending_no_retry_at",
+        nextAttemptAt: null,
+      }),
+      deliveryTransportIdempotent: false,
+      lastAttemptAt: startedAt,
+      status: "sending" as const,
+    };
+    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
+      "2026-04-27T00:02:30.000Z",
+    );
+    mocks.readHostedSystemMailboxState.mockResolvedValue({
+      pending: [completionItem],
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([sendingIntent]);
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([]);
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
@@ -12164,42 +12353,22 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(result).toEqual(expect.objectContaining({
-      nextWakeAt,
+      nextWakeAt: graceWakeAt,
       progressed: false,
     }));
-    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
-    expect(mocks.updateHostedSystemMailboxPendingItem).not.toHaveBeenCalled();
-  });
-
-  it("leaves a newer materialized ask outbox behind the pending personal reply", async () => {
-    const intent = createAssistantAskOutboxIntent({
-      createdAt: "2026-04-27T00:03:00.000Z",
-      deliveryIdempotencyKey: buildHostedAssistantAskCompletionDeliveryKey({
-        eventId: "aask_done_newer_materialized",
+    expect(mocks.updateHostedSystemMailboxPendingItem).toHaveBeenCalledWith({
+      item: expect.objectContaining({
+        itemId: completionItem.itemId,
+        nextAttemptAt: graceWakeAt,
+        status: "recording",
       }),
-      effectId: "effect_assistant_ask_newer_materialized",
-      nextAttemptAt: "2026-04-27T00:03:00.000Z",
+      vaultRoot: "/tmp/murph-vault",
     });
-    mocks.resolveHostedOldestPendingAssistantInputAt.mockResolvedValue(
-      "2026-04-27T00:02:00.000Z",
-    );
-    mocks.readHostedSystemMailboxState.mockResolvedValue({ pending: [] });
-    mocks.listAssistantOutboxIntents.mockResolvedValue([intent]);
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      now: () => "2026-04-27T00:04:00.000Z",
-    }));
-
-    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
-    expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
-      expect.objectContaining({ preferredIntentIds: [intent.intentId] }),
-    );
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
   });
 
   it.each([
     { deliveryStatus: "retryable" as const, intentStatus: "pending" as const },
-    { deliveryStatus: "sending" as const, intentStatus: "sending" as const },
     { deliveryStatus: "pending" as const, intentStatus: "pending" as const },
   ])(
     "retains the completed ask barrier while provider delivery is $deliveryStatus",
@@ -15780,14 +15949,19 @@ function createPendingEffectsReconcileSystemMailboxItem() {
   };
 }
 
-function createAssistantAskCompletionSystemMailboxItem() {
+function createAssistantAskCompletionSystemMailboxItem(input: {
+  eventId?: string;
+  itemId?: string;
+  occurredAt?: string;
+} = {}) {
+  const occurredAt = input.occurredAt ?? "2026-04-27T00:00:00.000Z";
   return {
     ...createSystemMailboxItem(),
     attemptCount: 1,
-    itemId: "system_mailbox_item_assistant_ask_completion",
+    itemId: input.itemId ?? "system_mailbox_item_assistant_ask_completion",
     lastAttemptAt: "2026-04-27T00:03:00.000Z",
     mailboxDedupeKey: "dedupe_system_mailbox_item_assistant_ask_completion",
-    occurredAt: "2026-04-27T00:00:00.000Z",
+    occurredAt,
     routeAction: "continue-assistant-ask" as const,
     wake: {
       ask: {
@@ -15802,11 +15976,27 @@ function createAssistantAskCompletionSystemMailboxItem() {
         },
         targetLabel: "Synthetic group",
       },
-      eventId: "aask_done_synthetic",
+      eventId: input.eventId ?? "aask_done_synthetic",
       kind: "assistant.ask.completed" as const,
-      occurredAt: "2026-04-27T00:00:00.000Z",
+      occurredAt,
       userId: "member_synthetic_phase",
     },
+  };
+}
+
+function createProcessedAssistantAskPreparation(
+  item: ReturnType<typeof createAssistantAskCompletionSystemMailboxItem>,
+) {
+  return {
+    item,
+    itemId: item.itemId,
+    metrics: {
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "assistant-ask-completion" as const,
+      redactedLogEntries: [],
+    },
+    status: "processed" as const,
   };
 }
 

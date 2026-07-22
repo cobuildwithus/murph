@@ -414,19 +414,28 @@ to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools. When personal input is already pending, its
-pre-assistant barrier selects the exact oldest completion that precedes the
-oldest pending personal input. It retains that mailbox item until the matching
-stable-key outbox intent is terminal, drains only that intent, and blocks the
-personal input while provider delivery is pending, retryable, or already in
-flight. If ordinary background maintenance already materialized the completion
-and removed its mailbox item, the same barrier recognizes the nonterminal
-completion intent by its deterministic key and creation time. After terminal
-delivery it re-enters the existing foreground loop for the personal input.
-Replay reuses the same deterministic completion delivery key, and a first
-attempt delayed at least one minute emits only a redacted stuck-zero-attempt
-warning. This marks ordinary local runtime residue dirty for the existing idle
-boundary; it does not publish a workspace snapshot, add an Ask-only foreground
-pass, or pull forward the routine idle snapshot.
+pre-assistant barrier repeatedly selects the exact oldest completion that
+precedes the oldest pending personal input. Invalid or already-terminal work is
+discharged and the remaining older set is checked before personal work may
+start. Once a completion creates its stable-key outbox intent, the retained
+mailbox item remains the occurrence and ordering anchor while the outbox alone
+owns delivery state and retry timing. Automatically actionable pending,
+retryable, or in-flight delivery blocks the personal input and uses the
+outbox-owned wake, including non-idempotent confirmation grace and stale
+reconciliation. A non-idempotent confirmation-pending intent is deliberately
+parked without automatic resend; its mailbox ordering anchor is discharged so
+later accepted input cannot be stranded, while the outbox record remains for
+status and manual reconciliation. After terminal delivery the existing
+foreground loop rechecks the remaining older completion set before reaching the
+personal input. Replay reuses the same deterministic completion delivery key,
+and a first attempt delayed at least one minute emits only a redacted
+stuck-zero-attempt warning. This marks ordinary local runtime residue dirty for
+the existing idle boundary; it does not publish a workspace snapshot, add an
+Ask-only foreground pass, or pull forward the routine idle snapshot.
+The oldest-personal-input fact comes from the existing compacting pending-input
+index owner: stale ids are removed before comparison, and a compaction/read
+failure aborts the phase for ordinary runtime retry rather than admitting the
+personal reply without its ordering prerequisite.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask

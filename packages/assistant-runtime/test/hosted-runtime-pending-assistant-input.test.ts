@@ -207,6 +207,36 @@ describe("resolveHostedOldestPendingAssistantInputAt", () => {
     await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
       .resolves.toBe("2026-04-23T00:00:02.000Z");
   });
+
+  it("compacts stale indexed residue before resolving the oldest live input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-06-02T12:00:00.000Z",
+      }],
+      updatedAt: "2026-06-02T12:00:00.000Z",
+      version: 1,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: "ain_99999999999999999999999999999999",
+      vaultRoot,
+    });
+    const event = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent(),
+      vault: vaultRoot,
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: event.inputId,
+      vaultRoot,
+    });
+
+    await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
+      .resolves.toBe("2026-04-23T00:00:03.000Z");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([event.inputId]);
+  });
 });
 
 async function createTempVault(): Promise<string> {
