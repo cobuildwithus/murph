@@ -366,7 +366,7 @@ test("browser vault replicas validate and round-trip canonical experiment outcom
   assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [outcome]);
 });
 
-test("browser vault replicas canonically upgrade legacy outcomes using only saved-time evidence", async () => {
+test("legacy outcomes stay immutable while results show current daily measurements", async () => {
   const experimentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FAW";
   const slug = "legacy-saved-time-evidence";
   const frontmatter = {
@@ -388,16 +388,27 @@ test("browser vault replicas canonically upgrade legacy outcomes using only save
       primaryBiomarkerKey: "biomarker:deep-sleep-minutes",
       desiredDirection: "increase" as const,
     },
+    outcome: {
+      latestOutcomeId: `${experimentId}-outcome-2026-04-04`,
+      finalAnalysisStatus: "generated" as const,
+    },
+    outcomeRef: {
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      outcomeId: `${experimentId}-outcome-2026-04-04`,
+      relativePath: `bank/experiments/outcomes/${slug}-2026-04-04.json`,
+    },
   };
   const vault = createVaultReadModel({
-    entities: [createEntity("experiment", experimentId, {
-      attributes: frontmatter,
-      experimentSlug: slug,
-      frontmatter,
-      kind: "experiment",
-      status: "completed",
-      title: frontmatter.title,
-    })],
+    entities: [
+      createEntity("experiment", experimentId, {
+        attributes: frontmatter,
+        experimentSlug: slug,
+        frontmatter,
+        kind: "experiment",
+        status: "completed",
+        title: frontmatter.title,
+      }),
+    ],
     metadata: null,
     vaultRoot: "browser://legacy-saved-time-evidence",
   });
@@ -432,35 +443,48 @@ test("browser vault replicas canonically upgrade legacy outcomes using only save
       return metric;
     }),
   });
-  const correctionValues = [160, 162, 170, 172];
-  const laterCorrections = originalPoints.map((point, index) => {
-    const value = correctionValues[index];
+  const currentValues = [160, 162, 170, 172];
+  const currentPoints = originalPoints.map((point, index) => {
+    const value = currentValues[index];
     if (value === undefined) {
-      throw new Error("Expected one correction value for each original point.");
+      throw new Error("Expected one current value for each original point.");
     }
     return {
       ...point,
       canonicalValue: value,
-      id: `metric-point:later-${index}`,
+      context: {
+        ...point.context,
+        contributingRecordIds: [`current-${index}`],
+      },
+      id: `metric-point:current-${index}`,
       recordedAt: "2026-04-06T12:00:00.000Z",
+      source: {
+        ...point.source,
+        recordId: `current-${index}`,
+      },
       value,
     };
   });
-
   const replica = await createBrowserVaultReplica({
     experimentOutcomes: [legacyOutcome],
     generatedAt: "2026-04-07T12:00:00.000Z",
-    metricPoints: [...originalPoints, ...laterCorrections],
+    metricPoints: currentPoints,
     sourceBundleHash: "b".repeat(64),
     vault,
   });
 
-  const upgradedOutcome = replica.experimentOutcomes?.[0];
-  assert.ok(upgradedOutcome);
-  assert.equal(upgradedOutcome.schemaVersion, "murph.experiment-outcome.v2");
+  const persistedOutcome = replica.experimentOutcomes?.[0];
+  assert.deepEqual(persistedOutcome, legacyOutcome);
+  const results = selectBrowserVaultExperimentResults(
+    createBrowserVaultQueryClient(replica),
+    { experimentId },
+  );
+  assert.ok(results);
+  assert.equal(results.persistedOutcome?.schemaVersion, "murph.experiment-outcome.v1");
+  assert.equal(results.biomarkers[0]?.baseline.mean, 61);
   assert.deepEqual(
-    upgradedOutcome.metricResults[0]?.points?.map((point) => point.value),
-    [60, 62, 70, 72],
+    results.biomarkers[0]?.points.map((point) => point.value),
+    currentValues,
   );
 });
 

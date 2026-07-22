@@ -1765,10 +1765,7 @@ describe("record service seams", () => {
         new Error("Experiment changed during outcome analysis."),
         { code: "EXPERIMENT_REVISION_CONFLICT" },
       );
-      const writeExperimentOutcome = vi
-        .fn()
-        .mockRejectedValueOnce(closeoutConflict)
-        .mockImplementation(async (input: {
+      const writeExperimentOutcome = vi.fn().mockImplementation(async (input: {
           relativePath: string;
           outcome: Record<string, unknown> & {
             experiment: Record<string, unknown>;
@@ -1796,6 +1793,10 @@ describe("record service seams", () => {
           _vaultRoot: string | undefined,
           run: () => Promise<unknown>,
         ) => run()),
+        readReferencedExperimentOutcome: vi
+          .fn()
+          .mockRejectedValueOnce(closeoutConflict)
+          .mockResolvedValue(null),
         writeExperimentOutcome,
       };
       const experimentOutcomeQuery = {
@@ -1915,9 +1916,10 @@ describe("record service seams", () => {
           },
         },
       });
-      expect(experimentOutcomeCore.writeExperimentOutcome).toHaveBeenCalledTimes(2);
+      expect(experimentOutcomeCore.readReferencedExperimentOutcome).toHaveBeenCalledTimes(2);
+      expect(experimentOutcomeCore.writeExperimentOutcome).toHaveBeenCalledTimes(1);
       expect(experimentOutcomeCore.withCanonicalWriteLock).toHaveBeenCalledTimes(2);
-      const closeoutInput = experimentOutcomeCore.writeExperimentOutcome.mock.calls[1]?.[0];
+      const closeoutInput = experimentOutcomeCore.writeExperimentOutcome.mock.calls[0]?.[0];
       expect(closeoutInput).toMatchObject({
         relativePath: "experiments/focus-sprint.md",
         expectedFrontmatter: {

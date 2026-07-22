@@ -187,6 +187,84 @@ test("experiment outcome closeout fails closed when a referenced artifact is mis
   );
 });
 
+test("experiment outcome closeout rejects mismatched and misaddressed references", async () => {
+  for (const variant of ["mismatched", "misaddressed"] as const) {
+    const vaultRoot = await makeVault(`murph-experiment-outcome-${variant}`);
+    const created = await createExperiment({
+      vaultRoot,
+      slug: `${variant}-reference`,
+      title: `${variant} reference`,
+      startedOn: "2026-06-01",
+      status: "active",
+    });
+    await updateExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      runPlan: {
+        interventionStart: "2026-06-01",
+        interventionEnd: "2026-06-07",
+      },
+    });
+    const active = await readExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+    });
+    const written = await writeExperimentOutcome({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+      expectedFrontmatter: active.frontmatter,
+      outcome: buildOutcome(active.frontmatter),
+    });
+    const outcomeFile = path.join(vaultRoot, written.outcomePath);
+
+    if (variant === "mismatched") {
+      await fs.writeFile(
+        outcomeFile,
+        `${JSON.stringify({
+          ...written.outcome,
+          experiment: {
+            ...written.outcome.experiment,
+            id: "exp_01JNV4458HYPP53JDQCBP1QJH1",
+          },
+        }, null, 2)}\n`,
+        "utf8",
+      );
+    } else {
+      const current = await readExperiment({
+        vaultRoot,
+        relativePath: created.experiment.relativePath,
+      });
+      const reference = current.frontmatter.outcomeRef;
+      if (reference === undefined) {
+        throw new Error("Expected the written experiment to reference its outcome.");
+      }
+      const alternatePath = "bank/experiments/outcomes/misaddressed-reference.json";
+      await fs.copyFile(outcomeFile, path.join(vaultRoot, alternatePath));
+      await updateExperiment({
+        vaultRoot,
+        relativePath: created.experiment.relativePath,
+        outcomeRef: { ...reference, relativePath: alternatePath },
+      });
+    }
+
+    const current = await readExperiment({
+      vaultRoot,
+      relativePath: created.experiment.relativePath,
+    });
+    await assert.rejects(
+      writeExperimentOutcome({
+        vaultRoot,
+        relativePath: created.experiment.relativePath,
+        expectedFrontmatter: current.frontmatter,
+        outcome: buildOutcome(current.frontmatter),
+      }),
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+    );
+  }
+});
+
 test("experiment outcome closeout returns the immutable artifact when later analysis changes", async () => {
   const vaultRoot = await makeVault("murph-experiment-outcome-write-once");
   const created = await createExperiment({
@@ -216,12 +294,27 @@ test("experiment outcome closeout returns the immutable artifact when later anal
   });
   const outcomeFile = path.join(vaultRoot, first.outcomePath);
   const firstBytes = await fs.readFile(outcomeFile, "utf8");
-  const completed = await readExperiment({
+  await updateExperiment({
+    vaultRoot,
+    relativePath: created.experiment.relativePath,
+    title: "Write Once Outcome (reviewed)",
+    runPlan: {
+      baselineStart: "2026-05-25",
+      baselineEnd: "2026-05-31",
+      interventionStart: "2026-06-01",
+      interventionEnd: "2026-06-08",
+    },
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:resting-heart-rate",
+      desiredDirection: "decrease",
+    },
+  });
+  const edited = await readExperiment({
     vaultRoot,
     relativePath: created.experiment.relativePath,
   });
   const changedAnalysis = experimentOutcomeSchema.parse({
-    ...buildOutcome(completed.frontmatter),
+    ...buildOutcome(edited.frontmatter),
     conclusion: {
       caveats: ["Evidence arrived after the saved result."],
       headline: "A later analysis reached a different conclusion.",
@@ -232,7 +325,7 @@ test("experiment outcome closeout returns the immutable artifact when later anal
   const repeated = await writeExperimentOutcome({
     vaultRoot,
     relativePath: created.experiment.relativePath,
-    expectedFrontmatter: completed.frontmatter,
+    expectedFrontmatter: edited.frontmatter,
     outcome: changedAnalysis,
   });
 

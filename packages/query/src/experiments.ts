@@ -1,7 +1,6 @@
 import {
   EXPERIMENT_OUTCOME_SCHEMA_VERSION,
   EXPERIMENT_PROGRESS_SCHEMA_VERSION,
-  LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
   experimentOutcomeSchema,
@@ -12,7 +11,6 @@ import {
   type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
-  type ExperimentOutcomeMetricResult as ContractExperimentOutcomeMetricResult,
   type ExperimentOutcomeMetricPoint,
   type ExperimentProgressMetricSignal,
   type ExperimentProgressSnapshot,
@@ -293,7 +291,6 @@ type ExperimentFollowupContext = Pick<
 };
 
 interface ExperimentMetricPointOptions {
-  evidenceRecordedThrough?: string;
   metricPoints?: readonly MetricPoint[];
 }
 
@@ -459,67 +456,6 @@ export function analyzeExperimentOutcome(
   } as ExperimentOutcomeSummary;
 }
 
-export function upgradeLegacyExperimentOutcome(
-  vault: VaultReadModel,
-  outcome: ExperimentOutcome,
-  options: ExperimentMetricPointOptions = {},
-): ExperimentOutcome {
-  if (
-    outcome.schemaVersion !== LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION ||
-    outcome.generatedAt === undefined ||
-    outcome.metricResults.length === 0
-  ) {
-    return outcome;
-  }
-
-  let analyzed: ExperimentOutcomeSummary;
-  try {
-    analyzed = analyzeExperimentOutcome(vault, outcome.experiment.slug, {
-      asOf: outcome.asOf,
-      evidenceRecordedThrough: outcome.generatedAt,
-      metricPoints: options.metricPoints,
-    });
-  } catch {
-    return outcome;
-  }
-
-  const analyzedByBiomarker = new Map(
-    analyzed.metricResults.map((metric) => [metric.biomarkerKey, metric]),
-  );
-  if (
-    analyzedByBiomarker.size !== outcome.metricResults.length ||
-    outcome.metricResults.some((metric) => {
-      const analyzedMetric = analyzedByBiomarker.get(metric.biomarkerKey);
-      return analyzedMetric === undefined ||
-        !experimentOutcomeMetricSummariesMatch(metric, analyzedMetric);
-    })
-  ) {
-    return outcome;
-  }
-
-  const upgraded = safeParseContract(experimentOutcomeSchema, {
-    ...outcome,
-    schema: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
-    schemaVersion: EXPERIMENT_OUTCOME_SCHEMA_VERSION,
-    metricResults: outcome.metricResults.map((metric) => ({
-      ...metric,
-      points: analyzedByBiomarker.get(metric.biomarkerKey)?.points ?? [],
-    })),
-  });
-  return upgraded.success ? upgraded.data : outcome;
-}
-
-function experimentOutcomeMetricSummariesMatch(
-  saved: ContractExperimentOutcomeMetricResult,
-  analyzed: ExperimentOutcomeMetricResult,
-): boolean {
-  const { points: _savedPoints, ...savedSummary } = saved;
-  const { points: _analyzedPoints, ...analyzedSummary } = analyzed;
-  void _savedPoints;
-  void _analyzedPoints;
-  return JSON.stringify(savedSummary) === JSON.stringify(analyzedSummary);
-}
-
 export function decideExperimentFollowupDue(
   vault: VaultReadModel,
   slug: string,
@@ -553,10 +489,7 @@ function buildExperimentSummaryContext(
   const asOf = normalizeAsOfDate(options.asOf);
   const progressPhase = resolveProgressPhase(frontmatter, asOf);
   const adherenceTargets = resolveAdherenceTargetsFromFrontmatter(frontmatter);
-  const events = filterExperimentEventsByRecordedThrough(
-    findExperimentEvents(vault, experiment, frontmatter, asOf),
-    options.evidenceRecordedThrough,
-  );
+  const events = findExperimentEvents(vault, experiment, frontmatter, asOf);
   const adherenceEvents = findAdherenceEvidenceEvents({
     asOf,
     events,
@@ -591,9 +524,7 @@ function buildExperimentSummaryContext(
     ),
     metricPoints: [
       ...(options.metricPoints ?? buildMetricProjection(vault).metricPoints).filter(
-        (point) =>
-          point.source.kind !== "intervention-session-field" &&
-          metricPointWasRecordedThrough(point, options.evidenceRecordedThrough),
+        (point) => point.source.kind !== "intervention-session-field",
       ),
       ...buildExperimentSessionMetricPoints(events, frontmatter),
     ],
@@ -2267,37 +2198,6 @@ function findExperimentEvents(
 
     return event.links.some((link) => link.targetId === experiment.entityId);
   });
-}
-
-function filterExperimentEventsByRecordedThrough(
-  events: readonly CanonicalEntity[],
-  recordedThrough: string | undefined,
-): CanonicalEntity[] {
-  if (recordedThrough === undefined) {
-    return [...events];
-  }
-
-  return events.filter((event) => {
-    const recordedAt = readStringAttribute(event, "recordedAt");
-    return recordedAt !== null && timestampIsNotAfter(recordedAt, recordedThrough);
-  });
-}
-
-function metricPointWasRecordedThrough(
-  point: MetricPoint,
-  recordedThrough: string | undefined,
-): boolean {
-  if (recordedThrough === undefined) {
-    return true;
-  }
-  return point.recordedAt !== null &&
-    timestampIsNotAfter(point.recordedAt, recordedThrough);
-}
-
-function timestampIsNotAfter(value: string, cutoff: string): boolean {
-  const valueMs = Date.parse(value);
-  const cutoffMs = Date.parse(cutoff);
-  return Number.isFinite(valueMs) && Number.isFinite(cutoffMs) && valueMs <= cutoffMs;
 }
 
 function findAdherenceEvidenceEvents(input: {

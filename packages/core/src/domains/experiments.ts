@@ -135,6 +135,12 @@ export interface WriteExperimentOutcomeResult {
   updatedExperiment: boolean;
 }
 
+export interface ReadReferencedExperimentOutcomeInput {
+  vaultRoot: string;
+  relativePath: string;
+  expectedFrontmatter: ExperimentFrontmatter;
+}
+
 interface AppendExperimentLifecycleEventInput {
   vaultRoot: string;
   relativePath: string;
@@ -681,6 +687,22 @@ export async function writeExperimentOutcome(
     );
   }
 
+  const referencedOutcome = await resolveReferencedExperimentOutcome({
+    attributes: document.attributes,
+    relativePath: input.relativePath,
+    vaultRoot: input.vaultRoot,
+  });
+  if (
+    referencedOutcome !== null &&
+    !shouldReplaceActiveInterimOutcome(
+      document.attributes,
+      referencedOutcome.outcome,
+      input.outcome,
+    )
+  ) {
+    return referencedOutcome;
+  }
+
   const requestedOutcome = validateContract(
     experimentOutcomeSchema,
     input.outcome,
@@ -764,47 +786,7 @@ export async function writeExperimentOutcome(
     "EXPERIMENT_OUTCOME_INVALID",
     "Experiment outcome failed contract validation before write.",
   );
-  const existingOutcome = await readExistingExperimentOutcome(
-    input.vaultRoot,
-    outcomePath,
-  );
-  if (
-    attributes.outcomeRef?.outcomeId === outcomeId &&
-    attributes.outcomeRef.relativePath === outcomePath
-  ) {
-    if (
-      existingOutcome === null ||
-      existingOutcome.outcomeId !== outcomeId ||
-      existingOutcome.asOf !== requestedOutcome.asOf ||
-      existingOutcome.generatedAt !== attributes.outcomeRef.generatedAt ||
-      existingOutcome.experiment.id !== attributes.experimentId ||
-      existingOutcome.experiment.slug !== attributes.slug ||
-      existingOutcome.experiment.status !== nextStatus ||
-      attributes.status !== nextStatus ||
-      attributes.endedOn !== nextEndedOn ||
-      attributes.outcome?.finalAnalysisStatus !== "generated" ||
-      attributes.outcomeRef.outcomeId !== outcomeId ||
-      attributes.outcomeRef.relativePath !== outcomePath
-    ) {
-      throw new VaultError(
-        "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
-        "The saved experiment outcome reference is missing or does not match its immutable artifact.",
-        {
-          experimentId: attributes.experimentId,
-          relativePath: input.relativePath,
-        },
-      );
-    }
-    return {
-      experimentId: attributes.experimentId,
-      slug: attributes.slug,
-      relativePath: input.relativePath,
-      status: attributes.status,
-      outcome: existingOutcome,
-      outcomePath,
-      updatedExperiment: false,
-    };
-  }
+  const existingOutcome = await readExistingExperimentOutcome(input.vaultRoot, outcomePath);
 
   if (attributes.outcomeRef !== undefined && !shouldCompleteRun) {
     throw new VaultError(
@@ -906,6 +888,122 @@ export async function writeExperimentOutcome(
   });
 
   return result.result;
+}
+
+export async function readReferencedExperimentOutcome(
+  input: ReadReferencedExperimentOutcomeInput,
+): Promise<WriteExperimentOutcomeResult | null> {
+  const { document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
+    input.relativePath,
+  );
+  const expectedFrontmatter = validateExperimentFrontmatter(
+    input.expectedFrontmatter,
+    input.relativePath,
+  );
+  if (!isDeepStrictEqual(document.attributes, expectedFrontmatter)) {
+    throw new VaultError(
+      "EXPERIMENT_REVISION_CONFLICT",
+      "Experiment changed while its saved outcome was being resolved. Retry against the current experiment revision.",
+      {
+        experimentId: document.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  return resolveReferencedExperimentOutcome({
+    attributes: document.attributes,
+    relativePath: input.relativePath,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function resolveReferencedExperimentOutcome(input: {
+  attributes: ExperimentFrontmatter;
+  relativePath: string;
+  vaultRoot: string;
+}): Promise<WriteExperimentOutcomeResult | null> {
+  const reference = input.attributes.outcomeRef;
+  if (reference === undefined) {
+    return null;
+  }
+  if (reference.relativePath === undefined) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The saved experiment outcome reference is missing or does not match its immutable artifact.",
+      {
+        experimentId: input.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const outcome = await readExistingExperimentOutcome(
+    input.vaultRoot,
+    reference.relativePath,
+  );
+  const expectedOutcomeId = outcome === null
+    ? null
+    : `${input.attributes.experimentId}-outcome-${outcome.asOf}`;
+  const expectedOutcomePath = outcome === null
+    ? null
+    : `${VAULT_LAYOUT.experimentsDirectory}/outcomes/${input.attributes.slug}-${outcome.asOf}.json`;
+  if (
+    outcome === null ||
+    outcome.generatedAt !== reference.generatedAt ||
+    outcome.outcomeId !== reference.outcomeId ||
+    outcome.outcomeId !== expectedOutcomeId ||
+    reference.relativePath !== expectedOutcomePath ||
+    outcome.experiment.id !== input.attributes.experimentId ||
+    outcome.experiment.slug !== input.attributes.slug ||
+    !isDeepStrictEqual(
+      outcome.commonsProtocolRef ?? null,
+      input.attributes.commonsProtocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      outcome.protocolRef ?? null,
+      input.attributes.protocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      outcome.effectiveProtocolSnapshot ?? null,
+      input.attributes.effectiveProtocolSnapshot ?? null,
+    ) ||
+    input.attributes.outcome?.latestOutcomeId !== reference.outcomeId ||
+    input.attributes.outcome?.finalAnalysisStatus !== "generated"
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The saved experiment outcome reference is missing or does not match its immutable artifact.",
+      {
+        experimentId: input.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  return {
+    experimentId: input.attributes.experimentId,
+    slug: input.attributes.slug,
+    relativePath: input.relativePath,
+    status: input.attributes.status,
+    outcome,
+    outcomePath: reference.relativePath,
+    updatedExperiment: false,
+  };
+}
+
+function shouldReplaceActiveInterimOutcome(
+  attributes: ExperimentFrontmatter,
+  referencedOutcome: ExperimentOutcome,
+  requestedOutcome: ExperimentOutcome,
+): boolean {
+  return (
+    referencedOutcome.experiment.status === "active" &&
+    attributes.status === "active" &&
+    attributes.runPlan?.interventionEnd !== undefined &&
+    requestedOutcome.asOf >= attributes.runPlan.interventionEnd
+  );
 }
 
 async function readExistingExperimentOutcome(
