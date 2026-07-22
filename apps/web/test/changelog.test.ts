@@ -46,7 +46,6 @@ describe("changelog registry", () => {
         itemIds: [
           "native-replies-to-exact-message",
           "automatic-meal-capture-guidance",
-          "first-plan-launch-song",
           "medical-records-import-recovery",
           "cold-replies-drop-finished-media",
         ],
