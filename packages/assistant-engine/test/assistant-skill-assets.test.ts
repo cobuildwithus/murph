@@ -1920,19 +1920,33 @@ describe('assistant skill assets', () => {
       'use one delegated child to save that single answer',
     )
     expect(raw).toContain('### 2. Minimal identity')
-    expect(raw).toContain(
-      'Also, how old are you—and are you a guy or a girl?',
-    )
+    expect(raw).toContain(`For casual tone, use:
+
+\`\`\`text
+hey — what should i call you?
+
+also, how old are you, and are you a guy or a girl?
+\`\`\``)
+    expect(raw).toContain(`For formal tone, use:
+
+\`\`\`text
+What should I call you?
+
+How old are you and what's your gender?
+\`\`\``)
+    expect(raw.toLowerCase()).not.toContain('totally optional')
     expect(raw).not.toContain("Totally fine if you'd rather not say.")
     expect(compact).toContain(
-      'casually ask their age and whether they are a guy or a girl',
+      'Casual tone asks whether they are a guy or a girl. Formal tone asks their gender.',
     )
     expect(compact).toContain(
-      'accept a different self-description without correcting or pressing them',
+      'Age and gender remain optional, but do not announce or append that optionality to the question.',
+    )
+    expect(compact).toContain(
+      'Accept a different self-description without correcting or pressing them',
     )
     expect(raw).not.toContain('age and relevant sex or gender context')
     expect(raw).not.toContain("I'll only ask about sex or gender")
-    expect(raw).not.toContain("what's your gender")
     expect(raw).not.toContain('how do you identify')
     expect(raw).not.toContain('avoid dumb assumptions')
     expect(compact).toContain(
@@ -1940,13 +1954,13 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toContain('If the user gives only a name, continue.')
     expect(raw).toContain(
-      'What would you most like from your health—something you want to change, understand, handle, or be able to do?',
+      'What would you most like from your health—something you want to improve, understand, handle, or be able to do?',
     )
     expect(compact).toContain(
       'start the same reply by greeting them by the name they just gave, then give a short two- or three-sentence bridge on how Murph works before the question',
     )
     expect(compact).toContain(
-      "the hard part usually isn't knowing what to do. It's fitting it into your real life and following through.",
+      "You might already know what you want to improve about your health. Following through is often the hard part. That's where I can help.",
     )
     expect(compact).toContain(
       'Do not frame the bridge around getting healthy, as if the user is starting from unhealthy.',
