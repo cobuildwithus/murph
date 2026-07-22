@@ -1677,8 +1677,31 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
 
   assert.match(
     ordinaryMarkup,
-    /class="flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
+    /class="flex flex-1 items-end gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
   );
+  assert.match(
+    ordinaryMarkup,
+    /class="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(ordinaryMarkup, /aria-label="Garmin connection is not available yet"[^>]+self-end/u);
+
+  const connectedMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    ...cardProps,
+    source: {
+      connected: true,
+      description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+      disconnectConnectionId: "dsc_garmin",
+      id: "garmin",
+      logo,
+      name: "Garmin",
+    },
+  }));
+
+  assert.match(
+    connectedMarkup,
+    /class="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(connectedMarkup, /aria-label="Disconnect Garmin"[^>]+self-end/u);
 });
 
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
@@ -1775,6 +1798,7 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
   // the shared horizontal row under the card's overflow-hidden.
   assert.match(appDownloadMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
   assert.doesNotMatch(appDownloadMarkup, /items-center gap-4/u);
+  assert.match(appDownloadMarkup, /aria-label="Download app for Apple Health"[^>]+self-end/u);
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
