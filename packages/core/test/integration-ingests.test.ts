@@ -107,8 +107,19 @@ async function writeIntegrationIngestGzipArchive(
   logicalPath: string,
   records: readonly IntegrationIngestRecord[],
 ): Promise<void> {
+  await writeIntegrationIngestGzipArchiveText(
+    vaultRoot,
+    logicalPath,
+    records.map((record) => JSON.stringify(record)).join("\n") + "\n",
+  );
+}
+
+async function writeIntegrationIngestGzipArchiveText(
+  vaultRoot: string,
+  logicalPath: string,
+  content: string,
+): Promise<void> {
   await fs.mkdir(path.dirname(path.join(vaultRoot, logicalPath)), { recursive: true });
-  const content = records.map((record) => JSON.stringify(record)).join("\n") + "\n";
   await fs.writeFile(path.join(vaultRoot, `${logicalPath}.gz`), gzipSync(content));
 }
 
@@ -641,9 +652,7 @@ test("integration evidence novelty reads bounded gzip and zip target archives", 
   }
 });
 
-test("integration evidence novelty validates a gzip archive through its trailer before returning", async () => {
-  const vaultRoot = await makeTempDirectory("murph-integration-ingest-novelty-gzip-trailer");
-  await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+test("integration evidence novelty makes every gzip outcome provisional through its trailer", async () => {
   const importedAt = "2026-06-03T21:00:00.000Z";
   const logicalPath = integrationIngestShardPath(importedAt);
   const matchingPart = buildIntegrationEvidencePart({
@@ -666,34 +675,65 @@ test("integration evidence novelty validates a gzip archive through its trailer 
     eventCount: 0,
     sampleCount: 0,
   });
+  const archivedMatchingPart = matchingRecord.parts[0];
+  assert.ok(archivedMatchingPart);
+  const integrityInvalidRecord = {
+    ...matchingRecord,
+    parts: [{
+      ...archivedMatchingPart,
+      byteSize: archivedMatchingPart.byteSize + 1,
+    }],
+  };
   const trailingRecord = makeIntegrationIngestRecord({
     id: "xfm_GzipTrailerValidationTail",
     eventId: "evt_GzipTrailerValidationTail",
     importedAt,
     partContent: randomBytes(1024 * 1024).toString("base64"),
   });
-  await writeIntegrationIngestGzipArchive(
-    vaultRoot,
-    logicalPath,
-    [matchingRecord, trailingRecord],
-  );
+  const failOpenSelection = { parts: [matchingPart], receiptIsNovel: false };
+  const scenarios = [
+    {
+      name: "complete",
+      firstLine: JSON.stringify(matchingRecord),
+      intactSelection: { parts: [], receiptIsNovel: false },
+    },
+    {
+      name: "integrity-invalid",
+      firstLine: JSON.stringify(integrityInvalidRecord),
+      intactSelection: failOpenSelection,
+    },
+    {
+      name: "malformed",
+      firstLine: "{not-json}",
+      intactSelection: failOpenSelection,
+    },
+  ];
 
-  const intact = runArchivedNoveltySelectionInChild(vaultRoot, importedAt);
-  assert.equal(intact.code, 0, intact.stderr);
-  assert.equal(intact.stderr, "");
-  assert.deepEqual(JSON.parse(intact.stdout), { parts: [], receiptIsNovel: false });
+  for (const scenario of scenarios) {
+    const vaultRoot = await makeTempDirectory(
+      `murph-integration-ingest-novelty-gzip-trailer-${scenario.name}`,
+    );
+    await initializeVault({ vaultRoot, createdAt: "2026-06-01T12:00:00.000Z" });
+    await writeIntegrationIngestGzipArchiveText(
+      vaultRoot,
+      logicalPath,
+      `${scenario.firstLine}\n${JSON.stringify(trailingRecord)}\n`,
+    );
 
-  const archivePath = path.join(vaultRoot, `${logicalPath}.gz`);
-  const archive = await fs.readFile(archivePath);
-  await fs.writeFile(archivePath, archive.subarray(0, archive.byteLength - 8));
+    const intact = runArchivedNoveltySelectionInChild(vaultRoot, importedAt);
+    assert.equal(intact.code, 0, `${scenario.name}: ${intact.stderr}`);
+    assert.equal(intact.stderr, "");
+    assert.deepEqual(JSON.parse(intact.stdout), scenario.intactSelection);
 
-  const corrupt = runArchivedNoveltySelectionInChild(vaultRoot, importedAt);
-  assert.equal(corrupt.code, 0, corrupt.stderr);
-  assert.equal(corrupt.stderr, "");
-  assert.deepEqual(JSON.parse(corrupt.stdout), {
-    parts: [matchingPart],
-    receiptIsNovel: false,
-  });
+    const archivePath = path.join(vaultRoot, `${logicalPath}.gz`);
+    const archive = await fs.readFile(archivePath);
+    await fs.writeFile(archivePath, archive.subarray(0, archive.byteLength - 8));
+
+    const corrupt = runArchivedNoveltySelectionInChild(vaultRoot, importedAt);
+    assert.equal(corrupt.code, 0, `${scenario.name}: ${corrupt.stderr}`);
+    assert.equal(corrupt.stderr, "");
+    assert.deepEqual(JSON.parse(corrupt.stdout), failOpenSelection);
+  }
 });
 
 test("full exact-id inspection reuses one complete history for append planning after a bounded tail miss", async () => {

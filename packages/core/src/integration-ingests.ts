@@ -982,17 +982,22 @@ export async function selectNovelIntegrationIngestEvidence(
   };
 
   if (source.kind !== "jsonl") {
+    let unsafe = false;
     try {
-      for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source])) {
+      for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source], {
+        onInvalidRow: () => {
+          unsafe = true;
+        },
+      })) {
         const decision = visitRaw(row.raw, row.sourcePath, row.relativePath);
         if (decision === "unsafe") {
-          return failOpenSelection();
+          unsafe = true;
         }
       }
     } catch {
       return failOpenSelection();
     }
-    return buildSelection();
+    return unsafe ? failOpenSelection() : buildSelection();
   }
 
   // Live shards use a bounded reverse-tail scan. Archived shards above use
@@ -2139,6 +2144,7 @@ async function* readIntegrationIngestJsonlRows(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
   options: {
+    onInvalidRow?: () => void;
     signal?: AbortSignal | null;
   } = {},
 ): AsyncGenerator<RawIntegrationIngestJsonlRow> {
@@ -2152,13 +2158,18 @@ async function* readIntegrationIngestJsonlRows(
       input: await openIntegrationIngestLineStream(vaultRoot, source, options.signal ?? null),
       crlfDelay: Infinity,
     });
-    yield* parseIntegrationIngestJsonlLines(lines, source);
+    yield* parseIntegrationIngestJsonlLines(lines, source, {
+      onInvalidRow: options.onInvalidRow,
+    });
   }
 }
 
 async function* parseIntegrationIngestJsonlLines(
   lines: AsyncIterable<string>,
   source: IntegrationIngestRowSource,
+  options: {
+    onInvalidRow?: () => void;
+  } = {},
 ): AsyncGenerator<RawIntegrationIngestJsonlRow> {
   let lineNumber = 0;
   for await (const line of lines) {
@@ -2166,21 +2177,31 @@ async function* parseIntegrationIngestJsonlLines(
     if (line.length === 0) continue;
     const lineBytes = Buffer.byteLength(line, "utf8");
     if (lineBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
-      throw new VaultError(
+      const error = new VaultError(
         "INTEGRATION_INGEST_ROW_TOO_LARGE",
         `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
         { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
       );
+      if (options.onInvalidRow) {
+        options.onInvalidRow();
+        continue;
+      }
+      throw error;
     }
     let raw: unknown;
     try {
       raw = JSON.parse(line);
     } catch (error) {
-      throw new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
+      const invalidJson = new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
         relativePath: source.sourcePath,
         lineNumber,
         cause: error instanceof Error ? error.message : String(error),
       });
+      if (options.onInvalidRow) {
+        options.onInvalidRow();
+        continue;
+      }
+      throw invalidJson;
     }
     yield {
       lineNumber,
