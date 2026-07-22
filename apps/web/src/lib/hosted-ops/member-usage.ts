@@ -3,6 +3,10 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  readHostedAiUsageGate,
+  readHostedAiUsageGateSnapshots,
+} from "../hosted-execution/usage-allowance";
+import {
   HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
   buildHostedAiUsageGateNoticeIdempotencyKey,
 } from "../hosted-onboarding/linq-delivery-store";
@@ -20,6 +24,7 @@ const HOSTED_USAGE_REPORTING_WINDOW_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedOpsMemberUsageRow {
+  allowanceStatus: "available" | "unavailable";
   allTimeUsageUsdMicros: string;
   billingStatus: string;
   containerOwnerMemberId: string | null;
@@ -43,7 +48,7 @@ export interface HostedOpsMemberUsagePeriod {
   periodStart: string;
   remainingUsdMicros: string;
   spentUsdMicros: string;
-  updatedAt: string;
+  updatedAt: string | null;
   usageCreditBalanceUsdMicros: string;
   usageCreditLedgerVersion: string;
 }
@@ -76,6 +81,11 @@ export interface HostedOpsMemberUsageResetResult {
   previousSpentUsdMicros: string;
   resetAt: string;
   updatedAt: string;
+}
+
+export interface HostedOpsMemberUsageResetResponse
+  extends HostedOpsMemberUsageResetResult {
+  runtimeRecheckStatus: "accepted" | "pending";
 }
 
 export class HostedOpsMemberUsageResetNotFoundError extends Error {
@@ -114,58 +124,44 @@ export async function readHostedOpsMemberUsage(
     now.getTime() - HOSTED_MESSAGE_RETENTION_DAYS * DAY_MS,
   );
 
-  const [members, retainedMessageCounts, last7DayMessageCounts, usageTotals] =
-    await Promise.all([
-      prisma.hostedMember.findMany({
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+  const members = await prisma.hostedMember.findMany({
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    select: {
+      billingStatus: true,
+      createdAt: true,
+      hostedGroupRuntime: {
         select: {
-          billingStatus: true,
-          createdAt: true,
-          hostedAiUsagePeriods: {
-            orderBy: { periodStart: "desc" },
-            select: {
-              blockedAt: true,
-              limitUsdMicros: true,
-              periodEnd: true,
-              periodStart: true,
-              spentUsdMicros: true,
-              updatedAt: true,
-            },
-            take: 1,
-            where: {
-              periodEnd: { gt: now },
-              periodStart: { lte: now },
-            },
+          ownerMemberId: true,
+          _count: {
+            select: { members: true },
           },
-          hostedGroupRuntime: {
-            select: {
-              ownerMemberId: true,
-              _count: {
-                select: { members: true },
-              },
-            },
-          },
-          id: true,
-          identity: {
-            select: { maskedPhoneNumberHint: true },
-          },
-          suspendedAt: true,
-          threadContainer: {
-            select: {
-              ownerMemberId: true,
-              _count: {
-                select: {
-                  participants: {
-                    where: { removedAt: null },
-                  },
-                },
-              },
-            },
-          },
-          usageCreditBalanceUsdMicros: true,
-          usageCreditLedgerVersion: true,
         },
-      }),
+      },
+      id: true,
+      identity: {
+        select: { maskedPhoneNumberHint: true },
+      },
+      suspendedAt: true,
+      threadContainer: {
+        select: {
+          ownerMemberId: true,
+          _count: {
+            select: {
+              participants: {
+                where: { removedAt: null },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+  const [
+    retainedMessageCounts,
+    last7DayMessageCounts,
+    usageTotals,
+    usageGateSnapshots,
+  ] = await Promise.all([
       prisma.hostedMailboxItem.groupBy({
         by: ["userId"],
         _count: { _all: true },
@@ -187,6 +183,11 @@ export async function readHostedOpsMemberUsage(
         _sum: { allowanceCostUsdMicros: true },
         where: { allowanceCounted: true },
       }),
+      readHostedAiUsageGateSnapshots({
+        memberIds: members.map((member) => member.id),
+        now,
+        prisma,
+      }),
     ]);
 
   const retainedByMember = new Map(
@@ -203,16 +204,19 @@ export async function readHostedOpsMemberUsage(
   );
 
   const claimLookupKeys = members.flatMap((member) => {
-    const period = member.hostedAiUsagePeriods[0];
-    if (!period) {
+    const snapshot = usageGateSnapshots.get(member.id);
+    const decision = snapshot?.decision;
+    if (
+      !snapshot?.periodPersistedAt
+      || !decision
+      || (!decision.allowed && decision.reason !== "ai_usage_limit_exceeded")
+    ) {
       return [];
     }
     const key = buildHostedUsageNoticeLookupKey({
       memberId: member.id,
-      periodStart: period.periodStart,
-      usageCreditLedgerVersion: normalizeNonNegativeBigInt(
-        member.usageCreditLedgerVersion,
-      ),
+      periodStart: decision.periodStart,
+      usageCreditLedgerVersion: decision.usageCreditLedgerVersion,
     });
     return key ? [key] : [];
   });
@@ -236,18 +240,16 @@ export async function readHostedOpsMemberUsage(
   const rows = members.map((member): HostedOpsMemberUsageRow => {
     const retained = retainedByMember.get(member.id) ?? 0;
     const last7Days = last7DaysByMember.get(member.id) ?? 0;
-    const usageCreditBalanceUsdMicros = normalizeNonNegativeBigInt(
-      member.usageCreditBalanceUsdMicros,
+    const snapshot = usageGateSnapshots.get(member.id) ?? null;
+    const decision = snapshot?.decision ?? null;
+    const allowanceAvailable = decision !== null && (
+      decision.allowed || decision.reason === "ai_usage_limit_exceeded"
     );
-    const usageCreditLedgerVersion = normalizeNonNegativeBigInt(
-      member.usageCreditLedgerVersion,
-    );
-    const period = member.hostedAiUsagePeriods[0] ?? null;
-    const noticeLookupKey = period
+    const noticeLookupKey = allowanceAvailable && snapshot?.periodPersistedAt
       ? buildHostedUsageNoticeLookupKey({
           memberId: member.id,
-          periodStart: period.periodStart,
-          usageCreditLedgerVersion,
+          periodStart: decision.periodStart,
+          usageCreditLedgerVersion: decision.usageCreditLedgerVersion,
         })
       : null;
     const threadContainer = member.threadContainer;
@@ -255,6 +257,7 @@ export async function readHostedOpsMemberUsage(
     const isContainer = threadContainer !== null || legacyGroupContainer !== null;
 
     return {
+      allowanceStatus: allowanceAvailable ? "available" : "unavailable",
       allTimeUsageUsdMicros: (usageByMember.get(member.id) ?? 0n).toString(),
       billingStatus: member.billingStatus,
       containerOwnerMemberId:
@@ -262,25 +265,22 @@ export async function readHostedOpsMemberUsage(
         ?? legacyGroupContainer?.ownerMemberId
         ?? null,
       createdAt: member.createdAt.toISOString(),
-      currentPeriod: period
+      currentPeriod: allowanceAvailable && decision && snapshot
         ? {
-            blockedAt: period.blockedAt?.toISOString() ?? null,
+            blockedAt: snapshot.periodBlockedAt?.toISOString() ?? null,
             idempotencyClaimStatus: noticeLookupKey
               ? noticeStatusByLookupKey.get(noticeLookupKey) ?? null
               : null,
-            limitUsdMicros: period.limitUsdMicros.toString(),
-            periodEnd: period.periodEnd.toISOString(),
-            periodStart: period.periodStart.toISOString(),
-            remainingUsdMicros: calculateRemainingUsdMicros({
-              credit: usageCreditBalanceUsdMicros,
-              limit: period.limitUsdMicros,
-              spent: period.spentUsdMicros,
-            }).toString(),
-            spentUsdMicros: period.spentUsdMicros.toString(),
-            updatedAt: period.updatedAt.toISOString(),
+            limitUsdMicros: decision.limitUsdMicros.toString(),
+            periodEnd: decision.periodEnd.toISOString(),
+            periodStart: decision.periodStart.toISOString(),
+            remainingUsdMicros: decision.remainingUsdMicros.toString(),
+            spentUsdMicros: decision.spentUsdMicros.toString(),
+            updatedAt: snapshot.periodPersistedAt?.toISOString() ?? null,
             usageCreditBalanceUsdMicros:
-              usageCreditBalanceUsdMicros.toString(),
-            usageCreditLedgerVersion: usageCreditLedgerVersion.toString(),
+              decision.usageCreditBalanceUsdMicros.toString(),
+            usageCreditLedgerVersion:
+              decision.usageCreditLedgerVersion.toString(),
           }
         : null,
       maskedPhoneNumberHint: member.identity?.maskedPhoneNumberHint ?? null,
@@ -358,6 +358,21 @@ export async function resetHostedOpsMemberUsage(
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
+    const canonicalGate = await readHostedAiUsageGate({
+      memberId: input.memberId,
+      now,
+      prisma: tx,
+    });
+    if (
+      (!canonicalGate.allowed
+        && canonicalGate.reason !== "ai_usage_limit_exceeded")
+      || canonicalGate.periodStart.getTime() !== input.periodStart.getTime()
+      || canonicalGate.usageCreditLedgerVersion
+        !== input.expectedUsageCreditLedgerVersion
+    ) {
+      throw new HostedOpsMemberUsageResetStaleError();
+    }
+
     const periodRows = await tx.$queryRaw<Array<{
       blockedAt: Date | null;
       periodEnd: Date;
@@ -379,9 +394,7 @@ export async function resetHostedOpsMemberUsage(
       throw new HostedOpsMemberUsageResetNotFoundError();
     }
     if (
-      input.periodStart.getTime() > now.getTime()
-      || period.periodEnd.getTime() <= now.getTime()
-      || period.updatedAt.getTime() !== input.expectedPeriodUpdatedAt.getTime()
+      period.updatedAt.getTime() !== input.expectedPeriodUpdatedAt.getTime()
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
     }
@@ -483,17 +496,6 @@ function buildHostedUsageNoticeLookupKey(input: {
   return createHostedLinqDeliveryIdempotencyLookupKey(
     buildHostedAiUsageGateNoticeIdempotencyKey(input),
   );
-}
-
-function calculateRemainingUsdMicros(input: {
-  credit: bigint;
-  limit: bigint;
-  spent: bigint;
-}): bigint {
-  const includedRemaining = input.limit > input.spent
-    ? input.limit - input.spent
-    : 0n;
-  return includedRemaining + input.credit;
 }
 
 function normalizeNonNegativeBigInt(value: bigint | null): bigint {

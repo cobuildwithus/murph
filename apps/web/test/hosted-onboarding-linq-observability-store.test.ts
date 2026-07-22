@@ -1298,7 +1298,7 @@ describe("hosted Linq observability stores", () => {
       targetKind: "thread",
     })).resolves.toEqual({
       claimed: true,
-      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      id: expect.stringMatching(/^hld_[A-Za-z0-9_-]{16}$/u),
     });
 
     expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
@@ -1353,7 +1353,7 @@ describe("hosted Linq observability stores", () => {
       template: "invite_signup",
     })).resolves.toEqual({
       claimed: true,
-      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
+      id: expect.stringMatching(/^hld_[A-Za-z0-9_-]{16}$/u),
     });
 
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
@@ -1946,6 +1946,9 @@ describe("hosted Linq observability stores", () => {
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
       idempotencyKey: currentIdempotencyKey,
+      providerIdempotencyKey: expect.stringMatching(
+        /^ai-usage-attempt:hld_[A-Za-z0-9_-]{16}$/u,
+      ),
       status: "claimed",
     });
 
@@ -2133,6 +2136,8 @@ describe("hosted Linq observability stores", () => {
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
       idempotencyKey: currentIdempotencyKey,
+      providerIdempotencyKey:
+        "ai-usage-attempt:hld_stale_current_usage_notice",
       status: "claimed",
     });
 

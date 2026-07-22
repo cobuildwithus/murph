@@ -5,6 +5,9 @@ import {
   HostedOpsMemberUsageResetStaleError,
   resetHostedOpsMemberUsage,
 } from "@/src/lib/hosted-ops/member-usage";
+import {
+  signalHostedRuntimeRecheckRuntime,
+} from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
@@ -28,6 +31,15 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "HOSTED_OPS_USAGE_RESET_REQUEST_TOO_LARGE",
     tooLargeErrorMessage: "Hosted ops usage reset request body is too large.",
   });
+  const memberId = readMemberId(body.memberId);
+
+  if (body.operation === "runtime_recheck") {
+    const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(memberId);
+    return jsonOk({
+      memberId,
+      runtimeRecheckStatus,
+    }, runtimeRecheckStatus === "accepted" ? 200 : 202);
+  }
 
   try {
     const result = await resetHostedOpsMemberUsage({
@@ -39,7 +51,7 @@ export const POST = withJsonError(async (request: Request) => {
       expectedUsageCreditLedgerVersion: readLedgerVersion(
         body.expectedUsageCreditLedgerVersion,
       ),
-      memberId: readMemberId(body.memberId),
+      memberId,
       periodStart: readIsoDate(
         body.periodStart,
         "HOSTED_OPS_USAGE_RESET_PERIOD_INVALID",
@@ -47,12 +59,27 @@ export const POST = withJsonError(async (request: Request) => {
       ),
     });
 
+    const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(
+      result.memberId,
+      result.resetAt,
+    );
+    if (runtimeRecheckStatus === "pending") {
+      return jsonOk({
+        ...result,
+        runtimeRecheckStatus: "pending",
+      }, 202);
+    }
+
     console.info("Hosted ops current usage period reset completed.", {
       noticeClaimReleased: result.noticeClaimReleased,
       outcome: result.outcome,
+      runtimeRecheckStatus: "accepted",
       timestamp: result.resetAt,
     });
-    return jsonOk(result);
+    return jsonOk({
+      ...result,
+      runtimeRecheckStatus: "accepted",
+    });
   } catch (error) {
     if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
       throw hostedOnboardingError({
@@ -82,6 +109,22 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 });
+
+async function trySignalHostedRuntimeRecheck(
+  memberId: string,
+  timestamp = new Date().toISOString(),
+): Promise<"accepted" | "pending"> {
+  try {
+    await signalHostedRuntimeRecheckRuntime({ userId: memberId });
+    return "accepted";
+  } catch (error) {
+    console.error("Hosted ops runtime recheck failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      timestamp,
+    });
+    return "pending";
+  }
+}
 
 function readMemberId(value: unknown): string {
   const memberId = typeof value === "string" ? value.trim() : "";

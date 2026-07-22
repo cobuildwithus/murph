@@ -244,14 +244,27 @@ as lifetime history. The trailing seven-day total and daily average use the
 same mailbox source. All-time priced AI usage is derived from immutable counted
 `HostedAiUsage` rows.
 
-A reset targets exactly one current allowance period. The server locks the
-member and period in the same order as usage accounting, verifies the period
-timestamp and usage-credit ledger version shown to the operator, then clears
-current included spend and its blocked state. In the same serializable
+A reset targets exactly one current allowance period. The table and reset both
+resolve that period through the canonical allowance gate, so Family-sponsored,
+trial, direct-billing, thread-container, inactive-access, plan-change, and
+no-persisted-row behavior cannot drift from runtime admission. The server locks
+the member and period in the same order as usage accounting, verifies the
+period timestamp and usage-credit ledger version shown to the operator, then
+clears current included spend and its blocked state. In the same serializable
 transaction it releases only the matching period-and-credit-version notice
-idempotency claim by clearing that delivery row's unique claim key. The
-delivery row remains as history. A recent pre-provider dispatch makes the
-operation retryable instead of permitting a concurrent duplicate send.
+claim by clearing that delivery row's unique lookup key. The delivery row
+remains as history. A recent pre-provider dispatch makes the operation
+retryable instead of permitting a concurrent duplicate send.
+
+The table reads decision and concurrency-version facts from one repeatable
+database snapshot. After reset commit, the route signals the existing hosted
+runtime recheck so accepted mailbox work is reconsidered immediately. If that
+wake is not accepted, the route reports the reset as committed and exposes a
+wake-only retry instead of replaying the reset or claiming complete recovery.
+Reusing the logical notice key still permits only one active claim, while each
+explicitly re-released notice gets a fresh durable attempt ID and Linq provider
+idempotency key. This prevents a retained history row or provider deduplication
+from suppressing the next real limit crossing.
 
 Reset never deletes or rewrites immutable usage rows, purchased-credit entries,
 the purchased-credit balance or version, billing state, mailbox rows, or

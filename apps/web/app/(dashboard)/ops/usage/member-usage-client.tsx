@@ -26,13 +26,22 @@ import {
 } from "@/src/components/ui/table";
 import type {
   HostedOpsMemberUsageDashboard,
-  HostedOpsMemberUsageResetResult,
+  HostedOpsMemberUsageResetResponse,
   HostedOpsMemberUsageRow,
 } from "@/src/lib/hosted-ops/member-usage";
 
 interface UsageResetMessage {
   text: string;
   tone: "error" | "success";
+}
+
+interface UsageResetRuntimeRetry {
+  memberId: string;
+}
+
+interface UsageRuntimeRecheckResponse {
+  memberId: string;
+  runtimeRecheckStatus: "accepted" | "pending";
 }
 
 class UsageResetRequestError extends Error {
@@ -56,6 +65,8 @@ export function MemberUsageClient({
     null,
   );
   const [message, setMessage] = useState<UsageResetMessage | null>(null);
+  const [runtimeRetry, setRuntimeRetry] =
+    useState<UsageResetRuntimeRetry | null>(null);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
@@ -70,12 +81,46 @@ export function MemberUsageClient({
     setResettingMemberId(row.memberId);
     setMessage(null);
     try {
+      if (runtimeRetry?.memberId === row.memberId) {
+        const result = await requestRuntimeRecheck(row.memberId);
+        if (result.runtimeRecheckStatus === "pending") {
+          setMessage({
+            text:
+              "The runtime still has not accepted its recheck. The committed usage reset is unchanged; retry the runtime wake.",
+            tone: "error",
+          });
+          return;
+        }
+        setRuntimeRetry(null);
+        setSelectedMemberId(null);
+        setMessage({
+          text:
+            "The runtime recheck was accepted. The committed usage reset is unchanged.",
+          tone: "success",
+        });
+        router.refresh();
+        return;
+      }
+
       const result = await requestUsageReset(row);
+      if (result.runtimeRecheckStatus === "pending") {
+        setRuntimeRetry({
+          memberId: result.memberId,
+        });
+        setMessage({
+          text:
+            "Usage was reset, but the runtime did not accept its recheck yet. Retry the runtime wake; usage and credits will not be reset again.",
+          tone: "error",
+        });
+        router.refresh();
+        return;
+      }
+      setRuntimeRetry(null);
       setSelectedMemberId(null);
       setMessage({
         text: result.noticeClaimReleased
-          ? "Current included usage was reset and the quota notice claim was released."
-          : "Current included usage was reset. No quota notice claim was attached.",
+          ? "Current included usage was reset, the quota notice claim was released, and the runtime recheck was accepted."
+          : "Current included usage is clear and the runtime recheck was accepted.",
         tone: "success",
       });
       router.refresh();
@@ -86,12 +131,17 @@ export function MemberUsageClient({
           : "Usage could not be reset. Refresh and try again.",
         tone: "error",
       });
-      setSelectedMemberId(null);
       if (
         error instanceof UsageResetRequestError
         && error.code === "HOSTED_OPS_USAGE_RESET_STALE"
       ) {
+        setRuntimeRetry(null);
+        setSelectedMemberId(null);
         router.refresh();
+        return;
+      }
+      if (runtimeRetry?.memberId !== row.memberId) {
+        setSelectedMemberId(null);
       }
     } finally {
       setResettingMemberId(null);
@@ -203,6 +253,7 @@ export function MemberUsageClient({
                     key={row.memberId}
                     onSelect={() => {
                       setMessage(null);
+                      setRuntimeRetry(null);
                       setSelectedMemberId(row.memberId);
                     }}
                     row={row}
@@ -217,6 +268,7 @@ export function MemberUsageClient({
       <Dialog
         onOpenChange={(open) => {
           if (!open && !isResetting) {
+            setRuntimeRetry(null);
             setSelectedMemberId(null);
           }
         }}
@@ -224,42 +276,67 @@ export function MemberUsageClient({
       >
         <DialogContent showCloseButton={!isResetting}>
           <DialogHeader>
-            <DialogTitle>Reset current included usage?</DialogTitle>
+            <DialogTitle>
+              {runtimeRetry?.memberId === selectedRow?.memberId
+                ? "Retry runtime wake?"
+                : "Reset current included usage?"}
+            </DialogTitle>
             <DialogDescription>
-              This sets current-period included spend to $0, clears the blocked
-              state, and releases the current quota notice claim. Immutable AI
-              usage and purchased-credit balance stay unchanged.
+              {runtimeRetry?.memberId === selectedRow?.memberId
+                ? "The allowance reset is already committed. Retry only the runtime recheck so already-accepted work can continue."
+                : "This sets current-period included spend to $0, clears the blocked state, releases the current quota notice claim, and wakes already-accepted work. Immutable AI usage and purchased-credit balance stay unchanged."}
             </DialogDescription>
           </DialogHeader>
+          {runtimeRetry?.memberId === selectedRow?.memberId && message ? (
+            <Alert variant="destructive">
+              <AlertDescription>{message.text}</AlertDescription>
+            </Alert>
+          ) : null}
           {selectedRow?.currentPeriod ? (
             <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2 border-y border-border/70 py-4 text-sm">
               <dt className="text-muted-foreground">Target</dt>
               <dd className="max-w-56 break-all text-right font-mono text-xs">
                 {selectedRow.memberId}
               </dd>
-              <dt className="text-muted-foreground">Current spend</dt>
-              <dd className="font-serif font-semibold">
-                {formatUsdMicros(selectedRow.currentPeriod.spentUsdMicros)}
-              </dd>
-              <dt className="text-muted-foreground">Notice claim</dt>
-              <dd>
-                {selectedRow.currentPeriod.idempotencyClaimStatus
-                  ? "Will be released"
-                  : "None"}
-              </dd>
+              {runtimeRetry?.memberId !== selectedRow.memberId ? (
+                <>
+                  <dt className="text-muted-foreground">Current spend</dt>
+                  <dd className="font-serif font-semibold">
+                    {formatUsdMicros(selectedRow.currentPeriod.spentUsdMicros)}
+                  </dd>
+                  <dt className="text-muted-foreground">Notice claim</dt>
+                  <dd>
+                    {selectedRow.currentPeriod.idempotencyClaimStatus
+                      ? "Will be released"
+                      : "None"}
+                  </dd>
+                </>
+              ) : null}
             </dl>
           ) : null}
           <DialogFooter>
             <Button
               disabled={isResetting}
-              onClick={() => setSelectedMemberId(null)}
+              onClick={() => {
+                setRuntimeRetry(null);
+                setSelectedMemberId(null);
+              }}
               type="button"
               variant="outline"
             >
-              Cancel
+              {runtimeRetry?.memberId === selectedRow?.memberId
+                ? "Close"
+                : "Cancel"}
             </Button>
             <Button
-              disabled={!selectedRow?.currentPeriod || isResetting}
+              disabled={
+                !selectedRow?.currentPeriod
+                || (
+                  selectedRow.currentPeriod.updatedAt === null
+                  && runtimeRetry?.memberId !== selectedRow.memberId
+                )
+                || isResetting
+              }
               onClick={() => {
                 if (selectedRow) {
                   void resetUsage(selectedRow);
@@ -271,7 +348,11 @@ export function MemberUsageClient({
               {isResetting ? <Spinner data-icon="inline-start" /> : (
                 <RotateCcwIcon data-icon="inline-start" />
               )}
-              {isResetting ? "Resetting" : "Reset usage"}
+              {isResetting
+                ? "Working"
+                : runtimeRetry?.memberId === selectedRow?.memberId
+                ? "Retry runtime wake"
+                : "Reset usage"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -287,11 +368,8 @@ function UsageRow(input: {
 }) {
   const period = input.row.currentPeriod;
   const resettable = period !== null
-    && (
-      BigInt(period.spentUsdMicros) > 0n
-      || period.blockedAt !== null
-      || period.idempotencyClaimStatus !== null
-    );
+    && input.row.allowanceStatus === "available"
+    && period.updatedAt !== null;
 
   return (
     <TableRow>
@@ -346,10 +424,11 @@ function UsageRow(input: {
           {period?.idempotencyClaimStatus ? (
             <Badge variant="secondary">Notice claimed</Badge>
           ) : null}
-          {!period ? (
-            <Badge variant="secondary">No current period</Badge>
+          {input.row.allowanceStatus === "unavailable" ? (
+            <Badge variant="secondary">Unavailable</Badge>
           ) : null}
-          {period && !input.row.suspended && !period.blockedAt
+          {input.row.allowanceStatus === "available" && period
+              && !input.row.suspended && !period.blockedAt
               && !period.idempotencyClaimStatus ? (
             <Badge variant="outline">Available</Badge>
           ) : null}
@@ -399,14 +478,15 @@ function readEntitySecondaryLabel(row: HostedOpsMemberUsageRow): string {
 
 async function requestUsageReset(
   row: HostedOpsMemberUsageRow,
-): Promise<HostedOpsMemberUsageResetResult> {
+): Promise<HostedOpsMemberUsageResetResponse> {
   const period = row.currentPeriod;
-  if (!period) {
-    throw new Error("This row has no current usage period to reset.");
+  const expectedPeriodUpdatedAt = period?.updatedAt ?? null;
+  if (!period || !expectedPeriodUpdatedAt) {
+    throw new Error("This row has no persisted current usage to reset.");
   }
   const response = await fetch("/api/ops/usage-reset", {
     body: JSON.stringify({
-      expectedPeriodUpdatedAt: period.updatedAt,
+      expectedPeriodUpdatedAt,
       expectedUsageCreditLedgerVersion: period.usageCreditLedgerVersion,
       memberId: row.memberId,
       periodStart: period.periodStart,
@@ -434,16 +514,63 @@ async function requestUsageReset(
   return payload;
 }
 
+async function requestRuntimeRecheck(
+  memberId: string,
+): Promise<UsageRuntimeRecheckResponse> {
+  const response = await fetch("/api/ops/usage-reset", {
+    body: JSON.stringify({
+      memberId,
+      operation: "runtime_recheck",
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("Runtime recheck returned an unreadable response.");
+  }
+  if (!response.ok) {
+    throw new UsageResetRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
+  }
+  if (!isUsageRuntimeRecheckResponse(payload)) {
+    throw new Error("Runtime recheck returned an invalid response.");
+  }
+  return payload;
+}
+
 function isHostedOpsMemberUsageResetResult(
   value: unknown,
-): value is HostedOpsMemberUsageResetResult {
+): value is HostedOpsMemberUsageResetResponse {
   return Boolean(
     value
       && typeof value === "object"
       && typeof Reflect.get(value, "memberId") === "string"
       && typeof Reflect.get(value, "noticeClaimReleased") === "boolean"
       && typeof Reflect.get(value, "outcome") === "string"
-      && typeof Reflect.get(value, "resetAt") === "string",
+      && typeof Reflect.get(value, "resetAt") === "string"
+      && ["accepted", "pending"].includes(
+        String(Reflect.get(value, "runtimeRecheckStatus")),
+      )
+  );
+}
+
+function isUsageRuntimeRecheckResponse(
+  value: unknown,
+): value is UsageRuntimeRecheckResponse {
+  return Boolean(
+    value
+      && typeof value === "object"
+      && typeof Reflect.get(value, "memberId") === "string"
+      && ["accepted", "pending"].includes(
+        String(Reflect.get(value, "runtimeRecheckStatus")),
+      )
   );
 }
 

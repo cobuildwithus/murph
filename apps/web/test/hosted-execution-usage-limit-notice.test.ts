@@ -55,6 +55,7 @@ describe("hosted usage-limit notice delivery", () => {
     });
     deliveryMocks.startHostedAiUsageLimitNoticeDispatchTx.mockResolvedValue({
       idempotencyKey: "usage_notice_claim_1",
+      providerIdempotencyKey: "usage_notice_provider_attempt_1",
       status: "claimed",
     });
     deliveryMocks.markHostedLinqDeliveryAcceptedTx.mockResolvedValue(true);

@@ -1304,12 +1304,17 @@ Current hosted billing assumptions:
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
-  rows, and labels the mailbox retention boundary. A row reset verifies the
-  displayed current-period and usage-credit versions, then atomically clears
-  current included spend and the block while releasing only that capacity
-  epoch's notice idempotency claim. It preserves immutable usage, purchased
-  credit, billing state, mailbox rows, and delivery history, and refuses to race
-  an in-flight notice dispatch.
+  rows, and labels the mailbox retention boundary. The table and reset reuse the
+  runtime's canonical allowance gate. A row reset verifies the displayed
+  current-period and usage-credit versions, then atomically clears current
+  included spend and the block while releasing only that capacity epoch's
+  logical notice claim. It preserves immutable usage, purchased credit, billing
+  state, mailbox rows, and delivery history, and refuses to race an in-flight
+  notice dispatch. After commit it signals the existing runtime recheck; a
+  failed wake is returned as a committed partial result with a wake-only retry.
+  The table reads its decision and reset version from one repeatable database
+  snapshot. A later crossing reuses the logical claim key but receives a fresh
+  durable delivery ID and provider idempotency key.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
   The proof expires after 15 minutes. Active Family sponsorship and paid,

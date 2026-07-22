@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   resetHostedOpsMemberUsage: vi.fn(),
+  signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -28,6 +29,11 @@ vi.mock("@/src/lib/hosted-ops/member-usage", async () => {
     resetHostedOpsMemberUsage: mocks.resetHostedOpsMemberUsage,
   };
 });
+
+vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
+  signalHostedRuntimeRecheckRuntime:
+    mocks.signalHostedRuntimeRecheckRuntime,
+}));
 
 import {
   HostedOpsMemberUsageResetNotFoundError,
@@ -61,6 +67,10 @@ describe("hosted ops usage reset route", () => {
       member: { id: OPERATOR_MEMBER_ID },
     });
     mocks.resetHostedOpsMemberUsage.mockResolvedValue(makeResult());
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:hbm_target",
+    });
   });
 
   afterEach(() => {
@@ -84,17 +94,71 @@ describe("hosted ops usage reset route", () => {
       memberId: TARGET_MEMBER_ID,
       periodStart: new Date(PERIOD_START),
     });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: TARGET_MEMBER_ID,
+    });
+    expect(
+      mocks.resetHostedOpsMemberUsage.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      Number(mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]),
+    );
     expect(consoleInfoSpy).toHaveBeenCalledWith(
       "Hosted ops current usage period reset completed.",
       {
         noticeClaimReleased: true,
         outcome: "reset",
+        runtimeRecheckStatus: "accepted",
         timestamp: NOW.toISOString(),
       },
     );
     expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain(
       TARGET_MEMBER_ID,
     );
+  });
+
+  test("reports a committed reset as retryable when the runtime recheck fails", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      new Error("Temporal unavailable"),
+    );
+
+    try {
+      const response = await route.POST(makeRequest());
+
+      assert.equal(response.status, 202);
+      assert.deepEqual(await response.json(), {
+        ...makeResult(),
+        runtimeRecheckStatus: "pending",
+      });
+      expect(mocks.resetHostedOpsMemberUsage).toHaveBeenCalledTimes(1);
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        "Hosted ops runtime recheck failed.",
+        {
+          errorName: "Error",
+          timestamp: NOW.toISOString(),
+        },
+      );
+      expect(JSON.stringify(consoleErrorSpy.mock.calls)).not.toContain(
+        TARGET_MEMBER_ID,
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("retries only the runtime wake after a committed reset", async () => {
+    const response = await route.POST(makeRuntimeRecheckRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      memberId: TARGET_MEMBER_ID,
+      runtimeRecheckStatus: "accepted",
+    });
+    expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      userId: TARGET_MEMBER_ID,
+    });
   });
 
   test("hides the route from members outside the ops allowlist", async () => {
@@ -179,6 +243,20 @@ function makeRequest(overrides: Record<string, unknown> = {}): Request {
       memberId: TARGET_MEMBER_ID,
       periodStart: PERIOD_START,
       ...overrides,
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost",
+    },
+    method: "POST",
+  });
+}
+
+function makeRuntimeRecheckRequest(): Request {
+  return new Request("http://localhost/api/ops/usage-reset", {
+    body: JSON.stringify({
+      memberId: TARGET_MEMBER_ID,
+      operation: "runtime_recheck",
     }),
     headers: {
       "content-type": "application/json",

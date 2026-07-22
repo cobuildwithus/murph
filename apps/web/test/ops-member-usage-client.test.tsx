@@ -110,18 +110,57 @@ describe("MemberUsageClient", () => {
       throw new Error("Expected a usage fixture row.");
     }
     row.currentPeriod = null;
+    row.allowanceStatus = "unavailable";
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard }),
     );
     cleanupRender = rendered.cleanup;
 
-    expect(rendered.container.textContent).toContain("No current period");
+    expect(rendered.container.textContent).toContain("Unavailable");
     expect(rendered.container.textContent).not.toContain("Available");
     const resetButton = getButton(rendered.container, "Reset");
     expect(resetButton.getAttribute("aria-label")).toBe(
       "Reset usage for hbm_container",
     );
     expect(resetButton.disabled).toBe(true);
+  });
+
+  test("keeps a synthetic available period visible but not resettable", async () => {
+    const dashboard = makeDashboard();
+    const period = dashboard.rows[0]?.currentPeriod;
+    if (!period) {
+      throw new Error("Expected a usage fixture period.");
+    }
+    period.blockedAt = null;
+    period.idempotencyClaimStatus = null;
+    period.remainingUsdMicros = "4500000";
+    period.spentUsdMicros = "0";
+    period.updatedAt = null;
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain("Available");
+    expect(rendered.container.textContent).toContain("$0.00 / $4.50");
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+  });
+
+  test("keeps a clear persisted period actionable for a later runtime wake", async () => {
+    const dashboard = makeDashboard();
+    const period = dashboard.rows[0]?.currentPeriod;
+    if (!period) {
+      throw new Error("Expected a usage fixture period.");
+    }
+    period.blockedAt = null;
+    period.idempotencyClaimStatus = null;
+    period.spentUsdMicros = "0";
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
   });
 
   test("shows an explicit empty state", async () => {
@@ -146,6 +185,7 @@ describe("MemberUsageClient", () => {
       periodStart: "2026-07-01T00:00:00.000Z",
       previousSpentUsdMicros: "4522964",
       resetAt: "2026-07-22T18:00:00.000Z",
+      runtimeRecheckStatus: "accepted",
       updatedAt: "2026-07-22T18:00:00.000Z",
     }));
     const rendered = await renderClientComponent(
@@ -177,8 +217,61 @@ describe("MemberUsageClient", () => {
       method: "POST",
     });
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
-      .toContain("quota notice claim was released");
+      .toContain("runtime recheck was accepted");
     expect(routerRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps a committed reset open and retries only the runtime wake", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        noticeClaimReleased: true,
+        outcome: "reset",
+        periodStart: "2026-07-01T00:00:00.000Z",
+        previousSpentUsdMicros: "4522964",
+        resetAt: "2026-07-22T18:00:00.000Z",
+        runtimeRecheckStatus: "pending",
+        updatedAt: "2026-07-22T18:00:00.000Z",
+      }, 202))
+      .mockResolvedValueOnce(jsonResponse({
+        memberId: "hbm_container",
+        runtimeRecheckStatus: "accepted",
+      }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    await clickButton(rendered.window, getButton(rendered.container, "Reset usage"));
+
+    expect(rendered.container.textContent).toContain(
+      "Usage was reset, but the runtime did not accept its recheck yet.",
+    );
+    expect(rendered.container.textContent).toContain("Retry runtime wake?");
+    expect(rendered.container.textContent).toContain("Target");
+    expect(rendered.container.textContent).not.toContain("Current spend");
+    expect(rendered.container.textContent).not.toContain("Will be released");
+    expect(getButton(rendered.container, "Close").disabled).toBe(false);
+    expect(getButton(rendered.container, "Retry runtime wake").disabled).toBe(false);
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Retry runtime wake"),
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        memberId: "hbm_container",
+        operation: "runtime_recheck",
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(rendered.container.querySelector('[role="alert"]')?.textContent)
+      .toContain("runtime recheck was accepted");
   });
 
   test("surfaces a stale reset without claiming success", async () => {
@@ -210,6 +303,7 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
     capturedAt: "2026-07-22T18:00:00.000Z",
     messageRetentionDays: 30,
     rows: [{
+      allowanceStatus: "available",
       allTimeUsageUsdMicros: "7250000",
       billingStatus: "active",
       containerOwnerMemberId: "hbm_owner",

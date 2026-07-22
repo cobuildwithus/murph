@@ -25,6 +25,7 @@ import {
   checkHostedAiUsageGate,
   priceHostedAiUsageForAllowance,
   readHostedAiUsageGate,
+  readHostedAiUsageGateSnapshots,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
@@ -3136,6 +3137,74 @@ describe("readHostedAiUsageGate", () => {
 
     expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
+  });
+});
+
+describe("readHostedAiUsageGateSnapshots", () => {
+  it("uses the canonical gate decision and attaches exact persisted metadata", async () => {
+    const now = new Date("2026-07-22T18:00:00.000Z");
+    const periodStart = new Date("2026-07-05T00:00:00.000Z");
+    const periodEnd = new Date("2026-08-05T00:00:00.000Z");
+    const periodUpdatedAt = new Date("2026-07-22T17:00:00.000Z");
+    const prisma = createGatePrisma({
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-07-22T16:55:00.000Z"),
+        limitUsdMicros: 10_000_000n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 10_000_000n,
+      },
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 10_000_000n,
+    });
+    const findPeriods = vi.fn(async () => [{
+      billingPlanCode: "launch_monthly",
+      blockedAt: new Date("2026-07-22T16:55:00.000Z"),
+      limitUsdMicros: 10_000_000n,
+      memberId: "member_123",
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 10_000_000n,
+      updatedAt: periodUpdatedAt,
+    }]);
+    Object.assign(prisma.hostedAiUsagePeriod, { findMany: findPeriods });
+    const transaction = vi.fn(async (
+      run: (tx: typeof prisma) => Promise<unknown>,
+      _options?: { isolationLevel?: string },
+    ) => run(prisma));
+
+    const snapshots = await readHostedAiUsageGateSnapshots({
+      memberIds: ["member_123"],
+      now,
+      prisma: { $transaction: transaction } as never,
+    });
+
+    expect(snapshots.get("member_123")).toMatchObject({
+      decision: {
+        allowed: false,
+        allowanceSource: "direct_paid_member_plan",
+        periodEnd,
+        periodStart,
+        reason: "ai_usage_limit_exceeded",
+        spentUsdMicros: 10_000_000n,
+      },
+      periodPersistedAt: periodUpdatedAt,
+    });
+    expect(findPeriods).toHaveBeenCalledWith({
+      select: expect.any(Object),
+      where: {
+        OR: [{
+          memberId: "member_123",
+          periodStart,
+        }],
+      },
+    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      { isolationLevel: "RepeatableRead" },
+    );
   });
 });
 

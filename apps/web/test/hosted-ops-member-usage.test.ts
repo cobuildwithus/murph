@@ -1,7 +1,24 @@
 import type { PrismaClient } from "@prisma/client";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+
+const usageAllowanceMocks = vi.hoisted(() => ({
+  readHostedAiUsageGate: vi.fn(),
+  readHostedAiUsageGateSnapshots: vi.fn(),
+}));
+
+vi.mock("../src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("../src/lib/hosted-execution/usage-allowance")
+  >("../src/lib/hosted-execution/usage-allowance");
+  return {
+    ...actual,
+    readHostedAiUsageGate: usageAllowanceMocks.readHostedAiUsageGate,
+    readHostedAiUsageGateSnapshots:
+      usageAllowanceMocks.readHostedAiUsageGateSnapshots,
+  };
+});
 
 import {
   HostedOpsMemberUsageResetNotFoundError,
@@ -23,6 +40,19 @@ const PERIOD_END = new Date("2026-08-01T00:00:00.000Z");
 const PERIOD_UPDATED_AT = new Date("2026-07-22T17:30:00.000Z");
 
 describe("hosted ops member usage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValue(
+      makeUsageGateDecision({
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
+      new Map(),
+    );
+  });
+
   test("reports members and containers from canonical retained and immutable rows", async () => {
     const groupMessages = vi.fn()
       .mockResolvedValueOnce([{
@@ -51,7 +81,6 @@ describe("hosted ops member usage", () => {
     }]);
     const findMembers = vi.fn(async () => [
       makeMember({
-        hostedAiUsagePeriods: [makePeriod()],
         id: "hbm_container",
         identity: null,
         threadContainer: {
@@ -63,6 +92,26 @@ describe("hosted ops member usage", () => {
       }),
       makeMember({ id: "hbm_person" }),
     ]);
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
+      new Map([
+        ["hbm_container", {
+          decision: makeUsageGateDecision({ allowed: true }),
+          periodBlockedAt: new Date("2026-07-22T17:25:30.000Z"),
+          periodPersistedAt: PERIOD_UPDATED_AT,
+        }],
+        ["hbm_person", {
+          decision: makeUsageGateDecision({
+            allowed: true,
+            memberId: "hbm_person",
+            remainingUsdMicros: 4_500_000n,
+            spentUsdMicros: 0n,
+            usageCreditLedgerVersion: 0n,
+          }),
+          periodBlockedAt: null,
+          periodPersistedAt: null,
+        }],
+      ]),
+    );
     const prisma = asPrismaClientForHostedOpsTest({
       hostedAiUsage: {
         groupBy: groupUsage,
@@ -83,6 +132,7 @@ describe("hosted ops member usage", () => {
       "hbm_person",
     ]);
     expect(dashboard.rows[0]).toMatchObject({
+      allowanceStatus: "available",
       allTimeUsageUsdMicros: "7250000",
       containerOwnerMemberId: "hbm_person",
       memberKind: "group_container",
@@ -229,6 +279,33 @@ describe("hosted ops member usage", () => {
     expect(tx.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
   });
 
+  test("rejects a date-active row that is no longer the canonical period", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        periodEnd: new Date("2026-07-25T00:00:00.000Z"),
+        periodStart: new Date("2026-06-25T00:00:00.000Z"),
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
+    const tx = createResetTransactionFixture();
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) =>
+        run(tx)),
+    });
+
+    await expect(resetHostedOpsMemberUsage({
+      expectedPeriodUpdatedAt: PERIOD_UPDATED_AT,
+      expectedUsageCreditLedgerVersion: 4n,
+      memberId: "hbm_container",
+      now: NOW,
+      periodStart: PERIOD_START,
+    }, prisma)).rejects.toBeInstanceOf(HostedOpsMemberUsageResetStaleError);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedLinqDelivery.update).not.toHaveBeenCalled();
+    expect(tx.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
+  });
+
   test("rejects a stale row before releasing its notice claim", async () => {
     const tx = createResetTransactionFixture({
       periodUpdatedAt: new Date(PERIOD_UPDATED_AT.getTime() + 1_000),
@@ -329,7 +406,6 @@ function makeMember(overrides: Record<string, unknown> = {}) {
   return {
     billingStatus: "active",
     createdAt: new Date("2026-06-01T00:00:00.000Z"),
-    hostedAiUsagePeriods: [],
     hostedGroupRuntime: null,
     id: "hbm_person",
     identity: { maskedPhoneNumberHint: "••• 0101" },
@@ -341,14 +417,26 @@ function makeMember(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makePeriod() {
+function makeUsageGateDecision(overrides: Record<string, unknown> = {}) {
   return {
-    blockedAt: new Date("2026-07-22T17:25:30.000Z"),
+    allowed: false,
+    allowanceSource: "thread_container",
+    billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
+    memberId: "hbm_container",
     periodEnd: PERIOD_END,
     periodStart: PERIOD_START,
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 500_000n,
+    retryAfter: PERIOD_END,
     spentUsdMicros: 4_522_964n,
-    updatedAt: PERIOD_UPDATED_AT,
+    usageCreditBalanceUsdMicros: 500_000n,
+    usageCreditLedgerVersion: 3n,
+    userNotice: {
+      code: "thread_usage_limit_reached",
+      message: "Usage limit reached.",
+    },
+    ...overrides,
   };
 }
 

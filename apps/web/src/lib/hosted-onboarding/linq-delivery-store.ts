@@ -67,6 +67,7 @@ const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
 export type HostedAiUsageLimitNoticeDeliveryClaim =
   | {
     idempotencyKey: string;
+    providerIdempotencyKey: string;
     status: "claimed";
   }
   | {
@@ -313,7 +314,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   } satisfies HostedLinqDeliveryProviderDispatchData;
   const createData = {
     ...data,
-    id: buildHostedLinqDeliveryId(idempotencyKey),
+    id: generateHostedRandomPrefixedId("hld"),
     idempotencyKey,
   };
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
@@ -455,8 +456,13 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
       template: "ai_usage_quota",
     });
     if (claim.claimed) {
+      if (!claim.id) {
+        throw new Error("Hosted AI usage notice claim is missing its attempt id.");
+      }
       return {
         idempotencyKey,
+        providerIdempotencyKey:
+          buildHostedAiUsageNoticeProviderIdempotencyKey(claim.id),
         status: "claimed",
       };
     }
@@ -521,6 +527,16 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
         usageCreditLedgerVersion: input.usageCreditLedgerVersion.toString(),
       };
   return `ai-usage-gate:${sha256Hex(JSON.stringify(capacityEpoch)).slice(0, 32)}`;
+}
+
+export function buildHostedAiUsageNoticeProviderIdempotencyKey(
+  deliveryId: string,
+): string {
+  const normalized = deliveryId.trim();
+  if (!normalized) {
+    throw new TypeError("Hosted AI usage notice delivery id is required.");
+  }
+  return `ai-usage-attempt:${normalized}`;
 }
 
 function normalizeHostedAiUsageNoticePeriodStart(value: Date | string): Date {
