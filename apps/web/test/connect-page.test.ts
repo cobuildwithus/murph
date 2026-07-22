@@ -1801,6 +1801,16 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
   assert.match(appDownloadMarkup, /aria-label="Download app for Apple Health"[^>]+self-end/u);
 });
 
+test("connect source card design study renders the production action states", async () => {
+  const { ConnectSourceCardStudy } = await import("../app/design/connect-source-card-study");
+  const markup = renderToStaticMarkup(createElement(ConnectSourceCardStudy));
+
+  assert.match(markup, /id="connect-source-card-actions"/u);
+  assert.match(markup, /aria-label="Disconnect Garmin"/u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
+  assert.match(markup, /aria-label="Connect Fitbit"/u);
+});
+
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
   const { resolveConnectSourceConnectionStates } = await import("../app/(dashboard)/connect/page");
 
