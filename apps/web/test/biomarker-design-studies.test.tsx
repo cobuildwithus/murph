@@ -74,6 +74,7 @@ import {
   BiomarkerBoundaryResultStudy,
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
+  BiomarkerPreparingStateStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -90,9 +91,11 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Biomarker detail");
   expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
@@ -102,11 +105,34 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const componentsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(componentsMarkup).toContain(">Components<");
+  expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
+});
+
+test("biomarker preparing study reassures members and previews the index structure", () => {
+  const markup = renderToStaticMarkup(createElement(BiomarkerPreparingStateStudy));
+
+  expect(markup).toContain('data-design-study="biomarker-preparing"');
+  expect(markup).toContain("Your records are in. Murph is organizing them.");
+  expect(markup).toContain("appear together here in one private index");
+  expect(markup).toContain("Future results update the same index");
+  expect(markup).not.toContain("one history");
+  expect(markup).toContain("Updating your biomarker index");
+  expect(markup).toContain('aria-live="polite"');
+  expect(markup).toContain('role="status"');
+  expect(markup).toContain("What appears next");
+  expect(markup).toContain("From your devices");
+  expect(markup).toContain("From the lab");
+  expect(markup).toContain("Index preview");
+  expect(markup).toContain("motion-reduce:animate-none");
+  expect(markup).toContain("lg:grid-cols-[minmax(0,1.08fr)_minmax(22rem,0.92fr)]");
+  expect(markup).not.toContain("Preparing your lab history");
+  expect(markup).not.toContain("rounded-xl");
+  expect(markup).not.toContain("shadow");
 });
 
 test("biomarker design data covers the full synthetic catalog", () => {

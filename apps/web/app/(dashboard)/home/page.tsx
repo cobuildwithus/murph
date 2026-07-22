@@ -64,7 +64,7 @@ export default async function HomePage({
     usageGate,
     deviceSyncCompletionDialog,
     connectedAppCompletionDialog,
-    showInitialVisitContactCard,
+    initialVisitContactAction,
   ] = await Promise.all([
     shouldShowHomeDeviceSyncStep({
       member,
@@ -86,8 +86,8 @@ export default async function HomePage({
       searchParams: resolvedSearchParams,
     }),
     showInitialVisitPersonaPicker
-      ? resolveHomeInitialVisitShowsContactCard()
-      : Promise.resolve(false),
+      ? resolveHomeInitialVisitContactAction()
+      : Promise.resolve(null),
   ]);
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
@@ -139,7 +139,7 @@ export default async function HomePage({
 
       {showInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
-          showContactCard={showInitialVisitContactCard}
+          contactAction={initialVisitContactAction}
         />
       ) : null}
 
@@ -176,13 +176,11 @@ function readFirstSearchParamValue(
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function resolveHomeInitialVisitShowsContactCard(): Promise<boolean> {
-  const option = await resolveHostedMurphContactOption({
+async function resolveHomeInitialVisitContactAction() {
+  return resolveHostedMurphContactOption({
     message: {
       body: "Hey Murph, do your thing",
       subject: "Hey Murph, do your thing",
     },
   });
-
-  return option?.kind === "text";
 }

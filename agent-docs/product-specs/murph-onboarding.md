@@ -230,8 +230,15 @@ not relevant, or explicitly skipped before answered completion:
    owner. If the member names Function Health, proactively send
    https://my.functionhealth.com/documents and ask for the Lab Results of Record
    PDFs. Naming the provider alone does not start a child. Once a PDF or paste
-   exists, the root verifies or creates its durable attachment, document, or
-   import ref before replying. When a V2 slot is available and
+   exists in durably accepted input, Murph immediately sends one short,
+   natural receipt update before slower preservation or extraction work. It
+   says only that the report arrived and what work is starting; it does not
+   claim the report is already saved, parsed, analyzed, or in the health
+   record, and it is not repeated in the substantive reply. When another
+   onboarding progress trigger applies in the same turn, Murph coalesces them
+   into one truthful update before the slower work. The root then
+   verifies or creates the durable attachment, document, or import ref before
+   that substantive reply. When a V2 slot is available and
    structured extraction can materially improve later help, spawn one child by
    default from that exact source. Skip it when the source is already structured
    or extraction cannot change later help. If the current answer needs the
@@ -315,7 +322,12 @@ questions below.
 Once the member selects or confirms a desired change likely to depend on
 repeated behavior, read the behavior-followthrough owner and make one bounded
 evidence pass across the foundation, relevant canonical records, connected
-data, and confirmed enrichment. Before selecting a first behavior, ground the
+data, and confirmed enrichment. When that pass spans more than one source or
+owner, Murph sends one short natural progress update before the first read,
+names the few member-facing areas being checked and why they matter to the
+chosen next step, and continues immediately. This is required even when each
+individual read is routine, is omitted for one targeted read, and is not
+repeated in the substantive reply. Before selecting a first behavior, ground the
 member's outcome and reason, current routine or baseline, relevant data, prior
 attempts, and the main conditions that help or disrupt follow-through. Ask up
 to three short questions across separate turns to fill only decision-changing gaps—
@@ -532,4 +544,6 @@ reflection-only scheduled message returns skip.
     movement/protocol, supplement, and medical/safety family, up to three,
     from the durable accepted source. Murph replies after the spawns without
     claiming completion and confirms child-owned writes only after canonical
-    readback. Onboarding lab evidence is durably preserved before the next reply.
+    readback. An accepted onboarding lab source gets an immediate natural
+    receipt update before slower preservation or extraction, and the evidence
+    is durably preserved before the substantive reply.
