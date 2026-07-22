@@ -139,6 +139,10 @@ test("biomarker index study keeps device context, source flags, and area disclos
   expect(markup).toContain("md:block");
   expect(markup).toContain("line-clamp-2");
   expect(markup).toContain("md:line-clamp-none");
+  expect(markup).toContain("border-y border-border/70");
+  expect(markup).toContain("h-12 w-1 shrink-0 rounded-full");
+  expect(markup).not.toContain("h-8 w-1 shrink-0 rounded-full");
+  expect(markup).toContain("overflow-hidden rounded-xl border border-border/70 bg-card/70");
   expect(markup).toContain('type="search"');
   expect(markup).toContain('placeholder="Search biomarkers"');
   expect(markup).toContain("Review");
@@ -169,6 +173,21 @@ test("biomarker index study applies the status control to the visible rows", asy
   );
 
   try {
+    const study = rendered.container.querySelector('[data-design-study="biomarker-index"]');
+    expect(study).not.toBeNull();
+    const studyClassTokens = study?.className.split(/\s+/u) ?? [];
+    expect(studyClassTokens).not.toContain("rounded-xl");
+    expect(studyClassTokens).not.toContain("border");
+    expect(studyClassTokens).not.toContain("bg-card/70");
+
+    const deviceSection = rendered.container.querySelector(
+      'section[aria-labelledby="device-study-heading"]',
+    );
+    const deviceSectionClassTokens = deviceSection?.className.split(/\s+/u) ?? [];
+    expect(deviceSectionClassTokens).toContain("border-y");
+    expect(deviceSectionClassTokens).not.toContain("rounded-xl");
+    expect(deviceSectionClassTokens).not.toContain("bg-card/70");
+
     const reviewButton = getButton(rendered.container, "Review");
     await click(rendered.window, reviewButton);
 
