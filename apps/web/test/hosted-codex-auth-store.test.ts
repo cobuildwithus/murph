@@ -629,12 +629,33 @@ describe("hosted Codex auth store", () => {
     expect(crypto.decrypt).not.toHaveBeenCalled();
   });
 
+  it("returns unconfigured without auth-policy checks when no connection exists", async () => {
+    const prisma = createCodexAuthPrismaHarness(null);
+    const crypto = createAccessSeedCrypto();
+    mocks.assertActiveHostedMemberAccessAllowed.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_ACCESS_REQUIRED",
+      httpStatus: 403,
+      message: "Hosted access is required.",
+    }));
+
+    await expect(readHostedCodexAuthAccessSeedForRuntime({
+      crypto,
+      knownConnectionVersion: null,
+      memberId: "member_123",
+      now: new Date("2026-07-21T20:00:00.000Z"),
+      prisma: prisma.client,
+    })).resolves.toEqual({
+      connectionVersion: null,
+      reason: "unconfigured",
+      schemaVersion: 1,
+      status: "unavailable",
+    });
+    expect(mocks.assertActiveHostedMemberAccessAllowed).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(crypto.decrypt).not.toHaveBeenCalled();
+  });
+
   it.each([
-    {
-      label: "unconfigured",
-      record: null,
-      version: null,
-    },
     {
       label: "disconnected",
       record: {

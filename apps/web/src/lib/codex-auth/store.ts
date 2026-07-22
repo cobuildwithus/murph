@@ -309,6 +309,14 @@ export async function readHostedCodexAuthAccessSeedForRuntime(input: {
     const record = await tx.hostedCodexAuthConnection.findUnique({
       where: { memberId: input.memberId },
     });
+    if (!record) {
+      return {
+        connectionVersion: null,
+        reason: "unconfigured",
+        schemaVersion: 1,
+        status: "unavailable",
+      };
+    }
     if (!await hostedCodexAuthRuntimeReadPolicyAllows({
       memberId: input.memberId,
       prisma: tx,
@@ -316,14 +324,6 @@ export async function readHostedCodexAuthAccessSeedForRuntime(input: {
       return {
         connectionVersion: record?.attemptId ?? null,
         reason: "needs_attention",
-        schemaVersion: 1,
-        status: "unavailable",
-      };
-    }
-    if (!record) {
-      return {
-        connectionVersion: null,
-        reason: "unconfigured",
         schemaVersion: 1,
         status: "unavailable",
       };
