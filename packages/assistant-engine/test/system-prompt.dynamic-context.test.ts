@@ -37,13 +37,16 @@ describe('assistant dynamic context prompt blocks', () => {
         'complete the user\'s current request first',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'your time together may pause soon unless more usage is added',
+        '$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'Do not expose token counts',
+        'single final usage-segment contract',
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        'Do not dramatize, guilt, pressure, send a separate warning, or repeat',
+        '`---` delimiter only when the channel reply-style guidance supports bubbles',
+      )
+      expect(layers.stableRouteCapabilityPrompt).toContain(
+        'Do not send a separate warning or repeat one already visible',
       )
     },
   )

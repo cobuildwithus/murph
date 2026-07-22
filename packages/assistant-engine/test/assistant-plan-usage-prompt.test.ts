@@ -14,7 +14,9 @@ describe("assistant plan usage guidance", () => {
     expect(guidance).toContain("Never call it automatically during onboarding");
     expect(guidance).toContain("cost-weighted included usage");
     expect(guidance).toContain("not a literal token count or cash balance");
-    expect(guidance).toContain("Communicate usage only through usedPercent and remainingPercent");
+    expect(guidance).toContain(
+      "When answering an explicit numerical usage question, communicate usage only through usedPercent and remainingPercent",
+    );
     expect(guidance).toContain("never expose, infer, or format internal currency amounts as usage progress");
     expect(guidance).toContain("invent no estimate, precision, scarcity, or urgency");
     expect(guidance).toContain("Never plead, imply Murph will die, use existential guilt");
