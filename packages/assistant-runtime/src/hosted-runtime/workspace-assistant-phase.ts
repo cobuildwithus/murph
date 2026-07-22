@@ -49,6 +49,7 @@ import {
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
   type AssistantInputEventRecord,
+  type MurphManagedAutomationDiagnosticStage,
   type AssistantTurnEnvironment,
   type HostedAssistantTurnTimingStage,
 } from "@murphai/assistant-engine";
@@ -2178,10 +2179,14 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     return null;
   }
 
+  let diagnosticStage: MurphManagedAutomationDiagnosticStage | null = null;
   let result: Awaited<ReturnType<typeof applyMurphManagedAutomations>>;
   try {
     result = await applyMurphManagedAutomations({
       now: new Date(resolveHostedAssistantPhaseNowMs(input.input)),
+      onDiagnosticStage(stage) {
+        diagnosticStage = stage;
+      },
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       ...(input.defaultRoute !== undefined
         ? { defaultRoute: input.defaultRoute }
@@ -2195,6 +2200,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     const failure = buildHostedRuntimeFailureDiagnostics(
       error,
       "Hosted managed automation setup failed.",
+      { includeSafeIdentity: true },
     );
     await writeHostedRuntimeLogBestEffort({
       entry: {
@@ -2210,6 +2216,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
         phase: "error",
         redactedJson: {
           ...failure.redactedJson,
+          ...buildHostedManagedAutomationStageDiagnostics(diagnosticStage),
           murphManagedAutomationFailed: true,
         },
       },
@@ -2248,6 +2255,7 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     const failure = buildHostedRuntimeFailureDiagnostics(
       stableKeyFailure,
       "Hosted managed automation stable-key setup failed.",
+      { includeSafeIdentity: true },
     );
     await writeHostedRuntimeLogBestEffort({
       entry: {
@@ -2338,6 +2346,26 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       murphManagedAutomationSkipped: result.skipped,
       murphManagedAutomationUpdated: result.updated,
     },
+  };
+}
+
+function buildHostedManagedAutomationStageDiagnostics(
+  diagnostic: MurphManagedAutomationDiagnosticStage | null,
+): HostedRuntimeRedactedJson {
+  if (!diagnostic) {
+    return {
+      murphManagedAutomationStage: "start",
+    };
+  }
+
+  return {
+    murphManagedAutomationStage: diagnostic.stage,
+    ...(diagnostic.seedCount === undefined
+      ? {}
+      : { murphManagedAutomationSeedCount: diagnostic.seedCount }),
+    ...(diagnostic.seedPosition === undefined
+      ? {}
+      : { murphManagedAutomationSeedPosition: diagnostic.seedPosition }),
   };
 }
 
@@ -7235,6 +7263,7 @@ async function writeHostedDeviceConnectRuntimeLog(input: {
 function buildHostedRuntimeFailureDiagnostics(
   error: unknown,
   fallbackMessage: string,
+  options: { includeSafeIdentity?: boolean } = {},
 ): {
   errorCode: string;
   redactedJson: HostedRuntimeRedactedJson;
@@ -7254,6 +7283,23 @@ function buildHostedRuntimeFailureDiagnostics(
   ) ?? fallbackMessage;
   const redactedJson: HostedRuntimeRedactedJson = {
     errorCode,
+    ...(options.includeSafeIdentity === true
+      && typeof diagnostics?.errorName === "string"
+      ? { errorName: diagnostics.errorName }
+      : {}),
+    ...(options.includeSafeIdentity === true
+      && typeof diagnostics?.errorStatus === "number"
+      ? { errorStatus: diagnostics.errorStatus }
+      : {}),
+    ...(options.includeSafeIdentity === true
+      && typeof diagnostics?.errorCodeDetail === "string"
+      ? {
+          errorCodeDetail: toHostedRuntimeLogCode(diagnostics.errorCodeDetail),
+        }
+      : {}),
+    ...(options.includeSafeIdentity === true
+      ? { errorDetailPresent: typeof diagnostics?.errorDetail === "string" }
+      : {}),
     safeErrorMessage,
   };
 
