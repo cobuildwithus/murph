@@ -161,6 +161,207 @@ Settings changed.
   ]);
 });
 
+test("does not manufacture proof syntax by joining tokens around comments", () => {
+  const changedPaths = [
+    "apps/web/app/settings/page.tsx",
+    "apps/web/app/design/components-content.tsx",
+  ];
+  const splitHeading = validateFrontendDesignProof({
+    changedPaths,
+    prBody: `
+#<!-- hidden --># Design proof
+
+- Design page: /design?tab=components#settings
+- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)
+- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)
+`,
+  });
+  assert.deepEqual(splitHeading.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+
+  const splitImageMarker = validateFrontendDesignProof({
+    changedPaths,
+    prBody: `
+## Design proof
+
+- Design page: /design?tab=components#settings
+- Desktop screenshot: !<!-- hidden -->[Desktop settings](https://example.test/desktop.png)
+- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)
+`,
+  });
+  assert.deepEqual(splitImageMarker.errors, [
+    "The Design proof section must include a hosted desktop screenshot from the design page.",
+  ]);
+});
+
+test("preserves comment line breaks between proof labels and values", () => {
+  const changedPaths = [
+    "apps/web/app/settings/page.tsx",
+    "apps/web/app/design/components-content.tsx",
+  ];
+  const splitRoute = validateFrontendDesignProof({
+    changedPaths,
+    prBody: [
+      "## Design proof",
+      "",
+      "- Design page:<!--",
+      "hidden",
+      "--> /design?tab=components#settings",
+      "- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)",
+      "- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)",
+    ].join("\n"),
+  });
+  assert.deepEqual(splitRoute.errors, [
+    "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
+  ]);
+
+  const splitScreenshot = validateFrontendDesignProof({
+    changedPaths,
+    prBody: [
+      "## Design proof",
+      "",
+      "- Design page: /design?tab=components#settings",
+      "- Desktop screenshot:<!--",
+      "hidden",
+      "--> ![Desktop settings](https://example.test/desktop.png)",
+      "- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)",
+    ].join("\r\n"),
+  });
+  assert.deepEqual(splitScreenshot.errors, [
+    "The Design proof section must include a hosted desktop screenshot from the design page.",
+  ]);
+});
+
+test("does not count a Design proof section inside a fenced code block", () => {
+  const changedPaths = [
+    "apps/web/app/settings/page.tsx",
+    "apps/web/app/design/components-content.tsx",
+  ];
+  const proofLines = [
+    "## Design proof",
+    "",
+    "- Design page: /design?tab=components#settings",
+    "- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)",
+    "- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)",
+  ];
+
+  for (const prBody of [
+    ["```md", ...proofLines, "```"].join("\n"),
+    ["~~~md", ...proofLines, "~~~"].join("\n"),
+    ["```md", ...proofLines].join("\n"),
+  ]) {
+    const result = validateFrontendDesignProof({ changedPaths, prBody });
+    assert.deepEqual(result.errors, [
+      "Add a `## Design proof` section to the pull request body.",
+    ]);
+  }
+});
+
+test("does not count proof inside raw HTML containers", () => {
+  const changedPaths = [
+    "apps/web/app/settings/page.tsx",
+    "apps/web/app/design/components-content.tsx",
+  ];
+  const proofLines = [
+    "## Design proof",
+    "",
+    "- Design page: /design?tab=components#settings",
+    "- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)",
+    "- Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)",
+  ];
+
+  for (const tag of ["div", "pre", "script", "style", "textarea"]) {
+    const prBody = [`<${tag}>`, ...proofLines, `</${tag}>`].join("\n");
+    const result = validateFrontendDesignProof({ changedPaths, prBody });
+    assert.deepEqual(result.errors, [
+      "Add a `## Design proof` section to the pull request body.",
+    ]);
+  }
+
+  const unclosedPre = validateFrontendDesignProof({
+    changedPaths,
+    prBody: ["<pre>", ...proofLines].join("\n"),
+  });
+  assert.deepEqual(unclosedPre.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+
+  const nestedDiv = validateFrontendDesignProof({
+    changedPaths,
+    prBody: ["<div>", "<div></div>", ...proofLines, "</div>"].join("\n"),
+  });
+  assert.deepEqual(nestedDiv.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+
+  const voidBlockTag = validateFrontendDesignProof({
+    changedPaths,
+    prBody: ["<hr>", ...proofLines].join("\n"),
+  });
+  assert.deepEqual(voidBlockTag.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+
+  for (const [start, end] of [
+    ["<span>", "</span>"],
+    ["<template>", "</template>"],
+    ["<?proof", "?>"],
+    ["<!PROOF", ">"],
+    ["<![CDATA[", "]]>"],
+  ]) {
+    const delimitedBlock = validateFrontendDesignProof({
+      changedPaths,
+      prBody: [start, ...proofLines, end].join("\n"),
+    });
+    assert.deepEqual(delimitedBlock.errors, [
+      "Add a `## Design proof` section to the pull request body.",
+    ]);
+  }
+});
+
+test("accepts proof after a raw HTML block and standalone HTML images", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/app/settings/page.tsx",
+      "apps/web/app/design/components-content.tsx",
+    ],
+    prBody: [
+      "<div>",
+      "Supporting context",
+      "</div>",
+      "",
+      "## Design proof",
+      "",
+      "- Design page: /design?tab=components#settings",
+      '- Desktop screenshot: <img src="https://example.test/desktop.png">',
+      '- Mobile screenshot: <img src="https://example.test/mobile.png">',
+    ].join("\n"),
+  });
+
+  assert.deepEqual(result.errors, []);
+});
+
+test("does not count proof fields inside indented code blocks", () => {
+  const result = validateFrontendDesignProof({
+    changedPaths: [
+      "apps/web/app/settings/page.tsx",
+      "apps/web/app/design/components-content.tsx",
+    ],
+    prBody: [
+      "## Design proof",
+      "",
+      "    - Design page: /design?tab=components#settings",
+      "\t- Desktop screenshot: ![Desktop settings](https://example.test/desktop.png)",
+      "    - Mobile screenshot: ![Mobile settings](https://example.test/mobile.png)",
+    ].join("\n"),
+  });
+
+  assert.deepEqual(result.errors, [
+    "Add a `## Design proof` section to the pull request body.",
+  ]);
+});
+
 test("reports every missing frontend design proof requirement", () => {
   const result = validateFrontendDesignProof({
     changedPaths: ["apps/web/app/settings/page.tsx"],
