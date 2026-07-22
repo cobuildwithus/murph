@@ -1954,13 +1954,13 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('If the user gives only a name, continue.')
     expect(raw).toContain(
-      'What would you most like from your health—something you want to change, understand, handle, or be able to do?',
+      'What would you most like from your health—something you want to improve, understand, handle, or be able to do?',
     )
     expect(compact).toContain(
       'start the same reply by greeting them by the name they just gave, then give a short two- or three-sentence bridge on how Murph works before the question',
     )
     expect(compact).toContain(
-      "the hard part usually isn't knowing what to do. It's fitting it into your real life and following through.",
+      "You might already know what you want to improve about your health. Following through is often the hard part. That's where I can help.",
     )
     expect(compact).toContain(
       'Do not frame the bridge around getting healthy, as if the user is starting from unhealthy.',

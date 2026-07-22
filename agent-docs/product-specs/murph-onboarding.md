@@ -135,7 +135,7 @@ and which mode fits now:
 
 A useful default is:
 
-> What would you most like from your health—something you want to change,
+> What would you most like from your health—something you want to improve,
 > understand, handle, or be able to do?
 
 Do not bundle this with additional intake questions. The broad anchor does not
