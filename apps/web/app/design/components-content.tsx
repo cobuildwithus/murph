@@ -546,7 +546,7 @@ export function ComponentsContent() {
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Group funding uses one shared card and the standard usage-credit
-            amount dialog. The live flow keeps payment confirmation in Stripe.
+            amount dialog. Credit is added only after payment is complete.
           </p>
           <div
             className="max-w-xl"
