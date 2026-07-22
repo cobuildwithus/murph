@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether ledger or plan mechanics apply.
@@ -23,7 +23,9 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, required
 specialist audits, any required Claude Code UI double-check or credit-exhaustion
 `frontend-review` substitute, parent final review,
-plan/ledger closure, and scoped commit;
+plan/ledger closure, and scoped commit. User-facing frontend UI work also requires
+the production component or section on the appropriate `/design` catalog tab and
+hosted desktop and mobile screenshots from that tab in the PR;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the pushed-head ReviewGPT gate.
 
@@ -76,7 +78,7 @@ proof, or the normal commit and PR requirements.
 6. When `frontend-review` applies, spawn a dedicated audit subagent, hand it `agent-docs/prompts/frontend-review.md` plus the audit handoff packet below, and run it before final review. Keep it review-only and scope it to user-facing `apps/web` surfaces plus the frontend guidance in `agent-docs/FRONTEND.md`. At the end of step 9, run the separate Claude Code UI double-check or use the `frontend-review` substitute on explicit Claude credit or quota exhaustion.
 7. Once implementation is stable enough to produce a truthful signal, run the coverage-bearing verification command chosen from the verification doc. Prefer `pnpm test:diff <path ...>` when it already covers the touched owner truthfully; otherwise run the edited owner package/app coverage command required there. When the canonical command dispatches through Crabbox to Blacksmith, retain the Testbox ID, timing summary, and linked Actions run with the verification evidence.
 8. When step 7 uses an owner-coverage or truthful diff-coverage lane, run the required `coverage-write` pass using the audit worker routing below. Hand that worker `agent-docs/prompts/coverage-write.md` plus the audit handoff packet below, and keep its write scope limited to tests or direct-proof scaffolding for already-landed behavior.
-9. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. After specialized review and coverage/proof work is stable, select exactly one required cross-cutting gate: ReviewGPT on an eligible PR lane that will use it, otherwise local `deep-review` when the trigger below applies. Never run both for the same completed change. Run a selected local `deep-review` now; a selected ReviewGPT gate runs after push in step 14. For user-facing `apps/web` UI work completed by a Codex-native parent, finish this step with the Claude Code UI double-check after the rendered evidence and any accepted UI fixes are stable, or use the credit-exhaustion `frontend-review` substitute defined below.
+9. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests and record the exact evidence. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. After specialized review and coverage/proof work is stable, select exactly one required cross-cutting gate: ReviewGPT on an eligible PR lane that will use it, otherwise local `deep-review` when the trigger below applies. Never run both for the same completed change. Run a selected local `deep-review` now; a selected ReviewGPT gate runs after push in step 14. For user-facing `apps/web` UI work completed by a Codex-native parent, finish this step with the Claude Code UI double-check after the rendered evidence and any accepted UI fixes are stable, or use the credit-exhaustion `frontend-review` substitute defined below.
 10. Run the final review locally as the parent agent: re-read the full diff with fresh eyes, walk the changed call paths, and check for remaining coverage or proof gaps, residual risks, and handoff completeness. If it finds meaningful missing tests or boundary-level verification, add the smallest high-impact proof before handoff instead of creating another default coverage pass. Do not spawn a final-review subagent; if the change feels too large or risky to final-review locally, that is a signal it belongs on the worktree/PR lane, where the external loop reviews it.
 11. Enter the review-resolution loop below for every required audit output. Completion means there are no unresolved accepted/actionable findings, not merely that the audit pass ran.
 12. Run or re-run the required checks through their canonical command after the implementation is stable, after any review-driven fixes, and after any required coverage pass lands. This keeps the final proof on the same truthful command surface regardless of whether the executor is local or Crabbox.
@@ -113,6 +115,11 @@ Required:
   `Category | Added | Deleted` table plus a total. This is reviewer orientation
   and a scope-anomaly signal, not a quality target or an automatic merge or
   architecture verdict; moves and generated churn may distort raw counts.
+- **Design proof for user-facing frontend UI.** Link the exact
+  `/design?tab=components` or `/design?tab=sections` catalog surface and embed
+  hosted desktop and mobile screenshots captured there. The screenshots must
+  show every materially changed component or section and the states needed for
+  review. PRs without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 

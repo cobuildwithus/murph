@@ -88,11 +88,15 @@ test("design page routes the biomarker studies through the dedicated sections ta
 
   expect(sectionsMarkup).toContain(">Sections<");
   expect(sectionsMarkup).toContain("Biomarker index");
+  expect(sectionsMarkup).toContain("Group usage funding");
   expect(sectionsMarkup).toContain("Biomarker detail");
   expect(sectionsMarkup).toContain("Boundary result detail");
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-boundary-result"');
+  expect(sectionsMarkup).toContain('data-design-study="group-usage-funding"');
+  expect(sectionsMarkup).toContain("Add usage to Sunday sleep crew");
+  expect(sectionsMarkup).toContain("Choose amount");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
   navigationMocks.tab = "components";
@@ -102,6 +106,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
+  expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain("Add usage to Sunday sleep crew");
+  expect(componentsMarkup).toContain("Choose amount");
   expect(componentsMarkup).toContain("max-w-5xl");
   expect(componentsMarkup).not.toContain("max-w-7xl");
 });

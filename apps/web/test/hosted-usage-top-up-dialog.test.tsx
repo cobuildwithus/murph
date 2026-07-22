@@ -171,12 +171,12 @@ vi.mock("@/src/components/ui/choice-card", () => ({
       title: ReactNode;
     }
   >(function ChoiceCard(
-    { description, disabled, id, meta, title, value },
+    { className, description, disabled, id, meta, title, value },
     ref,
   ) {
     return createElement(
       "label",
-      { htmlFor: id },
+      { className, htmlFor: id },
       createElement("input", {
         disabled,
         id,
@@ -221,7 +221,7 @@ test("opens from the settings deep link without preselecting a top-up", async ()
     const dialog = rendered.container.querySelector('[role="dialog"]');
     assert.ok(dialog);
     assert.equal(dialog.classList.contains("overflow-y-auto"), true);
-    assert.equal(dialog.classList.contains("sm:max-w-lg"), true);
+    assert.equal(dialog.classList.contains("sm:max-w-xl"), true);
     const radioInputs = Array.from(
       rendered.container.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
     );
@@ -230,10 +230,10 @@ test("opens from the settings deep link without preselecting a top-up", async ()
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);
     assert.match(
       rendered.container.textContent ?? "",
-      /one-time payment\. Stripe confirms the payment before Murph adds it\./,
+      /Stripe confirms payment before credit is added\./,
     );
     assert.equal(
-      rendered.container.querySelector("h2")?.classList.contains("text-xl"),
+      rendered.container.querySelector("h2")?.classList.contains("text-3xl"),
       true,
     );
     assert.equal(rendered.container.querySelector("h2")?.tabIndex, -1);
@@ -243,6 +243,29 @@ test("opens from the settings deep link without preselecting a top-up", async ()
         ?.classList.contains("sm:grid-cols-3"),
       true,
     );
+    assert.equal(
+      rendered.container
+        .querySelector('[role="radiogroup"]')
+        ?.classList.contains("grid-cols-3"),
+      false,
+    );
+    const firstAmountCard = rendered.container.querySelector<HTMLLabelElement>(
+      'label[for="usage-top-up-0"]',
+    );
+    assert.ok(firstAmountCard);
+    assert.equal(firstAmountCard.classList.contains("min-h-20"), true);
+    assert.equal(firstAmountCard.classList.contains("sm:min-h-24"), true);
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("text-3xl"),
+      true,
+    );
+    const selectionActions = buttonByText(
+      rendered.container,
+      "Choose an amount",
+    ).parentElement;
+    assert.ok(selectionActions);
+    assert.equal(selectionActions.classList.contains("flex-col-reverse"), true);
+    assert.equal(selectionActions.classList.contains("sm:flex-row"), true);
     assert.equal(
       rendered.container.querySelector("legend")?.textContent,
       "Usage credit amount",
@@ -285,7 +308,11 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Add group usage/);
+    assert.match(rendered.container.textContent ?? "", /Choose an amount/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Stripe confirms the payment\./,
+    );
     await clickRadio(rendered.container, rendered.window, "usage_500");
     await clickButton(
       rendered.container,
@@ -1304,6 +1331,13 @@ test("lets the member choose a different amount with a fresh request key", async
     );
     assert.ok(firstAmount);
     const focus = vi.spyOn(firstAmount, "focus");
+    const lockedActions = buttonByText(
+      rendered.container,
+      "Choose a different amount",
+    ).parentElement;
+    assert.ok(lockedActions);
+    assert.equal(lockedActions.classList.contains("flex-col-reverse"), true);
+    assert.equal(lockedActions.classList.contains("sm:flex-row"), false);
     await clickButton(rendered.container, rendered.window, "Choose a different amount");
 
     assert.equal(buttonByText(rendered.container, "Choose an amount").disabled, true);

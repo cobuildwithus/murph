@@ -117,30 +117,28 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     >
       {props.offers.length > 0 || purchaseTriggerLabel ? (
         <DialogTrigger
-          render={<Button type="button" variant="outline" size="lg" />}
+          render={<Button type="button" size="xl" className="w-full" />}
         >
-          {purchaseTriggerLabel ?? (props.scope === "group" ? "Add group usage" : "Add usage")}
+          {purchaseTriggerLabel ?? (props.scope === "group" ? "Choose amount" : "Add usage")}
         </DialogTrigger>
       ) : null}
       <DialogContent
-        className="max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto border border-border bg-popover p-5 sm:max-w-lg sm:p-6"
+        className="max-h-[calc(100dvh-2rem)] gap-7 overflow-y-auto border border-border bg-popover p-6 sm:max-w-xl sm:p-8"
         initialFocus={titleRef}
       >
         <DialogHeader className="pr-10">
           <DialogTitle
             ref={titleRef}
             tabIndex={-1}
-            className="text-xl font-semibold leading-tight outline-none"
+            className="text-3xl font-semibold leading-[1.1] tracking-tight outline-none"
           >
             {statusContent
               ? statusContent.title
               : props.offers.length === 0
                 ? "Usage credit unavailable"
-                : props.scope === "group"
-                  ? "Add group usage"
-                  : "Add usage"}
+                : "Choose an amount"}
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="max-w-md text-base leading-6">
             {purchase
               ? purchase.targetConflict
                 ? "Manage the unfinished checkout before starting one for this usage destination."
@@ -150,8 +148,8 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
-                  ? "Choose how much usage credit to add to this group in a one-time payment. Stripe confirms the payment before Murph adds it."
-                  : "Choose how much usage credit to add in a one-time payment. Stripe confirms the payment before Murph adds it."}
+                  ? "Credit stays with this group. Stripe confirms the payment."
+                  : "Stripe confirms payment before credit is added."}
           </DialogDescription>
         </DialogHeader>
 
@@ -272,8 +270,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
                     value={offer.offerCode}
                     disabled={hasAttempt}
+                    className="min-h-20 [&>[data-slot=field]]:items-center sm:min-h-24"
                     title={
-                      <span className="font-serif text-xl font-semibold tabular-nums">
+                      <span className="font-serif text-3xl font-semibold tabular-nums">
                         {offer.amountLabel}
                       </span>
                     }
@@ -287,12 +286,27 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               </RadioGroup>
             </FieldSet>
             <FieldError>{selectionError}</FieldError>
-            <div className="flex flex-col gap-2">
+            <div
+              className={
+                selection.attempt.kind === "locked"
+                  ? "flex flex-col-reverse gap-2"
+                  : "flex flex-col-reverse gap-2 sm:flex-row"
+              }
+            >
               <Button
                 type="button"
-                className="w-full"
-                disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                variant="ghost"
                 size="lg"
+                className="sm:w-auto"
+                onClick={() => controller.handleOpenChange(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="w-full sm:flex-1"
+                disabled={!controller.selectedOffer || controller.checkoutInFlight}
+                size="xl"
                 aria-busy={controller.checkoutInFlight}
                 onClick={() => void controller.startCheckout()}
               >
@@ -307,21 +321,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                   type="button"
                   variant="outline"
                   size="lg"
-                  className="w-full"
+                  className="w-full sm:flex-1"
                   onClick={controller.changeAmount}
                 >
                   Choose a different amount
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="lg"
-                className="w-full"
-                onClick={() => controller.handleOpenChange(false)}
-              >
-                Cancel
-              </Button>
             </div>
           </div>
         ) : null}

@@ -39,6 +39,7 @@ vi.mock("@/src/components/ui/badge", () => ({
 vi.mock("@/src/components/ui/button", () => ({
   Button: (props: { children?: React.ReactNode }) =>
     React.createElement("button", null, props.children),
+  buttonVariants: () => "button-variant",
 }));
 
 vi.mock("@/src/components/ui/card", () => ({
@@ -52,6 +53,8 @@ vi.mock("@/src/components/ui/card", () => ({
     React.createElement("footer", null, props.children),
   CardHeader: (props: { children?: React.ReactNode }) =>
     React.createElement("header", null, props.children),
+  CardTitle: (props: { children?: React.ReactNode }) =>
+    React.createElement("div", null, props.children),
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
@@ -119,12 +122,11 @@ describe("hosted group funding page", () => {
     assert.match(markup, /<h1[^>]*>Add usage to Sunday sleep crew<\/h1>/u);
     assert.match(
       markup,
-      /Choose a one-time usage-credit amount for this group\./u,
+      /One payment gives this group extra usage\. Personal plans stay unchanged\./u,
     );
-    assert.match(
-      markup,
-      /The credit belongs to the group and is used only after its included usage\./u,
-    );
+    assert.match(markup, /Group usage · Running low/u);
+    assert.match(markup, /top-up:group/u);
+    assert.match(markup, /href="\/home"[^>]*>Open Murph<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
       payerMemberId: "member_payer",
@@ -139,6 +141,28 @@ describe("hosted group funding page", () => {
       undefined,
     );
   });
+
+  it.each([
+    ["healthy", "Available"],
+    ["low", "Running low"],
+    ["exhausted", "Paused"],
+    [null, "Status unavailable"],
+  ] as const)(
+    "projects the %s capacity state into the shortened group status label",
+    async (capacityState, capacityLabel) => {
+      mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
+        capacityState,
+        fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+        periodEnd: "2026-08-01T00:00:00.000Z",
+      });
+
+      const markup = renderToStaticMarkup(await GroupFundingPage({
+        params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      }));
+
+      assert.match(markup, new RegExp(`Group usage · ${capacityLabel}`, "u"));
+    },
+  );
 
   it("ignores a checkout return belonging to another funding target", async () => {
     mocks.readHostedUsageCreditPurchaseStatus.mockRejectedValueOnce(

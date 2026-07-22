@@ -325,6 +325,20 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
+### Group Usage Funding
+Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
+credit. Lead with the group name, one concise sentence explaining that the
+credit belongs to the group, and one primary action. Keep status in a muted
+badge and retain `Open Murph` as the quiet secondary action.
+
+Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
+large radio cards, then one primary `Continue to Stripe` action and a plain
+cancel action. The title and one short support sentence carry the explanation;
+do not repeat plan mechanics or payment detail across multiple paragraphs.
+Stack amount cards and actions on narrow screens, preserve visible focus and
+selection states, and render the production components on both the Components
+and Sections tabs of `/design` for review.
+
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
 short status label. Pair it with a disabled control and visible action copy such

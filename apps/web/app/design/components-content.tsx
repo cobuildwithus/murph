@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -75,6 +76,8 @@ import {
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
+import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -536,6 +539,32 @@ export function ComponentsContent() {
               <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
+        </Section>
+
+        <Separator />
+
+        <Section title="Usage credit">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Group funding uses one shared card and the standard usage-credit
+            amount dialog. The live flow keeps payment confirmation in Stripe.
+          </p>
+          <div
+            className="max-w-xl"
+            data-design-component="group-usage-funding"
+            id="group-usage-funding-component"
+          >
+            <GroupUsageFundingCard
+              action={
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  scope="group"
+                />
+              }
+              capacityLabel="Available"
+              groupName="Sunday sleep crew"
+            />
+          </div>
         </Section>
 
         <Separator />
