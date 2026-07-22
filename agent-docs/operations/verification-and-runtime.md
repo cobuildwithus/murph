@@ -104,8 +104,9 @@ hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
 assistant-runtime bridge, and assistant-engine tool/prompt tests; then run
 `pnpm test:diff` for every touched owner and `pnpm test:scenario-integrity`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete `frontend-review`,
-`coverage-write`, the review-only Fable UI pass, and ReviewGPT before handoff.
+putting a real query or ZIP in a durable artifact. Complete
+`product-experience-review`, `frontend-review`, `coverage-write`, the
+review-only Fable UI pass, and ReviewGPT before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
