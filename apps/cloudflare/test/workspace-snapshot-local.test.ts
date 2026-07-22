@@ -888,6 +888,7 @@ describe("workspace snapshot local restore", () => {
     const notePath = path.join(vaultRoot, "note.md");
     const wrapperDir = path.join(tempRoot, "bin");
     const processMarkerPath = path.join(tempRoot, "snapshot-processes");
+    const zstdArgumentsMarkerPath = path.join(tempRoot, "snapshot-zstd-arguments");
     const originalPath = process.env.PATH;
     const realTarPath = (await execFileAsync("which", ["tar"])).stdout.trim();
     const realZstdPath = (await execFileAsync("which", ["zstd"])).stdout.trim();
@@ -921,6 +922,7 @@ case "\${1:-}" in
   *) operation=zstd-compress ;;
 esac
 printf '%s\\n' "$operation" >> "\${MURPH_TEST_SNAPSHOT_PROCESS_MARKER:?}"
+printf '%s\\n' "$*" >> "\${MURPH_TEST_SNAPSHOT_ZSTD_ARGUMENTS_MARKER:?}"
 exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
 `,
         { mode: 0o700 },
@@ -929,6 +931,7 @@ exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
       process.env.MURPH_TEST_REAL_TAR = realTarPath;
       process.env.MURPH_TEST_REAL_ZSTD = realZstdPath;
       process.env.MURPH_TEST_SNAPSHOT_PROCESS_MARKER = processMarkerPath;
+      process.env.MURPH_TEST_SNAPSHOT_ZSTD_ARGUMENTS_MARKER = zstdArgumentsMarkerPath;
       process.env.PATH = `${wrapperDir}${path.delimiter}${originalPath ?? ""}`;
 
       const aad = buildHostedWorkspaceSnapshotV2Aad({ objectKey, snapshotId, userId });
@@ -975,11 +978,19 @@ exec "\${MURPH_TEST_REAL_ZSTD:?}" "$@"
         "zstd-compress",
         "zstd-decompress",
       ]);
+      const [compressArguments, decompressArguments] = (await readFile(
+        zstdArgumentsMarkerPath,
+        "utf8",
+      )).trim().split("\n");
+      expect(compressArguments?.split(" ")).toContain("-3");
+      expect(compressArguments?.split(" ")).not.toContain("-1");
+      expect(decompressArguments?.split(" ")).toContain("-d");
     } finally {
       process.env.PATH = originalPath;
       delete process.env.MURPH_TEST_REAL_TAR;
       delete process.env.MURPH_TEST_REAL_ZSTD;
       delete process.env.MURPH_TEST_SNAPSHOT_PROCESS_MARKER;
+      delete process.env.MURPH_TEST_SNAPSHOT_ZSTD_ARGUMENTS_MARKER;
       await rm(tempRoot, { force: true, recursive: true });
       dataKey.fill(0);
     }
