@@ -984,11 +984,7 @@ export async function selectNovelIntegrationIngestEvidence(
   if (source.kind !== "jsonl") {
     let unsafe = false;
     try {
-      for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source], {
-        onInvalidRow: () => {
-          unsafe = true;
-        },
-      })) {
+      for await (const row of readIntegrationIngestJsonlRows(input.vaultRoot, [source])) {
         const decision = visitRaw(row.raw, row.sourcePath, row.relativePath);
         if (decision === "unsafe") {
           unsafe = true;
@@ -2144,7 +2140,6 @@ async function* readIntegrationIngestJsonlRows(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
   options: {
-    onInvalidRow?: () => void;
     signal?: AbortSignal | null;
   } = {},
 ): AsyncGenerator<RawIntegrationIngestJsonlRow> {
@@ -2158,57 +2153,87 @@ async function* readIntegrationIngestJsonlRows(
       input: await openIntegrationIngestLineStream(vaultRoot, source, options.signal ?? null),
       crlfDelay: Infinity,
     });
-    yield* parseIntegrationIngestJsonlLines(lines, source, {
-      onInvalidRow: options.onInvalidRow,
-    });
+    yield* parseIntegrationIngestJsonlLines(lines, source);
   }
 }
 
 async function* parseIntegrationIngestJsonlLines(
   lines: AsyncIterable<string>,
   source: IntegrationIngestRowSource,
-  options: {
-    onInvalidRow?: () => void;
-  } = {},
 ): AsyncGenerator<RawIntegrationIngestJsonlRow> {
   let lineNumber = 0;
-  for await (const line of lines) {
-    lineNumber += 1;
-    if (line.length === 0) continue;
-    const lineBytes = Buffer.byteLength(line, "utf8");
-    if (lineBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
-      const error = new VaultError(
-        "INTEGRATION_INGEST_ROW_TOO_LARGE",
-        `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
-        { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
-      );
-      if (options.onInvalidRow) {
-        options.onInvalidRow();
-        continue;
+  let retainedGzipRowError: VaultError | null = null;
+  const lineIterator = lines[Symbol.asyncIterator]();
+  let iteratorNeedsClose = true;
+
+  try {
+    while (true) {
+      let nextLine: IteratorResult<string>;
+      try {
+        nextLine = await lineIterator.next();
+      } catch (error) {
+        iteratorNeedsClose = false;
+        throw error;
       }
-      throw error;
-    }
-    let raw: unknown;
-    try {
-      raw = JSON.parse(line);
-    } catch (error) {
-      const invalidJson = new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
-        relativePath: source.sourcePath,
+      if (nextLine.done) {
+        iteratorNeedsClose = false;
+        break;
+      }
+
+      const line = nextLine.value;
+      lineNumber += 1;
+      if (line.length === 0) continue;
+      const lineBytes = Buffer.byteLength(line, "utf8");
+      if (lineBytes > MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES) {
+        const error = new VaultError(
+          "INTEGRATION_INGEST_ROW_TOO_LARGE",
+          `Integration ingest row in "${source.sourcePath}" exceeds the ${MAX_INTEGRATION_INGEST_JOURNAL_ROW_BYTES}-byte journal limit.`,
+          { lineNumber, relativePath: source.sourcePath, rowPayloadBytes: lineBytes },
+        );
+        if (source.kind === "gzip") {
+          retainedGzipRowError ??= error;
+          continue;
+        }
+        throw error;
+      }
+      let raw: unknown;
+      try {
+        raw = JSON.parse(line);
+      } catch (error) {
+        const invalidJson = new VaultError("VAULT_INVALID_JSONL", `Invalid JSON on line ${lineNumber}.`, {
+          relativePath: source.sourcePath,
+          lineNumber,
+          cause: error instanceof Error ? error.message : String(error),
+        });
+        if (source.kind === "gzip") {
+          retainedGzipRowError ??= invalidJson;
+          continue;
+        }
+        throw invalidJson;
+      }
+      yield {
         lineNumber,
-        cause: error instanceof Error ? error.message : String(error),
-      });
-      if (options.onInvalidRow) {
-        options.onInvalidRow();
-        continue;
-      }
-      throw invalidJson;
+        raw,
+        relativePath: source.logicalPath,
+        sourcePath: source.sourcePath,
+      };
     }
-    yield {
-      lineNumber,
-      raw,
-      relativePath: source.logicalPath,
-      sourcePath: source.sourcePath,
-    };
+  } finally {
+    if (iteratorNeedsClose && source.kind === "gzip") {
+      try {
+        while (!(await lineIterator.next()).done) {
+          // Keep the gzip error owner alive when a row consumer fails early.
+        }
+      } catch {
+        // Preserve the consumer's original typed row error.
+      }
+    } else if (iteratorNeedsClose) {
+      await lineIterator.return?.();
+    }
+  }
+
+  if (retainedGzipRowError) {
+    throw retainedGzipRowError;
   }
 }
 
