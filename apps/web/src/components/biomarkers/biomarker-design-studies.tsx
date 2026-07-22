@@ -83,10 +83,10 @@ export function BiomarkerIndexStudy() {
   return (
     <article
       aria-labelledby="biomarker-index-study-heading"
-      className="overflow-hidden rounded-xl border border-border/70 bg-card/70"
+      className="min-w-0"
       data-design-study="biomarker-index"
     >
-      <header className="grid gap-8 border-b border-border/70 px-5 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <header className="grid gap-8 px-5 py-8 sm:px-8 sm:py-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
           <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Synthetic interface study
@@ -107,7 +107,7 @@ export function BiomarkerIndexStudy() {
         </p>
       </header>
 
-      <section aria-labelledby="device-study-heading">
+      <section aria-labelledby="device-study-heading" className="border-y border-border/70">
         <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
             From your devices
@@ -120,7 +120,7 @@ export function BiomarkerIndexStudy() {
           {BIOMARKER_DEVICE_STUDIES.map((metric) => (
             <li className="border-b border-border/70 last:border-b-0" key={metric.metricKey}>
               <Link
-                className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:items-center md:gap-5"
+                className="group grid min-h-28 grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-4 px-5 py-5 transition-colors duration-200 hover:bg-muted/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-8 md:grid-cols-[2.5rem_8rem_minmax(0,1fr)_auto] md:gap-5"
                 href={`/biomarkers/${metric.metricKey}`}
               >
                 <BiomarkerIcon className="size-9" routeId={metric.metricKey} />
@@ -128,7 +128,7 @@ export function BiomarkerIndexStudy() {
                   <p className="hidden font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground md:block">
                     {metric.category}
                   </p>
-                  <p className="text-base font-semibold text-foreground md:mt-1">{metric.name}</p>
+                  <p className="text-lg font-semibold text-foreground md:mt-1 md:text-base">{metric.name}</p>
                 </div>
                 <p className="col-span-2 line-clamp-2 max-w-[72ch] text-sm leading-relaxed text-muted-foreground md:col-span-1 md:line-clamp-none">
                   {metric.summary}
@@ -145,7 +145,7 @@ export function BiomarkerIndexStudy() {
         </ol>
       </section>
 
-      <section aria-labelledby="lab-study-heading" className="border-t border-border/70">
+      <section aria-labelledby="lab-study-heading">
         <div className="px-5 pt-8 sm:px-8 sm:pt-10">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="lab-study-heading">
             From the lab
@@ -205,7 +205,7 @@ export function BiomarkerIndexStudy() {
         </div>
 
         {visibleGroups.length > 0 ? (
-          <div className="border-t border-border/70">
+          <div className="overflow-hidden rounded-xl border border-border/70 bg-card/70">
             {visibleGroups.map((group) => (
               <BiomarkerStudyDisclosure
                 forcedOpen={normalizedQuery.length > 0}
@@ -217,7 +217,7 @@ export function BiomarkerIndexStudy() {
             ))}
           </div>
         ) : (
-          <div className="border-t border-border/70 px-5 py-14 text-center sm:px-8">
+          <div className="rounded-xl border border-border/70 bg-card/70 px-5 py-14 text-center sm:px-8">
             <p className="font-serif text-xl font-semibold text-foreground">No matching biomarkers</p>
             <p className="mt-1 text-sm text-muted-foreground">Try another name or source status.</p>
           </div>
@@ -288,7 +288,7 @@ function BiomarkerStudyRow({ result }: { result: BiomarkerStudyResult }) {
         <span
           aria-hidden="true"
           className={cn(
-            "h-8 w-1 shrink-0 rounded-full",
+            "h-12 w-1 shrink-0 rounded-full",
             result.status === "in-range" && "bg-primary",
             result.status === "reported" && "bg-muted-foreground/50",
             result.status === "review" && "bg-destructive",
