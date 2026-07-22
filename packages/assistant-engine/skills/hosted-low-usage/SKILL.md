@@ -124,7 +124,7 @@ template.
 When the user asks what to do, read current state again if the answer requires
 it and give the smallest useful comparison:
 
-For any Family usage or tier management follow-up, first call
+For any Family member usage follow-up, first call
 `murph.family_plan action="read_status"` when available. Offer the private
 Family Settings handoff only after an explicit owner request and only when the
 current result has `owner: true`, `billingActive: true`, and the intended person
@@ -144,9 +144,10 @@ not permission to choose an amount, start Checkout, or claim usage was added.
 - **Paid Edge:** Offer the authorized one-time add-usage handoff or waiting for
   the reset. There is no higher current direct tier to invent.
 - **Family Pulse:** Personal top-ups are unavailable. The Family plan owner may
-  add one-time usage for this active member or move the member's seat to Edge
-  after the shared Family management gate above. Do not send a sponsored
-  non-owner to personal Settings or claim a change happened.
+  add one-time usage for this active member after the shared Family usage gate
+  above. For seat-tier changes, follow the existing private management-handoff
+  rule. Do not send a sponsored non-owner to personal Settings or claim a
+  change happened.
 - **Family Edge:** Personal top-ups and a higher Family tier are unavailable.
   The Family plan owner may add one-time usage for this active member after the
   shared Family management gate above. Otherwise offer to use less included
