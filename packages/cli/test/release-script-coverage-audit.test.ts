@@ -1459,7 +1459,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('sole cross-cutting audit')
     expect(prReviewGptLoop).toContain('Never run both for the same completed')
     expect(prReviewGptLoop).toMatch(
-      /specialist `prompt-review`,\s+`frontend-review`, or write-capable `coverage-write`/u,
+      /specialist `prompt-review`,\s+`product-experience-review`, `frontend-review`, or write-capable\s+`coverage-write`/u,
     )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
