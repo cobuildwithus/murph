@@ -6,22 +6,7 @@ const DESIGN_CATALOG_PATHS = new Set([
   "apps/web/app/design/sections-content.tsx",
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
-const RAW_HTML_BLOCK_START = /^[ ]{0,3}<\/?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t]|\/?>|$)/iu;
-const RAW_HTML_LITERAL_START = /^[ ]{0,3}<(pre|script|style|textarea)(?:[ \t]|>|$)/iu;
-const RAW_HTML_LITERAL_END = /<\/(?:pre|script|style|textarea)[ \t]*>/iu;
-const RAW_HTML_DELIMITED_BLOCKS = [
-  { end: /\?>/u, start: /^[ ]{0,3}<\?/u },
-  { end: />/u, start: /^[ ]{0,3}<![A-Za-z]/u },
-  { end: /\]\]>/u, start: /^[ ]{0,3}<!\[CDATA\[/u },
-];
-const HTML_TAG_NAME = String.raw`[A-Za-z][A-Za-z0-9-]*`;
-const HTML_ATTRIBUTE_NAME = String.raw`[A-Za-z_:][A-Za-z0-9_.:-]*`;
-const HTML_ATTRIBUTE_VALUE = String.raw`(?:[^\x00-\x20"'=<>\x60]+|'[^']*'|"[^"]*")`;
-const HTML_ATTRIBUTE = String.raw`[ \t]+${HTML_ATTRIBUTE_NAME}(?:[ \t]*=[ \t]*${HTML_ATTRIBUTE_VALUE})?`;
-const RAW_HTML_COMPLETE_TAG_START = new RegExp(
-  `^[ ]{0,3}(?:<${HTML_TAG_NAME}(?:${HTML_ATTRIBUTE})*[ \\t]*/?>|</${HTML_TAG_NAME}[ \\t]*>)[ \\t]*$`,
-  "u",
-);
+const GITHUB_MARKDOWN_URL = "https://api.github.com/markdown";
 
 function isFrontendUiPath(filePath) {
   if (filePath.startsWith("apps/web/app/design/")) {
@@ -51,7 +36,7 @@ function isFrontendUiPath(filePath) {
   );
 }
 
-function validateFrontendDesignProof({ changedPaths, prBody }) {
+function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   const uiPaths = changedPaths.filter(isFrontendUiPath);
   if (uiPaths.length === 0) {
     return { required: false };
@@ -67,22 +52,21 @@ function validateFrontendDesignProof({ changedPaths, prBody }) {
     );
   }
 
-  const visiblePrBody = maskNonRenderedMarkdown(prBody);
-  const designProof = readMarkdownSection(visiblePrBody, "Design proof");
+  const designProof = readRenderedSection(prBodyHtml, "Design proof");
   if (!designProof) {
     errors.push("Add a `## Design proof` section to the pull request body.");
   } else {
-    if (!hasDesignPageLine(designProof)) {
+    if (!hasDesignPageItem(designProof)) {
       errors.push(
         "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
       );
     }
-    if (!hasScreenshotLine(designProof, "Desktop screenshot")) {
+    if (!hasScreenshotItem(designProof, "Desktop screenshot")) {
       errors.push(
         "The Design proof section must include a hosted desktop screenshot from the design page.",
       );
     }
-    if (!hasScreenshotLine(designProof, "Mobile screenshot")) {
+    if (!hasScreenshotItem(designProof, "Mobile screenshot")) {
       errors.push(
         "The Design proof section must include a hosted mobile screenshot from the design page.",
       );
@@ -92,152 +76,119 @@ function validateFrontendDesignProof({ changedPaths, prBody }) {
   return { errors, required: true, uiPaths };
 }
 
-function maskNonRenderedMarkdown(markdown) {
-  const withoutComments = maskMatches(
-    markdown,
-    /<!--[\s\S]*?(?:-->|$)/gu,
-  );
-  const withoutHtmlContainers = maskRawHtmlBlocks(withoutComments);
-  return maskIndentedCodeBlocks(maskFencedCodeBlocks(withoutHtmlContainers));
-}
-
-function maskMatches(value, pattern) {
-  return value.replace(pattern, maskCharacters);
-}
-
-function maskCharacters(value) {
-  return value.replace(/[^\r\n]/gu, " ");
-}
-
-function markdownLines(markdown) {
-  return markdown.match(/[^\r\n]*(?:\r\n|\r|\n|$)/gu) ?? [];
-}
-
-function maskRawHtmlBlocks(markdown) {
-  let blockUntilBlankLine = false;
-  let delimitedBlockEnd = null;
-  return markdownLines(markdown)
-    .map((line) => {
-      const content = line.replace(/[\r\n]+$/u, "");
-      if (delimitedBlockEnd) {
-        const maskedLine = maskCharacters(line);
-        if (delimitedBlockEnd.test(content)) {
-          delimitedBlockEnd = null;
-        }
-        return maskedLine;
-      }
-      if (blockUntilBlankLine) {
-        if (/^[ \t]*$/u.test(content)) {
-          blockUntilBlankLine = false;
-          return line;
-        }
-        return maskCharacters(line);
-      }
-
-      const literalStart = RAW_HTML_LITERAL_START.exec(content);
-      if (literalStart?.[1]) {
-        if (!RAW_HTML_LITERAL_END.test(content)) {
-          delimitedBlockEnd = RAW_HTML_LITERAL_END;
-        }
-        return maskCharacters(line);
-      }
-      const delimitedBlock = RAW_HTML_DELIMITED_BLOCKS.find(({ start }) =>
-        start.test(content)
-      );
-      if (delimitedBlock) {
-        if (!delimitedBlock.end.test(content)) {
-          delimitedBlockEnd = delimitedBlock.end;
-        }
-        return maskCharacters(line);
-      }
-      if (RAW_HTML_BLOCK_START.test(content)) {
-        blockUntilBlankLine = true;
-        return maskCharacters(line);
-      }
-      if (RAW_HTML_COMPLETE_TAG_START.test(content)) {
-        blockUntilBlankLine = true;
-        return maskCharacters(line);
-      }
-      return line;
-    })
-    .join("");
-}
-
-function maskFencedCodeBlocks(markdown) {
-  let fence = null;
-  return markdownLines(markdown)
-    .map((line) => {
-      const content = line.replace(/[\r\n]+$/u, "");
-      if (fence) {
-        const closingFence = new RegExp(
-          `^[ \\t]{0,3}${fence.marker}{${fence.length},}[ \\t]*$`,
-          "u",
-        );
-        const maskedLine = maskCharacters(line);
-        if (closingFence.test(content)) {
-          fence = null;
-        }
-        return maskedLine;
-      }
-
-      const openingFence = /^[ \t]{0,3}(`{3,}|~{3,})/u.exec(content);
-      if (!openingFence) {
-        return line;
-      }
-      const marker = openingFence[1]?.[0];
-      if (marker !== "`" && marker !== "~") {
-        return line;
-      }
-      fence = { length: openingFence[1].length, marker };
-      return maskCharacters(line);
-    })
-    .join("");
-}
-
-function maskIndentedCodeBlocks(markdown) {
-  return markdownLines(markdown)
-    .map((line) => (
-      /^(?: {4}| {0,3}\t)/u.test(line) ? maskCharacters(line) : line
-    ))
-    .join("");
-}
-
-function readMarkdownSection(markdown, heading) {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const headingMatch = new RegExp(
-    `^##[ \\t]+${escapedHeading}[ \\t]*$`,
-    "imu",
-  ).exec(markdown);
-  if (!headingMatch || typeof headingMatch.index !== "number") {
-    return null;
+function readRenderedSection(html, heading) {
+  const headingPattern = /<h2\b[^>]*>([\s\S]*?)<\/h2\s*>/giu;
+  let headingMatch;
+  while ((headingMatch = headingPattern.exec(html)) !== null) {
+    if (renderedText(headingMatch[1]) !== heading) {
+      continue;
+    }
+    const sectionStart = headingMatch.index + headingMatch[0].length;
+    const trailingHtml = html.slice(sectionStart);
+    const nextHeadingIndex = trailingHtml.search(/<h[12]\b/iu);
+    const section = nextHeadingIndex >= 0
+      ? trailingHtml.slice(0, nextHeadingIndex)
+      : trailingHtml;
+    return section.trim() || null;
   }
-  const sectionStart = headingMatch.index + headingMatch[0].length;
-  const trailingMarkdown = markdown.slice(sectionStart);
-  const nextHeadingIndex = trailingMarkdown.search(/^##[ \\t]+/mu);
-  const section = (
-    nextHeadingIndex >= 0
-      ? trailingMarkdown.slice(0, nextHeadingIndex)
-      : trailingMarkdown
-  );
-  return section.trim() || null;
+  return null;
 }
 
-function hasDesignPageLine(section) {
-  return /^[ \t]*(?:[-*][ \t]+)?Design page[ \t]*:[ \t]*[^\n]*\/design\?tab=(?:components|sections)(?:[#&\s)`]|$)[^\n]*$/imu.test(
-    section,
+function renderedText(html) {
+  return decodeHtmlEntities(html.replace(/<[^>]*>/gu, ""))
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function decodeHtmlEntities(value) {
+  return value
+    .replace(/&nbsp;/giu, " ")
+    .replace(/&amp;/giu, "&")
+    .replace(/&lt;/giu, "<")
+    .replace(/&gt;/giu, ">")
+    .replace(/&quot;/giu, '"')
+    .replace(/&#(?:0*39|x0*27);/giu, "'");
+}
+
+function findRenderedListItem(section, label) {
+  const listItemPattern = /<li\b[^>]*>([\s\S]*?)<\/li\s*>/giu;
+  let listItemMatch;
+  while ((listItemMatch = listItemPattern.exec(section)) !== null) {
+    if (renderedText(listItemMatch[1]).startsWith(`${label}:`)) {
+      return listItemMatch[1];
+    }
+  }
+  return null;
+}
+
+function hasDesignPageItem(section) {
+  const item = findRenderedListItem(section, "Design page");
+  if (!item) {
+    return false;
+  }
+  const designRoute = /\/design\?tab=(?:components|sections)(?:[#&\s"'<]|$)/iu;
+  if (designRoute.test(renderedText(item))) {
+    return true;
+  }
+
+  const anchorPattern = /<a\b([^>]*)>/giu;
+  let anchorMatch;
+  while ((anchorMatch = anchorPattern.exec(item)) !== null) {
+    const href = readQuotedAttribute(anchorMatch[1], "href");
+    if (href && designRoute.test(decodeHtmlEntities(href))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function readQuotedAttribute(attributes, name) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(
+    `(?:^|\\s)${escapedName}\\s*=\\s*(["'])(.*?)\\1`,
+    "iu",
+  ).exec(attributes);
+  return match?.[2] ?? null;
+}
+
+function hasScreenshotItem(section, label) {
+  const item = findRenderedListItem(section, label);
+  if (!item) {
+    return false;
+  }
+  return /<img\b[^>]*\b(?:src|data-canonical-src)\s*=\s*["']https?:\/\/[^"']+["'][^>]*>/iu.test(
+    item,
   );
 }
 
-function hasScreenshotLine(section, label) {
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  const hostedImage = [
-    String.raw`!\[[^\]]*\]\(https?:\/\/[^)\s]+\)`,
-    String.raw`<img\b[^>]*\bsrc=["']https?:\/\/[^"']+["'][^>]*>`,
-  ].join("|");
-  return new RegExp(
-    `^[ \\t]*(?:[-*][ \\t]+)?${escapedLabel}[ \\t]*:[ \\t]*(?:${hostedImage})`,
-    "imu",
-  ).test(section);
+async function renderPrBody(markdown) {
+  const endpoint = process.env.MURPH_GITHUB_MARKDOWN_URL?.trim()
+    || GITHUB_MARKDOWN_URL;
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json",
+    "User-Agent": "murph-frontend-design-proof",
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const token = process.env.MURPH_GITHUB_TOKEN?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const payload = { mode: "gfm", text: markdown };
+  const context = process.env.GITHUB_REPOSITORY?.trim();
+  if (context) {
+    payload.context = context;
+  }
+
+  const response = await fetch(endpoint, {
+    body: JSON.stringify(payload),
+    headers,
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`GitHub Markdown rendering failed (${response.status}).`);
+  }
+  return response.text();
 }
 
 function readChangedPaths(baseSha, headSha) {
@@ -251,7 +202,7 @@ function readChangedPaths(baseSha, headSha) {
     .filter(Boolean);
 }
 
-function main() {
+async function main() {
   const baseSha = process.env.MURPH_PR_BASE_SHA?.trim();
   const headSha = process.env.MURPH_PR_HEAD_SHA?.trim();
   const prBody = process.env.MURPH_PR_BODY ?? "";
@@ -261,14 +212,15 @@ function main() {
     );
   }
 
-  const result = validateFrontendDesignProof({
-    changedPaths: readChangedPaths(baseSha, headSha),
-    prBody,
-  });
-  if (!result.required) {
+  const changedPaths = readChangedPaths(baseSha, headSha);
+  if (!changedPaths.some(isFrontendUiPath)) {
     console.log("No user-facing hosted Web UI changes detected.");
     return;
   }
+  const result = validateFrontendDesignProof({
+    changedPaths,
+    prBodyHtml: await renderPrBody(prBody),
+  });
   if (result.errors.length > 0) {
     console.error("Frontend design proof is incomplete:");
     for (const error of result.errors) {
@@ -286,7 +238,12 @@ const isDirectRun =
   typeof process.argv[1] === "string"
   && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
-  main();
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : "Frontend design proof failed.");
+    process.exitCode = 1;
+  }
 }
 
-export { hasDesignPageLine, isFrontendUiPath, validateFrontendDesignProof };
+export { isFrontendUiPath, renderPrBody, validateFrontendDesignProof };
