@@ -130,7 +130,17 @@ test("BiomarkersPage is a private measured-results entrypoint", async () => {
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
   assert.match(markup, />Biomarkers</);
-  assert.match(markup, /No lab results yet/);
+  assert.match(markup, /data-biomarker-index-state="empty"/);
+  assert.match(markup, /Bring your health records together here./);
+  assert.match(markup, /Send Murph a lab report to start here./);
+  assert.match(markup, /supported connected wearable will appear automatically/);
+  assert.match(markup, /Ready when you are/);
+  assert.match(markup, /What appears next/);
+  assert.match(markup, />Biomarkers</);
+  assert.match(markup, />Sync</);
+  assert.doesNotMatch(markup, /Future results update the same index/);
+  assert.doesNotMatch(markup, />Index preview</);
+  assert.doesNotMatch(markup, /No lab results yet/);
   assert.doesNotMatch(markup, /Library/);
   assert.ok(mocks.getHostedPageAuthSnapshot.mock.calls.length >= 1);
 });
@@ -182,7 +192,16 @@ test("BiomarkersPage shows preparation copy while its replica refresh is pending
 
   const markup = renderToStaticMarkup(await BiomarkersPage());
 
-  assert.match(markup, /Preparing your lab history/);
+  assert.match(markup, /data-biomarker-index-state="preparing"/);
+  assert.match(markup, /Murph is organizing your health records./);
+  assert.match(markup, /Updating your biomarkers/);
+  assert.match(markup, /aria-live="polite"/);
+  assert.match(markup, /role="status"/);
+  assert.match(markup, />Building</);
+  assert.match(markup, /motion-reduce:animate-none/);
+  assert.doesNotMatch(markup, /Future results update the same index/);
+  assert.doesNotMatch(markup, />Index preview</);
+  assert.doesNotMatch(markup, />Sync</);
 });
 
 test("BiomarkersPage asks signed-out visitors to sign in before offering lab sync", async () => {
