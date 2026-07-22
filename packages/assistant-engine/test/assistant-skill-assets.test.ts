@@ -1920,19 +1920,33 @@ describe('assistant skill assets', () => {
       'use one delegated child to save that single answer',
     )
     expect(raw).toContain('### 2. Minimal identity')
-    expect(raw).toContain(
-      'Also, how old are you—and are you a guy or a girl?',
-    )
+    expect(raw).toContain(`For casual tone, use:
+
+\`\`\`text
+hey — what should i call you?
+
+also, how old are you, and are you a guy or a girl?
+\`\`\``)
+    expect(raw).toContain(`For formal tone, use:
+
+\`\`\`text
+What should I call you?
+
+How old are you and what's your gender?
+\`\`\``)
+    expect(raw.toLowerCase()).not.toContain('totally optional')
     expect(raw).not.toContain("Totally fine if you'd rather not say.")
     expect(compact).toContain(
-      'casually ask their age and whether they are a guy or a girl',
+      'Casual tone asks whether they are a guy or a girl. Formal tone asks their gender.',
     )
     expect(compact).toContain(
-      'accept a different self-description without correcting or pressing them',
+      'Age and gender remain optional, but do not announce or append that optionality to the question.',
+    )
+    expect(compact).toContain(
+      'Accept a different self-description without correcting or pressing them',
     )
     expect(raw).not.toContain('age and relevant sex or gender context')
     expect(raw).not.toContain("I'll only ask about sex or gender")
-    expect(raw).not.toContain("what's your gender")
     expect(raw).not.toContain('how do you identify')
     expect(raw).not.toContain('avoid dumb assumptions')
     expect(compact).toContain(

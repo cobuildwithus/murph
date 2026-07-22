@@ -106,12 +106,15 @@ policy, or setup instructions.
 
 ### 2. Collect minimal identity
 
-Learn the member's preferred name. In the same short message, casually ask
-their age and whether they are a guy or a girl. Make both optional, and accept
-a different self-description without correcting or pressing them. Do not add a
-clinical explanation unless the member asks. If the member declines, continue.
-Treat that bundled message as one minimal-identity checkpoint rather than
-splitting it into three setup turns.
+Learn the member's preferred name. In the same short message, ask their age and
+use the active tone preference for the final identity question: casual asks
+whether they are a guy or a girl, while formal asks their gender. Both details
+remain optional, but the visible question does not announce that with “totally
+optional” or similar copy. Accept a different self-description without
+correcting or pressing them. Do not add a clinical explanation unless the
+member asks. If the member declines, continue. Treat that bundled message as
+one minimal-identity checkpoint rather than splitting it into three setup
+turns.
 
 Never delay an immediate health need for identity collection. Answer or handle
 the need first.

@@ -167,17 +167,27 @@ Do not append an intake question or capability list.
 
 ### 2. Minimal identity
 
-Ask what the user wants to be called. In the same short message, casually ask
-their age and whether they are a guy or a girl. Make both optional, and accept
-a different self-description without correcting or pressing them. Do not add a
-clinical explanation unless the user asks.
+Ask what the user wants to be called. In the same short message, ask their age
+and use the active tone preference for the final identity question. Casual tone
+asks whether they are a guy or a girl. Formal tone asks their gender. Accept a
+different self-description without correcting or pressing them. Age and gender
+remain optional, but do not announce or append that optionality to the question.
+Do not add a clinical explanation unless the user asks.
 
-A natural default is:
+For casual tone, use:
+
+```text
+hey — what should i call you?
+
+also, how old are you, and are you a guy or a girl?
+```
+
+For formal tone, use:
 
 ```text
 What should I call you?
 
-Also, how old are you—and are you a guy or a girl?
+How old are you and what's your gender?
 ```
 
 Treat this bundled minimal-identity prompt as one onboarding question. Its
