@@ -10,6 +10,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
   buildHostedExecutionMemberPreferencesUpdatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -1161,6 +1162,82 @@ describe("hosted system mailbox notification execution context", () => {
           }),
         }),
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("selects only a pending-effects reconciliation from the shared runtime-control lane", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const manualWake = buildHostedExecutionRuntimeControlWake({
+      eventId: "runtime-control:manual-before-pending-effects",
+      kind: "runtime.manual-requested",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+    const pendingEffectsWake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+      effectId: "effect_approved_vault_export",
+      eventId: "runtime-control:pending-effects",
+      occurredAt: FIXED_NOW,
+      userId: "member_123",
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake: manualWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedRuntimeControlItem({
+          dedupeKey: "runtime-control:pending-effects",
+          id: "mailbox_item_system_pending_effects",
+          kind: "runtime.pending-effects-reconcile-requested",
+          laneSeq: "2",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: pendingEffectsWake,
+      });
+
+      await expect(resolveHostedSystemMailboxNextWakeAt({
+        allowedRouteActions: ["apply-runtime-control-request"],
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+        now: () => FIXED_NOW,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toBe(FIXED_NOW);
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-runtime-control-request"],
+        allowedWakeKinds: ["runtime.pending-effects-reconcile-requested"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toEqual(expect.objectContaining({
+        itemId: "mailbox_item_system_pending_effects",
+        status: "processed",
+      }));
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceMailboxItemId: "mailbox_item_system_pending_effects",
+          wake: expect.objectContaining({
+            effectId: "effect_approved_vault_export",
+            kind: "runtime.pending-effects-reconcile-requested",
+          }),
+        }),
+      );
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({
+          itemId: "mailbox_item_system_runtime_control",
+          status: "pending",
+          wake: expect.objectContaining({
+            kind: "runtime.manual-requested",
+          }),
+        }),
+      ]);
     } finally {
       await workspace.cleanup();
     }
@@ -2553,7 +2630,12 @@ function createResolvedMemberChannelsItem(input: {
   };
 }
 
-function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
+function createResolvedRuntimeControlItem(
+  overrides: Partial<Pick<
+    HostedMailboxItem,
+    "dedupeKey" | "id" | "kind" | "laneSeq"
+  >> = {},
+): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
     dedupeKey: "runtime-control:manual",
@@ -2569,6 +2651,7 @@ function createResolvedRuntimeControlItem(): HostedMailboxResolvedImportItem {
     payloadSchema: "murph.hosted-mailbox-item.v1",
     updatedAt: FIXED_NOW,
     userId: "member_123",
+    ...overrides,
   };
 
   return {
