@@ -1095,6 +1095,7 @@ describe('assistant vault-file send', () => {
       'https://murph.test/approve/haa_test',
     )
     expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.vaultFileSendOwnsResponseMedia).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       filename: 'report.pdf',
@@ -1133,6 +1134,7 @@ describe('assistant vault-file send', () => {
 
     expect(result.requiredVaultFileApprovalUrl).toBeUndefined()
     expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.vaultFileSendOwnsResponseMedia).toBe(true)
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       note:
@@ -1168,6 +1170,7 @@ describe('assistant vault-file send', () => {
 
     expect(result.finalActionPatch).toBeUndefined()
     expect(result.responseMediaPatch).toBeUndefined()
+    expect(result.vaultFileSendOwnsResponseMedia).toBe(true)
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
       filename: 'report.pdf',

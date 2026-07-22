@@ -160,7 +160,6 @@ import {
 } from "./hosted-runtime/detached-assistant-ask.ts";
 import {
   readHostedSystemMailboxHandledThroughSeq,
-  readHostedSystemMailboxState,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
@@ -498,36 +497,6 @@ async function hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
       item.lane === "system"
       && item.kind === "runtime.pending-effects-reconcile-requested"
     );
-}
-
-async function hostedInitialMailboxImportContainsOnlyCausalPendingEffectsWakes(input: {
-  prefetch: HostedMailboxPrefixPrefetch | null;
-  result: HostedMailboxImportCheckpointResult;
-  vaultRoot: string;
-}): Promise<boolean> {
-  if (input.prefetch !== null) {
-    return await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(input.prefetch);
-  }
-
-  const importedSystemMailboxItemIds =
-    input.result.importResult.importedSystemMailboxItemIds ?? [];
-  if (
-    importedSystemMailboxItemIds.length === 0
-    || input.result.importResult.fetchedCount !== importedSystemMailboxItemIds.length
-  ) {
-    return false;
-  }
-
-  const pendingItemsById = new Map(
-    (await readHostedSystemMailboxState(input.vaultRoot)).pending.map((item) => [
-      item.itemId,
-      item,
-    ]),
-  );
-  return importedSystemMailboxItemIds.every((itemId) =>
-    pendingItemsById.get(itemId)?.wake.kind
-      === "runtime.pending-effects-reconcile-requested"
-  );
 }
 
 function isHostedInitialBootstrapPending(input: {
@@ -2868,14 +2837,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       };
 
-      const initialCausalPendingEffectsOnly =
-        await hostedInitialMailboxImportContainsOnlyCausalPendingEffectsWakes({
-          prefetch: initialMailboxImportResult.prefetch,
-          result: initialMailboxImport,
-          vaultRoot: restored.vaultRoot,
-        });
       result = await runForegroundPass({
-        causalPendingEffectsOnly: initialCausalPendingEffectsOnly,
         initialMailboxImport,
         initialMailboxImportContext,
         initialMailboxPrefetch: initialMailboxImportResult.prefetch,

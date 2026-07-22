@@ -2796,6 +2796,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   let computerToolsLockedAfterUserPause = false
   const requiredVaultFileApprovalUrls: string[] = []
+  let vaultFileSendClaimedResponseMedia = false
   const actionDiagnostics = input.onTraceEvent
     ? createCodexActionDiagnosticsReducer()
     : null
@@ -3812,9 +3813,25 @@ async function runCodexAppServerTurnOnProcess(
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
+        if (
+          vaultFileSendClaimedResponseMedia &&
+          isResponseMediaDynamicToolRequest(dynamicToolRequest)
+        ) {
+          return {
+            rpcResult: {
+              contentItems: [{
+                text: dynamicToolRequest.kind === 'send-vault-file'
+                  ? 'vault-file sending cannot be combined with other response media'
+                  : 'response media cannot be changed after a vault-file send',
+                type: 'inputText' as const,
+              }],
+              success: false,
+            },
+          }
+        }
         const hostedToolContext = resolveCodexAppServerHostedToolContext(input)
         await hostedToolContext?.beforeToolExecution?.()
-        return await executeMurphDynamicToolRequest({
+        const result = await executeMurphDynamicToolRequest({
           authorizeAcceptedMessageTarget:
             input.authorizeAcceptedMessageTarget ?? null,
           assistantStyleSettingsOverlay,
@@ -3851,6 +3868,13 @@ async function runCodexAppServerTurnOnProcess(
               ? input.voiceMemoRuntime ?? null
               : null,
         })
+        if (
+          dynamicToolRequest.kind === 'send-vault-file' &&
+          result.vaultFileSendOwnsResponseMedia === true
+        ) {
+          vaultFileSendClaimedResponseMedia = true
+        }
+        return result
       },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
@@ -4989,6 +5013,16 @@ function isSerializedDynamicToolRequest(
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     isComputerDynamicToolRequest(request)
+}
+
+function isResponseMediaDynamicToolRequest(
+  request: MurphDynamicToolRequest,
+): boolean {
+  return request.kind === 'attach-response-media' ||
+    request.kind === 'generate-image' ||
+    request.kind === 'generate-song' ||
+    request.kind === 'generate-voice-memo' ||
+    request.kind === 'send-vault-file'
 }
 
 function isInvocationScopedRootToolRequest(

@@ -18,7 +18,6 @@ import {
   persistCanonicalInboxCapture,
 } from "@murphai/inboxd";
 import {
-  buildHostedExecutionPendingEffectsReconcileRequestedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
@@ -5594,6 +5593,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
+    const causalPendingEffectsOnlyValues: boolean[] = [];
     let assistantPhaseCalls = 0;
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
@@ -5636,8 +5636,9 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
+            causalPendingEffectsOnlyValues.push(input.causalPendingEffectsOnly === true);
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               setTimeout(() => {
@@ -5667,6 +5668,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(assistantPhaseCalls, 2);
+      assert.deepEqual(causalPendingEffectsOnlyValues, [false, true]);
       assert.ok(
         requireEventIndex(
           events,
@@ -5674,171 +5676,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ) < requireEventIndex(events, "snapshot:idle_shutdown"),
         events.join(","),
       );
-      assert.equal(result.status, "idle");
-    } finally {
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("marks an initial causal pending-effects prefix as causal-only", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const causalPendingEffectsOnlyValues: boolean[] = [];
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_initial_causal_pending_effects",
-            idleCheckpointDelayMs: 1,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "a".repeat(64),
-                key: "users/bundles/member-synthetic/initial-causal-pending-effects.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            events.push(`mailbox.importItem:${item.item.id}`);
-            await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
-            return await enqueueHostedSystemMailboxItem({
-              item: createResolvedRuntimeControlSystemMailboxItem(item.item),
-              vaultRoot,
-              wake: buildHostedExecutionPendingEffectsReconcileRequestedWake({
-                effectId: "vault-file-send:effect_entrypoint_initial_causal",
-                eventId: item.item.dedupeKey,
-                occurredAt: item.item.occurredAt,
-                userId: TEST_USER_ID,
-              }),
-            });
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [createMailboxItem({
-                id: "mailbox_item_entrypoint_initial_causal_pending_effects",
-                kind: "runtime.pending-effects-reconcile-requested",
-                lane: "system",
-                laneSeq: "1",
-              })],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          async runAssistantPhase(input) {
-            causalPendingEffectsOnlyValues.push(input.causalPendingEffectsOnly === true);
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.deepEqual(causalPendingEffectsOnlyValues, [true]);
-      assert.equal(result.status, "idle");
-    } finally {
-      await removeTempRoot(vaultRoot);
-    }
-  });
-
-  test("does not mark a mixed initial conversation prefix as causal-only", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
-    const events: string[] = [];
-    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-    const causalPendingEffectsOnlyValues: boolean[] = [];
-
-    try {
-      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      const result = await runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            attemptId: "attempt_synthetic_initial_mixed_pending_effects",
-            idleCheckpointDelayMs: 1,
-            leaseGeneration: "7",
-            userId: TEST_USER_ID,
-            workspaceVersion: "0",
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            return {
-              snapshotRef: createBundleRef({
-                hash: "b".repeat(64),
-                key: "users/bundles/member-synthetic/initial-mixed-pending-effects.bundle.json",
-                size: 512,
-              }),
-            };
-          },
-          async importItem(item) {
-            events.push(`mailbox.importItem:${item.item.id}`);
-            if (item.item.lane === "conversation") {
-              return {
-                assistantInputId: await stageAssistantInputEventForMailboxItem({
-                  item: item.item,
-                  vaultRoot,
-                }),
-                status: "imported",
-              };
-            }
-            await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
-            return await enqueueHostedSystemMailboxItem({
-              item: createResolvedRuntimeControlSystemMailboxItem(item.item),
-              vaultRoot,
-              wake: buildHostedExecutionPendingEffectsReconcileRequestedWake({
-                effectId: "vault-file-send:effect_entrypoint_initial_mixed",
-                eventId: item.item.dedupeKey,
-                occurredAt: item.item.occurredAt,
-                userId: TEST_USER_ID,
-              }),
-            });
-          },
-          platform: createPlatform({
-            mailboxPort: createMailboxPort({
-              events,
-              items: [
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_initial_mixed_pending_effects",
-                  kind: "runtime.pending-effects-reconcile-requested",
-                  lane: "system",
-                  laneSeq: "1",
-                }),
-                createMailboxItem({
-                  id: "mailbox_item_entrypoint_initial_mixed_conversation",
-                  kind: "conversation.message",
-                  lane: "conversation",
-                  laneSeq: "1",
-                }),
-              ],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: createWorkspaceState({ version: "0" }),
-            }),
-          }),
-          async runAssistantPhase(input) {
-            causalPendingEffectsOnlyValues.push(input.causalPendingEffectsOnly === true);
-            return { progressed: false };
-          },
-          vaultRoot,
-        },
-      );
-
-      assert.deepEqual(causalPendingEffectsOnlyValues, [false]);
       assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);

@@ -1800,6 +1800,7 @@ export interface MurphDynamicToolExecutionResult {
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
   usageDraft?: AssistantProviderUsageDraft | null
+  vaultFileSendOwnsResponseMedia?: boolean
 }
 
 interface ParsedDynamicToolCallRequest {
@@ -2669,15 +2670,18 @@ export async function executeMurphDynamicToolRequest(input: {
               requiredVaultFileApprovalUrl: result.approvalUrl,
             }
           case 'approved':
-            return toolTextResult(
-              true,
-              JSON.stringify({
-                filename: result.filename,
-                note:
-                  'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
-                status: result.status,
-              }),
-            )
+            return {
+              ...toolTextResult(
+                true,
+                JSON.stringify({
+                  filename: result.filename,
+                  note:
+                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
+                  status: result.status,
+                }),
+              ),
+              vaultFileSendOwnsResponseMedia: true,
+            }
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
           case 'expired':
@@ -2688,14 +2692,17 @@ export async function executeMurphDynamicToolRequest(input: {
           error instanceof VaultCliError
           && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
         ) {
-          return toolTextResult(
-            true,
-            JSON.stringify({
-              note:
-                'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
-              status: 'already_in_progress',
-            }),
-          )
+          return {
+            ...toolTextResult(
+              true,
+              JSON.stringify({
+                note:
+                  'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+                status: 'already_in_progress',
+              }),
+            ),
+            vaultFileSendOwnsResponseMedia: true,
+          }
         }
         return toolTextResult(false, 'secure vault-file approval could not be prepared')
       }

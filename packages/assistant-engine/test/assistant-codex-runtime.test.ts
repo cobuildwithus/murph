@@ -2857,22 +2857,11 @@ describe('assistant codex runtime', () => {
     )
     const firstSendStarted = createDeferred<void>()
     const releaseFirstSend = createDeferred<void>()
-    const approvedFile = {
-      approvalGeneration: 'f'.repeat(64),
-      approvalId: `haa_${'f'.repeat(32)}`,
-      contentType: 'application/pdf',
-      filename: 'report.pdf',
-      kind: 'vault_file' as const,
-      ref: 'documents/report.pdf',
-      sha256: 'a'.repeat(64),
-      sizeBytes: 42,
-    }
     const sendVaultFile = vi.fn(async () => {
       firstSendStarted.resolve()
       await releaseFirstSend.promise
       return {
-        file: approvedFile,
-        filename: approvedFile.filename,
+        filename: 'report.pdf',
         status: 'approved' as const,
       }
     })
@@ -2936,15 +2925,45 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
-            method: 'item/completed',
+            id: 94,
+            method: 'item/tool/call',
             params: {
-              item: {
-                id: 'assistant-vault-send-order',
-                message: 'Here is the report.',
-                type: 'assistant_message',
+              arguments: {
+                media: [{
+                  alt: 'A second attachment',
+                  kind: 'image',
+                  source: 'second-attachment',
+                  url: 'https://cdn.example.test/assistant/second.png',
+                }],
               },
+              namespace: 'murph',
+              tool: 'attach_response_media',
             },
           }))
+          await expect(waitForRpcResponse(child, 94)).resolves.toEqual({
+            id: 94,
+            result: {
+              contentItems: [{
+                text: 'response media cannot be changed after a vault-file send',
+                type: 'inputText',
+              }],
+              success: false,
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            id: 93,
+            method: 'item/tool/call',
+            params: {
+              arguments: {},
+              namespace: 'murph',
+              tool: 'finish_without_reply',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 93)).resolves.toMatchObject({
+            id: 93,
+            result: { success: true },
+          })
           child.stdout.write(jsonLine({
             method: 'turn/completed',
             params: {
@@ -2961,12 +2980,13 @@ describe('assistant codex runtime', () => {
     })
 
     await expect(executeCodexAppServerTurn({
+      allowFinishWithoutReply: true,
       hostedToolContext,
       prompt: 'send the report twice',
       workingDirectory,
     })).resolves.toMatchObject({
-      finalMessage: 'Here is the report.',
-      responseMedia: [approvedFile],
+      finalMessage: '',
+      responseMedia: [],
     })
     expect(sendVaultFile).toHaveBeenCalledOnce()
   })
