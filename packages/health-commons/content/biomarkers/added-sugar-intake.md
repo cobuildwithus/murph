@@ -32,7 +32,7 @@ biomarker:
   measurement:
     bestContext: 'Use a consistent logging method across baseline and intervention: record grams of Added Sugars from packaged foods and separately note unlabeled sources such as sweetened drinks, desserts, syrups, honey, or restaurant foods.'
     howToMeasure:
-    - Record baseline without changing behavior for at least 7 days.
+    - Record baseline without changing behavior for at least 14 days.
     - During the intervention, log grams of Added Sugars per day from labels when available.
     - For unlabeled foods, log the item and whether it likely contained added sugar rather than inventing precise grams.
     - Keep added sugar separate from total sugar and from broader free-sugar definitions.

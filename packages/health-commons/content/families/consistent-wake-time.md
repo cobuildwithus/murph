@@ -67,7 +67,7 @@ Consistent Wake Time is the wake-time-anchored member of the broader sleep-regul
 
 Use this family for protocols where the main behavior is choosing and maintaining a stable final wake/rise window while preserving enough sleep. Do not collapse it with full sleep hygiene, bedtime-only regularity, CBT-I, sleep restriction, morning light therapy, melatonin, delayed sleep-wake phase treatment, social-jetlag reduction, or shift-work adaptation.
 
-The default child protocol is **Consistent Wake Time**, a 7-day baseline plus 28-day intervention that tracks wake-time variability, sleep opportunity, daytime sleepiness, and confounders.
+The default child protocol is **Consistent Wake Time**, a 14-day baseline plus 28-day intervention that tracks wake-time variability, sleep opportunity, daytime sleepiness, and confounders.
 
 ## Extraction Notes
 

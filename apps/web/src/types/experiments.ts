@@ -362,6 +362,7 @@ export interface ExperimentRunProjection {
   outcomeConfidence?: "low" | "medium" | "high";
   summary?: string;
   summaryDetail?: string;
+  timingKnown: boolean;
   conclusions?: ExperimentConclusionSection[];
 }
 

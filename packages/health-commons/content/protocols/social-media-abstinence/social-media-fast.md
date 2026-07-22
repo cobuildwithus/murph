@@ -129,8 +129,8 @@ protocol:
     - "Stop or soften if the fast causes unsafe isolation, missed urgent communication, worsening mood, compulsive distress, or material work, school, caregiving, or safety problems."
 testPlans: 
   - planId: "social-media-fast-7d"
-    durationDays: 14
-    baselineDays: 7
+    durationDays: 21
+    baselineDays: 14
     interventionDays: 7
     primaryBiomarkerKey: "biomarker:self-reported-mood"
     secondaryBiomarkerKeys: 
@@ -142,7 +142,7 @@ testPlans:
     minimumAdherenceSessions: 1
     targetAdherenceSessions: 1
     notes: 
-      - "Use a 7-day baseline when practical, then one selected 24 h, 72 h, or 7 d fast window. Preserve null, mixed, and burden findings."
+      - "Use a 14-day baseline when practical, then one selected 24 h, 72 h, or 7 d fast window. Preserve null, mixed, and burden findings."
 expectedSignalDescriptions: 
   - biomarkerKey: "biomarker:self-reported-mood"
     expected: "Could go either way"

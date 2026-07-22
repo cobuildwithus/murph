@@ -11,7 +11,8 @@ completion:
 2. The later `pr-review` loop is the final cross-cutting gate for eligible work
    and replaces local `deep-review`.
 
-Both stages use the managed Eragon, Phlebas, and Mountain browser lanes. They
+Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser
+lanes. They
 never share round state: the preliminary pass does not create or advance the
 final gate's immutable first-reviewed-head baseline. Final round 1 starts only
 after preliminary findings are resolved, parent final review and verification
@@ -263,8 +264,8 @@ requires it or the current user explicitly asks for it.
    its decision and why the current delta stays inside it.
 
    The repo wrapper chooses one usable ReviewGPT browser lane per run:
-   `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`, or
-   `Mountain.app` on `9450`, always with profile `Default` and
+   `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
+   `Hercules.app` on `9444`, or `Mountain.app` on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
@@ -281,7 +282,7 @@ requires it or the current user explicitly asks for it.
    downgrading the model.
 
    To pin a specific lane while recovering or debugging one profile, set
-   `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|mountain` on that command.
+   `REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain` on that command.
    `aragon` is accepted as an alias for `eragon`. Leave it unset for normal
    PR-review rounds.
 

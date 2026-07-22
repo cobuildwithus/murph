@@ -133,8 +133,8 @@ testPlans:
       - biomarker:morning-blood-pressure
       - biomarker:resting-heart-rate
       - biomarker:hrv-rmssd
-    durationDays: 35
-    baselineDays: 7
+    durationDays: 42
+    baselineDays: 14
     interventionDays: 28
 expectedSignalDescriptions:
 

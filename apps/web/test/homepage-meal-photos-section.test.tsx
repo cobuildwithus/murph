@@ -10,7 +10,7 @@ test("MealPhotosSection renders the static photo calorie counting copy", () => {
   const markup = renderToStaticMarkup(createElement(MealPhotosSection));
 
   assert.match(markup, /Calorie counting/);
-  assert.match(markup, /Coming next week/);
+  assert.doesNotMatch(markup, /Coming next week/);
   assert.match(markup, /The calorie tracker you never open\./);
   assert.match(
     markup,

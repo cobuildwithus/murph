@@ -34,6 +34,29 @@ including diff scope, reverse dependents, coverage thresholds, app verification,
 and acceptance semantics. The remote bootstrap reconciles the synced lockfile
 with `pnpm install --frozen-lockfile --prefer-offline` before verification.
 
+### Ten-minute local admission fallback
+
+Measure time spent waiting for the exclusive local shared-host slot separately
+from active verification time. If a required canonical command has waited 10
+continuous minutes without acquiring that slot, stop only the exact waiting
+process tree owned by the current task and rerun the same command through
+Crabbox:
+
+```bash
+MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
+MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+```
+
+Use an existing task-owned Crabbox lease when one is already available;
+otherwise the forced executor creates a fresh one-shot Testbox. Do not leave the
+local waiter running concurrently, forward local environment values, bypass the
+canonical command, or return automatically to another unbounded local wait.
+Before delegation, satisfy the Git-state admission boundary, including fully
+staging any new non-ignored source or documentation file. If Crabbox cannot run
+because its CLIs, authentication, or capacity are unavailable, fail closed and
+report that concrete blocker with the completed local evidence. Preserve the
+Testbox ID, timing summary, and linked Actions run when delegation starts.
+
 ### Environment and Vercel boundary
 
 The default Crabbox/Blacksmith lane is synthetic and secret-free:

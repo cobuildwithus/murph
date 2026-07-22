@@ -563,9 +563,9 @@ export function ProductSlide() {
 // Panel one — the protocol being run, as label/value spec rows.
 const PROTOCOL_SPEC = [
   { label: "Cadence", value: "3× / week" },
-  { label: "Length", value: "21 days" },
+  { label: "Length", value: "28 days" },
   { label: "Session", value: "15–20 min" },
-  { label: "Baseline", value: "7 days" },
+  { label: "Baseline", value: "14 days" },
 ] as const;
 
 // Panel three: a recent Finnish-sauna run measured against its locked
@@ -651,12 +651,12 @@ export function ExperimentSlide() {
           <div className="mt-4 flex items-center gap-2 font-mono text-[9px] uppercase tracking-[0.1em]">
             <span className="text-[#9fb389]">Baseline ✓</span>
             <span className="text-[#e9e2d4]/25">·</span>
-            <span className="font-semibold text-[#f5f0e8]">Active, day 16</span>
+            <span className="font-semibold text-[#f5f0e8]">Active, day 9 of 14</span>
             <span className="text-[#e9e2d4]/25">·</span>
             <span className="text-[#e9e2d4]/35">Analysis</span>
           </div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#f5f0e8]/10">
-            <div className="h-full w-[76%] rounded-full bg-[#9fb389]" />
+            <div className="h-full w-[82%] rounded-full bg-[#9fb389]" />
           </div>
 
           {/* Adherence — one segment per scheduled session */}
@@ -665,16 +665,16 @@ export function ExperimentSlide() {
               Adherence
             </span>
             <span className="text-[12px] text-[#e9e2d4]/70">
-              6 of 9 sessions
+              4 of 6 sessions
             </span>
           </div>
           <div className="mt-2 flex gap-1.5">
-            {Array.from({ length: 9 }, (_, index) => (
+            {Array.from({ length: 6 }, (_, index) => (
               <span
                 key={index}
                 aria-hidden="true"
                 className={`h-2 flex-1 rounded-full ${
-                  index < 6 ? "bg-[#9fb389]" : "bg-[#f5f0e8]/12"
+                  index < 4 ? "bg-[#9fb389]" : "bg-[#f5f0e8]/12"
                 }`}
               />
             ))}

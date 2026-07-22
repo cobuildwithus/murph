@@ -952,7 +952,7 @@ attribution:
   ownerType: murph
   note: Drafted from the creatine-monohydrate research run using the normalized source-page drafts, canonical source ledger, atomic findings, and section syntheses listed in the package research context.
 protocol:
-  doseSignature: 3–5 g/day creatine monohydrate ongoing; optional <=20 g/day split loading as four <=5 g servings for 5–7 days; 7-day baseline + 6-week intervention
+  doseSignature: 3–5 g/day creatine monohydrate ongoing; optional <=20 g/day split loading as four <=5 g servings for 5–7 days; 14-day baseline + 6-week intervention
   target: Plain creatine monohydrate, taken consistently; avoid blending evidence from other creatine forms or multi-ingredient products.
   frequency:
     sessionsPerWeek: 7
@@ -960,7 +960,7 @@ protocol:
   interventionSessionsMinimum: 28
   interventionSessionsTarget: 42
   steps:
-    - Before starting, record a 7-day baseline for body weight, usual training performance, training volume, GI symptoms, recovery, diet changes, and current supplements.
+    - Before starting, record a 14-day baseline for body weight, usual training performance, training volume, GI symptoms, recovery, diet changes, and current supplements.
     - Choose a plain creatine monohydrate product and log the exact product name, serving size, and whether it is micronized, flavored, or mixed with other ingredients.
     - 'Choose one dosing path: either skip loading and take 3–5 g once daily, or use an optional loading phase of no more than 20 g/day split into four separated servings of no more than 5 g each for 5–7 days.'
     - After any loading phase, move to 3–5 g/day maintenance dosing.
@@ -1018,8 +1018,8 @@ testPlans:
 
   -
     planId: strength-and-tolerance-49d
-    durationDays: 49
-    baselineDays: 7
+    durationDays: 56
+    baselineDays: 14
     interventionDays: 42
     primaryBiomarkerKey: biomarker:training-performance
     secondaryBiomarkerKeys:
@@ -1035,8 +1035,8 @@ testPlans:
       - Creatine washout can be slow after loading; do not plan a short crossover that assumes one week off resets baseline.
   -
     planId: no-load-tolerance-35d
-    durationDays: 35
-    baselineDays: 7
+    durationDays: 42
+    baselineDays: 14
     interventionDays: 28
     primaryBiomarkerKey: biomarker:gi-tolerance
     secondaryBiomarkerKeys:

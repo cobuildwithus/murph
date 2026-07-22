@@ -427,7 +427,7 @@ attribution:
   ownerType: murph
   note: Drafted from the Walking After Every Meal research run and canonical source ledger; external named consumer protocols are cited only as context, not as Murph protocol authority.
 protocol:
-  doseSignature: After each main meal · 10–15 min comfortable walking · start soon after eating when safe, usually within the first hour, and keep the start delay consistent · 7-day baseline + 14-day intervention
+  doseSignature: After each main meal · 10–15 min comfortable walking · start soon after eating when safe, usually within the first hour, and keep the start delay consistent · 14-day baseline + 14-day intervention
   target: meal-timed light-to-moderate walking after breakfast, lunch, and dinner
   frequency:
     sessionsPerDay: 3
@@ -451,7 +451,7 @@ protocol:
   interventionSessionsMinimum: 28
   interventionSessionsTarget: 36
   steps:
-    - "Baseline 7 days: keep normal post-meal habits; log meal time, rough meal content, glucose if available, and usual activity."
+    - "Baseline 14 days: keep normal post-meal habits; log meal time, rough meal content, glucose if available, and usual activity."
     - "After each main meal, choose a safe indoor loop, outdoor route, treadmill, hallway, or similar walking option."
     - "Begin when practical after eating; keep start delay consistent, usually within the first hour when safe."
     - "Walk 10–15 min at easy-to-moderate talkable pace; avoid jogging, stair sprints, traffic, and bending-heavy tasks."
@@ -509,8 +509,8 @@ protocol:
 testPlans:
 -
   planId: cgm-postprandial-21d
-  durationDays: 21
-  baselineDays: 7
+  durationDays: 28
+  baselineDays: 14
   interventionDays: 14
   primaryBiomarkerKey: biomarker:postprandial-glucose-excursion
   secondaryBiomarkerKeys:
@@ -951,7 +951,7 @@ claims:
   - source_artifact:pmid-40023292
   - source_artifact:pmid-41362785
   caveats:
-  - These markers may matter clinically, but they are not the default readout for a 7-day baseline plus 14-day walking self-experiment.
+  - These markers may matter clinically, but they are not the default readout for a 14-day baseline plus 14-day walking self-experiment.
   - Medication, diagnosis, pregnancy status, and clinical targets should govern interpretation of lab and clinic markers.
 -
   claimId: secondary-metabolic-outcomes-fasting-glucose-guardrail

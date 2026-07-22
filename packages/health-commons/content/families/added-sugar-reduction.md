@@ -408,7 +408,7 @@ Ordinary added-sugar-reduction wellness variants must preserve food access, adeq
 
 ## Current canonical protocol
 
-- `protocol_variant:added-sugar-reduction/no-added-sugar-diet` — Murph’s default label-defined, 7-day baseline plus 21-day intervention self-experiment.
+- `protocol_variant:added-sugar-reduction/no-added-sugar-diet` — Murph’s default label-defined, 14-day baseline plus 21-day intervention self-experiment.
 
 ## Evidence posture
 
