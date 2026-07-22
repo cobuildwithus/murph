@@ -1,6 +1,5 @@
 import Link from "next/link";
 
-import { Badge } from "@/src/components/ui/badge";
 import { buttonVariants } from "@/src/components/ui/button";
 import {
   Card,
@@ -13,24 +12,16 @@ import { cn } from "@/src/lib/utils";
 
 type GroupUsageFundingCardProps = {
   action: React.ReactNode;
-  capacityLabel: string;
   groupName: string;
 };
 
 function GroupUsageFundingCard({
   action,
-  capacityLabel,
   groupName,
 }: GroupUsageFundingCardProps) {
   return (
     <Card className="gap-5 py-6 sm:py-8">
-      <CardHeader className="gap-4 px-6 sm:px-8">
-        <Badge
-          variant="secondary"
-          className="w-fit font-mono text-[10px] uppercase tracking-[0.12em]"
-        >
-          Group usage · {capacityLabel}
-        </Badge>
+      <CardHeader className="px-6 sm:px-8">
         <div className="flex flex-col gap-2">
           <p className="text-sm font-medium text-muted-foreground">{groupName}</p>
           <CardTitle>

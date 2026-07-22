@@ -31,11 +31,6 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
   HostedUsageTopUpDialog: mocks.HostedUsageTopUpDialog,
 }));
 
-vi.mock("@/src/components/ui/badge", () => ({
-  Badge: (props: { children?: React.ReactNode }) =>
-    React.createElement("span", null, props.children),
-}));
-
 vi.mock("@/src/components/ui/button", () => ({
   Button: (props: { children?: React.ReactNode }) =>
     React.createElement("button", null, props.children),
@@ -125,7 +120,7 @@ describe("hosted group funding page", () => {
       markup,
       /One-time credit belongs to this group\. Personal plans stay unchanged\./u,
     );
-    assert.match(markup, /Group usage · Running low/u);
+    assert.doesNotMatch(markup, /Group usage|Running low/u);
     assert.match(markup, /top-up:group/u);
     assert.match(markup, /href="\/home"[^>]*>Open Murph<\/a>/u);
     expect(mocks.readHostedUsageCreditPurchaseStatus).toHaveBeenCalledWith({
@@ -142,28 +137,6 @@ describe("hosted group funding page", () => {
       undefined,
     );
   });
-
-  it.each([
-    ["healthy", "Available"],
-    ["low", "Running low"],
-    ["exhausted", "Paused"],
-    [null, "Status unavailable"],
-  ] as const)(
-    "projects the %s capacity state into the shortened group status label",
-    async (capacityState, capacityLabel) => {
-      mocks.readHostedGroupUsageStatus.mockResolvedValueOnce({
-        capacityState,
-        fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-        periodEnd: "2026-08-01T00:00:00.000Z",
-      });
-
-      const markup = renderToStaticMarkup(await GroupFundingPage({
-        params: Promise.resolve({ joinCode: "group_join_code_1234" }),
-      }));
-
-      assert.match(markup, new RegExp(`Group usage · ${capacityLabel}`, "u"));
-    },
-  );
 
   it("ignores a checkout return belonging to another funding target", async () => {
     mocks.readHostedUsageCreditPurchaseStatus.mockRejectedValueOnce(

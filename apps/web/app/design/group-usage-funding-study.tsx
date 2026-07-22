@@ -43,7 +43,6 @@ function GroupUsageFundingStudy() {
               scope="group"
             />
           }
-          capacityLabel="Available"
           groupName="Sunday sleep crew"
         />
       </div>

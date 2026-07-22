@@ -561,7 +561,6 @@ export function ComponentsContent() {
                   scope="group"
                 />
               }
-              capacityLabel="Available"
               groupName="Sunday sleep crew"
             />
           </div>

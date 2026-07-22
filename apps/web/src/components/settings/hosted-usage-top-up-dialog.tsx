@@ -279,9 +279,9 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                     id={`${props.scope === "group" ? "group-" : ""}usage-top-up-${index}`}
                     value={offer.offerCode}
                     disabled={hasAttempt}
-                    className="min-h-20 [&>[data-slot=field]]:items-center sm:min-h-24"
+                    className="h-20 [&_[data-slot=field-content]]:gap-0 [&_[data-slot=field-content]]:justify-center sm:h-24"
                     title={
-                      <span className="font-serif text-3xl font-semibold tabular-nums">
+                      <span className="flex h-5 items-center font-serif text-3xl font-semibold leading-none tabular-nums">
                         {offer.amountLabel}
                       </span>
                     }

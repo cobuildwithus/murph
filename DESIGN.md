@@ -338,8 +338,8 @@ navigation or as a substitute for ordinary buttons.
 ### Group Usage Funding
 Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
 credit. Lead with the group name, one concise sentence explaining that the
-credit belongs to the group, and one primary action. Keep status in a muted
-badge and retain `Open Murph` as the quiet secondary action.
+credit belongs to the group, and one primary action. Do not add a decorative
+status badge; retain `Open Murph` as the quiet secondary action.
 
 Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
 large choice cards, then one primary `Continue to checkout` action and a plain

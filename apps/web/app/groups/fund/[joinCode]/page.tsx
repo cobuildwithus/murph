@@ -131,7 +131,6 @@ export default async function GroupFundingPage({
             <GroupFundingSignInButton />
           )
         }
-        capacityLabel={readCapacityLabel(usageStatus.capacityState)}
         groupName={groupName}
       />
     </main>
@@ -158,21 +157,6 @@ function GroupFundingUnavailable() {
       </Card>
     </main>
   );
-}
-
-function readCapacityLabel(
-  capacityState: "exhausted" | "healthy" | "low" | null,
-): string {
-  switch (capacityState) {
-    case "healthy":
-      return "Available";
-    case "low":
-      return "Running low";
-    case "exhausted":
-      return "Paused";
-    default:
-      return "Status unavailable";
-  }
 }
 
 function readUsageTopUpPurchaseReturn(

@@ -259,10 +259,34 @@ test("opens from the settings deep link without preselecting a top-up", async ()
       'label[for="usage-top-up-0"]',
     );
     assert.ok(firstAmountCard);
-    assert.equal(firstAmountCard.classList.contains("min-h-20"), true);
-    assert.equal(firstAmountCard.classList.contains("sm:min-h-24"), true);
+    assert.equal(firstAmountCard.classList.contains("h-20"), true);
+    assert.equal(firstAmountCard.classList.contains("sm:h-24"), true);
+    assert.equal(
+      firstAmountCard.classList.contains(
+        "[&_[data-slot=field-content]]:justify-center",
+      ),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.classList.contains(
+        "[&_[data-slot=field-content]]:gap-0",
+      ),
+      true,
+    );
     assert.equal(
       firstAmountCard.querySelector("span")?.classList.contains("text-3xl"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("leading-none"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("h-5"),
+      true,
+    );
+    assert.equal(
+      firstAmountCard.querySelector("span")?.classList.contains("items-center"),
       true,
     );
     const selectionActions = buttonByText(

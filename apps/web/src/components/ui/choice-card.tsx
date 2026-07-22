@@ -59,7 +59,7 @@ function ChoiceCard({
         </span>
       ) : null}
       <Field
-        className="relative z-10 h-full gap-3 p-4 sm:p-5"
+        className="relative z-10 h-full gap-3 p-4 [&>[data-slot=radio-group-item]]:absolute sm:p-5"
       >
         <RadioGroupItem
           aria-describedby={[descriptionId, metaId].filter(Boolean).join(" ")}
