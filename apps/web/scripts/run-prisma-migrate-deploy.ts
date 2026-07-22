@@ -4,6 +4,11 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  verifyHostedWebMigrationOwner,
+  withHostedWebMigrationOwner,
+} from "./hosted-web-migration-owner";
+
 const CONFIG_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOSTED_WEB_PRISMA_MIGRATIONS_DIR = path.join(CONFIG_DIR, "prisma", "migrations");
 const KNOWN_POOLER_PORTS = new Set(["6432", "6543"]);
@@ -140,6 +145,7 @@ export type HostedWebMigrationRunner = (
 
 export interface HostedWebPrismaMigrateDeployOptions {
   prismaMigrationsDir?: string;
+  verifyMigrationOwner?: (databaseUrl: string) => Promise<void>;
 }
 
 export interface HostedWebMigrationDatabaseUrl {
@@ -240,14 +246,18 @@ export async function runHostedWebPrismaMigrateDeploy(
   );
 
   const migrationDatabaseUrl = resolveHostedWebMigrationDatabaseUrl(environment);
+  const ownerDatabaseUrl = withHostedWebMigrationOwner(migrationDatabaseUrl.url);
+  await (options.verifyMigrationOwner ?? verifyHostedWebMigrationOwner)(
+    ownerDatabaseUrl,
+  );
   console.log(`Applying hosted web Prisma migrations with ${migrationDatabaseUrl.source}.`);
   const childEnvironment: NodeJS.ProcessEnv = {
     ...process.env,
     ...environment,
-    DATABASE_URL: migrationDatabaseUrl.url,
+    DATABASE_URL: ownerDatabaseUrl,
   };
   if (migrationDatabaseUrl.source === "DIRECT_DATABASE_URL") {
-    childEnvironment.DIRECT_DATABASE_URL = migrationDatabaseUrl.url;
+    childEnvironment.DIRECT_DATABASE_URL = ownerDatabaseUrl;
   }
 
   await runCommand(
