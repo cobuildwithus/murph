@@ -52,6 +52,30 @@ member-facing biomarker.
    but none are classified, say that no recognized biomarkers are available
    while confirming that the saved records remain available.
 
+## Result detail contract
+
+- Lead with the exact latest result, source status, collection date, reported
+  source/lab, and source-specific reference range. Do not substitute Commons
+  guidance for the result's own range or flag.
+- When an authored Health Commons page maps to the canonical lab identity, use
+  its one-sentence summary below the title and keep saved-history count/date
+  context as secondary metadata.
+- Plot only exact numeric results that the query owner has already established
+  as comparable. Comparator and qualitative results stay exact in the ledger
+  and never become invented points.
+- Show a reference band or limit only when every plotted result has the same
+  normalized numeric range and unit. Otherwise omit it without implying that
+  the result lacks source context in the ledger.
+- Keep the result ledger available at every viewport. The full four-column
+  layout starts only when it fits; smaller screens use one accessible stacked
+  representation rather than duplicated desktop/mobile markup.
+- Prefer a quiet omission over long chart caveats. If there is no comparable
+  numeric series, show the exact saved history without an empty chart or a
+  rationale card.
+- Offer the existing Chat with Murph contact action with a short draft based on
+  the public biomarker display name. Do not place the member's private value,
+  date, source, flag, or reference range in an external compose URL.
+
 ## Explicitly excluded classes
 
 Unless a future owner deliberately classifies a specific measurement, the
@@ -59,6 +83,75 @@ index excludes administrative/report metadata, malformed value-as-analyte
 fields, ECG and exercise-test procedure fields, routine urinalysis attributes,
 infectious screening and culture outcomes, blood type, genetics report
 commentary, and unknown custom fields.
+
+## Reviewed content coverage
+
+The requested content set contains 122 labels: 117 saved-lab labels and 5
+device markers. Canonicalization produces 115 distinct lab identities and 5
+device identities, for 120 authored Commons entities. The two true label alias
+pairs are `MPV` / `Mean Platelet Volume` and `CO2` / `Carbon Dioxide`.
+
+| Measure | Count |
+| --- | ---: |
+| Requested labels | 122 |
+| Requested saved-lab labels | 117 |
+| Distinct saved-lab identities | 115 |
+| Requested device identities | 5 |
+| Authored Commons entities | 120 |
+| Existing pages updated | 21 |
+| New pages added | 99 |
+| Explicit metric-to-Commons mappings | 6 |
+
+The explicit mappings preserve stable metric identities while reusing the
+correct existing authored analyte page:
+
+| Metric biomarker key | Authored Commons entity |
+| --- | --- |
+| `biomarker:alt` | `biomarker:alanine-aminotransferase` |
+| `biomarker:apob` | `biomarker:apolipoprotein-b` |
+| `biomarker:ast` | `biomarker:aspartate-aminotransferase` |
+| `biomarker:creatinine` | `biomarker:serum-creatinine` |
+| `biomarker:total-bilirubin` | `biomarker:bilirubin` |
+| `biomarker:vitamin-d` | `biomarker:serum-25-hydroxyvitamin-d` |
+
+| Guidance classification | Entities |
+| --- | ---: |
+| Generally applicable numeric | 1 |
+| Conditional numeric | 11 |
+| Calculated or method-specific | 17 |
+| Qualitative | 3 |
+| Source-range-only | 52 |
+| No universal range | 36 |
+| **Total** | **120** |
+
+Twelve entities use a numeric classification. FIB-4 and vitamin D retain
+tightly scoped numeric decision items while remaining classified for the
+governing limitation: FIB-4 is calculation-specific, and vitamin D records
+conflicting guidance rather than a false universal range.
+
+The coverage tests keep distinct LDL calculation methods; generic, CKD-EPI,
+and historical MDRD eGFR outputs; percentage and absolute differential counts;
+OmegaCheck panels, individual fatty acids, and ratios; generic mercury and any
+future specimen-specific mercury assay; and POC troponin I versus any
+assay-specific troponin identity or cutoff. Historical MDRD outputs remain for
+report provenance but are not normalized into current race-free eGFR
+identities.
+
+Three evidence limitations remain explicit rather than being filled with false
+precision:
+
+1. Generic `Mercury` does not identify specimen or chemical species, so no
+   portable numeric range is encoded and specimen-specific aliases remain
+   excluded.
+2. `POC Troponin I` does not identify an instrument or assay generation, so its
+   exact 99th-percentile upper reference limit comes from the assay
+   documentation and reporting source.
+3. Several living assay catalogs do not publish a stable publication year;
+   source metadata records the 2026 review year with the exact title and URL.
+
+These are contextual limitations, not missing page coverage. The request's
+health-area groups remain navigation only and do not imply medical equivalence,
+interchangeable assays, or shared reference guidance.
 
 ## Ownership
 
@@ -84,4 +177,8 @@ commentary, and unknown custom fields.
 - UI tests cover device-first ordering, initially expanded disclosures, search,
   status filters, flagged-first ordering, the one-row notebook shape,
   full-row links, the absence of `Other`, and the saved-but-unclassified empty
-  state.
+  state. Detail tests cover exact comparators, qualitative history, reference
+  band eligibility, responsive ledger structure, and Commons summary fallback.
+- Health Commons coverage tests resolve every requested lab and device identity,
+  enforce the deliberate aliases and non-equivalences, validate one-sentence
+  summaries and source locators, and lock the guidance-classification counts.

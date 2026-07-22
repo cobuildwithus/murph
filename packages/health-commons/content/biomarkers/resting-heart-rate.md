@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:resting-heart-rate
 slug: biomarkers/resting-heart-rate
 title: Resting Heart Rate
-summary: How many times the heart beats per minute at full rest, where a lower count usually means the heart pumps more blood per beat and needs fewer contractions to do the same job.
+summary: "Resting heart rate measures how often the heart beats during quiet rest, which can reflect fitness, recovery, illness, medication effects, and other changes over time."
 status: field-testing
 quality: usable
 aliases:
@@ -96,6 +96,29 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
   placeholder: Early outcome summaries will appear here once enough opted-in experiment runs are available.
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: reference_interval
+      guidance: "The American Heart Association describes 60 through 100 beats per minute as a typical resting range for most adults, while trained athletes, medications, illness, and rhythm conditions can shift what is expected."
+      applicability: "Applies to a resting measurement under comparable conditions while age, fitness, illness, medications, rhythm, and measurement method are considered."
+      numericValues:
+        - label: "Typical resting adult interval"
+          unit: "bpm"
+          lowerBound:
+            value: 60
+            inclusive: true
+          upperBound:
+            value: 100
+            inclusive: true
+      source:
+        title: "Target Heart Rates Chart"
+        organization: "American Heart Association"
+        year: 2024
+        sourceType: "academic_reference"
+        url: "https://www.heart.org/en/healthy-living/fitness/fitness-basics/target-heart-rates"
 ---
 
 Resting heart rate is useful because it is available on most consumer wearables and easier to explain than composite recovery scores.

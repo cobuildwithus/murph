@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:total-cholesterol"
 slug: "biomarkers/total-cholesterol"
 title: "Total Cholesterol"
-summary: "Total cholesterol from a blood lipid panel; a supportive endpoint for cholesterol protocols, not the most specific marker."
+summary: "Total cholesterol measures cholesterol carried across the major lipoprotein classes, which can provide broad lipid context but does not distinguish particle type or overall risk by itself."
 status: "draft"
 quality: "usable"
 aliases:
@@ -69,5 +69,21 @@ communityOutcomeSummary:
   state: "coming_soon"
   minimumCohortSize: 20
   placeholder: "Opted-in lipid experiment summaries will appear once enough comparable runs are available."
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for Total cholesterol; use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies to the named lipid analyte and method with fasting status, treatment, overall cardiovascular risk, and the source laboratory report retained."
+      source:
+        title: "2026 ACC/AHA/Multisociety Guideline on the Management of Dyslipidemia"
+        organization: "American College of Cardiology, American Heart Association, and collaborating societies; Circulation"
+        year: 2026
+        sourceType: "clinical_guideline"
+        url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001423"
+        doi: "10.1161/CIR.0000000000001423"
 ---
+
 Total Cholesterol is used here as a lab-measured lipid marker. These cholesterol protocols treat LDL-C as the primary endpoint and use other lipid markers as supportive or contextual measures.

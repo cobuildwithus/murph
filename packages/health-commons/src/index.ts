@@ -1,3 +1,4 @@
+export * from "./biomarker-entity-mappings.ts";
 export * from "./catalog.ts";
 export * from "./load.ts";
 export * from "./normalize.ts";

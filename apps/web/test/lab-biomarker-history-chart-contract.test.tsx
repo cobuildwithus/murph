@@ -8,11 +8,15 @@ const captured = vi.hoisted(() => ({
   lineChartProps: null as Record<string, unknown> | null,
   referenceAreas: [] as Record<string, unknown>[],
   referenceLines: [] as Record<string, unknown>[],
-  tooltipFormatter: null as ((value: unknown) => ReactNode) | null,
+  tooltipFormatter: null as ((
+    value: unknown,
+    name?: unknown,
+    item?: { payload?: unknown },
+  ) => ReactNode) | null,
   yAxisDomain: null as unknown,
   yAxisPadding: null as unknown,
   yAxisTickFormatter: null as ((value: unknown) => string) | null,
-  yAxisWidth: null as number | null,
+  yAxisWidth: null as number | "auto" | null,
 }));
 
 vi.mock("recharts", async () => {
@@ -43,7 +47,7 @@ vi.mock("recharts", async () => {
       domain?: unknown;
       padding?: unknown;
       tickFormatter?: (value: unknown) => string;
-      width?: number;
+      width?: number | "auto";
     }) {
       captured.yAxisDomain = props.domain ?? null;
       captured.yAxisPadding = props.padding ?? null;
@@ -67,7 +71,13 @@ vi.mock("@/src/components/ui/chart", async () => {
     ChartTooltip({ content }: { content?: ReactNode }) {
       return React.createElement(React.Fragment, null, content);
     },
-    ChartTooltipContent(props: { formatter?: (value: unknown) => ReactNode }) {
+    ChartTooltipContent(props: {
+      formatter?: (
+        value: unknown,
+        name?: unknown,
+        item?: { payload?: unknown },
+      ) => ReactNode;
+    }) {
       captured.tooltipFormatter = props.formatter ?? null;
       return null;
     },
@@ -101,7 +111,7 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
 
   expect(captured.lineChartProps?.accessibilityLayer).not.toBe(true);
   expect(captured.yAxisTickFormatter?.(0.0014)).toBe("0.0014");
-  expect(captured.yAxisWidth).toBe(72);
+  expect(captured.yAxisWidth).toBe("auto");
   expect(captured.chartConfig).toMatchObject({
     value: { color: "var(--chart-1)" },
   });
@@ -153,6 +163,23 @@ test("a single reference bound renders one dashed line and no band", () => {
 
   expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
+});
+
+test("a supplied display value preserves the lab's reported precision in the tooltip", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "Hemoglobin",
+    points: [
+      { date: "2026-02-17", displayValue: "18.0", id: "p1", value: 18 },
+    ],
+    unit: "g/dL",
+  }));
+
+  const tooltip = captured.tooltipFormatter?.(
+    18,
+    "value",
+    { payload: { displayValue: "18.0" } },
+  );
+  expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("18.0 g/dL");
 });
 
 test("no reference range keeps the grid and default domain", () => {

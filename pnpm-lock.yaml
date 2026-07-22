@@ -196,6 +196,9 @@ importers:
       '@murphai/health-commons':
         specifier: workspace:*
         version: link:../../packages/health-commons
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../../packages/health-metrics
       '@murphai/hosted-execution':
         specifier: workspace:*
         version: link:../../packages/hosted-execution

@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:bilirubin
 slug: biomarkers/bilirubin
 title: Bilirubin
-summary: Optional liver-context safety lab interpreted by a clinician when relevant.
+summary: "Total bilirubin measures conjugated and unconjugated bilirubin together, which can add context about red-cell breakdown, liver processing, and bile flow."
 status: draft
 quality: usable
 categories:
@@ -22,6 +22,22 @@ biomarker:
   direction:
     desired: stable
     label: Stay within the lab reference range; large excursions should be reviewed with a clinician.
+referenceGuidance:
+  classification: source_range_only
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: reference_interval
+      guidance: "Use the reporting laboratory’s reference interval for Total bilirubin; Commons does not replace the source range because reference limits depend on assay, specimen, and reference population."
+      applicability: "Applies with the reporting assay, age, sex, symptoms, medications, alcohol, exercise, and related liver or blood-count results considered."
+      source:
+        title: "ACG Clinical Guideline: Evaluation of Abnormal Liver Chemistries"
+        organization: "American College of Gastroenterology; American Journal of Gastroenterology"
+        year: 2017
+        sourceType: "clinical_guideline"
+        url: "https://pubmed.ncbi.nlm.nih.gov/27995906/"
+        doi: "10.1038/ajg.2016.517"
+        pmid: "27995906"
 ---
 
 Optional liver-context safety lab interpreted by a clinician when relevant.

@@ -4,7 +4,7 @@ entityType: "biomarker"
 key: "biomarker:non-hdl-cholesterol"
 slug: "biomarkers/non-hdl-cholesterol"
 title: "Non-HDL Cholesterol"
-summary: "Total cholesterol minus HDL-C; secondary lipid-context endpoint for EPA/DHA experiments when a fasting lipid panel is used."
+summary: "Non-HDL cholesterol subtracts HDL-C from total cholesterol to estimate cholesterol carried by atherogenic particles, which can support risk-based lipid assessment."
 status: "draft"
 quality: "usable"
 aliases:
@@ -79,6 +79,37 @@ claims:
       - "source_artifact:pmid-26073395"
       - "source_artifact:pmid-26073397"
       - "source_artifact:pmid-36313109"
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: decision_limit
+      guidance: "The 2026 dyslipidemia guideline uses non-HDL-C goals below 130 mg/dL for borderline or intermediate primary-prevention risk, below 100 mg/dL for high risk, and below 85 mg/dL for very-high-risk secondary prevention."
+      applicability: "These are risk- and treatment-specific goals rather than a universal reference interval, and they should remain linked to total cholesterol, HDL-C, treatment, and the member’s risk category."
+      numericValues:
+        - label: "Borderline or intermediate primary-prevention goal"
+          unit: "mg/dL"
+          upperBound:
+            value: 130
+            inclusive: false
+        - label: "High-risk goal"
+          unit: "mg/dL"
+          upperBound:
+            value: 100
+            inclusive: false
+        - label: "Very-high-risk secondary-prevention goal"
+          unit: "mg/dL"
+          upperBound:
+            value: 85
+            inclusive: false
+      source:
+        title: "2026 ACC/AHA/Multisociety Guideline on the Management of Dyslipidemia"
+        organization: "American College of Cardiology, American Heart Association, and collaborating societies; Circulation"
+        year: 2026
+        sourceType: "clinical_guideline"
+        url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001423"
+        doi: "10.1161/CIR.0000000000001423"
 ---
 
 ## Role in this protocol
