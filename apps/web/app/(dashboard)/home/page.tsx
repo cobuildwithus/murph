@@ -2,10 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 
 import { DeviceSyncCompletionDialog } from "./device-sync-completion-dialog";
-import {
-  type HomeInitialVisitContactAction,
-  HomeInitialVisitPersonaPickerClient,
-} from "./initial-visit-persona-picker-client";
+import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-picker-client";
 
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
@@ -179,25 +176,11 @@ function readFirstSearchParamValue(
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function resolveHomeInitialVisitContactAction(): Promise<
-  HomeInitialVisitContactAction | null
-> {
-  const option = await resolveHostedMurphContactOption({
+async function resolveHomeInitialVisitContactAction() {
+  return resolveHostedMurphContactOption({
     message: {
       body: "Hey Murph, do your thing",
       subject: "Hey Murph, do your thing",
     },
   });
-
-  if (!option) {
-    return null;
-  }
-
-  return {
-    href: option.href,
-    kind: option.kind,
-    label: option.label,
-    rel: option.rel,
-    target: option.target,
-  };
 }

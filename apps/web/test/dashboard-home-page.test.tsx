@@ -72,6 +72,10 @@ vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
     contactAction: {
       href: string;
       kind: string;
+      webmail?: {
+        href: string;
+        label: string;
+      } | null;
     } | null;
   }) {
     return createElement(
@@ -79,6 +83,8 @@ vi.mock("../app/(dashboard)/home/initial-visit-persona-picker-client", () => ({
       {
         "data-contact-action-href": contactAction?.href ?? "none",
         "data-contact-action-kind": contactAction?.kind ?? "none",
+        "data-contact-action-webmail-href": contactAction?.webmail?.href ?? "none",
+        "data-contact-action-webmail-label": contactAction?.webmail?.label ?? "none",
         "data-show-contact-card": contactAction?.kind === "text" ? "true" : "false",
         "data-home-initial-visit-persona-picker": "shown",
       },
@@ -585,6 +591,34 @@ test("HomePage skips the contact-card picker for Telegram-only members", async (
   assert.match(markup, /data-show-contact-card="false"/);
   assert.match(markup, /data-contact-action-kind="telegram"/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+});
+
+test("HomePage preserves the resolved email webmail composer for initial visits", async () => {
+  mocks.resolveHostedMurphContactOption.mockResolvedValueOnce({
+    href: "mailto:murph@example.test",
+    kind: "email",
+    label: "Email",
+    webmail: {
+      href: "https://mail.google.com/mail/u/0/?tf=cm&to=murph%40example.test",
+      label: "Gmail",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve({
+        initialVisit: "true",
+      }),
+    }),
+  );
+
+  assert.match(markup, /data-contact-action-kind="email"/);
+  assert.match(
+    markup,
+    /data-contact-action-webmail-href="https:\/\/mail\.google\.com\/mail\/u\/0\/\?tf=cm&amp;to=murph%40example\.test"/,
+  );
+  assert.match(markup, /data-contact-action-webmail-label="Gmail"/);
 });
 
 test("HomePage keeps persona onboarding gated behind the exact initial-visit marker", async () => {

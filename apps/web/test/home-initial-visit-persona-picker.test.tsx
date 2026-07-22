@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { act, createElement, type HTMLAttributes, type ReactNode } from "react";
 import { test, vi } from "vitest";
 
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/murph/murph-persona-picker", () => ({
@@ -237,6 +239,47 @@ test("HomeInitialVisitPersonaPickerClient uses settings as the final Text Murph 
 
     assert.match(container.textContent ?? "", /Welcome to Murph/u);
     assert.equal(container.querySelector("a")?.getAttribute("href"), "/settings");
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HomeInitialVisitPersonaPickerClient preserves the resolved webmail composer", async () => {
+  const { HomeInitialVisitPersonaPickerClient } = await import(
+    "../app/(dashboard)/home/initial-visit-persona-picker-client"
+  );
+  const contactAction: MurphContactOption = {
+    href: "mailto:murph@example.test",
+    kind: "email",
+    label: "Email",
+    webmail: {
+      href: "https://mail.google.com/mail/u/0/?tf=cm&to=murph%40example.test",
+      label: "Gmail",
+    },
+  };
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HomeInitialVisitPersonaPickerClient, { contactAction }),
+    { requireButton: false },
+  );
+
+  try {
+    const completeButton = Array.from(container.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Complete persona picker",
+    );
+    assert.ok(completeButton);
+
+    await act(async () => {
+      completeButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    const contactLink = container.querySelector("a");
+    assert.equal(contactLink?.getAttribute("href"), contactAction.webmail?.href);
+    assert.equal(contactLink?.getAttribute("target"), "_blank");
+    assert.equal(contactLink?.getAttribute("rel"), "noopener noreferrer");
+    assert.equal(
+      contactLink?.getAttribute("aria-label"),
+      "Text Murph in Gmail (opens in a new tab)",
+    );
   } finally {
     await cleanup();
   }

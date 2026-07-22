@@ -18,15 +18,10 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const INITIAL_VISIT_QUERY_KEY = "initialVisit";
 
-export type HomeInitialVisitContactAction = Pick<
-  MurphContactOption,
-  "href" | "kind" | "label" | "rel" | "target"
->;
-
 export function HomeInitialVisitPersonaPickerClient({
   contactAction,
 }: {
-  contactAction: HomeInitialVisitContactAction | null;
+  contactAction: MurphContactOption | null;
 }) {
   const [stage, setStage] = useState<"contact" | "persona" | "welcome" | "done">(
     contactAction?.kind === "text" ? "contact" : "persona",
