@@ -1,6 +1,6 @@
 # iOS ChatGPT access-token runtime handoff
 
-Status: active
+Status: completed
 Created: 2026-07-21
 Updated: 2026-07-21
 
@@ -167,6 +167,22 @@ Updated: 2026-07-21
 
 ## Verification
 
+- Evidence recorded on the completed head after merging `origin/main`:
+  - focused assistant-engine/runtime and hosted-execution tests passed 25/25,
+    Web migration tests passed 5/5, and Cloudflare runner-platform tests passed
+    139/139;
+  - the lower-concurrency scoped `test:diff` passed every affected package,
+    including 2,589 assistant-engine tests, 1,785 assistant-runtime tests, 388
+    hosted-execution tests, 6,149 Web tests plus its production build, and 1,856
+    Cloudflare tests;
+  - `pnpm verify:acceptance` passed its full typecheck, documentation,
+    package-coverage, Web, Cloudflare, boundary, build, and test gates;
+  - direct Codex App Server 0.144.0 login accepted a structurally valid
+    synthetic JWT through `chatgptAuthTokens`, used no real credential, and
+    left `auth.json` absent. A preliminary invalid synthetic string was
+    correctly rejected before this protocol-valid proof;
+  - `git diff --check`, task-diff privacy checks, and the required
+    coverage-write audit passed with no follow-up edit.
 - Evidence recorded before the final `main` merge:
   - focused Web store/route/migration, Cloudflare transport, hosted-execution,
     assistant-runtime, and assistant-engine suites passed, including adversarial
@@ -200,3 +216,4 @@ Updated: 2026-07-21
     secret-safe response; connect/update/disconnect/cold-start proofs show the
     current generation only; no credential-like value appears in the diff or
     generated artifacts.
+Completed: 2026-07-21
