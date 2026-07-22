@@ -974,13 +974,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.112')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.114')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.112'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.114'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1042,7 +1042,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptDriver).toContain('`CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain('`Nested CDP socket command timed out: ${method}`')
     expect(reviewGptDriver).toContain(
-      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 10 * 60 * 1000;',
+      'const MIN_MARKED_CONCRETE_MODEL_RESPONSE_MS = 7.5 * 60 * 1000;',
     )
     const solTarget: ReviewGptModelPickerTarget = {
       desiredVersion: '5-6',
@@ -1133,9 +1133,9 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptReadme).toContain('the exact turn committed by this run')
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
-    expect(reviewGptReadme).toContain('after at least 10 minutes of observed generation')
+    expect(reviewGptReadme).toContain('after at least 7.5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response that completes in under 10 minutes fails closed as untrusted',
+      'A marked concrete-model response that completes in under 7.5 minutes fails closed as untrusted',
     )
     expect(reviewGptDriver).toContain('REVIEW_GPT_TURN_NONCE:')
     expect(reviewGptDriver).not.toContain("value.includes('MODEL_CONFIRMATION:')")
@@ -1430,7 +1430,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'A marked concrete-model response that completes in under 10 minutes',
+      'A marked concrete-model response that completes in under 7.5 minutes',
     )
     expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
@@ -1730,7 +1730,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toContain('confirmed model UNKNOWN, expected gpt-5.6-sol')
     expect(
@@ -1738,7 +1738,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         '',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toBe('')
     expect(
@@ -1746,7 +1746,7 @@ describe('monorepo release flow coverage audit', () => {
         'gpt-5.6-sol',
         extractedConfirmation,
         'gpt-5-5-pro',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toContain('DOM reported model gpt-5-5-pro, expected gpt-5.6-sol')
 
@@ -1959,7 +1959,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toMatchObject({ evidence: null, failure: expect.stringContaining('confirmed model UNKNOWN') })
     expect(
@@ -1968,7 +1968,7 @@ describe('monorepo release flow coverage audit', () => {
         elapsedFallbackSnapshot,
         true,
         committedUserTurnSignature,
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toEqual({ evidence: null, failure: '' })
 
@@ -2002,24 +2002,24 @@ describe('monorepo release flow coverage audit', () => {
     ).toMatchObject({ evidence: null })
   })
 
-  it('fails closed marked concrete-model responses below ten minutes', () => {
+  it('fails closed marked concrete-model responses below seven and a half minutes', () => {
     const harness = loadReviewGptOpenTargetHarness(1)
 
     expect(
       harness.markedResponseDurationFailure('gpt-5.6-sol', 'ROUND_OUTCOME:', 37_000),
-    ).toContain('after 37s, below the 10m minimum')
+    ).toContain('after 37s, below the 7.5m minimum')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        10 * 60 * 1000 - 1,
+        7.5 * 60 * 1000 - 1,
       ),
     ).toContain('The response is untrusted and was not attested.')
     expect(
       harness.markedResponseDurationFailure(
         'gpt-5.6-sol',
         'ROUND_OUTCOME:',
-        10 * 60 * 1000,
+        7.5 * 60 * 1000,
       ),
     ).toBe('')
     expect(
