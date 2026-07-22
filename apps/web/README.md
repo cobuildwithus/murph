@@ -28,10 +28,11 @@ device-sync state, and checkpoints its own workspace state.
 
 Signup-oriented landing-page auth completion for accessible hosted stages routes
 to `/home?initialVisit=true`. The home page treats that query as a one-shot
-browser handoff: it opens the welcome dialog, resolves the member's best
-available Murph contact route, and strips the query parameter on mount so
-ordinary `/home` visits are not blocked. Login-oriented landing CTAs continue to
-route to `/home`.
+browser handoff. Members with a resolved text contact see the contact-card picker
+first and then the production four-step Murph personality picker; members without
+one start at the personality picker. The page strips the query parameter on mount
+so ordinary `/home` visits are not blocked.
+Login-oriented landing CTAs continue to route to `/home`.
 
 `apps/cloudflare` remains the execution-only runtime boundary. It accepts
 authenticated execution intents, restores encrypted runtime state, runs a

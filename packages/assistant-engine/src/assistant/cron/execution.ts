@@ -10,6 +10,7 @@ import {
 } from '@murphai/hosted-execution/env'
 import type {
   HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
   type AutomationQueryRecord,
@@ -61,7 +62,10 @@ import type {
 } from '../service-contracts.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import { errorMessage, normalizeNullableString } from '../shared.js'
-import type { AssistantStatePaths } from '../store/paths.js'
+import {
+  resolveAssistantStatePaths,
+  type AssistantStatePaths,
+} from '../store/paths.js'
 import { withAssistantCronWriteLock } from './locking.js'
 import {
   buildAssistantCronHostedDeliveryIdempotency,
@@ -670,6 +674,12 @@ export async function executeClaimedAssistantCronJob(
           executionContext: input.executionContext ?? null,
           job: claimedJob,
         })
+        const scheduledInvocationAuthority =
+          resolveAssistantCronScheduledInvocationAuthority({
+            job: input.job,
+            occurrenceAt,
+            trigger: input.trigger,
+          })
         const automationTurn = buildAssistantAutomationTurnEnvelope({
           assistantTargetOverride:
             resolveAssistantCronAutomationTargetOverride(input.job) ??
@@ -681,6 +691,7 @@ export async function executeClaimedAssistantCronJob(
             occurrenceAt,
             trigger: input.trigger,
           }),
+          scheduledInvocationAuthority,
           scheduledOccurrenceAt: occurrenceAt,
           serviceTier,
           signal: yieldCancellation.signal,
@@ -719,8 +730,56 @@ export async function executeClaimedAssistantCronJob(
               executionContext: automationTurn.executionContext,
               route: deliveryRoute,
               routeAuthorityVerified: !maintenanceJob,
+              scheduledInvocationAuthority,
             })
-          const result = await sendAssistantNotificationLocal({
+          const assertNotificationStillAuthorized = async (): Promise<void> => {
+            const authority = await resolveAssistantCronCanonicalSourceAuthority({
+              job: input.job,
+              now: new Date(),
+              trigger: input.trigger,
+              vault: input.vault,
+            })
+            if (authority.kind !== 'current') {
+              canonicalSourceDisposition = authority.kind
+              throw new AssistantCronCanonicalSourceInvalidatedError(authority)
+            }
+            await assertAssistantCronLifecycleNotificationStillAuthorized({
+              job: input.job,
+              vault: input.vault,
+            })
+
+            if (notificationExecutionContext?.hosted?.groupTool) {
+              const currentAuthorizedDelivery =
+                await resolveAssistantCronAuthorizedNotificationDeliveryRoute({
+                  executionContext: input.executionContext ?? null,
+                  signal: yieldCancellation.signal,
+                  target: claimedJob.target,
+                })
+              const currentRoute = currentAuthorizedDelivery.route
+              const expectedTarget = normalizeNullableString(
+                deliveryRoute.bindingDelivery?.target
+                  ?? deliveryRoute.deliveryTarget,
+              )
+              const currentTarget = normalizeNullableString(
+                currentRoute.bindingDelivery?.target
+                  ?? currentRoute.deliveryTarget,
+              )
+              if (
+                currentRoute.threadIsDirect !== false
+                || !expectedTarget
+                || currentTarget !== expectedTarget
+              ) {
+                throw new VaultCliError(
+                  'ASSISTANT_CRON_GROUP_ROUTE_STALE',
+                  'Scheduled group route changed before the next tool or delivery.',
+                  { retryable: true },
+                )
+              }
+            }
+          }
+          const notificationInput: Parameters<
+            typeof sendAssistantNotificationLocal
+          >[0] = {
             vault: input.vault,
             ...automationTurn,
             executionContext: notificationExecutionContext,
@@ -735,37 +794,10 @@ export async function executeClaimedAssistantCronJob(
                   },
                 }
               : {}),
-            beforeDelivery: async () => {
-              const authority = await resolveAssistantCronCanonicalSourceAuthority({
-                job: input.job,
-                now: new Date(),
-                trigger: input.trigger,
-                vault: input.vault,
-              })
-              if (authority.kind !== 'current') {
-                canonicalSourceDisposition = authority.kind
-                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
-              }
-              await assertAssistantCronLifecycleNotificationStillAuthorized({
-                job: input.job,
-                vault: input.vault,
-              })
-            },
+            beforeDelivery: assertNotificationStillAuthorized,
+            beforeToolExecution: assertNotificationStillAuthorized,
             beforeCommit: async (context) => {
-              const authority = await resolveAssistantCronCanonicalSourceAuthority({
-                job: input.job,
-                now: new Date(),
-                trigger: input.trigger,
-                vault: input.vault,
-              })
-              if (authority.kind !== 'current') {
-                canonicalSourceDisposition = authority.kind
-                throw new AssistantCronCanonicalSourceInvalidatedError(authority)
-              }
-              await assertAssistantCronLifecycleNotificationStillAuthorized({
-                job: input.job,
-                vault: input.vault,
-              })
+              await assertNotificationStillAuthorized()
               await preemptAssistantCronNotificationCommitForForeground({
                 allowTerminalNoDelivery:
                   assistantCronDeviceActivitySkipConsumesOccurrence({
@@ -819,7 +851,8 @@ export async function executeClaimedAssistantCronJob(
             threadIsDirect: deliveryRoute.threadIsDirect,
             operatorAuthority: 'direct-operator',
             workingDirectory: input.vault,
-          })
+          }
+          const result = await sendAssistantNotificationLocal(notificationInput)
 
           sessionId = result.session.sessionId
           response = result.response ?? result.decision.privateSummary
@@ -1346,6 +1379,24 @@ function resolveAssistantCronAutomationTargetOverride(
   return job.kind === 'canonical' && job.source.kind === 'automation'
     ? job.source.assistantTargetOverride
     : null
+}
+
+export function resolveAssistantCronScheduledInvocationAuthority(input: {
+  job: ResolvedAssistantCronJob
+  occurrenceAt: string
+  trigger: AssistantCronTrigger
+}): HostedRuntimeScheduledAutomationAuthority | null {
+  if (
+    input.trigger !== 'scheduled' ||
+    input.job.kind !== 'canonical' ||
+    input.job.source.kind !== 'automation'
+  ) {
+    return null
+  }
+  return {
+    automationId: input.job.source.automationId,
+    occurrenceAt: input.occurrenceAt,
+  }
 }
 
 function resolveAssistantCronScheduledNewsletterAuthority(input: {
@@ -2039,6 +2090,7 @@ function scopeAssistantCronScheduledGroupTools(input: {
   executionContext: AssistantExecutionContext | null | undefined
   route: ReturnType<typeof resolveAssistantCronNotificationDeliveryRoute>
   routeAuthorityVerified: boolean
+  scheduledInvocationAuthority: HostedRuntimeScheduledAutomationAuthority | null
 }): AssistantExecutionContext | null | undefined {
   const hosted = input.executionContext?.hosted
   if (
@@ -2054,12 +2106,17 @@ function scopeAssistantCronScheduledGroupTools(input: {
     createScheduledGroupTools,
     groupPermissionOfferTool: _unscopedGroupPermissionOfferTool,
     groupSharedReader: _unscopedGroupSharedReader,
+    groupTool: _unscopedGroupTool,
     ...hostedWithoutScheduledGroupTools
   } = hosted
   void _unscopedGroupPermissionOfferTool
   void _unscopedGroupSharedReader
+  void _unscopedGroupTool
   const unscopedExecutionContext: AssistantExecutionContext = {
     hosted: hostedWithoutScheduledGroupTools,
+  }
+  if (!input.scheduledInvocationAuthority) {
+    return unscopedExecutionContext
   }
   const target = normalizeNullableString(
     input.route.bindingDelivery?.target ?? input.route.deliveryTarget,

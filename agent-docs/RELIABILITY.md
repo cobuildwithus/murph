@@ -58,6 +58,14 @@ Last verified: 2026-07-21
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
+  start the selected requests, then use ordinary shell waits and exact replay to
+  poll every accepted request until it returns completed or unavailable. The
+  existing ten-minute request expiry bounds the loop. The cron owner revalidates
+  current automation and route authority before every Murph tool call, and Web
+  revalidates disclosure authority before returning a stored result. Waiting
+  does not hold a callback open, wake the runtime, start another provider turn,
+  create an outbox delivery, or introduce another retry owner.
 - A target runtime may run at most one `executeReadOnlyAssistantAsk` child beside
   its resident foreground turn. The child is a separate one-shot process and
   cannot write or send, so its startup, provider latency, failure, or retry must
@@ -98,11 +106,19 @@ Last verified: 2026-07-21
   stable query/slice identity, bounded windows must be non-overlapping, and
   checkpoint completion is recorded per slice while resource-family outcome
   counts remain deduplicated. Legacy checkpoints and manifests remain readable;
-  Web must not emit the query-aware protocol until compatible runtime readers
-  have deployed. Plans admit at most 80 slices so the maximum descriptor,
-  pagination budget, and terminal-error fan-out remain inside their existing
-  64 KiB control response, 500 provider-page, and 100-error envelopes; this is
-  deliberately independent from the 500-file raw-storage cap.
+  legacy retrieval rows remain on the legacy wire protocol, while newly
+  created runs pin `query-slices-v2` for their full lifecycle. Query-aware page
+  claims, cursors, fingerprints, and outcomes bind the frozen query-scope and
+  slice identity. Plans admit at most 80 slices so the maximum descriptor,
+  32 KiB terminal-outcome request, pagination budget, and terminal-error
+  fan-out remain inside bounded control envelopes, the 500 provider-page cap,
+  and the 100-error cap; this is deliberately independent from the 500-file
+  raw-storage cap.
+- Epic activates 24 primary query scopes across 17 unique FHIR resource
+  permissions. Each granted family expands into all of its query variants. Nine
+  time-bounded queries freeze one initial newest-first 90- or 365-day slice at
+  run creation; dependency reads and older-window backfill remain separate
+  bounded work rather than implicit fan-out.
 - Cloudflare container and Durable Object RPC methods must be invoked directly on the platform stub, not detached, bound, wrapped, or passed around as ordinary callbacks. Test doubles for hosted runner/container seams should model that direct-call contract so local coverage catches receiver/proxy mistakes before they become accepted-but-stuck runtime work.
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.

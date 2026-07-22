@@ -120,6 +120,36 @@ closed. Smoke one private-to-group ask while the group runtime is idle and one
 while its foreground Murph is replying; neither may create group-visible
 activity or delay the foreground reply.
 
+The Ask admission advisory-lock correction is Web-only and does not require a
+Cloudflare deploy. The optional failed-request correlation headers are additive:
+old runners ignore them safely, while the runner bundle that surfaces its
+bounded request id, allowlisted Prisma diagnostic code, and HTTP status requires
+a Cloudflare deploy. Deploy
+that diagnostic consumer with `container_rollout=immediate`, prove the new
+runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
+the correlation metadata immediately. Either mixed version remains functionally
+safe because Web does not require the runner to consume the header.
+
+## Consented Group Disclosure Rollout
+
+The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
+secret, Durable Object state, scheduler, workflow, second container, or producer
+flag. The first compatible runner bundle is the rollback floor while a consented
+request or completion can remain in a Web mailbox, imported local pending item,
+or committed workspace snapshot. Roll below that floor only after the full
+ten-minute request lifetime has elapsed and pending work has drained or expired;
+prefer a forward fix if an imported item may remain. Do not delete permission or
+grant rows during rollback: they remain member-managed product truth and cannot
+erase already shared answers.
+
+After deployment, require managed-container smoke to report the new runner
+bundle fingerprint and preserve the existing `murph-group-read` confinement
+proof. Verify the outgoing reviewer starts with an empty runtime root and no
+personal workspace, application tools, delivery route, inherited secrets, or
+network. Smoke one exact permission-message Like by a current member, one
+allowed ask whose bytes reach the originating group unchanged, one
+out-of-permission denial, and one revoke followed by a rejected ask.
+
 ## Linq Participant-Context Rollout
 
 The participant-addition hint uses an additive database column, an additive

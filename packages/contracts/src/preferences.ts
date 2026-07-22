@@ -8,14 +8,62 @@ export const assistantPreferenceMutationStateRelativePath =
   "bank/assistant-preference-mutations.json";
 export const assistantPreferenceMutationStateSchemaVersion = 1;
 
-export const assistantPersonaIdValues = [
+export const assistantBasePersonaIdValues = [
   "classic",
   "navy-seal",
   "stoic-philosopher",
+  "scientist",
+  "hype-coach",
+  "straight-talking-friend",
+] as const;
+export const assistantBasePersonaIdSchema = z.enum(assistantBasePersonaIdValues);
+export type AssistantBasePersonaId = z.infer<typeof assistantBasePersonaIdSchema>;
+
+export const assistantPersonaIdValues = [
+  "classic",
+  "classic-with-navy-seal",
+  "classic-with-stoic-philosopher",
+  "classic-with-scientist",
+  "classic-with-hype-coach",
+  "classic-with-straight-talking-friend",
+  "navy-seal",
+  "navy-seal-with-classic",
+  "navy-seal-with-stoic-philosopher",
+  "navy-seal-with-scientist",
+  "navy-seal-with-hype-coach",
+  "navy-seal-with-straight-talking-friend",
+  "stoic-philosopher",
+  "stoic-philosopher-with-classic",
+  "stoic-philosopher-with-navy-seal",
+  "stoic-philosopher-with-scientist",
+  "stoic-philosopher-with-hype-coach",
+  "stoic-philosopher-with-straight-talking-friend",
+  "scientist",
+  "scientist-with-classic",
+  "scientist-with-navy-seal",
+  "scientist-with-stoic-philosopher",
+  "scientist-with-hype-coach",
+  "scientist-with-straight-talking-friend",
+  "hype-coach",
+  "hype-coach-with-classic",
+  "hype-coach-with-navy-seal",
+  "hype-coach-with-stoic-philosopher",
+  "hype-coach-with-scientist",
+  "hype-coach-with-straight-talking-friend",
+  "straight-talking-friend",
+  "straight-talking-friend-with-classic",
+  "straight-talking-friend-with-navy-seal",
+  "straight-talking-friend-with-stoic-philosopher",
+  "straight-talking-friend-with-scientist",
+  "straight-talking-friend-with-hype-coach",
+] as const;
+export const assistantPersonaIdSchema = z.enum(assistantPersonaIdValues);
+export type AssistantPersonaId = z.infer<typeof assistantPersonaIdSchema>;
+
+const legacyAssistantPersonaIdValues = [
   "wise-elder",
   "medical-detective",
   "longevity-scientist",
-  "hype-coach",
   "zen-monk",
   "best-friend",
   "championship-coach",
@@ -25,8 +73,57 @@ export const assistantPersonaIdValues = [
   "biohacker",
   "drill-sergeant",
 ] as const;
-export const assistantPersonaIdSchema = z.enum(assistantPersonaIdValues);
-export type AssistantPersonaId = z.infer<typeof assistantPersonaIdSchema>;
+type LegacyAssistantPersonaId = (typeof legacyAssistantPersonaIdValues)[number];
+
+const legacyAssistantPersonaMainIdById = {
+  "wise-elder": "stoic-philosopher",
+  "medical-detective": "scientist",
+  "longevity-scientist": "scientist",
+  "zen-monk": "stoic-philosopher",
+  "best-friend": "straight-talking-friend",
+  "championship-coach": "navy-seal",
+  "science-professor": "scientist",
+  "mountain-guide": "stoic-philosopher",
+  grandma: "classic",
+  biohacker: "scientist",
+  "drill-sergeant": "navy-seal",
+} as const satisfies Readonly<Record<LegacyAssistantPersonaId, AssistantBasePersonaId>>;
+
+const assistantBasePersonaIdSet: ReadonlySet<string> = new Set(
+  assistantBasePersonaIdValues,
+);
+const assistantPersonaIdSet: ReadonlySet<string> = new Set(assistantPersonaIdValues);
+const legacyAssistantPersonaIdSet: ReadonlySet<string> = new Set(
+  legacyAssistantPersonaIdValues,
+);
+
+export function isAssistantBasePersonaId(
+  value: unknown,
+): value is AssistantBasePersonaId {
+  return typeof value === "string" && assistantBasePersonaIdSet.has(value);
+}
+
+export function isAssistantPersonaId(value: unknown): value is AssistantPersonaId {
+  return typeof value === "string" && assistantPersonaIdSet.has(value);
+}
+
+function isLegacyAssistantPersonaId(
+  value: unknown,
+): value is LegacyAssistantPersonaId {
+  return typeof value === "string" && legacyAssistantPersonaIdSet.has(value);
+}
+
+export function normalizeStoredAssistantPersonaId(
+  value: unknown,
+): AssistantPersonaId | null {
+  if (isAssistantPersonaId(value)) {
+    return value;
+  }
+  if (isLegacyAssistantPersonaId(value)) {
+    return legacyAssistantPersonaMainIdById[value];
+  }
+  return null;
+}
 
 export const assistantTonePreferenceValues = ["casual", "formal"] as const;
 export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValues);
@@ -292,7 +389,7 @@ export const assistantVoiceOptions = [
     elevenLabsVoiceId: "RILOU7YmBhvwJGDGjNmP",
     gender: "female",
     id: "narrator",
-    label: "Audiobook narrator",
+    label: "Documentary narrator",
     previewPath: "/audio/murph-voices/narrator.mp3",
   },
   {
@@ -376,13 +473,6 @@ export type PreferencesDocument = z.infer<typeof preferencesDocumentSchema>;
 
 export function isWearablePreferenceProvider(value: unknown): value is WearablePreferenceProvider {
   return typeof value === "string" && wearablePreferenceProviderOrder.has(value as WearablePreferenceProvider);
-}
-
-export function isAssistantPersonaId(value: unknown): value is AssistantPersonaId {
-  return (
-    typeof value === "string"
-    && assistantPersonaIdValues.includes(value as AssistantPersonaId)
-  );
 }
 
 export function isAssistantTonePreference(value: unknown): value is AssistantTonePreference {

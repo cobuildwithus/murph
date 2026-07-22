@@ -27,6 +27,8 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   HOSTED_CODEX_AUTH_SEED_RESPONSE_MAX_BYTES,
+  HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   type HostedWorkspaceCheckpointRequest,
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
@@ -2824,6 +2826,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it("preserves structured non-retryable web-control errors without raw JSON in the message", async () => {
+    const requestId = `aask_req_${"a".repeat(64)}`;
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       error: {
         code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
@@ -2833,6 +2836,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }), {
       headers: {
         "content-type": "application/json; charset=utf-8",
+        [HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER]: requestId,
       },
       status: 403,
     }));
@@ -2854,11 +2858,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expect(error).toMatchObject({
         code: "HOSTED_LINQ_RECIPIENT_RECENT_REPLY_REQUIRED",
         context: {
+          requestId,
           retryable: false,
           status: 403,
           statusCode: 403,
         },
         retryable: false,
+        requestId,
         status: 403,
         statusCode: 403,
       });
@@ -2868,6 +2874,57 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         .not.toContain("\"retryable\":false");
     }
   });
+
+  it.each([
+    [`aask_req_${"b".repeat(64)}`, "P2010", `aask_req_${"b".repeat(64)}`, "P2010"],
+    ["aask_req_not-a-valid-correlation-id", "PRIVATE_CODE", undefined, "INTERNAL_ERROR"],
+  ])(
+    "bounds Assistant Ask diagnostics from web-control headers",
+    async (requestIdHeader, diagnosticCodeHeader, expectedRequestId, expectedCode) => {
+      const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
+        },
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER]: diagnosticCodeHeader,
+          [HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER]: requestIdHeader,
+        },
+        status: 500,
+      }));
+      const platform = buildHostedExecutionRuntimePlatform({
+        boundUserId: "member_123",
+        fetchImpl: fetchMock as typeof fetch,
+        webCallbackSigning: {
+          keyId: "v1",
+          privateKeyJwkJson: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+        webControlBaseUrl: "https://web.example.test",
+      });
+
+      try {
+        await platform.workspacePort!.read!();
+        throw new Error("Expected web-control read to fail.");
+      } catch (error) {
+        expect(error).toBeInstanceOf(HostedWebControlPlaneResponseError);
+        expect(error).toMatchObject({
+          code: expectedCode,
+          requestId: expectedRequestId,
+          status: 500,
+          statusCode: 500,
+        });
+        if (expectedRequestId === undefined) {
+          expect(
+            error instanceof HostedWebControlPlaneResponseError
+              ? error.context
+              : {},
+          ).not.toHaveProperty("requestId");
+        }
+      }
+    },
+  );
 
   it("stops buffering sensitive chunked web-control responses at the byte limit", async () => {
     const encoder = new TextEncoder();
@@ -4595,15 +4652,28 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
-  it("write-fences Linq egress authority assertions and preserves only boolean directness", async () => {
+  it("write-fences Linq egress authority assertions and preserves boolean fallback/directness", async () => {
     let responseCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       expect(new URL(request.url).pathname).toBe(HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH);
       responseCount += 1;
-      const body = await request.json() as { authorityCheckOnly?: unknown };
+      const body = await request.json() as {
+        assistantAskCompletionExpiresAt?: unknown;
+        assistantAskFallback?: unknown;
+        authorityCheckOnly?: unknown;
+      };
       expect(body.authorityCheckOnly).toBe(responseCount === 1 ? false : true);
+      expect(body.assistantAskFallback).toBe(
+        responseCount === 1 ? undefined : false,
+      );
+      expect(body.assistantAskCompletionExpiresAt).toBe(
+        responseCount === 1 ? undefined : "2026-07-16T12:10:00.000Z",
+      );
       return new Response(JSON.stringify({
+        ...(body.assistantAskFallback === false
+          ? { assistantAskFallbackRequired: true }
+          : {}),
         ok: true,
         ...(body.authorityCheckOnly === false
           ? { providerDispatchClaimed: true }
@@ -4639,10 +4709,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       threadIsDirect: false,
     });
     await expect(assertLinqRecentInboundEngagement({
+      assistantAskCompletionExpiresAt: "2026-07-16T12:10:00.000Z",
+      assistantAskFallback: false,
       authorityCheckOnly: true,
       target: "chat_456",
       targetKind: "thread",
-    })).resolves.toEqual({});
+    })).resolves.toEqual({ assistantAskFallbackRequired: true });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const [index, call] of fetchMock.mock.calls.entries()) {

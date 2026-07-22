@@ -559,6 +559,32 @@ test("stores persona sparsely and applies causal order per preference field", as
   );
 });
 
+test("normalizes legacy stored persona ids to canonical main-only ids", async () => {
+  const vaultRoot = await createTempVault();
+  await writeFile(
+    path.join(vaultRoot, "bank/preferences.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      updatedAt: "2026-07-20T10:00:00.000Z",
+      assistant: {
+        persona: "longevity-scientist",
+        tone: "formal",
+      },
+      workoutUnitPreferences: {},
+      wearablePreferences: {
+        desiredProviders: [],
+      },
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const document = await readPreferencesDocument(vaultRoot);
+  assert.deepEqual(document.assistant, {
+    persona: "scientist",
+    tone: "formal",
+  });
+});
+
 test("uses mailbox causal order per field across delayed Settings and conversation writes", async () => {
   const vaultRoot = await createTempVault();
   await updateAssistantPreferences({

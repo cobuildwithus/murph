@@ -48,7 +48,10 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({ routeAuthority: null }),
-        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
       ],
     });
 
@@ -126,6 +129,21 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       },
     });
 
+    await groupTool.request({
+      action: "post_disclosure_request",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      permissionText: "Share my calendar availability only to coordinate group calls.",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "post_disclosure_request",
+      originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+      permissionText: "Share my calendar availability only to coordinate group calls.",
+      linqThread: {
+        authority: ROUTE_AUTHORITY,
+        chatId: "chat_group_1",
+      },
+    });
+
     await groupTool.request({ action: "read_current" });
     expect(request).toHaveBeenLastCalledWith({ action: "read_current" });
 
@@ -139,6 +157,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
+      linqSenderHandles: ["+15550000001"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 
@@ -155,6 +174,27 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
       originSessionId: "session_private",
       question: "What exercises are assigned today?",
+    });
+
+    await groupTool.request({
+      action: "ask_member",
+      grantId: "hdg_calendar",
+      origin: {
+        assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+      question: "Are you available Tuesday afternoon?",
+    });
+    expect(request).toHaveBeenLastCalledWith({
+      action: "ask_member",
+      grantId: "hdg_calendar",
+      origin: {
+        assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+      question: "Are you available Tuesday afternoon?",
     });
 
     await groupTool.request({
@@ -310,6 +350,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         projectionKinds: ["sleep-times.v0"],
       },
     });
+
   });
 
   it("does not use unauthenticated email From as newsletter opt-out authority", async () => {
@@ -375,6 +416,32 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "authenticated_sender_required",
       },
     });
+    expect(request).not.toHaveBeenCalled();
+
+    for (const actionRequest of [
+      {
+        action: "ask_member" as const,
+        grantId: "hdg_calendar",
+        origin: {
+          assistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+          kind: "accepted_input" as const,
+          sessionId: "session_group",
+        },
+        question: "Are you available Tuesday afternoon?",
+      },
+      {
+        action: "post_disclosure_request" as const,
+        originAssistantInputId: PRIVATE_ASSISTANT_INPUT_ID,
+        permissionText: "Share calendar availability only.",
+      },
+      { action: "revoke_disclosure_grant" as const, grantId: "hdg_calendar" },
+    ]) {
+      const response = await groupTool.request(actionRequest);
+      expect(response.result).toMatchObject({
+        status: "unavailable",
+        unavailableReason: "authenticated_sender_required",
+      });
+    }
     expect(request).not.toHaveBeenCalled();
 
     await expect(groupTool.request({ action: "create_join_link" })).resolves.toEqual({

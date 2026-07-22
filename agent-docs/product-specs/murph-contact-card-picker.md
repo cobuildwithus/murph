@@ -1,7 +1,7 @@
 # Murph Contact Card Picker
 
-Last verified: 2026-07-08
-Status: Implemented (picker on `/design?tab=components`, vCard route, initialVisit + signup-success placement); persisted avatar choice not started
+Last verified: 2026-07-21
+Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, and initial-visit handoff); persisted avatar choice not started
 
 ## Why
 
@@ -9,12 +9,12 @@ Murph's contact card ships with one canonical headshot (the hooded character). S
 
 ## User flow (implemented)
 
-Right after signup, adding Murph as a contact is the first thing the member sees:
+The contact-card picker remains available immediately after website signup:
 
-1. `/home?initialVisit=true` (`apps/web/app/(dashboard)/home/initial-visit-dialog-client.tsx`) is a three-stage sequence: members whose primary contact channel is a text line see the contact-card picker first; on Add, Skip, or dismiss they enter the assistant tone and voice picker before the existing welcome dialog ("Text Murph" / "Start exploring"). Members without a text line (Telegram, email only, or no channel yet) start at the tone and voice picker because there is no phone contact card to save.
-2. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the same picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
+1. The website signup success stage (`join-invite-stage-server.tsx`) renders `MurphAddToContactsButton`, which opens the picker. This replaced the old inline `data:` URI vCard that had no photo and no backup line.
+2. `/home?initialVisit=true` resolves the member's contact channel. Members with a text contact see the contact-card picker first; adding the card, skipping, or dismissing advances to the Murph personality picker. Members without a text contact start directly at the personality picker.
 
-Both surfaces reuse one component: `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
+The signup and design-system surfaces reuse `MurphContactCardPicker` in `apps/web/src/components/murph/murph-contact-card-picker.tsx` (drawer under 768px, dialog above, via `useIsMobile`).
 
 ## Avatar options
 
@@ -40,4 +40,4 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 
 ## Current state
 
-`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, `MurphContactCardPreview`, and `MurphAddToContactsButton` are live on `/design?tab=components`, in the `initialVisit` sequence, and on the signup success stage; the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: the optional persisted avatar choice for group-share reuse.
+`MurphContactCardPicker`, `MurphContactAvatarGrid`, `MurphContactAvatarArt`, `MurphContactCardPreview`, and `MurphAddToContactsButton` are live on `/design?tab=components`, the signup success stage, and the initial-visit handoff for members with a text contact; the picker's primary CTA downloads the real vCard from `/api/murph-contact-card`. Remaining: the optional persisted avatar choice for group-share reuse.

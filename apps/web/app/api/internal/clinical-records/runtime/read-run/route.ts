@@ -1,3 +1,7 @@
+import {
+  hostedClinicalRecordsReadRunRequestSchema,
+} from "@murphai/hosted-execution/clinical-records";
+
 import { readClinicalRetrievalRun } from "@/src/lib/clinical-records/retrieval";
 import { clinicalRecordsError } from "@/src/lib/clinical-records/errors";
 import { withClinicalJsonError } from "@/src/lib/clinical-records/http";
@@ -22,25 +26,15 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     message: "Clinical Records runtime access is inactive.",
   });
   const body = await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES });
-  assertExactKeys(body, ["generation", "runId"]);
-  if (
-    typeof body.runId !== "string"
-    || !/^[A-Za-z0-9._-]{1,120}$/u.test(body.runId)
-    || !Number.isInteger(body.generation)
-    || typeof body.generation !== "number"
-    || body.generation < 1
-  ) throw invalidRequestError();
+  const parsed = hostedClinicalRecordsReadRunRequestSchema.safeParse(body);
+  if (!parsed.success) throw invalidRequestError();
   const result = await readClinicalRetrievalRun({
-    generation: body.generation,
+    generation: parsed.data.generation,
     memberId,
-    runId: body.runId,
+    runId: parsed.data.runId,
   });
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 });
-
-function assertExactKeys(record: Record<string, unknown>, keys: readonly string[]): void {
-  if (Object.keys(record).sort().join(",") !== [...keys].sort().join(",")) throw invalidRequestError();
-}
 
 function invalidRequestError() {
   return clinicalRecordsError({

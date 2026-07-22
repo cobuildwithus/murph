@@ -390,6 +390,7 @@ export interface AssistantHostedExecutionContext {
   }): {
     groupPermissionOfferTool?: AssistantHostedGroupPermissionOfferTool
     groupSharedReader: AssistantHostedGroupSharedReader
+    groupTool: AssistantHostedGroupTool
   } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies

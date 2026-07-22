@@ -9,6 +9,8 @@ export {
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
   createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
+  createHostedGroupDisclosurePermissionLookupKey,
+  createHostedGroupDisclosurePermissionLookupKeyReadCandidates,
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
   HOSTED_EXTERNAL_THREAD_CHANNELS,

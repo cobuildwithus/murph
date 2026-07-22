@@ -107,6 +107,10 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_account_group_invite",
   "prisma.hosted_account_group_billing_ref",
   "prisma.hosted_account_group_plan_capacity",
+  "prisma.hosted_group",
+  "prisma.hosted_group_member",
+  "prisma.hosted_group_disclosure_permission",
+  "prisma.hosted_group_disclosure_grant",
   "prisma.hosted_mailbox_item",
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
@@ -378,6 +382,50 @@ describe("deleteHostedAccountData", () => {
       "prisma.clinical_record_oauth_session": 1,
       "prisma.clinical_record_retrieval_request": 1,
       "prisma.clinical_record_retrieval_run": 1,
+    });
+  });
+
+  it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => undefined,
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedGroupDisclosureGrant",
+        where: { OR: [
+          { membership: { memberId: "member_123" } },
+          { membership: { group: { ownerMemberId: "member_123" } } },
+          { membership: { group: { runtimeMemberId: "member_123" } } },
+        ] },
+      },
+      {
+        model: "hostedGroupDisclosurePermission",
+        where: { group: { OR: [
+          { ownerMemberId: "member_123" },
+          { runtimeMemberId: "member_123" },
+        ] } },
+      },
+    ]));
+    const deletedModels = deleteCalls.map((call) => call.model);
+    expect(deletedModels.indexOf("hostedGroupDisclosureGrant")).toBeLessThan(
+      deletedModels.indexOf("hostedGroupDisclosurePermission"),
+    );
+    for (const owner of ["hostedGroupMember", "hostedGroup"]) {
+      expect(deletedModels.indexOf("hostedGroupDisclosurePermission"))
+        .toBeLessThan(deletedModels.indexOf(owner));
+    }
+    expect(result.deletedCounts).toMatchObject({
+      "prisma.hosted_group_disclosure_grant": 1,
+      "prisma.hosted_group_disclosure_permission": 1,
     });
   });
 

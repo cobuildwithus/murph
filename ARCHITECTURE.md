@@ -102,6 +102,54 @@ group label. Web rechecks membership before the group read and completion
 append. The paired mailbox rows are the only durable operation state, and the
 answer remains untrusted data when the private runtime composes its follow-up.
 
+The reverse `consented_member` adapter lets an authenticated group Murph ask
+one current member's private Murph under a separate exact grant. Web/Postgres
+owns an immutable, group-visible natural-language permission encrypted with the
+existing hosted member private-field secure-box under the synthetic group
+runtime, plus an append-only per-membership grant generation. The permission row
+id and encrypted field are bound into AAD; plaintext is opened only after the
+exact group or member authority has been established. A current member creates
+that grant only by adding the exact Like reaction to the exact server-authored
+consent message;
+membership never implies the grant, and the Like cannot create membership. The
+group model may select only a current opaque `grantId` returned beside that
+member and permission by `read_current`. Web binds every hidden identity and
+revalidates the group, personal runtime, membership generation, grant
+generation, permission digest, origin, expiry, and runtime fence at admission,
+before the personal read, and before disclosure completion. Accepted-input
+delivery also revalidates the same authority in the existing Linq egress
+transaction that claims provider dispatch. It carries the completion mailbox id
+as its causal anchor, so a revoked, expired, mismatched, or unanchored queued
+answer is terminal before provider entry. Leave/rejoin and revoke/regrant
+therefore invalidate old work. One
+trusted accepted-input or scheduled-automation invocation owns at most one
+consented-member request per exact grant; exact replay reuses it, a changed
+question for that grant conflicts, and another current grant in the same
+invocation remains independent without creating an implicit roster fan-out API.
+The initial turn of a claimed canonical scheduled group occurrence reuses the
+ordinary group runtime. Its existing scheduled group-tool factory attaches the
+same bounded group port only after route authority resolves a non-direct thread,
+and the notification retains it only with runtime-minted occurrence authority.
+Ordinary notifications and manual, direct, unknown-audience, or local cron runs
+do not receive that group capability.
+A scheduled Codex turn starts every needed member ask, then uses ordinary shell
+waits and exact replay to poll each accepted `ask_member` call until it returns
+completed or unavailable. The existing request expiry bounds the loop. Web
+returns a completed result only after the ordinary cron owner revalidates the
+current canonical automation and non-direct route immediately before the tool
+call, and Web revalidates the exact request and completion, member, grant,
+permission, personal runtime, origin, expiry, and runtime fences. An unavailable
+result ends that request without an answer. Scheduled completion never wakes the
+group runtime, starts another provider turn, creates a group outbox delivery, or
+holds a callback open while the member runtime works. The
+reviewed answer remains untrusted data rather than consent for an external
+action, and the ordinary scheduled turn may use only tools independently
+authorized by their existing owners. It never gains access to the grantor's
+personal runtime or connected accounts.
+Candidate and reviewer provider usage flows through the existing
+hosted usage ledger with deterministic request, attempt, stage, and provider
+ordinal identity; usage recording is best-effort and never controls disclosure.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -121,6 +169,19 @@ workspace replacement, or shutdown, the runtime aborts and awaits the exact
 owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
+
+For a consented member target, the private read-only child receives the exact
+permission context and produces a candidate from the member workspace. One
+separate fresh-context outgoing reviewer then receives only that immutable
+permission, the question, and the candidate; it has no member workspace,
+history, application tools, network, or delivery authority and returns only `allow` or
+`deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
+placed on the bound group completion and delivered as the exact reviewed bytes
+without another model turn. Denial or a candidate-declared cannot-answer yields
+fixed non-disclosing copy. Invalid review output, provider failure, or stale
+authority discloses nothing and follows the existing retry, expiry, or terminal
+lifecycle. A denied candidate never becomes durable operation state. This adds no
+fan-out, scheduler, policy engine, result table, or second service.
 
 ## Hosted Connected Apps
 
@@ -521,8 +582,17 @@ resuming from the vault-owned operational checkpoint after preemption. The
 versioned runtime contract accepts either the current resource-family descriptor
 or explicit query slices; query-aware raw pages and completion state remain
 grouped by query/slice through the checkpoint and v3 raw manifest. Existing v2
-manifests and v1 checkpoints remain readable. Web continues to emit the current
-descriptor until the compatible runner deployment is complete. Then
+manifests and v1 checkpoints remain readable. Each run pins its retrieval
+protocol at creation: existing nullable-protocol rows remain legacy for their
+entire lifecycle, while new runs emit `query-slices-v2`. Query-aware page
+requests, opaque cursors, durable request claims, and terminal outcomes bind
+the frozen query-scope and slice identities so they cannot be swapped across
+the same resource type. Epic's active policy expands 24 primary query scopes
+from 17 unique granted FHIR resource permissions. Fifteen scopes use one
+whole-family slice and nine freeze one newest-first 90- or 365-day initial
+window at run creation. Supporting dependency reads remain registration-only;
+resource families without a canonical mapper still enter the patient-bound raw
+evidence and explicit-review path. Then
 `@murphai/vault-usecases/clinical-records` revalidates the web-owned current run
 immediately before atomically committing immutable raw pages and the retrieval
 manifest, and again before lazily invoking

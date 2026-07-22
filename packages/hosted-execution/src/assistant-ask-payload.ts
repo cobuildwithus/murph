@@ -3,6 +3,9 @@ import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
   type HostedExecutionAssistantAskCompletedPayload,
+  type HostedExecutionAssistantAskConsentedMemberTarget,
+  type HostedExecutionAssistantAskJoinedGroupTarget,
+  type HostedExecutionAssistantAskOrigin,
   type HostedExecutionAssistantAskRequestedPayload,
   type HostedExecutionAssistantAskResult,
 } from "./contracts.ts";
@@ -19,56 +22,56 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
   label = "Hosted execution assistant.ask.requested payload",
 ): HostedExecutionAssistantAskRequestedPayload {
   const record = requireObject(value, label);
+  const target = parseHostedExecutionAssistantAskTarget(
+    record.target,
+    `${label}.target`,
+  );
+  const expiresAt = parseHostedExecutionAssistantAskTimestamp(
+    record.expiresAt,
+    `${label}.expiresAt`,
+  );
+  const question = parseHostedExecutionAssistantAskQuestion(
+    record.question,
+    `${label}.question`,
+  );
+
+  if (target.kind === "joined_group") {
+    assertExactHostedExecutionAssistantAskKeys(record, [
+      "expiresAt",
+      "originAssistantInputId",
+      "originSessionId",
+      "question",
+      "target",
+    ], label);
+    return {
+      expiresAt,
+      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.originAssistantInputId,
+        `${label}.originAssistantInputId`,
+      ),
+      originSessionId: parseHostedExecutionAssistantAskOpaqueId(
+        record.originSessionId,
+        `${label}.originSessionId`,
+      ),
+      question,
+      target,
+    };
+  }
+
   assertExactHostedExecutionAssistantAskKeys(record, [
     "expiresAt",
-    "originAssistantInputId",
-    "originSessionId",
+    "origin",
     "question",
     "target",
   ], label);
-  const targetLabel = `${label}.target`;
-  const target = requireObject(record.target, targetLabel);
-  assertExactHostedExecutionAssistantAskKeys(
-    target,
-    ["kind", "membershipId", "requestedLabel"],
-    targetLabel,
-  );
-  if (target.kind !== "joined_group") {
-    throw new TypeError(`${targetLabel}.kind is invalid.`);
-  }
-
   return {
-    expiresAt: parseHostedExecutionAssistantAskTimestamp(
-      record.expiresAt,
-      `${label}.expiresAt`,
+    expiresAt,
+    origin: parseHostedExecutionAssistantAskOrigin(
+      record.origin,
+      `${label}.origin`,
     ),
-    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-      record.originAssistantInputId,
-      `${label}.originAssistantInputId`,
-    ),
-    originSessionId: parseHostedExecutionAssistantAskOpaqueId(
-      record.originSessionId,
-      `${label}.originSessionId`,
-    ),
-    question: parseHostedExecutionAssistantAskBoundedText({
-      label: `${label}.question`,
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: record.question,
-    }),
-    target: {
-      kind: "joined_group",
-      membershipId: parseHostedExecutionAssistantAskOpaqueId(
-        target.membershipId,
-        `${targetLabel}.membershipId`,
-      ),
-      requestedLabel: target.requestedLabel === null
-        ? null
-        : parseHostedExecutionAssistantAskBoundedText({
-            label: `${targetLabel}.requestedLabel`,
-            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-            value: target.requestedLabel,
-          }),
-    },
+    question,
+    target,
   };
 }
 
@@ -77,47 +80,122 @@ export function parseHostedExecutionAssistantAskCompletedPayload(
   label = "Hosted execution assistant.ask.completed payload",
 ): HostedExecutionAssistantAskCompletedPayload {
   const record = requireObject(value, label);
+  const expiresAt = parseHostedExecutionAssistantAskTimestamp(
+    record.expiresAt,
+    `${label}.expiresAt`,
+  );
+  const question = parseHostedExecutionAssistantAskQuestion(
+    record.question,
+    `${label}.question`,
+  );
+  const requestId = parseHostedExecutionAssistantAskOpaqueId(
+    record.requestId,
+    `${label}.requestId`,
+  );
+  const result = parseHostedExecutionAssistantAskResult(
+    record.result,
+    `${label}.result`,
+  );
+
+  if (record.origin === undefined) {
+    assertExactHostedExecutionAssistantAskKeys(record, [
+      "expiresAt",
+      "originAssistantInputId",
+      "originSessionId",
+      "question",
+      "requestId",
+      "result",
+      "targetLabel",
+    ], label);
+    return {
+      expiresAt,
+      originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.originAssistantInputId,
+        `${label}.originAssistantInputId`,
+      ),
+      originSessionId: parseHostedExecutionAssistantAskOpaqueId(
+        record.originSessionId,
+        `${label}.originSessionId`,
+      ),
+      question,
+      requestId,
+      result,
+      targetLabel: record.targetLabel === null
+        ? null
+        : parseHostedExecutionAssistantAskBoundedText({
+            label: `${label}.targetLabel`,
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: record.targetLabel,
+          }),
+    };
+  }
+
+  const origin = parseHostedExecutionAssistantAskOrigin(
+    record.origin,
+    `${label}.origin`,
+  );
+  assertHostedExecutionAssistantAskNullTargetLabel(record.targetLabel, label);
   assertExactHostedExecutionAssistantAskKeys(record, [
     "expiresAt",
-    "originAssistantInputId",
-    "originSessionId",
+    "origin",
     "question",
     "requestId",
     "result",
     "targetLabel",
   ], label);
-
   return {
-    expiresAt: parseHostedExecutionAssistantAskTimestamp(
-      record.expiresAt,
-      `${label}.expiresAt`,
-    ),
-    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
-      record.originAssistantInputId,
-      `${label}.originAssistantInputId`,
-    ),
-    originSessionId: parseHostedExecutionAssistantAskOpaqueId(
-      record.originSessionId,
-      `${label}.originSessionId`,
-    ),
-    question: parseHostedExecutionAssistantAskBoundedText({
-      label: `${label}.question`,
-      maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-      value: record.question,
-    }),
-    requestId: parseHostedExecutionAssistantAskOpaqueId(
-      record.requestId,
-      `${label}.requestId`,
-    ),
-    result: parseHostedExecutionAssistantAskResult(record.result, `${label}.result`),
-    targetLabel: record.targetLabel === null
-      ? null
-      : parseHostedExecutionAssistantAskBoundedText({
-          label: `${label}.targetLabel`,
-          maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-          value: record.targetLabel,
-        }),
+    expiresAt,
+    origin,
+    question,
+    requestId,
+    result,
+    targetLabel: null,
   };
+}
+
+export function parseHostedExecutionAssistantAskOrigin(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantAskOrigin {
+  const record = requireObject(value, label);
+  const kind = requireString(record.kind, `${label}.kind`);
+  if (kind === "accepted_input") {
+    assertExactHostedExecutionAssistantAskKeys(
+      record,
+      ["assistantInputId", "kind", "sessionId"],
+      label,
+    );
+    return {
+      assistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+        record.assistantInputId,
+        `${label}.assistantInputId`,
+      ),
+      kind,
+      sessionId: parseHostedExecutionAssistantAskOpaqueId(
+        record.sessionId,
+        `${label}.sessionId`,
+      ),
+    };
+  }
+  if (kind === "automation_occurrence") {
+    assertExactHostedExecutionAssistantAskKeys(
+      record,
+      ["automationId", "kind", "occurrenceAt"],
+      label,
+    );
+    return {
+      automationId: parseHostedExecutionAssistantAskOpaqueId(
+        record.automationId,
+        `${label}.automationId`,
+      ),
+      kind,
+      occurrenceAt: parseHostedExecutionAssistantAskTimestamp(
+        record.occurrenceAt,
+        `${label}.occurrenceAt`,
+      ),
+    };
+  }
+  throw new TypeError(`${label}.kind is invalid.`);
 }
 
 export function parseHostedExecutionAssistantAskResult(
@@ -190,6 +268,70 @@ export function parseHostedExecutionAssistantAskTimestamp(
   return timestamp;
 }
 
+function parseHostedExecutionAssistantAskTarget(
+  value: unknown,
+  label: string,
+): HostedExecutionAssistantAskJoinedGroupTarget
+  | HostedExecutionAssistantAskConsentedMemberTarget {
+  const target = requireObject(value, label);
+  const kind = requireString(target.kind, `${label}.kind`);
+  if (kind === "joined_group") {
+    assertExactHostedExecutionAssistantAskKeys(
+      target,
+      ["kind", "membershipId", "requestedLabel"],
+      label,
+    );
+    return {
+      kind,
+      membershipId: parseHostedExecutionAssistantAskOpaqueId(
+        target.membershipId,
+        `${label}.membershipId`,
+      ),
+      requestedLabel: target.requestedLabel === null
+        ? null
+        : parseHostedExecutionAssistantAskBoundedText({
+            label: `${label}.requestedLabel`,
+            maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+            value: target.requestedLabel,
+          }),
+    };
+  }
+  if (kind === "consented_member") {
+    assertExactHostedExecutionAssistantAskKeys(
+      target,
+      ["grantId", "kind", "membershipId", "permissionDigest"],
+      label,
+    );
+    return {
+      grantId: parseHostedExecutionAssistantAskOpaqueId(
+        target.grantId,
+        `${label}.grantId`,
+      ),
+      kind,
+      membershipId: parseHostedExecutionAssistantAskOpaqueId(
+        target.membershipId,
+        `${label}.membershipId`,
+      ),
+      permissionDigest: parseHostedExecutionAssistantAskOpaqueId(
+        target.permissionDigest,
+        `${label}.permissionDigest`,
+      ),
+    };
+  }
+  throw new TypeError(`${label}.kind is invalid.`);
+}
+
+function parseHostedExecutionAssistantAskQuestion(
+  value: unknown,
+  label: string,
+): string {
+  return parseHostedExecutionAssistantAskBoundedText({
+    label,
+    maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
+    value,
+  });
+}
+
 function parseHostedExecutionAssistantAskOpaqueId(
   value: unknown,
   label: string,
@@ -199,6 +341,15 @@ function parseHostedExecutionAssistantAskOpaqueId(
     maxCodePoints: HOSTED_EXECUTION_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS,
     value,
   });
+}
+
+function assertHostedExecutionAssistantAskNullTargetLabel(
+  value: unknown,
+  label: string,
+): void {
+  if (value !== null) {
+    throw new TypeError(`${label}.targetLabel must be null.`);
+  }
 }
 
 function assertExactHostedExecutionAssistantAskKeys(

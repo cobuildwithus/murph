@@ -235,6 +235,75 @@ describe("hosted clinical records runtime port", () => {
       .toHaveLength(CLINICAL_FHIR_MAX_RETRIEVAL_SLICES);
   });
 
+  it("preserves query, slice, and fingerprint identity through page and outcome callbacks", async () => {
+    const received: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      received.push(await request.json());
+      return new URL(request.url).pathname === HOSTED_CLINICAL_RECORDS_RUNTIME_FETCH_PAGE_PATH
+        ? Response.json({
+            body: "{\"resourceType\":\"Bundle\",\"entry\":[]}",
+            nextCursor: null,
+            status: "page",
+          })
+        : Response.json({ ok: true });
+    });
+    const port = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: fetchMock as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await port.fetchPage({
+      cursor: null,
+      generation: 1,
+      queryFingerprint: HASH,
+      queryScopeId: "laboratory-observations",
+      requestId: "request_1",
+      resourceType: "Observation",
+      retrievalProtocol: "query-slices-v2",
+      runId: "run_1",
+      sliceId: "whole",
+    });
+    await port.recordOutcome({
+      counts: {
+        createdCount: 0,
+        executableDecisionCount: 0,
+        fetchedPageCount: 1,
+        fetchedResourceFamilyCount: 1,
+        rawFileCount: 1,
+        retractedCount: 0,
+        reviewDecisionCount: 0,
+        skippedExistingCount: 0,
+        supersededCount: 0,
+      },
+      generation: 1,
+      retrievalProtocol: "query-slices-v2",
+      retrievalSlices: [{
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }],
+      runId: "run_1",
+      status: "completed",
+    });
+
+    expect(received).toEqual([
+      expect.objectContaining({
+        queryFingerprint: HASH,
+        queryScopeId: "laboratory-observations",
+        sliceId: "whole",
+      }),
+      expect.objectContaining({
+        retrievalProtocol: "query-slices-v2",
+        retrievalSlices: [{
+          queryScopeId: "laboratory-observations",
+          sliceId: "whole",
+        }],
+      }),
+    ]);
+  });
+
   it("rejects a direct-transport connect link on another origin", async () => {
     const fetchMock = vi.fn(async () => Response.json({
       connectUrl:

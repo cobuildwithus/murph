@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls
 
 ## Product Contract
@@ -17,12 +17,14 @@ The five controls remain:
 
 Tone and voice appear during the hosted first visit and under **How Murph talks** in personal Settings. Humor, Push, and Detail are available through explicit private conversational requests and under **Personality** in personal Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps. An authenticated hosted Linq group may change all five controls conversationally, but those choices belong to that room's Murph runtime and have no separate web UI.
 
-The first-visit sequence remains:
+The first-visit sequence is the four-step Murph personality picker:
 
-1. Text-line members: contact card picker, persona with tone and voice, welcome.
-2. Members without a text line: persona with tone and voice, welcome.
+1. Choose one main personality.
+2. Choose no support or one supporting personality.
+3. Choose a voice.
+4. Choose a tone and save.
 
-Skip advances without writing a style preference. Continue writes persona, tone, and voice in one preference update. Personality dials do not add onboarding steps or separate signup writes.
+`/home?initialVisit=true` opens this picker directly without a preceding contact-card step or trailing welcome dialog. Skip or dismiss closes without writing a style preference. Continue on the final step writes persona, tone, and voice in one preference update. Personality dials do not add onboarding steps or separate signup writes.
 
 ## Canonical Preferences
 
@@ -43,7 +45,7 @@ Its optional assistant block is:
 ```json
 {
   "assistant": {
-    "persona": "medical-detective",
+    "persona": "scientist-with-classic",
     "tone": "casual",
     "voice": "deep-calm",
     "personality": {
@@ -57,7 +59,7 @@ Its optional assistant block is:
 
 The personality object is strict and sparse. It stores only explicit user choices. Every stored value is an integer from 0 through 10. Unknown keys, fractions, and out-of-range scores fail validation instead of being ignored or clamped.
 
-The Classic Murph baseline defaults are:
+The Classic baseline defaults are:
 
 | Dial | Default |
 | --- | ---: |

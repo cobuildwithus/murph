@@ -93,6 +93,7 @@ function createPrisma(input: {
     ? membership()
     : input.selectedMembership;
   const tx = {
+    $executeRaw: vi.fn().mockResolvedValue(1),
     $queryRaw: vi.fn().mockResolvedValue([{ id: selectedMembership?.id ?? "missing" }]),
     hostedGroupMember: {
       findMany: vi.fn().mockResolvedValue(input.memberships ?? [membership()]),
@@ -176,7 +177,7 @@ describe("Hosted group Assistant Ask admission", () => {
   });
 
   it("automatically selects the only membership and appends one expiring request", async () => {
-    const { prisma } = createPrisma();
+    const { prisma, tx } = createPrisma();
     const requestId = createHostedAssistantAskRequestId({
       memberId: ORIGIN_MEMBER_ID,
       originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
@@ -222,6 +223,7 @@ describe("Hosted group Assistant Ask admission", () => {
       itemId: requestId,
       tx: expect.any(Object),
     });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
   });
 
   it("resolves a normalized unique label and keeps the selector in the request", async () => {

@@ -826,6 +826,25 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
+  it('polls scheduled member asks to a terminal result in the current turn', async () => {
+    const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
+    expect(groupChatSkill).toBeTruthy()
+    if (!groupChatSkill) return
+
+    const raw = await readSkillFile(groupChatSkill)
+    expect(raw).toContain('While any request remains `accepted`')
+    expect(raw).toContain(
+      'poll the exact same `ask_member` call again for each still-pending request',
+    )
+    expect(raw).toContain('until every request returns a terminal result')
+    expect(raw).toContain('`status="completed"` contains the answer for this turn')
+    expect(raw).toContain('request expiry bounds the polling loop')
+    expect(raw).toContain('Do not create another automation')
+    expect(raw).toContain('follow-up turn, or a long-held callback')
+    expect(raw).not.toContain('sleep 60')
+    expect(raw).not.toContain('resumes that same current\nautomation')
+  })
+
   it('registers a dedicated group newsletter editorial skill', async () => {
     const newsletterSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'group-newsletter',

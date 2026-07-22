@@ -6,6 +6,8 @@ import {
   EPIC_ACQUISITION_POLICY,
   EPIC_ACQUISITION_POLICY_ID,
   EPIC_BETA_REQUESTED_BASE_SCOPES,
+  EPIC_BETA_RESOURCE_TYPES,
+  EPIC_LEGACY_BETA_RESOURCE_TYPES,
 } from "./epic-policy";
 
 export const CLINICAL_PROVIDER_DIRECTORY_SCHEMA_V1 =
@@ -212,18 +214,15 @@ function parseDirectoryEntry(
   if (policyId !== EPIC_ACQUISITION_POLICY_ID) {
     throw new TypeError(`Clinical provider directory entry ${index} references an unknown policy.`);
   }
-  const activeQueryScopes = EPIC_ACQUISITION_POLICY.queryScopes
-    .filter((query) => query.status === "active-beta")
-    .sort((left, right) => (left.activeOrder ?? 0) - (right.activeOrder ?? 0));
   const requestedBaseScopes = isV2
     ? EPIC_BETA_REQUESTED_BASE_SCOPES
     : parseRequestedBaseScopes(record.requestedBaseScopes, index);
   const resourceTypes = isV2
-    ? activeQueryScopes.map((query) => query.resourceType)
+    ? EPIC_BETA_RESOURCE_TYPES
     : parseResourceTypes(
         record.resourceTypes,
         index,
-        activeQueryScopes.map((query) => query.resourceType),
+        EPIC_LEGACY_BETA_RESOURCE_TYPES,
       );
 
   return {

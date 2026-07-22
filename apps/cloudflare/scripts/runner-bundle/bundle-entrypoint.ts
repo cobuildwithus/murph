@@ -54,10 +54,19 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // have more surface.
 //
 // PR #813's reviewed route-authority boundary, after merging current main,
-// measured 9,314,428B on CI Linux and 9,369,574B on local macOS. Ratchet the
-// fixed total backstop to the exact larger measurement; dynamic chunk jitter
-// still receives no extra margin or platform-specific branch.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_369_574;
+// measured 9,314,428B on CI Linux and 9,369,574B on local macOS after the
+// scheduled Telegram redirect authority correction. PR #750's
+// consented group-to-member ask path measures 9,402,536B on that merged base;
+// the scheduled-authority remediation measures 9,402,701B, and the combined
+// post-#827 head measures 9,405,369B. After merging current main's biomarker
+// unit normalization, the combined head measures 9,410,180B. Current main's
+// persona redesign adds 10,122B, producing 9,420,302B. PR #824's Epic query
+// expansion measures 9,388,733B on that mainline; the exact combined graph
+// measures 9,424,514B. Ratchet the fixed total backstop to that exact
+// local measurement;
+// dynamic chunk jitter still receives no extra margin or platform-specific
+// branch.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_424_514;
 // The exact PR #626 head after current-main exact-target reply handling adds
 // reviewed boot-critical batching recovery logic. Assembly measured
 // 1,486,467B on CI Linux (+699B over the prior budget) and 1,493,474B on local
@@ -121,6 +130,10 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/health-metrics/dist/murph-age-source-routes.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+] as const;
+
+const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
+  "/clinical-records/dist/retrieval-limits.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(
@@ -305,6 +318,9 @@ function assertRunnerEntrypointBundleBootInputsAllowed(
       const normalizedInputPath = normalizeMetafilePath(inputPath);
       if (
         RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS.some((marker) =>
+          normalizedInputPath.includes(marker)
+        )
+        && !RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS.some((marker) =>
           normalizedInputPath.includes(marker)
         )
       ) {
