@@ -1,6 +1,6 @@
 # Conversation Mailbox Consumed-Watermark Repair
 
-Status: active
+Status: completed
 Updated: 2026-07-22
 
 ## Why
@@ -91,12 +91,19 @@ document the safe Web/Cloudflare deployment order before handoff.
 - Compatibility is additive: deploy Web before the runner producer, use an
   immediate runner rollout, and roll back in reverse order. Neither skew
   direction can advance an unproven prefix.
-- Focused verification is green: assistant-runtime handled-prefix tests
-  (136/136), pending-index tests after the bounded-probe correction (23/23),
-  Web checkpoint-store tests (51/51), assistant-runtime typecheck, and diff
-  whitespace checks.
+- Focused verification is green: the three affected assistant-runtime suites
+  (369/369), Web checkpoint-store tests (52/52), assistant-runtime typecheck,
+  and diff whitespace checks.
 - The required coverage-write and product/reliability reviews both ended with
   no findings after their requested regression and bounded-I/O refinements.
-- Canonical `test:diff` passed on the final synchronized patch: assistant-
-  runtime (1,801 passed, 2 skipped), Cloudflare (1,856 passed), and Web's full
-  test, typecheck, lint, and production-build verification.
+- The preliminary exact-head ReviewGPT specialist pass reported one accepted
+  coverage gap: the rollback test failed before the replay-floor write rather
+  than proving atomic rollback after both writes were staged. Its test-only
+  patch was downloaded from the owned review thread, inspected, applied, and
+  now exercises the public transaction boundary with a post-acknowledgement
+  read failure; both committed states remain unchanged.
+- Canonical `test:diff` passed on the synchronized patch in 2m13s, including
+  assistant-runtime, Cloudflare (1,856 passed), and Web's full test, typecheck,
+  lint, and production-build verification. Full `verify:acceptance` then
+  passed in 4m08s on the same isolated Testbox.
+Completed: 2026-07-22

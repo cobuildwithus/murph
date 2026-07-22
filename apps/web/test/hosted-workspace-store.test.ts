@@ -16,6 +16,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  checkpointHostedWorkspace,
   checkpointHostedWorkspaceTx,
   ensureHostedWorkspace,
   publishLatestBrowserVaultReplicaRefTx,
@@ -377,6 +378,88 @@ describe("hosted workspace store", () => {
 
     expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
     expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rolls back both checkpoint writes when a post-acknowledgement read fails", async () => {
+    const initialWorkspace = buildHostedWorkspaceRow({
+      snapshotRef: createBundleRef("snapshot_conversation_before_rollback"),
+      version: 4n,
+    });
+    let committedWorkspace = initialWorkspace;
+    let committedConsumedSeq = 3n;
+    let workingWorkspace = { ...committedWorkspace };
+    let workingConsumedSeq = committedConsumedSeq;
+    let laneReadCount = 0;
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      findUnique: vi.fn<HostedWorkspaceFindUnique>(async () => workingWorkspace),
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => {
+        workingWorkspace = buildHostedWorkspaceRow({
+          ...workingWorkspace,
+          snapshotRef: createBundleRef("snapshot_conversation_after_rollback"),
+          version: workingWorkspace.version + 1n,
+        });
+        return { count: 1 };
+      }),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: committedConsumedSeq,
+      nextSeq: 9n,
+    });
+    hostedMailboxLaneCounter.findUnique.mockImplementation(async () => {
+      laneReadCount += 1;
+      if (laneReadCount === 2) {
+        throw new Error("synthetic post-acknowledgement read failure");
+      }
+      return {
+        consumedSeq: workingConsumedSeq,
+        lane: "conversation",
+        nextSeq: 9n,
+        updatedAt: FIXED_NOW,
+        userId: "member_workspace_1",
+      };
+    });
+    hostedMailboxLaneCounter.updateMany.mockImplementation(async (args) => {
+      workingConsumedSeq = args.data.consumedSeq;
+      return { count: 1 };
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+    const transaction = vi.fn(async <T>(
+      run: (transactionTx: Parameters<typeof checkpointHostedWorkspaceTx>[0]["tx"]) => Promise<T>,
+    ) => {
+      workingWorkspace = { ...committedWorkspace };
+      workingConsumedSeq = committedConsumedSeq;
+      const result = await run(tx);
+      committedWorkspace = workingWorkspace;
+      committedConsumedSeq = workingConsumedSeq;
+      return result;
+    });
+    const prisma = Object.assign(Object.create(null), {
+      $transaction: transaction,
+    }) as NonNullable<Parameters<typeof checkpointHostedWorkspace>[0]["prisma"]>;
+
+    await expect(checkpointHostedWorkspace({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      prisma,
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_after_rollback"),
+      userId: "member_workspace_1",
+    })).rejects.toThrow("synthetic post-acknowledgement read failure");
+
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledOnce();
+    expect(committedWorkspace).toEqual(initialWorkspace);
+    expect(committedConsumedSeq).toBe(3n);
   });
 
   it("reserves canonical receipt protocol fields outside the ordinary status budget", async () => {
