@@ -73,6 +73,9 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
   const metricValue = signal?.value ?? formatChartValue(data.currentValue);
   const metricUnit = signal?.unit ?? data.unit;
   const delta = signal?.delta ?? data.delta;
+  const accessibleLabel = data.windowComparison
+    ? `${data.label}: baseline window average ${formatChartValue(data.baselineAvg)} ${data.unit}; experiment window average ${formatChartValue(data.currentValue)} ${data.unit}.`
+    : `${data.label}: daily baseline and experiment measurements${data.unit ? ` in ${data.unit}` : ""}.`;
 
   return (
     <div
@@ -128,14 +131,16 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
       </div>
 
       <ChartContainer
-        aria-label={data.windowComparison
-          ? `${data.label}: baseline window average ${formatChartValue(data.baselineAvg)} ${data.unit}; experiment window average ${formatChartValue(data.currentValue)} ${data.unit}.`
-          : undefined}
+        aria-label={accessibleLabel}
         className="h-40 w-full"
         config={chartConfig}
-        role={data.windowComparison ? "img" : undefined}
+        role={data.windowComparison ? "img" : "region"}
       >
-        <AreaChart data={deduped} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+        <AreaChart
+          accessibilityLayer={!data.windowComparison}
+          data={deduped}
+          margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+        >
           <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--color-border)" strokeOpacity={0.5} />
           <XAxis dataKey="day" hide />
           <YAxis

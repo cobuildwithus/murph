@@ -517,6 +517,14 @@ test.sequential(
         interventionMean: 20,
         label: 'Sleep Onset Latency',
         movedAsExpected: true,
+        points: [
+          { date: '2026-04-01', phase: 'baseline', unit: 'minutes', value: 45 },
+          { date: '2026-04-02', phase: 'baseline', unit: 'minutes', value: 40 },
+          { date: '2026-04-03', phase: 'baseline', unit: 'minutes', value: 35 },
+          { date: '2026-04-04', phase: 'intervention', unit: 'minutes', value: 25 },
+          { date: '2026-04-05', phase: 'intervention', unit: 'minutes', value: 20 },
+          { date: '2026-04-06', phase: 'intervention', unit: 'minutes', value: 15 },
+        ],
         unit: 'minutes',
       })
       assert.equal(requireData(finalWrite).outcome.experiment.status, 'completed')
@@ -539,6 +547,14 @@ test.sequential(
           interventionMean: 15,
           label: 'Wake After Sleep Onset',
           movedAsExpected: null,
+          points: [
+            { date: '2026-04-01', phase: 'baseline', unit: 'minutes', value: 30 },
+            { date: '2026-04-02', phase: 'baseline', unit: 'minutes', value: 25 },
+            { date: '2026-04-03', phase: 'baseline', unit: 'minutes', value: 20 },
+            { date: '2026-04-04', phase: 'intervention', unit: 'minutes', value: 20 },
+            { date: '2026-04-05', phase: 'intervention', unit: 'minutes', value: 15 },
+            { date: '2026-04-06', phase: 'intervention', unit: 'minutes', value: 10 },
+          ],
           unit: 'minutes',
         },
       )

@@ -871,7 +871,14 @@ production, rejects known pooled Postgres ports such as `6432` and `6543`, and
 blocks destructive or incompatible Prisma migration SQL outside the frozen
 historical migration set ending at
 `20260707170000_drop_stale_linq_recency_columns`; keep
-`DATABASE_URL` available for app runtime traffic. Because a successful
+`DATABASE_URL` available for app runtime traffic. Vercel predeploy and GitHub
+postdeploy may use separate dedicated PlanetScale login roles, but both login
+roles must be able to assume the canonical `postgres` schema-owner role. Both
+migration runners set that role at connection startup and verify that it owns
+the Prisma migration ledger before executing DDL. If an unpinned migration
+login creates objects under itself, reassign all of that login's objects to
+`postgres` before retrying; do not grant per-table exceptions or introduce a
+second schema owner. Because a successful
 predeploy migration cannot roll back automatically if a later deploy step
 fails, normal production Prisma migrations must stay backward compatible with
 the currently deployed app and avoid old-code-breaking changes such as required

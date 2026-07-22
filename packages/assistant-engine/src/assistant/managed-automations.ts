@@ -61,6 +61,7 @@ export interface MurphManagedAutomationSeed {
 
 export interface ApplyMurphManagedAutomationsInput {
   defaultRoute?: AutomationRoute | null
+  onDiagnosticStage?: ((diagnostic: MurphManagedAutomationDiagnosticStage) => void) | null
   now?: Date
   operatorHomeRoot?: string | null
   routeValidationProfile?: AssistantCronDeliveryRouteValidationProfile
@@ -68,6 +69,19 @@ export interface ApplyMurphManagedAutomationsInput {
   seeds?: readonly MurphManagedAutomationSeed[]
   shouldYield?: (() => boolean) | null
   vaultRoot: string
+}
+
+export type MurphManagedAutomationDiagnosticStageName =
+  | 'experiment_lifecycle'
+  | 'seed_composition'
+  | 'managed_seed'
+  | 'onboarding_followup'
+  | 'experiment_support_series'
+
+export interface MurphManagedAutomationDiagnosticStage {
+  seedCount?: number
+  seedPosition?: number
+  stage: MurphManagedAutomationDiagnosticStageName
 }
 
 export interface ApplyMurphManagedAutomationsResult {
@@ -533,16 +547,25 @@ export async function applyMurphManagedAutomations(
   }
   // Deterministic closeout and user-facing seed composition share one
   // authoritative experiment scan and still run before route resolution.
-  const experimentLifecycle = input.seeds === undefined
-    ? await prepareExperimentLifecycleAutomations({
-        now,
-        shouldYield: input.shouldYield ?? null,
-        vaultRoot: input.vaultRoot,
-      })
-    : null
+  let experimentLifecycle: Awaited<ReturnType<
+    typeof prepareExperimentLifecycleAutomations
+  >> | null = null
+  if (input.seeds === undefined) {
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      stage: 'experiment_lifecycle',
+    })
+    experimentLifecycle = await prepareExperimentLifecycleAutomations({
+      now,
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    })
+  }
   if (experimentLifecycle?.yielded === true || input.shouldYield?.() === true) {
     return { ...result, yielded: true }
   }
+  reportMurphManagedAutomationDiagnosticStage(input, {
+    stage: 'seed_composition',
+  })
   const rawSeeds =
     input.seeds ??
     markPersonalMurphManagedAutomationSeeds([
@@ -574,7 +597,12 @@ export async function applyMurphManagedAutomations(
     createRoute = await resolveMurphManagedAutomationCreateRoute(input)
     return createRoute
   }
-  for (const rawSeed of seeds) {
+  for (const [seedIndex, rawSeed] of seeds.entries()) {
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      seedCount: seeds.length,
+      seedPosition: seedIndex + 1,
+      stage: 'managed_seed',
+    })
     if (input.shouldYield?.() === true) {
       return { ...result, yielded: true }
     }
@@ -808,6 +836,9 @@ export async function applyMurphManagedAutomations(
   if (input.shouldYield?.() === true) {
     return { ...result, yielded: true }
   }
+  reportMurphManagedAutomationDiagnosticStage(input, {
+    stage: 'onboarding_followup',
+  })
   const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
     now,
     shouldYield: input.shouldYield ?? null,
@@ -824,6 +855,9 @@ export async function applyMurphManagedAutomations(
     if (input.shouldYield?.() === true) {
       return { ...result, yielded: true }
     }
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      stage: 'experiment_support_series',
+    })
     const reconciliation = await reconcileAutomationSupportSeriesNamespace({
       desiredSeries: desiredExperimentSupportSeries,
       now,
@@ -838,6 +872,17 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+function reportMurphManagedAutomationDiagnosticStage(
+  input: ApplyMurphManagedAutomationsInput,
+  diagnostic: MurphManagedAutomationDiagnosticStage,
+): void {
+  try {
+    input.onDiagnosticStage?.(diagnostic)
+  } catch {
+    // Diagnostics are best-effort and must not affect reconciliation.
+  }
 }
 
 function buildDesiredExperimentSupportSeries(

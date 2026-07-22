@@ -14,6 +14,10 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "@/src/lib/hosted-onboarding/bounded-post-commit";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -175,8 +179,15 @@ async function signalHostedMailboxAppendBestEffort(input: {
   expectedUserId: string;
   mailboxItemId: string;
 }): Promise<void> {
+  const deadlineMs = createHostedPostCommitDeadline(undefined);
   try {
-    await signalHostedMailboxAppendRuntime(input);
+    await waitForHostedPostCommitOperation({
+      deadlineMs,
+      operation: (abortSignal) => signalHostedMailboxAppendRuntime({
+        ...input,
+        abortSignal,
+      }),
+    });
   } catch {
     // The durable save succeeds even when the best-effort runtime wake is unavailable.
   }

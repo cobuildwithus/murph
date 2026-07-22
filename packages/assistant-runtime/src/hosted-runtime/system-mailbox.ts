@@ -230,6 +230,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
@@ -243,13 +244,18 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
-      const selectionState = input.allowedRouteActions == null
-        ? {
-            pending: state.pending.filter((item) =>
-              item.routeAction !== "run-assistant-ask"
-            ),
-          }
-        : state;
+      const selectionState = {
+        pending: state.pending.filter((item) =>
+          (
+            input.allowedRouteActions != null
+            || item.routeAction !== "run-assistant-ask"
+          )
+          && (
+            input.allowedWakeKinds == null
+            || input.allowedWakeKinds.includes(item.wake.kind)
+          )
+        ),
+      };
       const pending = findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         now: startedAt,

@@ -362,7 +362,13 @@ test("browser vault replicas validate and round-trip canonical experiment outcom
     }),
   });
 
-  assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [outcome]);
+  assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [
+    {
+      ...outcome,
+      schema: "murph.experiment-outcome.v2",
+      schemaVersion: "murph.experiment-outcome.v2",
+    },
+  ]);
 });
 
 test("browser vault parser defaults legacy replicas without outcomes to an empty list", async () => {

@@ -1,6 +1,6 @@
 # Protocol Outcome Network
 
-Last verified: 2026-07-16
+Last verified: 2026-07-21
 
 ## Current State
 
@@ -26,8 +26,8 @@ The assistant is the interface into this loop, not the full category by itself.
 
 ## Implemented Now
 
-- The canonical experiment outcome writer saves one version-bound outcome with biomarker deltas, confidence, caveats, confounders, protocol references, and analysis windows.
-- The encrypted browser-vault replica dereferences only the validated `outcomeRef` on a canonical experiment and requires the saved artifact to match the stable experiment identity. The saved artifact owns its historical title, lifecycle status, protocol, windows, and metric summaries; supported later experiment edits do not revoke it, and Experiment detail does not overlay mutable live metric points on the completed result.
+- The canonical experiment outcome writer saves one version-bound outcome with biomarker deltas, confidence, caveats, confounders, protocol references, analysis windows, and the bounded daily points used to calculate each metric summary.
+- The encrypted browser-vault replica dereferences only the validated `outcomeRef` on a canonical experiment and requires the saved artifact to match the stable experiment identity. The saved artifact owns its historical title, lifecycle status, protocol, windows, metric summaries, and daily point snapshots; supported later experiment edits do not revoke or rewrite it. For legacy point-free outcomes only, replica generation may reconstruct a snapshot from retained metric evidence using current browser, current canonical, or v1 selection semantics, but only when the candidate's counts, rounded means, and derived deltas exactly reproduce every saved metric result. Any unrecoverable metric leaves the whole legacy outcome aggregate-only.
 - Experiment detail keeps a stable **Your results** route for the matching active run or newest completed run. A completed run with no saved outcome is shown as pending; an invalid, missing, or mismatched reference is unavailable and fails closed without hiding the run.
 - Completed browser Results use canonical `endedOn` as the single horizon for rolling and anchored measurements, events, adherence, schedule, context, signals, and trends. When `endedOn` is before the planned intervention end, Results presents the run as stopped and never shows a completed conclusion.
 - CLI and web surfaces keep those results private by default.

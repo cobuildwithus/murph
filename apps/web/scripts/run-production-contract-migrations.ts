@@ -7,6 +7,10 @@ import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 
 import {
+  assertHostedWebMigrationOwner,
+  withHostedWebMigrationOwner,
+} from "./hosted-web-migration-owner";
+import {
   resolveHostedWebMigrationDatabaseUrl,
   type HostedWebMigrationEnvironment,
 } from "./run-prisma-migrate-deploy";
@@ -36,6 +40,9 @@ export interface HostedWebContractMigrationResult {
 }
 
 export interface HostedWebContractMigrationOptions {
+  clientFactory?: (
+    connectionString: string,
+  ) => HostedWebContractMigrationClient;
   migrationsDir?: string;
 }
 
@@ -44,6 +51,12 @@ export interface HostedWebContractMigrationDatabase {
     text: string,
     values?: unknown[],
   ): Promise<{ rows: Array<Record<string, unknown>> }>;
+}
+
+export interface HostedWebContractMigrationClient
+  extends HostedWebContractMigrationDatabase {
+  connect(): Promise<unknown>;
+  end(): Promise<void>;
 }
 
 export type HostedWebContractMigrationEnvironment =
@@ -74,11 +87,15 @@ export async function runHostedWebProductionContractMigrationsIfNeeded(
     ...environment,
     MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
   });
-  const client = new Client({ connectionString: migrationDatabaseUrl.url });
+  const ownerDatabaseUrl = withHostedWebMigrationOwner(migrationDatabaseUrl.url);
+  const client = (options.clientFactory ?? createContractMigrationClient)(
+    ownerDatabaseUrl,
+  );
   console.log(`Applying hosted web contract migrations with ${migrationDatabaseUrl.source}.`);
 
   await client.connect();
   try {
+    await assertHostedWebMigrationOwner(client);
     const result = await applyHostedWebContractMigrations(client, migrations);
     console.log(
       `Hosted web contract migrations complete: ${result.applied} applied, ${result.skipped} skipped.`,
@@ -88,6 +105,12 @@ export async function runHostedWebProductionContractMigrationsIfNeeded(
   }
 
   return "ran";
+}
+
+function createContractMigrationClient(
+  connectionString: string,
+): HostedWebContractMigrationClient {
+  return new Client({ connectionString });
 }
 
 export async function listHostedWebContractMigrations(

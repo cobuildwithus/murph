@@ -398,7 +398,9 @@ function buildTrends(
         return [];
       }
 
-      const history = runStart ? buildHistoryPoints(client, biomarker, runStart) : [];
+      const history = runStart && !results.persistedOutcome
+        ? buildHistoryPoints(client, biomarker, runStart)
+        : [];
 
       return [{
         label: biomarker.label,

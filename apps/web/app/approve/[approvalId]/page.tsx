@@ -33,6 +33,7 @@ type TerminalActionApprovalView = HostedActionApprovalView & {
   status: Exclude<HostedActionApprovalStatus, "pending">;
 };
 
+const APPROVED_REPLY_BODY = "I approved the secure request.";
 const EXPIRED_APPROVAL_REPLY_BODY =
   "That approval link expired. Please send a new one.";
 
@@ -81,19 +82,21 @@ async function ActionApprovalTerminalState({
   approval: TerminalActionApprovalView;
 }) {
   const content = terminalContent(approval.status);
-  const needsRecoveryMessage = approval.status === "expired";
+  const replyBody = approval.returnContactKind === null
+    ? null
+    : terminalReplyBody(approval.status);
   const contactOptions = approval.returnContactKind === null
     ? []
     : await resolveHostedMurphContactOptions({
-        ...(needsRecoveryMessage
-          ? { message: { body: EXPIRED_APPROVAL_REPLY_BODY } }
+        ...(replyBody
+          ? { message: { body: replyBody } }
           : {}),
         preferredKind: approval.returnContactKind,
       }).catch(() => []);
 
-  // Already-approved revisits with a known return channel bounce the member
-  // straight back there. Denied/expired stay on-screen so the member can read
-  // what happened before navigating away.
+  // Approved revisits return to the originating conversation with the same
+  // foreground continuation as a fresh decision. Denied/expired stay on-screen
+  // so the member can read what happened before navigating away.
   if (approval.status === "approved" && contactOptions[0]?.href) {
     redirect(contactOptions[0].href);
   }
@@ -118,14 +121,14 @@ async function ActionApprovalTerminalState({
             {content.actionLabel}
             <ArrowRight aria-hidden="true" data-icon="inline-end" />
           </MurphContactLink>
-        ) : needsRecoveryMessage ? (
+        ) : replyBody ? (
           <div>
             <p className="text-sm text-muted-foreground">
               Return to the Murph conversation where this request started and
               send:
             </p>
             <p className="mt-3 break-words rounded-lg bg-muted/40 px-4 py-3 font-mono text-sm text-foreground">
-              {EXPIRED_APPROVAL_REPLY_BODY}
+              {replyBody}
             </p>
           </div>
         ) : (
@@ -136,6 +139,19 @@ async function ActionApprovalTerminalState({
       </div>
     </ActionApprovalScreen>
   );
+}
+
+function terminalReplyBody(
+  status: Exclude<HostedActionApprovalStatus, "pending">,
+): string | null {
+  switch (status) {
+    case "approved":
+      return APPROVED_REPLY_BODY;
+    case "expired":
+      return EXPIRED_APPROVAL_REPLY_BODY;
+    case "denied":
+      return null;
+  }
 }
 
 function ActionApprovalUnavailableState() {

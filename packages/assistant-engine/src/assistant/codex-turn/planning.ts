@@ -482,7 +482,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
   const explicitAssistantPersona = privateInteractiveProviderTurn
-    && input.input.scheduledOccurrenceAt == null
     ? preferenceContext.assistantPersona ?? null
     : null
   const effectiveAssistantStyle = explicitAssistantPersona

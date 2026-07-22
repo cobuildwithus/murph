@@ -15067,6 +15067,150 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([11, 21])(
+    "keeps one fresh conversation input live across %i due preference items",
+    async (preferenceItemCount) => {
+      const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-preference-pages-"));
+      const events: string[] = [];
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const runtimeAbortController = new AbortController();
+      const conversationItem = createMailboxItem({
+        id: `mailbox_item_entrypoint_preference_pages_${preferenceItemCount}`,
+        laneSeq: "1",
+      });
+      const selectedInputIdsByPhase: string[][] = [];
+      let importedInputId: string | null = null;
+      let preferencesApplied = 0;
+      let providerCalls = 0;
+
+      try {
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_synthetic_preference_pages_${preferenceItemCount}`,
+              budget: {
+                maxMailboxItems: 1,
+              },
+              idleCheckpointDelayMs: 1,
+              leaseGeneration: "9",
+              userId: TEST_USER_ID,
+              workspaceVersion: "4",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: `users/bundles/member-synthetic/preference-pages-${preferenceItemCount}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem(item) {
+              importedInputId = await stagePendingLinqAssistantInputForMailboxItem({
+                item: item.item,
+                threadId: "thread_preference_pages",
+                vaultRoot,
+              });
+              return {
+                assistantInputId: importedInputId,
+                status: "imported",
+              };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [conversationItem],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "4" }),
+              }),
+            }),
+            async runAssistantPhase(phaseInput) {
+              const acceptedInputIds = phaseInput.initialAssistantInputBatch?.assistantInputIds
+                ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
+                ?? [];
+              const selection = await selectHostedAssistantInputIds({
+                freshAssistantInputIds: acceptedInputIds,
+                mode: "foreground",
+                vaultRoot,
+              });
+              selectedInputIdsByPhase.push(selection.inputIds);
+              if (selection.inputIds.length === 0) {
+                return {
+                  foregroundReplyFailed: 0,
+                  progressed: false,
+                };
+              }
+
+              const pageSize = Math.min(10, preferenceItemCount - preferencesApplied);
+              preferencesApplied += pageSize;
+              events.push(`preferences.applied:${preferencesApplied}`);
+              if (preferencesApplied < preferenceItemCount) {
+                return {
+                  checkpointReason: "system_mailbox_receipt" as const,
+                  nextWakeAt: TEST_NOW,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                };
+              }
+
+              events.push("provider.accepted");
+              providerCalls += 1;
+              const selectedInputId = selection.inputIds[0];
+              assert.ok(selectedInputId);
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: selectedInputId,
+                vaultRoot,
+              });
+              return {
+                checkpointReason: "assistant_runtime_commit" as const,
+                foregroundReplyFailed: 0,
+                nextWakeAt: null,
+                progressed: true,
+              };
+            },
+            signal: runtimeAbortController.signal,
+            vaultRoot,
+          },
+        );
+
+        assert.ok(importedInputId);
+        assert.equal(preferencesApplied, preferenceItemCount);
+        assert.equal(providerCalls, 1);
+        assert.deepEqual(
+          selectedInputIdsByPhase.filter((inputIds) => inputIds.length > 0),
+          Array.from(
+            { length: Math.ceil(preferenceItemCount / 10) },
+            () => [importedInputId],
+          ),
+        );
+        assert.ok(
+          requireEventIndex(events, `preferences.applied:${preferenceItemCount}`)
+            < requireEventIndex(events, "provider.accepted"),
+        );
+        assert.ok(
+          requireEventIndex(events, "provider.accepted")
+            < requireEventIndex(events, "workspace.checkpoint"),
+        );
+        assert.ok(
+          requireEventIndex(events, "provider.accepted")
+            < requireEventIndex(events, "snapshot:idle_shutdown"),
+        );
+        assert.equal(checkpointRequests.length, 1);
+        assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
+      } finally {
+        runtimeAbortController.abort();
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
+
   test("keeps an uncovered successor ahead of the boundary after handled-prefix repair", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-prefix-repair-order-"));
     const events: string[] = [];
