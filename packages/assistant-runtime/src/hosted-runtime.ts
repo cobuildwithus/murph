@@ -160,6 +160,7 @@ import {
 } from "./hosted-runtime/detached-assistant-ask.ts";
 import {
   readHostedSystemMailboxHandledThroughSeq,
+  readHostedSystemMailboxState,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
@@ -492,11 +493,41 @@ async function hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<boolean> {
   const response = await prefetch.response;
-  const systemItems = response.items.filter((item) => item.lane === "system");
-  return systemItems.length > 0
-    && systemItems.every((item) =>
-      item.kind === "runtime.pending-effects-reconcile-requested"
+  return response.items.length > 0
+    && response.items.every((item) =>
+      item.lane === "system"
+      && item.kind === "runtime.pending-effects-reconcile-requested"
     );
+}
+
+async function hostedInitialMailboxImportContainsOnlyCausalPendingEffectsWakes(input: {
+  prefetch: HostedMailboxPrefixPrefetch | null;
+  result: HostedMailboxImportCheckpointResult;
+  vaultRoot: string;
+}): Promise<boolean> {
+  if (input.prefetch !== null) {
+    return await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(input.prefetch);
+  }
+
+  const importedSystemMailboxItemIds =
+    input.result.importResult.importedSystemMailboxItemIds ?? [];
+  if (
+    importedSystemMailboxItemIds.length === 0
+    || input.result.importResult.fetchedCount !== importedSystemMailboxItemIds.length
+  ) {
+    return false;
+  }
+
+  const pendingItemsById = new Map(
+    (await readHostedSystemMailboxState(input.vaultRoot)).pending.map((item) => [
+      item.itemId,
+      item,
+    ]),
+  );
+  return importedSystemMailboxItemIds.every((itemId) =>
+    pendingItemsById.get(itemId)?.wake.kind
+      === "runtime.pending-effects-reconcile-requested"
+  );
 }
 
 function isHostedInitialBootstrapPending(input: {
@@ -1670,6 +1701,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
+      causalPendingEffectsOnly?: boolean;
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -1740,6 +1772,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                causalPendingEffectsOnly:
+                  passInput.causalPendingEffectsOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
@@ -2475,6 +2509,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
+        causalPendingEffectsOnly?: boolean;
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -2512,6 +2547,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             presentedInvocationLocalProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
+            causalPendingEffectsOnly:
+              singleWakeInput.causalPendingEffectsOnly === true,
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
@@ -2731,6 +2768,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         try {
           await runForegroundPassAfterMailboxImport({
+            causalPendingEffectsOnly:
+              input.systemMailboxAdmission === "causal_pending_effects",
             initialMailboxImport: systemImport,
             initialMailboxImportContext,
             latencySeed: input.latencySeed,
@@ -2829,7 +2868,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         };
       };
 
+      const initialCausalPendingEffectsOnly =
+        await hostedInitialMailboxImportContainsOnlyCausalPendingEffectsWakes({
+          prefetch: initialMailboxImportResult.prefetch,
+          result: initialMailboxImport,
+          vaultRoot: restored.vaultRoot,
+        });
       result = await runForegroundPass({
+        causalPendingEffectsOnly: initialCausalPendingEffectsOnly,
         initialMailboxImport,
         initialMailboxImportContext,
         initialMailboxPrefetch: initialMailboxImportResult.prefetch,

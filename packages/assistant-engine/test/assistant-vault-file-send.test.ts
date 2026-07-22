@@ -94,13 +94,16 @@ describe('assistant vault-file send', () => {
       turnId: 'turn_456',
     })
     const intents = await listAssistantOutboxIntents(vaultRoot)
-    expect(second.file).toEqual(first.file)
+    expect(second).toEqual(first)
     expect(intents).toHaveLength(1)
     expect(intents[0]).toMatchObject({
       deliveryIdempotencyKey:
         `assistant-vault-file:haa_${'a'.repeat(32)}:2026-06-24T12:15:00.000Z`,
-      media: [first.file],
-      message: '',
+      media: [expect.objectContaining({
+        filename: 'report.pdf',
+        kind: 'vault_file',
+      })],
+      message: 'report.pdf',
       nextAttemptAt: '2026-06-24T12:05:00.000Z',
       status: 'awaiting_approval',
     })
@@ -945,7 +948,7 @@ describe('assistant vault-file send', () => {
     })
   })
 
-  it('keeps the approval request stable between pre-approval and the normal reply intent', async () => {
+  it('keeps the approval request stable while the parked intent remains the only delivery owner', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-approved-target-',
     )
@@ -995,35 +998,18 @@ describe('assistant vault-file send', () => {
 
     const first = await requestAssistantVaultFileSend(baseRequest)
     const approved = await requestAssistantVaultFileSend(baseRequest)
-    const replyIntent = await createAssistantOutboxIntent({
-      bindingDelivery: { kind: 'thread', target: 'chat_123' },
-      channel: 'linq',
-      deliveryIdempotencyKey: 'hosted-turn-delivery-target-stable',
-      deliveryTransportIdempotent: true,
-      identityId: 'member_123',
-      media: [approved.file],
-      message: 'Here is the file.',
-      replyToMessageId: 'approved_message_target_stable',
-      sessionId: 'session_123',
-      threadId: 'chat_123',
-      threadIsDirect: true,
-      turnId: 'turn_123',
-      vault: vaultRoot,
-    })
+    const [parkedIntent] = await listAssistantOutboxIntents(vaultRoot)
 
-    expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(2)
+    if (!parkedIntent) {
+      throw new Error('Expected the pending vault-file intent to remain parked.')
+    }
+    expect(await listAssistantOutboxIntents(vaultRoot)).toHaveLength(1)
     expect(first.status).toBe('pending')
     expect(approved.status).toBe('approved')
-    if (approved.status !== 'approved') {
-      throw new Error('Expected approved vault-file send result.')
-    }
-    expect(approved.file).toMatchObject({
-      approvalGeneration: 'd'.repeat(64),
-      approvalId: `haa_${'d'.repeat(32)}`,
-    })
+    expect(approved).not.toHaveProperty('file')
     expect(requests).toHaveLength(2)
     expect(requests[1]).toEqual(requests[0])
-    expect(buildAssistantVaultFileSendApprovalRequest(replyIntent)).toEqual(
+    expect(buildAssistantVaultFileSendApprovalRequest(parkedIntent)).toEqual(
       requests[0],
     )
   })
@@ -1155,14 +1141,12 @@ describe('assistant vault-file send', () => {
     }))
   })
 
-  it('attaches an approved vault file to the normal assistant reply path', async () => {
-    const file = createApprovedVaultFileResponseMedia()
+  it('leaves approved vault-file delivery with the existing runtime intent', async () => {
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       sendVaultFile: vi.fn(async () => ({
-        file,
         filename: 'report.pdf',
         status: 'approved' as const,
       })),
@@ -1183,97 +1167,16 @@ describe('assistant vault-file send', () => {
     })
 
     expect(result.finalActionPatch).toBeUndefined()
-    expect(result.responseMediaPatch).toEqual({
-      media: [file],
-      op: 'append',
-    })
+    expect(result.responseMediaPatch).toBeUndefined()
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toBe(JSON.stringify({
-      deliveryStatus: 'queued_with_reply',
       filename: 'report.pdf',
       note:
-        'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
+        'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
       status: 'approved',
     }))
   })
-
-  it('does not allow later response media to replace an approved vault file', async () => {
-    const result = await executeMurphDynamicToolRequest({
-      currentResponseMedia: [createApprovedVaultFileResponseMedia()],
-      env: {},
-      fetchImpl: fetch,
-      nextUsageOrdinal: () => 1,
-      progressDelivery: null,
-      publicFetchImpl: fetch,
-      request: {
-        kind: 'attach-response-media',
-        media: [{
-          alt: 'Generated bottle image',
-          kind: 'image' as const,
-          source: 'test',
-          url: 'https://imagedelivery.net/account/image/public',
-        }],
-      },
-    })
-
-    expect(result.responseMediaPatch).toBeUndefined()
-    expect(result.rpcResult).toEqual({
-      success: false,
-      contentItems: [{
-        text: 'response media cannot be changed after an approved vault file is attached',
-        type: 'inputText',
-      }],
-    })
-  })
-
-  it('does not allow generated images to append after an approved vault file', async () => {
-    const nextUsageOrdinal = vi.fn(() => 1)
-
-    const result = await executeMurphDynamicToolRequest({
-      currentResponseMedia: [createApprovedVaultFileResponseMedia()],
-      env: {
-        OPENAI_API_KEY: 'openai-test-key',
-      },
-      fetchImpl: fetch,
-      nextUsageOrdinal,
-      progressDelivery: null,
-      publicFetchImpl: fetch,
-      request: {
-        kind: 'generate-image',
-        args: {
-          alt: 'Generated bottle image',
-          outputFormat: 'webp',
-          prompt: 'Render a clean supplement bottle.',
-          quality: 'medium',
-          size: '1024x1024',
-        },
-      },
-    })
-
-    expect(nextUsageOrdinal).not.toHaveBeenCalled()
-    expect(result.responseMediaPatch).toBeUndefined()
-    expect(result.rpcResult).toEqual({
-      success: false,
-      contentItems: [{
-        text: 'image generation cannot be combined with an approved vault file',
-        type: 'inputText',
-      }],
-    })
-  })
 })
-
-function createApprovedVaultFileResponseMedia() {
-  return {
-    approvalGeneration: 'f'.repeat(64),
-    approvalId: `haa_${'f'.repeat(32)}`,
-    contentType: 'application/pdf',
-    filename: 'report.pdf',
-    kind: 'vault_file' as const,
-    ref: 'documents/report.pdf',
-    sha256: 'a'.repeat(64),
-    sizeBytes: 42,
-  }
-}
 
 function createVaultFileIntent() {
   return {

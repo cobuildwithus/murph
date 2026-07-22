@@ -267,6 +267,7 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
+  causalPendingEffectsOnly?: boolean;
   deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
   restored: HostedRestoredExecutionContext;
@@ -1424,6 +1425,23 @@ export async function runHostedWorkspaceAssistantPhase(
       wake,
     });
     const systemMailboxMaintenanceMs = elapsedSince(systemMailboxMaintenanceStartedAt);
+    if (
+      input.causalPendingEffectsOnly === true
+      && systemMailboxMaintenance.result
+      && !systemMailboxMaintenance.continueAssistantLane
+    ) {
+      return await finalizeHostedBackgroundMaintenanceResult({
+        backgroundMaintenanceYielded: systemMailboxMaintenance.backgroundMaintenanceYielded,
+        initialProviderCleanupCheckpoint:
+          systemMailboxMaintenance.initialProviderCleanupCheckpoint,
+        input,
+        result: withHostedDeviceSyncMaintenanceRan(
+          systemMailboxMaintenance.result,
+          systemMailboxMaintenance.deviceSyncMaintenanceRan,
+        ),
+        wake,
+      });
+    }
     const hasAssistantInputAtPassStart =
       hasFreshConversationInput
       || systemMailboxMaintenance.pendingAssistantInputWakeAt !== null;
@@ -3998,6 +4016,7 @@ async function runSystemMailboxMaintenancePhase(input: {
       || input.input.shouldYieldBackgroundMaintenance?.() === true
     )
     && !foregroundPendingEffectsAttempted
+    && phaseInput.causalPendingEffectsOnly !== true
   ) {
     return {
       backgroundMaintenanceYielded: false,
@@ -4358,15 +4377,17 @@ async function runSystemMailboxMaintenancePhase(input: {
 
   return {
     backgroundMaintenanceYielded,
-    continueAssistantLane:
-      !causalPendingEffectsReconciliationOwnsThisPass
-      && (
-        foregroundPendingEffectsAttempted
-        || causalPendingEffectsReconciliationCompletedWithoutDelivery
-        || systemAssistantCronWakeState.dueNow
-        || backgroundMaintenanceYielded
-        || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation)
-      ),
+    continueAssistantLane: phaseInput.causalPendingEffectsOnly === true
+      ? !causalPendingEffectsReconciliationOwnsThisPass
+        && foregroundPendingEffectsAttempted
+      : !causalPendingEffectsReconciliationOwnsThisPass
+        && (
+          foregroundPendingEffectsAttempted
+          || causalPendingEffectsReconciliationCompletedWithoutDelivery
+          || systemAssistantCronWakeState.dueNow
+          || backgroundMaintenanceYielded
+          || shouldContinueAssistantLaneAfterSystemMailboxPreparation(systemMailboxPreparation)
+        ),
     initialProviderCleanupCheckpoint,
     pendingAssistantInputWakeAt,
     result: mergeMemberPreferencesPrePlanningResult({

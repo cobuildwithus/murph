@@ -11863,6 +11863,97 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("keeps managed setup out of a causal-only exact delivery pass", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    const deliveryEffect = {
+      ...createDeliveryEffect(),
+      effectId: pendingEffectsItem.wake.effectId,
+    };
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([deliveryEffect]);
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      causalPendingEffectsOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      }),
+    );
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "outbox_sending",
+      progressed: true,
+    }));
+  });
+
+  it("keeps due cron work out of a causal-only zero-effect pass", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+    mocks.getAssistantCronStatus.mockResolvedValue({
+      dueJobs: 1,
+      enabledJobs: 1,
+      nextRunAt: now,
+      runningJobs: 0,
+      totalJobs: 1,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      causalPendingEffectsOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+    }));
+
+    expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferredEffectIds: [pendingEffectsItem.wake.effectId],
+      }),
+    );
+    expect(mocks.applyMurphManagedAutomations).not.toHaveBeenCalled();
+    expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      progressed: true,
+    }));
+  });
+
   it("continues foreground automation when a causal approval wake has no deliverable effect", async () => {
     const now = "2026-04-27T00:00:00.000Z";
     const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
@@ -14521,6 +14612,7 @@ async function runRealForegroundApprovalAdmissionScenario(input: {
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [assistantInput.inputId],
+      causalPendingEffectsOnly: true,
       conversationImportedCount: 1,
       importedCount: 1,
       now: () => now,
@@ -14616,6 +14708,7 @@ function createPhaseWorkspace(input: {
 
 function createPhaseInput(input: {
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
+  causalPendingEffectsOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
   assistantInputIds?: string[];
   assistantInputRecords?: NonNullable<
@@ -14672,6 +14765,7 @@ function createPhaseInput(input: {
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
+    causalPendingEffectsOnly: input.causalPendingEffectsOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,
     currentAssistantInputId: input.currentAssistantInputId,

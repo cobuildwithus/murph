@@ -896,7 +896,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -2557,12 +2557,6 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'response media cannot be changed after an approved vault file is attached',
-        )
-      }
       return {
         ...toolTextResult(
           true,
@@ -2675,22 +2669,15 @@ export async function executeMurphDynamicToolRequest(input: {
               requiredVaultFileApprovalUrl: result.approvalUrl,
             }
           case 'approved':
-            return {
-              ...toolTextResult(
-                true,
-                JSON.stringify({
-                  deliveryStatus: 'queued_with_reply',
-                  filename: result.filename,
-                  note:
-                    'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
-                  status: result.status,
-                }),
-              ),
-              responseMediaPatch: {
-                media: [result.file],
-                op: 'append' as const,
-              },
-            }
+            return toolTextResult(
+              true,
+              JSON.stringify({
+                filename: result.filename,
+                note:
+                  'Approval succeeded. The runtime owns delivery of the existing attachment intent. Call finish_without_reply; do not attach the file or send a companion acknowledgment.',
+                status: result.status,
+              }),
+            )
           case 'denied':
             return toolTextResult(false, 'vault-file delivery was denied')
           case 'expired':
@@ -2882,12 +2869,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }
       }
     case 'generate-image': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'image generation cannot be combined with an approved vault file',
-        )
-      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
@@ -3043,12 +3024,6 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
-}
-
-function hasVaultFileResponseMedia(
-  media: readonly AssistantResponseMedia[],
-): boolean {
-  return media.some((item) => item.kind === 'vault_file')
 }
 
 async function executeSubmitProductFeedbackTool(input: {
