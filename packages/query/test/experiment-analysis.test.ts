@@ -3244,8 +3244,8 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
     asOf: "2026-04-25",
   });
 
-  assert.equal(outcome.schema, "murph.experiment-outcome.v1");
-  assert.equal(outcome.schemaVersion, "murph.experiment-outcome.v1");
+  assert.equal(outcome.schema, "murph.experiment-outcome.v2");
+  assert.equal(outcome.schemaVersion, "murph.experiment-outcome.v2");
   assert.equal(outcome.experiment.status, "active");
   assert.equal(outcome.outcomeId, "exp_01JNV4458HYPP53JDQCBP1QJFM-outcome-2026-04-25");
   assert.equal(outcome.commonsProtocolRef?.key, "protocol_variant:dry-sauna/murph-finnish-standard-3x-week");
@@ -3275,6 +3275,44 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
     },
     label: "Resting Heart Rate",
     movedAsExpected: true,
+    points: [
+      {
+        date: "2026-04-01",
+        phase: "baseline",
+        unit: "bpm",
+        value: 62,
+      },
+      {
+        date: "2026-04-02",
+        phase: "baseline",
+        unit: "bpm",
+        value: 61,
+      },
+      {
+        date: "2026-04-03",
+        phase: "baseline",
+        unit: "bpm",
+        value: 61,
+      },
+      {
+        date: "2026-04-08",
+        phase: "intervention",
+        unit: "bpm",
+        value: 59,
+      },
+      {
+        date: "2026-04-09",
+        phase: "intervention",
+        unit: "bpm",
+        value: 58,
+      },
+      {
+        date: "2026-04-10",
+        phase: "intervention",
+        unit: "bpm",
+        value: 59,
+      },
+    ],
     unit: "bpm",
     baseline: {
       daysWithData: 3,

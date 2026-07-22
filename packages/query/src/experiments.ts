@@ -11,6 +11,7 @@ import {
   type DeviceDataOrigin,
   type ExperimentFrontmatter,
   type ExperimentOutcome,
+  type ExperimentOutcomeMetricPoint,
   type ExperimentProgressMetricSignal,
   type ExperimentProgressSnapshot,
 } from "@murphai/contracts";
@@ -52,6 +53,7 @@ import {
   selectMetricWindowComparison,
   unitsEquivalent,
   type MetricPoint,
+  type MetricSeriesPoint,
   type MetricWindowSummary,
 } from "./metrics/index.ts";
 import { buildMetricProjection } from "./metrics/projection.ts";
@@ -141,6 +143,10 @@ export interface ExperimentMetricResult {
   unit: string | null;
 }
 
+export interface ExperimentOutcomeMetricResult extends ExperimentMetricResult {
+  points: ExperimentOutcomeMetricPoint[];
+}
+
 export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
   schema: typeof EXPERIMENT_PROGRESS_SCHEMA_VERSION;
   asOf: string;
@@ -207,6 +213,7 @@ export interface ExperimentProgressSummary extends ExperimentProgressSnapshot {
 
 export interface ExperimentOutcomeSummary extends ExperimentOutcome {
   schema: typeof EXPERIMENT_OUTCOME_SCHEMA_VERSION;
+  schemaVersion: typeof EXPERIMENT_OUTCOME_SCHEMA_VERSION;
   adherenceSummary: {
     adherenceLevel?: "unknown" | "low" | "partial" | "good";
     completedSessions: number;
@@ -235,7 +242,7 @@ export interface ExperimentOutcomeSummary extends ExperimentOutcome {
   };
   commonsProtocolRef: ExperimentProtocolProjectionFields["commonsProtocolRef"];
   effectiveProtocolSnapshot: ExperimentProtocolProjectionFields["effectiveProtocolSnapshot"];
-  metricResults: ExperimentMetricResult[];
+  metricResults: ExperimentOutcomeMetricResult[];
   protocolRef: ExperimentProtocolProjectionFields["protocolRef"];
   windows: ExperimentProgressSummary["windows"];
 }
@@ -301,6 +308,7 @@ type QueryExperimentAdherenceTarget = NonNullable<
 interface MetricWindowSelection {
   daysWithData: number;
   mean: number | null;
+  points: ExperimentOutcomeMetricPoint[];
   totalDays: number;
   unit: string | null;
 }
@@ -398,7 +406,7 @@ export function analyzeExperimentOutcome(
   options: { asOf?: string } & ExperimentMetricPointOptions = {},
 ): ExperimentOutcomeSummary {
   const context = buildExperimentSummaryContext(vault, slug, options);
-  const metricResults = buildMetricResults(context);
+  const metricResults = buildMetricResults(context, { includePoints: true });
   const adherence = buildAdherenceSummary(context);
   const confidence = buildOutcomeConfidence({
     adherence,
@@ -562,7 +570,18 @@ function requireExperimentFrontmatter(entity: CanonicalEntity): QueryExperimentF
   return result.data;
 }
 
-function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetricResult[] {
+function buildMetricResults(
+  context: ExperimentSummaryContext,
+  options: { includePoints: true },
+): ExperimentOutcomeMetricResult[];
+function buildMetricResults(
+  context: ExperimentSummaryContext,
+  options?: { includePoints?: false },
+): ExperimentMetricResult[];
+function buildMetricResults(
+  context: ExperimentSummaryContext,
+  options: { includePoints?: boolean } = {},
+): Array<ExperimentMetricResult & { points?: ExperimentOutcomeMetricPoint[] }> {
   const biomarkerKeys = [
     context.frontmatter.analysisPlan?.primaryBiomarkerKey,
     ...(context.frontmatter.analysisPlan?.secondaryBiomarkerKeys ?? []),
@@ -617,6 +636,9 @@ function buildMetricResults(context: ExperimentSummaryContext): ExperimentMetric
       intervention: interventionSummary,
       label: humanizeBiomarkerKey(biomarkerKey),
       movedAsExpected: movedAsExpected(deltaAbs, expectedDirection),
+      ...(options.includePoints
+        ? { points: [...baselineWindow.points, ...interventionWindow.points] }
+        : {}),
       unit,
     };
   });
@@ -1826,6 +1848,7 @@ function selectMetricWindows(
       baseline: collectAnchoredMetricWindow(context, biomarkerKey, "baseline") ?? {
         daysWithData: 0,
         mean: null,
+        points: [],
         totalDays: 0,
         unit: null,
       },
@@ -1834,6 +1857,7 @@ function selectMetricWindows(
         collectPlannedMetricWindow(context, biomarkerKey, "followup") ?? {
           daysWithData: 0,
           mean: null,
+          points: [],
           totalDays: 0,
           unit: null,
         },
@@ -1862,20 +1886,27 @@ function collectRunMetricWindows(
     return emptyWindows;
   }
 
+  const seriesPoints = selectMetricSeries({
+    metricKey,
+    points: context.metricPoints,
+  }).rows;
   const comparison = selectMetricWindowComparison({
     baselineWindow: metricWindowRangeFromDates(context.baselineDates),
     comparisonWindow: metricWindowRangeFromDates(context.interventionDates),
     metricKey,
-    points: selectMetricSeries({
-      metricKey,
-      points: context.metricPoints,
-    }).rows,
+    points: seriesPoints,
     statistic: "mean",
   });
 
   return {
-    baseline: metricWindowSelectionFromSummary(comparison.baseline),
-    intervention: metricWindowSelectionFromSummary(comparison.comparison),
+    baseline: metricWindowSelectionFromSummary(
+      comparison.baseline,
+      selectOutcomeMetricPoints(seriesPoints, comparison.baseline, "baseline"),
+    ),
+    intervention: metricWindowSelectionFromSummary(
+      comparison.comparison,
+      selectOutcomeMetricPoints(seriesPoints, comparison.comparison, "intervention"),
+    ),
   };
 }
 
@@ -1931,8 +1962,7 @@ function collectAnchoredMetricWindow(
 
   const metricKey = resolveMetricKeyForBiomarker(biomarkerKey);
   const definition = metricKey ? resolveMetricDefinition(metricKey) : null;
-  const values: number[] = [];
-  let unit: string | null = null;
+  const points: ExperimentOutcomeMetricPoint[] = [];
   for (const anchor of anchors) {
     const anchoredPoints = context.metricPoints.filter(
       (point) =>
@@ -1947,31 +1977,51 @@ function collectAnchoredMetricWindow(
     });
     const fallback = definition
       ? anchoredPoints
-          .map((point) => resolveComparableMetricPointValue(point, definition))
+          .map((point) => ({
+            point,
+            value: resolveComparableMetricPointValue(point, definition),
+          }))
           .find((candidate) =>
-            candidate !== null
+            candidate.value !== null
             && (
               definition.canonicalUnit === null
-              || unitsEquivalent(candidate.unit, definition.canonicalUnit)
+              || unitsEquivalent(candidate.value.unit, definition.canonicalUnit)
             )
           ) ?? null
       : null;
-    const value = typeof selection.value === "number" ? selection.value : fallback?.value ?? null;
+    const value = typeof selection.value === "number"
+      ? selection.value
+      : fallback?.value?.value ?? null;
     if (typeof value !== "number" || !Number.isFinite(value)) {
       continue;
     }
 
-    values.push(value);
-    unit ??= typeof selection.value === "number" ? selection.unit : fallback?.unit ?? null;
+    const sourcePoint = typeof selection.value === "number"
+      ? selection.point
+      : fallback?.point ?? null;
+    const date = sourcePoint?.effectiveDate ?? anchor.observedOn ?? null;
+    if (!date) {
+      continue;
+    }
+
+    points.push({
+      date,
+      phase: role === "baseline" ? "baseline" : "intervention",
+      unit: typeof selection.value === "number"
+        ? selection.unit
+        : fallback?.value?.unit ?? null,
+      value,
+    });
   }
 
-  return metricWindowSelectionFromValues(values, anchors.length, unit);
+  return metricWindowSelectionFromValues(points, anchors.length);
 }
 
 function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {
   return {
     daysWithData: 0,
     mean: null,
+    points: [],
     totalDays,
     unit: null,
   };
@@ -1979,30 +2029,58 @@ function emptyMetricWindowSelection(totalDays: number): MetricWindowSelection {
 
 function metricWindowSelectionFromSummary(
   summary: MetricWindowSummary,
+  points: ExperimentOutcomeMetricPoint[],
 ): MetricWindowSelection {
   return {
     daysWithData: summary.daysWithData,
     mean: summary.value !== null ? round(summary.value) : null,
+    points,
     totalDays: summary.totalDays,
     unit: summary.unit,
   };
 }
 
 function metricWindowSelectionFromValues(
-  values: readonly number[],
+  points: ExperimentOutcomeMetricPoint[],
   totalDays: number,
-  unit: string | null,
 ): MetricWindowSelection {
-  if (values.length === 0) {
+  if (points.length === 0) {
     return emptyMetricWindowSelection(totalDays);
   }
 
+  const values = points.map((point) => point.value);
   return {
-    daysWithData: values.length,
+    daysWithData: points.length,
     mean: round(values.reduce((sum, value) => sum + value, 0) / values.length),
+    points,
     totalDays,
-    unit,
+    unit: points[0]?.unit ?? null,
   };
+}
+
+function selectOutcomeMetricPoints(
+  seriesPoints: readonly MetricSeriesPoint[],
+  window: MetricWindowSummary,
+  phase: ExperimentOutcomeMetricPoint["phase"],
+): ExperimentOutcomeMetricPoint[] {
+  const { start, end } = window;
+  if (!start || !end) {
+    return [];
+  }
+
+  return seriesPoints.flatMap((point) =>
+    point.date >= start &&
+      point.date <= end &&
+      typeof point.value === "number" &&
+      Number.isFinite(point.value)
+      ? [{
+          date: point.date,
+          phase,
+          unit: point.unit,
+          value: point.value,
+        }]
+      : []
+  );
 }
 
 function metricWindowRangeFromDates(

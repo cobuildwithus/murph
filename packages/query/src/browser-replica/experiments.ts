@@ -370,13 +370,16 @@ export function selectBrowserVaultExperimentResults(
     findReferencedExperimentOutcome(client, entity),
   );
   const { persistedOutcome } = context;
-  const biomarkers = persistedOutcome
-    ? buildPersistedOutcomeBiomarkers(persistedOutcome)
+  const liveBiomarkers = persistedOutcome
+    ? null
     : buildBiomarkerResults(
         client,
         context,
         buildMetricWindowContext(context.run.windows, context.evidenceThrough),
       );
+  const biomarkers = persistedOutcome
+    ? buildPersistedOutcomeBiomarkers(persistedOutcome)
+    : liveBiomarkers ?? [];
   const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
   const progress = buildProgressResult(context, biomarkers, schedule, adherence);
@@ -665,6 +668,7 @@ function buildPersistedOutcomeBiomarkers(
   outcome: ExperimentOutcome,
 ): BrowserVaultExperimentBiomarkerResult[] {
   return outcome.metricResults.map((metric) => {
+    const sourceMetric = resolveBiomarkerMetricSource(metric.biomarkerKey);
     const baselineUnit = metric.baseline?.unit ?? metric.unit;
     const interventionUnit = metric.intervention?.unit ?? metric.unit;
     const expectedEffect: BrowserVaultExperimentExpectedEffect = {
@@ -702,8 +706,17 @@ function buildPersistedOutcomeBiomarkers(
       },
       label: metric.label,
       movedAsExpected: metric.movedAsExpected,
-      points: [],
-      sourceMetric: resolveBiomarkerMetricSource(metric.biomarkerKey),
+      points: metric.points !== undefined && sourceMetric
+        ? metric.points.map((point) => ({
+            confidence: "none" as const,
+            date: point.date,
+            metricKey: sourceMetric.metricKey,
+            phase: point.phase,
+            unit: point.unit,
+            value: point.value,
+          }))
+        : [],
+      sourceMetric,
       status: "available",
       statusReason: "Saved experiment analysis is available.",
       unit: metric.unit,

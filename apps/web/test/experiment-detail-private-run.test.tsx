@@ -723,11 +723,50 @@ describe("experiment detail private-run composition", () => {
     expect(staleMarkup).toContain("The latest private refresh failed.");
   });
 
-  it("keeps the exact canonical saved outcome and charts window means without a saved delta", async () => {
+  it("keeps the exact canonical saved outcome and charts its saved daily points", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
     const outcome = createSavedOutcome({
       deltaAbs: null,
       id: "exp_sauna_saved_outcome",
+      points: [
+        {
+          date: "2026-04-01",
+          phase: "baseline",
+          unit: "bpm",
+          value: 63,
+        },
+        {
+          date: "2026-04-02",
+          phase: "baseline",
+          unit: "bpm",
+          value: 62,
+        },
+        {
+          date: "2026-04-03",
+          phase: "baseline",
+          unit: "bpm",
+          value: 61,
+        },
+        {
+          date: "2026-04-04",
+          phase: "intervention",
+          unit: "bpm",
+          value: 59,
+        },
+        {
+          date: "2026-04-05",
+          phase: "intervention",
+          unit: "bpm",
+          value: 58,
+        },
+        {
+          date: "2026-04-06",
+          phase: "intervention",
+          unit: "bpm",
+          value: 57,
+        },
+      ],
+      schemaVersion: "murph.experiment-outcome.v2",
       slug: "finnish-sauna",
       status: "paused",
       title: "Original sauna run",
@@ -740,6 +779,7 @@ describe("experiment detail private-run composition", () => {
         experimentOutcomes: [outcome],
         generatedAt: "2027-06-20T08:00:00.000Z",
         metricRows: restingHeartRateRows([
+          ["2026-03-31", 88],
           ["2026-04-01", 99],
           ["2026-04-04", 120],
           ["2026-04-08", 130],
@@ -793,17 +833,21 @@ describe("experiment detail private-run composition", () => {
     expect(privateRun?.signals).toEqual([]);
     expect(privateRun?.trends).toEqual([
       expect.objectContaining({
-        active: [],
-        baseline: [],
+        active: [
+          { day: 4, value: 59 },
+          { day: 5, value: 58 },
+          { day: 6, value: 57 },
+        ],
+        baseline: [
+          { day: 1, value: 63 },
+          { day: 2, value: 62 },
+          { day: 3, value: 61 },
+        ],
         baselineAvg: 62,
         currentValue: 58,
+        history: [],
         label: "Resting heart rate",
-        windowComparison: {
-          baselineDaysWithData: 3,
-          baselineTotalDays: 3,
-          interventionDaysWithData: 3,
-          interventionTotalDays: 3,
-        },
+        windowComparison: undefined,
       }),
     ]);
     expect(privateRun?.conclusions?.[0]?.title).toBe("What limits this read");
@@ -827,11 +871,11 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain(outcome.conclusion.caveats[0]);
     expect(markup).toContain("Saved result");
     expect(markup.match(/medium confidence/gu)).toHaveLength(1);
-    expect(markup).toContain("Window averages");
     expect(markup).toContain('data-slot="chart"');
-    expect(markup).toContain("Baseline average");
-    expect(markup).toContain("Experiment average");
-    expect(markup).toContain("3 of 3 days measured");
+    expect(markup).toContain("Baseline");
+    expect(markup).toContain("Active");
+    expect(markup).not.toContain("History");
+    expect(markup).not.toContain("Window averages");
     expect(markup).not.toContain("What the saved analysis says");
 
     const privateRunRouteMarkup = renderToStaticMarkup(
@@ -1018,6 +1062,10 @@ describe("experiment detail private-run composition", () => {
     expect(trendMarkup).not.toContain("Expected");
     expect(trendMarkup).toContain("experiment average");
     expect(trendMarkup).not.toContain("latest");
+    expect(trendMarkup).toContain('role="region"');
+    expect(trendMarkup).toContain(
+      'aria-label="Resting Heart Rate: daily baseline and experiment measurements in bpm."',
+    );
   });
 
   it("projects ordered comparable card metrics from production browser-vault signals", async () => {
@@ -2491,6 +2539,8 @@ function createExperimentFrontmatter(input: {
 function createSavedOutcome(input: {
   deltaAbs?: number | null;
   id: string;
+  points?: ExperimentOutcome["metricResults"][number]["points"];
+  schemaVersion?: ExperimentOutcome["schemaVersion"];
   slug: string;
   status?: ExperimentOutcome["experiment"]["status"];
   title?: string;
@@ -2547,11 +2597,12 @@ function createSavedOutcome(input: {
       interventionMean: 58,
       label: "Resting heart rate",
       movedAsExpected: true,
+      ...(input.points === undefined ? {} : { points: input.points }),
       unit: "bpm",
     }],
     outcomeId: `outcome_${input.id}`,
     protocolRef: null,
-    schemaVersion: "murph.experiment-outcome.v1",
+    schemaVersion: input.schemaVersion ?? "murph.experiment-outcome.v1",
     windows: input.windows ?? {
       baselineEnd: "2026-04-03",
       baselineStart: "2026-04-01",

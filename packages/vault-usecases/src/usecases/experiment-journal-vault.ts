@@ -2034,7 +2034,7 @@ export async function writeExperimentOutcomeRecord(input: {
           ...analysis,
           outcome: {
             ...analysis.outcome,
-            schema: written.outcome.schema ?? written.outcome.schemaVersion,
+            schema: analysis.outcome.schema,
             generatedAt: written.outcome.generatedAt,
             outcomeId: written.outcome.outcomeId,
             experiment: {
