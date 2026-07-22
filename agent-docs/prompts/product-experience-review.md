@@ -1,5 +1,5 @@
 ---
-description: End-to-end product experience audit for materially changed user-facing behavior
+description: End-to-end product experience audit for changed user-facing product decisions
 action: product experience review
 ---
 

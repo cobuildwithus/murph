@@ -94,10 +94,11 @@ normal commit and PR requirements.
 ## Product and Rendered Review Admission
 
 Route specialist review by the dimension changed, before evaluating final
-ReviewGPT eligibility. A product-owned dimension is semantic user-facing copy,
-UI state selection, primary-action count or priority, user-visible element or
-screen existence, or the journey's timing, delivery, permission, and recovery
-contract.
+ReviewGPT eligibility. A product-owned dimension is semantic user-facing copy;
+user-visible action purpose, count, or priority; required interaction steps; UI
+state selection and visible feedback or progress; user-visible element or
+screen existence; asynchronous continuation or wake ownership; or the
+journey's timing, delivery, permission, and recovery contract.
 
 | Changed dimension | Product-decision owner | Rendered-implementation route |
 | --- | --- | --- |

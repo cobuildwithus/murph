@@ -1569,6 +1569,15 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
       'utf8',
     )
+    const completionSpecialists = readFileSync(
+      path.join(
+        repoRoot,
+        'scripts',
+        'chatgpt-review-presets',
+        'completion-specialists.md',
+      ),
+      'utf8',
+    )
     const productExperienceReview = readFileSync(
       path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
       'utf8',
@@ -1599,7 +1608,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReview).toContain(
       'Make every word, click, field, choice,',
     )
+    expect(completionSpecialists).toContain(
+      "repository's meaning-preserving tiny static-copy fast path",
+    )
+    expect(completionSpecialists).toContain(
+      'rendered fidelity to the declared',
+    )
+    expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productExperienceReview).toContain(
+      'audit for changed user-facing product decisions',
+    )
+    expect(productExperienceReview).not.toContain(
+      'audit for materially changed user-facing behavior',
+    )
     expect(productExperienceReview).toMatch(
       /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
     )
@@ -1624,6 +1646,12 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('## Product and Rendered Review Admission')
     expect(completionWorkflow).toContain(
+      'user-visible action purpose, count, or priority; required interaction steps;',
+    )
+    expect(completionWorkflow).toContain(
+      'asynchronous continuation or wake ownership;',
+    )
+    expect(completionWorkflow).toContain(
       '| Any product-owned dimension, including one changed through a prompt | Run local `product-experience-review` |',
     )
     expect(completionWorkflow).toContain(
@@ -1646,7 +1674,10 @@ describe('monorepo release flow coverage audit', () => {
       /a prompt that changes a product-owned dimension also runs local\s+`product-experience-review`/u,
     )
     expect(agentWorkflowRouting).toContain(
-      'Any change to semantic user-facing copy, UI state selection, primary-action count or priority',
+      'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'asynchronous continuation or wake ownership;',
     )
     expect(agentWorkflowRouting).toContain(
       'only for a meaning-preserving typo, punctuation, grammar, or equivalent localization correction',

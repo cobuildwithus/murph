@@ -20,8 +20,9 @@ The three lenses are conditional:
   developer instructions, agent workflow prompts, tool descriptions, prompt
   assembly guidance, or prompt regression tests.
 - Apply the frontend lens when the diff changes user-facing `apps/web` pages,
-  components, interactions, or design-system-facing UI. The repository's tiny
-  static-copy fast path should not reach this review.
+  components, rendered interactions, or design-system-facing UI. The
+  repository's meaning-preserving tiny static-copy fast path should not reach
+  this review.
 - Apply the coverage lens when the routed verification includes truthful
   `pnpm test:diff` coverage or an owner-level coverage command.
 
@@ -29,11 +30,13 @@ State `applicable` or `not applicable` for each lens with one sentence of
 evidence. Apply every applicable lens together; do not split them into separate
 reviews or ask for another specialist agent.
 
-The separate `product-experience-review` owns the irreducible user purpose and
-the complete cross-surface journey. The later final ReviewGPT gate owns the
-cross-cutting production bug hunt, invariant drift, purpose drift, and material
-architecture simplification. Do not omit a specialist finding merely because a
-later gate exists, but do not duplicate those other passes' scope.
+The separate `product-experience-review` owns the irreducible user purpose,
+semantic copy, action and required-step decisions, state and element selection,
+visible feedback, continuation or wake ownership, and the complete
+cross-surface journey. The later final ReviewGPT gate owns the cross-cutting
+production bug hunt, invariant drift, purpose drift, and material architecture
+simplification. Do not omit a specialist finding merely because a later gate
+exists, but do not duplicate those other passes' scope.
 
 # Evidence
 
@@ -95,11 +98,12 @@ readable, redacted desktop and mobile evidence for the touched states. If that
 evidence is absent or unreadable, state the exact gap and return
 `SPECIALIST_OUTCOME: INVALID`; do not infer visual quality from source alone.
 
-Find evidence-backed regressions in hierarchy, responsive containment,
-overflow, interaction states, keyboard/focus behavior, contrast, accessibility,
-loading/empty/error/success states, shared tokens and primitives, or product
-alignment. Do not report subjective taste, optional polish, or a preference for
-different styling when the shipped result is coherent and accessible.
+Find evidence-backed regressions in rendered fidelity to the declared
+experience and hierarchy, responsive containment, overflow, interaction
+states, keyboard/focus behavior, contrast, accessibility,
+loading/empty/error/success states, or shared tokens and primitives. Do not
+report subjective taste, optional polish, or a preference for different styling
+when the shipped result is coherent and accessible.
 
 # Coverage lens
 
