@@ -16,7 +16,6 @@ export function HostedFamilySettings(props: {
   ownerSnapshot: HostedFamilyOwnerSnapshot;
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpFormerMemberLabels?: Readonly<Record<string, string>>;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -59,7 +58,6 @@ export function HostedFamilySettings(props: {
         }))}
         usageTopUpActiveMemberId={props.usageTopUpActiveMemberId}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
-        usageTopUpFormerMemberLabels={props.usageTopUpFormerMemberLabels}
         usageTopUpOffers={props.usageTopUpOffers ?? []}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
         usageTopUpReturnMemberId={props.usageTopUpReturnMemberId}

@@ -7,6 +7,7 @@ import {
 
 import { hostedLookupKeyMatchesValue } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { resolveHostedFamilyUsageCreditCheckoutTargetTx } from "./family-plan";
 import { requireHostedStripeApiMode } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -112,14 +113,16 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
     throw buildHostedUsageCreditPurchaseNotFoundError();
   }
 
-  return buildHostedUsageCreditPurchaseStatusResult(purchase);
+  return projectHostedUsageCreditPurchaseStatusResult(purchase);
 }
 
 export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   beneficiaryMemberId?: string;
   now?: Date;
+  // Omit this list to receive status/cancel data without a URL or retry action.
+  serverApprovedPayableTargets?: readonly HostedUsageCreditPurchaseTargetProjection[];
   payerMemberId: string;
-  prisma?: HostedOnboardingReadClient;
+  prisma?: PrismaClient;
 }): Promise<HostedActiveUsageCreditPurchaseProjection | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -162,21 +165,54 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   if (!purchase.payer) {
     throw buildHostedUsageCreditInvariantError("purchase_payer_missing");
   }
-  const checkout = purchase.payer.suspendedAt
-    ? buildHostedUsageCreditPurchaseStatusResult(purchase)
-    : await projectHostedUsageCreditCheckoutResult({
+  const target = projectHostedUsageCreditPurchaseTarget(purchase);
+  const targetApprovedByCaller =
+    input.serverApprovedPayableTargets?.some((payableTarget) =>
+      hostedUsageCreditPurchaseTargetsMatch(target, payableTarget)
+    ) === true;
+  const mayExposePayableCapability =
+    purchase.payer.suspendedAt === null &&
+    targetApprovedByCaller &&
+    await hasCurrentHostedUsageCreditPayableAuthority({
+      payerMemberId: input.payerMemberId,
+      prisma,
+      target,
+    });
+  const checkout = mayExposePayableCapability
+    ? await projectHostedUsageCreditCheckoutResult({
         prisma,
         purchase,
-      });
+      })
+    : projectHostedUsageCreditPurchaseStatusResult(purchase);
 
   return {
     ...checkout,
     offerCode,
     retryAllowed:
-      purchase.payer.suspendedAt === null &&
+      mayExposePayableCapability &&
       canRetryHostedUsageCreditCheckoutCreate({ now, purchase }),
-    target: projectHostedUsageCreditPurchaseTarget(purchase),
+    target,
   };
+}
+
+async function hasCurrentHostedUsageCreditPayableAuthority(input: {
+  payerMemberId: string;
+  prisma: PrismaClient;
+  target: HostedUsageCreditPurchaseTargetProjection;
+}): Promise<boolean> {
+  const target = input.target;
+  if (target.kind !== "family") {
+    return true;
+  }
+  return input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.payerMemberId);
+    const currentTarget = await resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: target.beneficiaryMemberId,
+      ownerMemberId: input.payerMemberId,
+      tx,
+    });
+    return currentTarget?.groupId === target.familyGroupId;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function readHostedUsageCreditPurchaseTargetForPayer(input: {
@@ -218,6 +254,26 @@ export function projectHostedUsageCreditPurchaseTarget(input: Pick<
   return target;
 }
 
+function hostedUsageCreditPurchaseTargetsMatch(
+  left: HostedUsageCreditPurchaseTargetProjection,
+  right: HostedUsageCreditPurchaseTargetProjection,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.beneficiaryMemberId !== right.beneficiaryMemberId
+  ) {
+    return false;
+  }
+  if (left.kind === "personal" && right.kind === "personal") {
+    return true;
+  }
+  if (left.kind === "group" && right.kind === "group") {
+    return left.groupJoinCode === right.groupJoinCode;
+  }
+  return left.kind === "family" && right.kind === "family" &&
+    left.familyGroupId === right.familyGroupId;
+}
+
 export async function expireHostedUsageCreditCheckout(input: {
   now?: Date;
   payerMemberId: string;
@@ -254,7 +310,7 @@ export async function expireHostedUsageCreditCheckout(input: {
     purchase.status === HostedUsageCreditPurchaseStatus.payment_failed ||
     purchase.status === HostedUsageCreditPurchaseStatus.created
   ) {
-    return buildHostedUsageCreditPurchaseStatusResult(purchase);
+    return projectHostedUsageCreditPurchaseStatusResult(purchase);
   }
 
   const sessionId = await decryptHostedUsageCreditPurchaseStripeField({
@@ -302,7 +358,7 @@ export async function expireHostedUsageCreditCheckout(input: {
       current.status === HostedUsageCreditPurchaseStatus.expired ||
       current.status === HostedUsageCreditPurchaseStatus.payment_failed
     ) {
-      return buildHostedUsageCreditPurchaseStatusResult(current);
+      return projectHostedUsageCreditPurchaseStatusResult(current);
     }
 
     const currentSessionId = await decryptHostedUsageCreditPurchaseStripeField({
@@ -352,7 +408,7 @@ export async function expireHostedUsageCreditCheckout(input: {
     if (!reconciled) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
-    return buildHostedUsageCreditPurchaseStatusResult(reconciled);
+    return projectHostedUsageCreditPurchaseStatusResult(reconciled);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -375,7 +431,7 @@ export async function projectHostedUsageCreditCheckoutResult(input: {
     status !== "checkout_open" ||
     !input.purchase.stripeCheckoutUrlEncrypted
   ) {
-    return buildHostedUsageCreditPurchaseStatusResult(input.purchase);
+    return projectHostedUsageCreditPurchaseStatusResult(input.purchase);
   }
 
   const url = await decryptHostedUsageCreditPurchaseStripeField({
@@ -411,7 +467,7 @@ function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
   }
 }
 
-function buildHostedUsageCreditPurchaseStatusResult(input: Pick<
+export function projectHostedUsageCreditPurchaseStatusResult(input: Pick<
   HostedUsageCreditPurchase,
   "checkoutExpiresAt" | "id" | "status"
 >): HostedUsageCreditPurchaseStatusResult {

@@ -41,6 +41,7 @@ import {
   buildHostedUsageCreditPurchaseNotFoundError,
   canRetryHostedUsageCreditCheckoutCreate,
   closeExpiredUnattachedHostedUsageCreditPurchasesTx,
+  projectHostedUsageCreditPurchaseStatusResult,
   projectHostedUsageCreditPurchaseTarget,
   projectHostedUsageCreditCheckoutResult,
   type HostedUsageCreditCheckoutResult,
@@ -287,6 +288,27 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         purchase: racedExisting,
         target: input.target,
       });
+      if (input.target.kind === "family") {
+        const frozenTarget = projectHostedUsageCreditPurchaseTarget(
+          racedExisting,
+        );
+        const currentTarget = await resolveHostedFamilyUsageCreditCheckoutTargetTx({
+          beneficiaryMemberId: input.target.beneficiaryMemberId,
+          ownerMemberId: input.target.payerMemberId,
+          tx,
+        });
+        if (
+          frozenTarget.kind !== "family" ||
+          !currentTarget ||
+          currentTarget.groupId !== frozenTarget.familyGroupId
+        ) {
+          return {
+            purchase: racedExisting,
+            recovered: true,
+            targetConflict: true,
+          };
+        }
+      }
       return {
         purchase: racedExisting,
         recovered: false,
@@ -476,11 +498,10 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
-  if (resolution.targetConflict && input.target.kind === "family") {
-    const projected = await projectHostedUsageCreditCheckoutResult({
-      prisma,
-      purchase: resolution.purchase,
-    });
+  if (resolution.targetConflict) {
+    const projected = projectHostedUsageCreditPurchaseStatusResult(
+      resolution.purchase,
+    );
     return {
       purchaseId: projected.purchaseId,
       recovered: true,
@@ -499,7 +520,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     return {
       ...checkout,
       ...(resolution.recovered ? { recovered: true as const } : {}),
-      ...(resolution.targetConflict ? { targetConflict: true as const } : {}),
     };
   } catch (error) {
     if (
@@ -519,7 +539,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       return {
         ...checkout,
         recovered: true,
-        ...(resolution.targetConflict ? { targetConflict: true as const } : {}),
         ...(canRetryHostedUsageCreditCheckoutCreate({ now, purchase })
           ? { retryAllowed: true as const }
           : {}),

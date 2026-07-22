@@ -132,18 +132,18 @@ never grants the owner access to that member's data.
 One payer may have only one nonterminal usage-credit purchase across personal,
 group, or Family targets. The purchase freezes its exact Family group and
 beneficiary before provider I/O. An exact request-key replay may recover that
-purchase after the member leaves, but a fresh request must pass current Family
-authority. While any purchase is active, every other Family member's Add usage
+purchase's status after the member leaves, but every payable replay and every
+fresh request must pass current Family authority. While any purchase is active,
+every other Family member's Add usage
 action is hidden. A request for a different member cannot resume, retry, or
 follow the existing checkout URL; it may only inspect or cancel the payer's
 frozen purchase and refresh the server projection.
 
-Settings names a former beneficiary only from that exact group's accepted
-invite context. If no owner-recognizable label can be recovered, the former
-purchase remains inspectable and cancelable but no payment URL or retry action
-is exposed. A recognizable former member may resume an already-open frozen
-Checkout URL, but Settings does not offer a fresh retry after current membership
-authority has ended.
+Once a beneficiary leaves the active roster, the former-member purchase remains
+inspectable and cancelable but is never payable from Settings: the server does
+not release its Checkout URL or retry action. Historical invite labels and
+contact hints do not restore payment authority because they are not unique
+beneficiary identity.
 
 ## Deployment Order
 

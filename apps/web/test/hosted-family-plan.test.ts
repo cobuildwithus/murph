@@ -102,7 +102,6 @@ import {
   issueHostedFamilyInviteTx,
   prepareHostedLegacySyntheticFamilyCleanupTx,
   readHostedFamilyCheckoutSessionIdFromUrl,
-  readHostedFamilyUsageCreditBeneficiaryLabel,
   resolveHostedFamilyChatNotificationRouteTx,
   resolveHostedFamilyCheckoutRedirectUrl,
   writeHostedAccountGroupStripeBillingTx,
@@ -455,35 +454,6 @@ describe("hosted Family plan", () => {
       ownerMemberId: "member_owner",
       tx,
     })).resolves.toBeNull();
-  });
-
-  it("recovers an owner-recognizable label for a former usage beneficiary", async () => {
-    const tx = createTxMock();
-    tx.hostedAccountGroupInvite.findFirst.mockResolvedValueOnce(
-      createPendingInvite({
-        acceptedAt: new Date("2026-07-01T12:00:00.000Z"),
-        acceptedByMemberId: "member_former",
-        status: "accepted",
-        targetLabel: "Mom",
-      }),
-    );
-
-    await expect(readHostedFamilyUsageCreditBeneficiaryLabel({
-      beneficiaryMemberId: "member_former",
-      groupId: "hbag_family",
-      ownerMemberId: "member_owner",
-      prisma: tx,
-    })).resolves.toBe("Mom");
-    expect(tx.hostedAccountGroupInvite.findFirst).toHaveBeenCalledWith({
-      orderBy: { createdAt: "asc" },
-      select: expect.any(Object),
-      where: {
-        acceptedByMemberId: "member_former",
-        group: { ownerMemberId: "member_owner" },
-        groupId: "hbag_family",
-        status: "accepted",
-      },
-    });
   });
 
   it("creates owner family groups without storing seat capacity on the group", async () => {

@@ -229,7 +229,6 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpFormerMemberLabels?: Readonly<Record<string, string>>;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -682,17 +681,8 @@ export function HostedFamilyManager(props: {
           && memberIds.indexOf(memberId) === index,
         ))
         .map((memberId) => {
-          const targetLabel =
-            props.usageTopUpFormerMemberLabels?.[memberId]?.trim() || null;
           const activePurchase = props.usageTopUpActiveMemberId === memberId
             ? props.usageTopUpActivePurchase ?? null
-            : null;
-          const safeActivePurchase = activePurchase
-            ? {
-                ...activePurchase,
-                retryAllowed: false,
-                ...(!targetLabel ? { url: undefined } : {}),
-              }
             : null;
           return (
             <div
@@ -700,12 +690,11 @@ export function HostedFamilyManager(props: {
               className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
             >
               <p className="text-sm text-muted-foreground">
-                {targetLabel
-                  ? `Finish the usage checkout for ${targetLabel}.`
-                  : "Review an unfinished checkout for a former family member. Its recipient could not be identified, so it cannot be paid here."}
+                Review an unfinished checkout for a former family member. It
+                cannot be paid here.
               </p>
               <HostedUsageTopUpDialog
-                activePurchase={safeActivePurchase}
+                activePurchase={activePurchase}
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
                 deferTerminalRefreshUntilClose
                 offers={[]}
@@ -715,7 +704,7 @@ export function HostedFamilyManager(props: {
                     : null
                 }
                 scope="family"
-                targetLabel={targetLabel ?? "an unidentified former family member"}
+                targetLabel="a former family member"
               />
             </div>
           );

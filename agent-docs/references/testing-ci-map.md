@@ -66,7 +66,10 @@ exercise app-session/CSRF binding, fixed offers, eligibility, and Checkout
 request idempotency. Family coverage additionally proves owner/group/member
 authorization, use of the Family billing Customer, distinct owner-self target
 identity, exact frozen replay after membership changes, per-member Settings
-routing, and former-member recovery; reconciliation suites exercise live Stripe re-fetch,
+routing, all ordered cross-target conflict directions, and server-withheld
+former-member payment capability; page and dialog suites prove payer-wide
+offer suppression and status/cancel-only cross-target recovery. Reconciliation
+suites exercise live Stripe re-fetch,
 one-time/subscription dispatch separation, replay-safe grants, refund/dispute
 signed adjustments in both directions; component suites exercise the Settings
 dialog selection, redirect, return polling, and error states. A guarded

@@ -198,15 +198,18 @@ authenticated purchase-status endpoint and refreshes its server projection. It
 does not invoke payment reconciliation and must not say **Usage added** until
 the webhook-owned grant entry is committed.
 
-When a fresh request recovers an already-open Checkout, the dialog names that
-state and offers explicit **Resume checkout** and **Cancel checkout** actions.
+When a fresh request recovers an already-open Checkout for the same exact
+server-approved target, the dialog names that state and offers explicit
+**Resume checkout** and **Cancel checkout** actions.
 Current plan eligibility or offer configuration cannot strand that frozen
 purchase; cancellation still uses the authenticated mutation and live Stripe
 state described below. Suspension withholds the stored Checkout URL and Resume
 action, while the payer-owned purchase remains visible and cancelable.
 
-Settings projects the payer's active frozen purchase server-side, but the
-dialog performs no purchase-status or provider I/O until the member opens it.
+Settings projects the payer's active frozen purchase server-side and releases
+payment capability only when its frozen target exactly matches a current
+server-approved target. The dialog performs no purchase-status or provider I/O
+until the member opens it.
 For a still-unattached `created` purchase, the server derives a **Retry
 checkout** capability only while the payer is unsuspended and the exact
 30-minute create-retry window remains. The capability is not durable state.
@@ -711,21 +714,27 @@ The purchase freezes the exact Family group and beneficiary in its
 server-generated return URLs. This distinguishes an owner's personal target
 from that same owner as a Family member and prevents a historical group from
 being reinterpreted as a new Family relationship. Exact request-key replay may
-recover a frozen purchase after membership removal; a fresh request key must
-pass current authority.
+recover status and cancellation after membership removal, but it rechecks
+current Family authority before releasing payment capability; a fresh request
+key also requires current authority.
 
 Only one payer-wide nonterminal purchase may exist. While it does, Family
 Settings hides every new amount picker and places recovery controls only on the
-frozen member. A request targeting another member receives a conflict with no
-Checkout URL and no resume or retry capability. The owner may inspect or cancel
-the frozen purchase, and closing the conflict refreshes server state.
+frozen member. Any request for a different personal, hosted-group, or Family
+target receives a conflict with no Checkout URL and no resume or retry
+capability, regardless of request order. The payer may inspect or cancel the
+frozen purchase, and closing the conflict refreshes server state.
 
-If the frozen beneficiary is no longer in the roster, Settings recovers an
-owner-recognizable label only from that exact group's accepted invite. Without
-such a label, payment and retry controls fail closed while status and
-cancellation remain available. With a recognizable label, an already-open
-frozen Checkout URL may be resumed, but fresh retry remains unavailable after
-membership authority ends.
+Personal Settings and hosted-group funding pages also read the payer-wide
+active purchase before showing offers. The exact frozen target receives its
+ordinary recovery controls; another target receives the shared status/cancel
+conflict state with no amount picker, URL, or retry action.
+
+The active-purchase server projection releases payment capability only when the
+frozen target exactly matches a current server-approved target. If a Family
+beneficiary is no longer in the roster, Settings shows status and cancellation
+only; it does not decrypt or serialize the Checkout URL and does not offer
+retry. Historical invite labels and contact hints never authorize payment.
 
 ## Operations And Reconciliation
 
@@ -817,8 +826,8 @@ Current focused unit and component coverage exercises:
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;
 - Family owner/member authorization, exact target freezing, former-member
-  recovery, target-conflict payment suppression, and payer-wide single-active
-  purchase presentation;
+  status/cancel-only recovery, all ordered target-conflict payment suppression,
+  and payer-wide single-active purchase presentation;
 - coarse group usage reads, trusted low-capacity next-turn context, and the
   route-authorized exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.

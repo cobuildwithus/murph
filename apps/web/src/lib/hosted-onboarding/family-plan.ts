@@ -681,46 +681,6 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
   };
 }
 
-/**
- * Recovers the owner-recognizable label for one accepted Family member without
- * exposing the rest of the historical roster to the browser. This is used only
- * to identify the immutable beneficiary of an unfinished usage checkout after
- * that member has left the active roster.
- */
-export async function readHostedFamilyUsageCreditBeneficiaryLabel(input: {
-  beneficiaryMemberId: string;
-  groupId: string;
-  ownerMemberId: string;
-  prisma?: HostedOnboardingReadClient;
-}): Promise<string | null> {
-  const prisma = input.prisma ?? getPrisma();
-  const invite = await prisma.hostedAccountGroupInvite.findFirst({
-    orderBy: { createdAt: "asc" },
-    select: hostedAccountGroupInviteSelect,
-    where: {
-      acceptedByMemberId: input.beneficiaryMemberId,
-      group: { ownerMemberId: input.ownerMemberId },
-      groupId: input.groupId,
-      status: "accepted",
-    },
-  });
-  if (!invite) {
-    return null;
-  }
-  const targetLabel = normalizeFamilyLabel(invite.targetLabel);
-  if (targetLabel) {
-    return targetLabel;
-  }
-  const projected = await projectHostedFamilyInvitePrivateSnapshot(invite, prisma);
-  return normalizeFamilyLabel(projected.targetEmail)
-    ?? normalizeFamilyLabel(
-      projected.targetTelegramUsername
-        ? `@${projected.targetTelegramUsername}`
-        : null,
-    )
-    ?? normalizeFamilyLabel(projected.targetPhoneHint);
-}
-
 export async function readHostedFamilyInviteAcceptanceView(input: {
   inviteCode: string;
   now?: Date;

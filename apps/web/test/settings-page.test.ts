@@ -86,7 +86,6 @@ const mocks = vi.hoisted(() => ({
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
-  readHostedFamilyUsageCreditBeneficiaryLabel: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
     hostedCodexAuthConnection: {
@@ -223,8 +222,6 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
-  readHostedFamilyUsageCreditBeneficiaryLabel:
-    mocks.readHostedFamilyUsageCreditBeneficiaryLabel,
 }));
 
 vi.mock("@/src/lib/sensitive-actions/secure-approval-status", () => ({
@@ -262,7 +259,6 @@ beforeEach(() => {
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
-  mocks.readHostedFamilyUsageCreditBeneficiaryLabel.mockResolvedValue(null);
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(null);
   mocks.readHostedConfiguredUsageCreditOfferCodes.mockReturnValue([
     "usage_5_usd",
@@ -651,6 +647,10 @@ test("SettingsPage reads the app session and persisted account settings into the
       prisma: mocks.prisma,
     });
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+      serverApprovedPayableTargets: [{
+        beneficiaryMemberId: "member_123",
+        kind: "personal",
+      }],
       payerMemberId: "member_123",
       prisma: mocks.prisma,
     });
@@ -796,7 +796,88 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
   );
 });
 
-test("SettingsPage routes a frozen Family purchase and return to the selected member", async () => {
+test.each([
+  {
+    label: "hosted-group",
+    target: {
+      beneficiaryMemberId: "member_group",
+      groupJoinCode: "group_join_code_1234",
+      kind: "group" as const,
+    },
+  },
+  {
+    label: "another Family group",
+    target: {
+      beneficiaryMemberId: "member_family",
+      familyGroupId: "hbag_otherfamilygroup",
+      kind: "family" as const,
+    },
+  },
+])("SettingsPage keeps a $label purchase available for status and cancellation", async ({ target }) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  const familyOwner = {
+    billingActive: true,
+    billingStatus: "active",
+    displayName: null,
+    groupId: "hbag_currentfamilygrp",
+    invites: [],
+    members: [{ label: null, memberId: "member_123" }],
+    ownerMemberId: "member_123",
+    plans: {},
+    seats: {},
+    suspendedAt: null,
+  };
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(familyOwner);
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: false,
+    status: "checkout_open",
+    target,
+    url: "https://checkout.stripe.test/session",
+  } as const;
+  mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(
+    activePurchase,
+  );
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+  renderToStaticMarkup(await SettingsPage());
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActivePurchase: {
+        ...activePurchase,
+        retryAllowed: false,
+        targetConflict: true,
+        url: undefined,
+      },
+      usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+  expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      usageTopUpActiveMemberId: null,
+      usageTopUpActivePurchase: null,
+      usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test("SettingsPage keeps a former Family purchase status-only despite duplicate roster labels", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
   mocks.getHostedPrivySession.mockResolvedValue(null);
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -816,7 +897,11 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
     displayName: null,
     groupId: "hbag_abcdefghijklmnop",
     invites: [],
-    members: [],
+    members: [
+      { label: null, memberId: "member_123" },
+      { label: "Alex", memberId: "member_current_a" },
+      { label: "Alex", memberId: "member_current_b" },
+    ],
     ownerMemberId: "member_123",
     plans: {},
     seats: {},
@@ -833,13 +918,11 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
       familyGroupId: "hbag_abcdefghijklmnop",
       kind: "family",
     },
-    url: "https://checkout.stripe.test/family-session",
   } as const;
   mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValue(activePurchase);
   mocks.readHostedUsageCreditPurchaseTargetForPayer.mockResolvedValue(
     activePurchase.target,
   );
-  mocks.readHostedFamilyUsageCreditBeneficiaryLabel.mockResolvedValue("Mom");
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
   const markup = renderToStaticMarkup(await SettingsPage({
@@ -855,6 +938,7 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
       usageTopUpActivePurchase: null,
+      usageTopUpOffers: [],
       usageTopUpPurchaseReturn: null,
     }),
     undefined,
@@ -863,7 +947,6 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
     ownerSnapshot: familyOwner,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
-    usageTopUpFormerMemberLabels: { member_family: "Mom" },
     usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",
@@ -876,10 +959,29 @@ test("SettingsPage routes a frozen Family purchase and return to the selected me
     prisma: mocks.prisma,
     purchaseId: "hucp_abcdefghijklmnop",
   });
-  expect(mocks.readHostedFamilyUsageCreditBeneficiaryLabel).toHaveBeenCalledWith({
-    beneficiaryMemberId: "member_family",
-    groupId: "hbag_abcdefghijklmnop",
-    ownerMemberId: "member_123",
+  expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+    serverApprovedPayableTargets: [
+      {
+        beneficiaryMemberId: "member_123",
+        kind: "personal",
+      },
+      {
+        beneficiaryMemberId: "member_123",
+        familyGroupId: "hbag_abcdefghijklmnop",
+        kind: "family",
+      },
+      {
+        beneficiaryMemberId: "member_current_a",
+        familyGroupId: "hbag_abcdefghijklmnop",
+        kind: "family",
+      },
+      {
+        beneficiaryMemberId: "member_current_b",
+        familyGroupId: "hbag_abcdefghijklmnop",
+        kind: "family",
+      },
+    ],
+    payerMemberId: "member_123",
     prisma: mocks.prisma,
   });
   expect(mocks.readHostedConfiguredUsageCreditOfferCodes).not.toHaveBeenCalled();
@@ -1197,7 +1299,6 @@ test("SettingsPage keeps Family settings available when the top-up catalog is un
   renderToStaticMarkup(await SettingsPage());
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
-      usageTopUpFormerMemberLabels: {},
       usageTopUpOffers: [],
     }),
     undefined,

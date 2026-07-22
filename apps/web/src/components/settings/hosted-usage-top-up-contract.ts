@@ -20,6 +20,7 @@ interface HostedUsageTopUpActivePurchase {
   restartAt?: string;
   retryAllowed: boolean;
   status: HostedUsageTopUpPurchaseStatus;
+  targetConflict?: true;
   url?: string;
 }
 

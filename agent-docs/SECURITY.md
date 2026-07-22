@@ -59,13 +59,17 @@ Last verified: 2026-07-22
   unauthorized Family-sponsored, suspended, thread-container, missing-billing,
   and malformed states fail closed. Personal, hosted-group, and Family targets
   remain distinct even when payer and beneficiary ids coincide. Mutable Family
-  membership gates a fresh purchase; exact request-key replay and fulfillment
-  use the immutable purchase after creation. Family admission first binds the
+  membership gates every payable request. Exact request-key replay identifies
+  the immutable purchase, but a Family replay rechecks current authority before
+  releasing payment capability; fulfillment remains bound to the frozen
+  purchase. Family admission first binds the
   opaque selector to the owner's roster before locking the beneficiary. A
   payer-wide conflict with another frozen target may be inspected or canceled
-  but must never return a payable URL or retry permission. Former-member
-  recovery may remain payable only when the owner can recognize the frozen
-  beneficiary from the existing accepted-invite label or contact hint.
+  but must never return a payable URL or retry permission, regardless of the
+  requested or frozen target kind. Active-purchase projection releases a
+  payable URL or retry permission only for an exact server-approved target.
+  Former Family beneficiaries are always status/cancel-only; historical labels
+  and contact hints are display data, not payment authority.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session state must never grant credit. The verified Stripe
   receipt owner must re-fetch and bind the live one-time Session, line item,

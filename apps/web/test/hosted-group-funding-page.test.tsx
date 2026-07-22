@@ -138,6 +138,47 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
+    expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
+      serverApprovedPayableTargets: [{
+        beneficiaryMemberId: "member_group_runtime",
+        groupJoinCode: "group_join_code_1234",
+        kind: "group",
+      }],
+      payerMemberId: "member_payer",
+      prisma: { label: "test-prisma" },
+    });
+  });
+
+  it("shows a payer-wide target conflict without another amount picker", async () => {
+    mocks.readHostedActiveUsageCreditPurchaseForPayer.mockResolvedValueOnce({
+      offerCode: "usage_10_usd",
+      purchaseId: "hucp_familyactive12",
+      retryAllowed: false,
+      status: "checkout_open",
+      target: {
+        beneficiaryMemberId: "member_family",
+        familyGroupId: "hbag_abcdefghijklmnop",
+        kind: "family",
+      },
+    });
+
+    renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: expect.objectContaining({
+          purchaseId: "hucp_familyactive12",
+          retryAllowed: false,
+          targetConflict: true,
+          url: undefined,
+        }),
+        offers: [],
+        scope: "group",
+      }),
+      undefined,
+    );
   });
 
   it("ignores a checkout return belonging to another funding target", async () => {

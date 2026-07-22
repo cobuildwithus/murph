@@ -462,6 +462,49 @@ test("withholds Resume but keeps Cancel for a suspended payer's open Checkout", 
   }
 });
 
+test("keeps a server-projected cross-target Checkout status-only before interaction", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_other_target",
+        retryAllowed: false,
+        status: "checkout_open",
+        targetConflict: true,
+      },
+      offers: [],
+      scope: "group",
+    }),
+    {
+      location: { href: "https://example.test/groups/fund/group_join_code_1234" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Review checkout");
+
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Another checkout is already open/,
+    );
+    assert.equal(hasButton(rendered.container, "Resume checkout"), false);
+    assert.equal(hasButton(rendered.container, "Retry checkout"), false);
+    assert.equal(buttonByText(rendered.container, "Cancel checkout").disabled, false);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        url: "/api/settings/billing/usage-credit/purchases/hucp_other_target",
+      }),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("does not advertise Retry for a suspended reconciling purchase", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     purchaseId: "hucp_suspended_reconciling",

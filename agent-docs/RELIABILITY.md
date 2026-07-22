@@ -29,15 +29,18 @@ Last verified: 2026-07-22
   member may begin another purchase only after the existing one is terminal.
 - Family usage-credit creation rechecks owner, group billing, active membership,
   and beneficiary status inside the purchase transaction. Exact request-key
-  replay recovers the already-frozen purchase without consulting mutable Family
-  membership, while every fresh key reauthorizes current state. Personal,
+  replay keeps the already-frozen purchase identity but rechecks mutable Family
+  authority before releasing any payable capability; every fresh key also
+  reauthorizes current state. Personal,
   hosted-group, and Family return scopes are frozen distinctly so payer-wide
   active-purchase recovery cannot confuse an owner self top-up across targets.
-  A conflicting Family request may expose status and cancellation only: it must
-  not continue Stripe creation, return a Checkout URL, or offer retry. Settings
-  suppresses every other member's offer while the payer has an active purchase;
-  a departed beneficiary remains payable only when the owner's accepted-invite
-  history yields a recognizable label or contact hint.
+  Every conflicting request may expose status and cancellation only: it must
+  not continue Stripe creation, return a Checkout URL, or offer retry in any
+  ordered combination of personal, hosted-group, and Family targets. Settings
+  and hosted-group funding suppress every new amount picker while the payer has
+  an active purchase and map a different target to status/cancel-only recovery.
+  The server projects a departed Family beneficiary as status/cancel-only and
+  does not decrypt or serialize its Checkout URL.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked

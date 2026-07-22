@@ -956,7 +956,7 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
   }
 });
 
-test("HostedFamilyManager keeps recovery available after the beneficiary leaves", async () => {
+test("HostedFamilyManager renders a server-withheld former-member checkout as status-only", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
@@ -965,15 +965,12 @@ test("HostedFamilyManager keeps recovery available after the beneficiary leaves"
     purchaseId: "hucp_abcdefghijklmnop",
     retryAllowed: false,
     status: "checkout_open" as const,
-    url: "https://checkout.stripe.test/session",
   };
   const { cleanup, container } = await renderClientComponent(
     createElement(HostedFamilyManager, {
       ...baseFamilyManagerProps(),
       usageTopUpActiveMemberId: "member_former",
       usageTopUpActivePurchase: activePurchase,
-      usageTopUpFormerMemberLabels: { member_former: "Mom" },
-      usageTopUpOffers: [{ amountLabel: "$5", offerCode: "usage_5_usd" }],
     }),
     { requireButton: false },
   );
@@ -981,57 +978,17 @@ test("HostedFamilyManager keeps recovery available after the beneficiary leaves"
   try {
     assert.match(
       container.textContent ?? "",
-      /Finish the usage checkout for Mom\./,
+      /former family member\. It cannot be paid here/,
     );
     expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
       expect.objectContaining({
-        activePurchase: { ...activePurchase, retryAllowed: false },
+        activePurchase,
         checkoutUrl:
           "/api/settings/billing/family/members/member_former/usage-credit/checkout",
         deferTerminalRefreshUntilClose: true,
         offers: [],
         scope: "family",
-        targetLabel: "Mom",
-      }),
-    );
-  } finally {
-    await cleanup();
-  }
-});
-
-test("HostedFamilyManager makes an unidentified former-member checkout nonpayable", async () => {
-  const { HostedFamilyManager } = await import(
-    "@/src/components/settings/hosted-family-settings-actions"
-  );
-  const activePurchase = {
-    offerCode: "usage_10_usd",
-    purchaseId: "hucp_abcdefghijklmnop",
-    retryAllowed: true,
-    status: "checkout_open" as const,
-    url: "https://checkout.stripe.test/session",
-  };
-  const { cleanup, container } = await renderClientComponent(
-    createElement(HostedFamilyManager, {
-      ...baseFamilyManagerProps(),
-      usageTopUpActiveMemberId: "member_former",
-      usageTopUpActivePurchase: activePurchase,
-    }),
-    { requireButton: false },
-  );
-
-  try {
-    assert.match(
-      container.textContent ?? "",
-      /recipient could not be identified, so it cannot be paid here/,
-    );
-    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activePurchase: {
-          ...activePurchase,
-          retryAllowed: false,
-          url: undefined,
-        },
-        targetLabel: "an unidentified former family member",
+        targetLabel: "a former family member",
       }),
     );
   } finally {
