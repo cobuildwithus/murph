@@ -25,6 +25,8 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  isHostedRuntimeAssistantAskDiagnosticCode,
+  isHostedRuntimeAssistantAskRequestId,
   sanitizeHostedProductFeedbackSummary,
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeFamilyPlanToolRequest,
@@ -3568,12 +3570,46 @@ async function executeGroupTool(input: {
       ...toolTextResult(true, safeToolPayloadText(payload)),
       ...(usageDraft ? { usageDraft } : {}),
     }
-  } catch {
+  } catch (error) {
     return {
-      ...toolTextResult(false, 'group tool request failed'),
+      ...toolTextResult(
+        false,
+        input.request.action === 'ask'
+          ? buildGroupAskRequestFailureText(error)
+          : 'group tool request failed',
+      ),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+function buildGroupAskRequestFailureText(error: unknown): string {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return 'group tool request failed'
+  }
+  const record = error as Record<string, unknown>
+  const errorCode = isHostedRuntimeAssistantAskDiagnosticCode(record.code)
+    ? record.code
+    : null
+  const requestId = isHostedRuntimeAssistantAskRequestId(record.requestId)
+    ? record.requestId
+    : null
+  const statusCode = typeof record.statusCode === 'number'
+    && Number.isInteger(record.statusCode)
+    && record.statusCode >= 100
+    && record.statusCode <= 599
+    ? record.statusCode
+    : null
+  if (!errorCode && !requestId && statusCode === null) {
+    return 'group tool request failed'
+  }
+  return safeToolPayloadText({
+    errorCode,
+    message: 'group tool request failed',
+    requestId,
+    status: 'request_failed',
+    statusCode,
+  })
 }
 
 async function executeGroupPermissionOffer(input: {

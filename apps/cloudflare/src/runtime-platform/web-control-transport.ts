@@ -17,6 +17,12 @@ import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH,
 } from "@murphai/hosted-execution/routes";
 import {
+  HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
+  HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
+  isHostedRuntimeAssistantAskDiagnosticCode,
+  isHostedRuntimeAssistantAskRequestId,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   HostedRuntimeControlPlaneFetchError,
   HOSTED_REPLAY_SAFE_READ_RETRY_ATTEMPTS,
   combineAbortSignalsWithCleanup,
@@ -46,10 +52,12 @@ export type HostedWebControlTransport =
 export class HostedWebControlPlaneResponseError extends Error {
   readonly code: string | undefined;
   readonly context: {
+    requestId?: string;
     retryable?: boolean;
     status: number;
     statusCode: number;
   };
+  readonly requestId: string | undefined;
   readonly retryable: boolean | undefined;
   readonly status: number;
   readonly statusCode: number;
@@ -58,16 +66,19 @@ export class HostedWebControlPlaneResponseError extends Error {
     code?: string | undefined;
     description: string;
     message?: string | undefined;
+    requestId?: string | undefined;
     retryable?: boolean | undefined;
     status: number;
   }) {
     super(formatHostedWebControlPlaneResponseErrorMessage(input));
     this.name = "HostedWebControlPlaneResponseError";
     this.code = input.code;
+    this.requestId = input.requestId;
     this.retryable = input.retryable;
     this.status = input.status;
     this.statusCode = input.status;
     this.context = {
+      ...(input.requestId ? { requestId: input.requestId } : {}),
       ...(typeof input.retryable === "boolean" ? { retryable: input.retryable } : {}),
       status: input.status,
       statusCode: input.status,
@@ -319,6 +330,8 @@ export async function fetchHostedWebControlPlaneJson(input: {
     const error = createHostedWebControlPlaneResponseError({
       description: input.description,
       detail: input.sensitiveResponseBody ? "" : text.trim(),
+      diagnosticCode: readHostedAssistantAskDiagnosticCode(response.headers),
+      requestId: readHostedAssistantAskRequestId(response.headers),
       status: response.status,
     });
     emitHostedExecutionStructuredLog({
@@ -450,24 +463,39 @@ function createHostedWebControlPlaneResponseTooLargeError(input: {
 function createHostedWebControlPlaneResponseError(input: {
   description: string;
   detail: string;
+  diagnosticCode?: string | undefined;
+  requestId?: string | undefined;
   status: number;
 }): HostedWebControlPlaneResponseError {
   const structured = parseHostedWebControlPlaneJsonError(input.detail);
   if (structured) {
     return new HostedWebControlPlaneResponseError({
-      code: structured.code,
+      code: input.diagnosticCode ?? structured.code,
       description: input.description,
       message: structured.message,
+      requestId: input.requestId,
       retryable: structured.retryable,
       status: input.status,
     });
   }
 
   return new HostedWebControlPlaneResponseError({
+    code: input.diagnosticCode,
     description: input.description,
     message: input.detail,
+    requestId: input.requestId,
     status: input.status,
   });
+}
+
+function readHostedAssistantAskDiagnosticCode(headers: Headers): string | undefined {
+  const code = headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER);
+  return isHostedRuntimeAssistantAskDiagnosticCode(code) ? code : undefined;
+}
+
+function readHostedAssistantAskRequestId(headers: Headers): string | undefined {
+  const requestId = headers.get(HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER);
+  return isHostedRuntimeAssistantAskRequestId(requestId) ? requestId : undefined;
 }
 
 function formatHostedWebControlPlaneResponseErrorMessage(input: {
