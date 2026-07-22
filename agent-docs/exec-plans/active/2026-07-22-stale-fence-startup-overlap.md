@@ -63,10 +63,22 @@ measured owner without weakening cache, deletion, or command-budget semantics.
 - `pnpm test:scenario-integrity`: 204 scenarios passed integrity checks.
 - Two independent read-only concurrency audits found no new async work and
   confirmed the sequential workspace, fence-bind, and store-load order.
-- `pnpm test:diff <touched paths>` passed affected typechecks plus the large
-  Assistant Engine and Assistant Runtime suites, then encountered unrelated
-  CLI timeouts and experiment-expansion failures outside this diff. Its final
-  CLI worker remained idle after reporting those failures and the exact
-  session-owned verification process was stopped after a bounded grace period.
-- Preliminary specialist review, final verification, and final ReviewGPT are
-  pending.
+- Preliminary specialist ReviewGPT found one coverage gap: the tests asserted
+  only the types of the five elapsed fields. Its exact test-only patch was
+  inspected and applied; the fake clock was then anchored to the observed
+  preparation start so the test proves exact same-call arithmetic without
+  depending on unrelated timer advancement. The user-runner suite remained
+  green at 90 tests.
+- The first `pnpm test:diff <touched paths>` passed affected typechecks plus the
+  large Assistant Engine and Assistant Runtime suites, then encountered
+  unrelated CLI artifact-preparation failures. Generating the ignored Health
+  Commons artifact and preparing the CLI runtime made both exact failed files
+  pass: 36 experiment-expansion tests and 38 assistant CLI tests.
+- A second canonical diff run passed affected typechecks, 2,600 Assistant
+  Engine tests, 1,791 Assistant Runtime tests, 128 Assistant CLI tests, 40
+  Assistantd tests, the 1,080-test CLI aggregate, 45 cloudflare-hosted-control
+  tests, and 381 hosted-execution tests. It then exposed a missing
+  `packages/assistant-runtime/dist` prerequisite in the unchanged hosted-local
+  harness. Building that package and rerunning the harness alone passed 24
+  files and 406 tests with one skip.
+- Final exact-current-main verification and final ReviewGPT are pending.

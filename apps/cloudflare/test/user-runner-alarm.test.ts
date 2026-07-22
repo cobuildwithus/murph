@@ -46,6 +46,7 @@ import {
 } from "../src/storage-paths.ts";
 import { HostedUserRunner } from "../src/user-runner.ts";
 import { HostedUserRunnerWithTestControls } from "../src/user-runner/hosted-user-runner-test.ts";
+import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 import type {
   DurableObjectStateLike,
   DurableObjectStorageLike,
@@ -821,12 +822,20 @@ describe("HostedUserRunner execution coordination", () => {
     vi.setSystemTime(new Date(FIXED_NOW));
     const workspaceRead = createDeferred<void>();
     const workspaceReadTimeouts: number[] = [];
+    let preparationStartedAtEpochMs: number | null = null;
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => ({ kind: "ready" }));
     const { invoke, runner } = createRunnerHarness({
       ensureReadyForProcessing,
+      onCryptoContextRead: () => {
+        if (preparationStartedAtEpochMs === null) {
+          throw new Error("Expected workspace preparation to have started.");
+        }
+        vi.setSystemTime(new Date(preparationStartedAtEpochMs + 1_250));
+      },
       onWorkspaceRead: async (input) => {
+        preparationStartedAtEpochMs = Date.now();
         workspaceReadTimeouts.push(input.timeoutMs);
         await workspaceRead.promise;
       },
@@ -870,6 +879,10 @@ describe("HostedUserRunner execution coordination", () => {
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
     )).toHaveLength(0);
 
+    if (preparationStartedAtEpochMs === null) {
+      throw new Error("Expected workspace preparation to have started.");
+    }
+    vi.setSystemTime(new Date(preparationStartedAtEpochMs + 1_000));
     workspaceRead.resolve();
 
     await expect(accepted).resolves.toMatchObject({
@@ -885,9 +898,9 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invocationOrchestration).toMatchObject({
       freshStartContainerReadyAtEpochMs: expect.any(Number),
       freshStartInvocationPreparedAtEpochMs: expect.any(Number),
-      runtimeInvocationPreparationElapsedMs: expect.any(Number),
-      runtimeStoreEnsureElapsedMs: expect.any(Number),
-      workspaceReadElapsedMs: expect.any(Number),
+      runtimeInvocationPreparationElapsedMs: 1_250,
+      runtimeStoreEnsureElapsedMs: 250,
+      workspaceReadElapsedMs: 1_000,
     });
     expect(invocationOrchestration?.freshStartContainerReadyAtEpochMs)
       .not.toBe(999_995);
@@ -2769,11 +2782,25 @@ describe("HostedUserRunner execution coordination", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const invocationResult = createDeferred<HostedWorkspaceInvocationResult>();
+    const activeWakeStartedAtEpochMs = Date.parse(FIXED_NOW);
+    const originalClearWriteFenceForReplacement =
+      RunnerStateStore.prototype.clearWriteFenceForReplacement;
+    const clearWriteFenceForReplacement = vi.spyOn(
+      RunnerStateStore.prototype,
+      "clearWriteFenceForReplacement",
+    ).mockImplementation(async function (this: RunnerStateStore, input) {
+      const result = await originalClearWriteFenceForReplacement.call(this, input);
+      vi.setSystemTime(new Date(activeWakeStartedAtEpochMs + 125));
+      return result;
+    });
     const ensureProcessing = vi.fn<NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>>(
-      async () => ({
-        kind: "start-required" as const,
-        reason: "no-active-child" as const,
-      }),
+      async () => {
+        vi.setSystemTime(new Date(activeWakeStartedAtEpochMs + 50));
+        return {
+          kind: "start-required" as const,
+          reason: "no-active-child" as const,
+        };
+      },
     );
     const runnerRuntimeEnvSource = {
       ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
@@ -2794,13 +2821,28 @@ describe("HostedUserRunner execution coordination", () => {
       workspaceVersion: "7",
     });
 
-    await expect(runner.ensureRuntimeProcessingForUser({
+    const response = await runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        activeFenceTargetWasPriorVersion: false,
+        activeWakeAccepted: true,
+        activeWakeElapsedMs: 999_991,
+        activeWakeFinishedAtEpochMs: 999_992,
+        activeWakeFoundNoActiveChild: false,
+        activeWakeStartedAtEpochMs: 999_993,
+        replacedStaleFence: false,
+        replacementFenceClearElapsedMs: 999_994,
+        replacementFenceClearedAtEpochMs: 999_995,
+        replacementFenceClearStartedAtEpochMs: 999_996,
+      },
       orchestrationAttemptId: "test-orchestration-attempt-replace-prior-version",
       userId: TEST_USER_ID,
-    })).resolves.toMatchObject({
+    }).finally(() => {
+      clearWriteFenceForReplacement.mockRestore();
+    });
+    expect(response).toMatchObject({
       action: "replaced",
       kind: "runtime_processing_accepted",
-      recommendedRecheckAt: ACTIVE_RUNTIME_RECHECK_AT,
+      recommendedRecheckAt: "2026-04-27T00:01:34.125Z",
       runtimeAttemptId: expect.not.stringMatching(token.attemptId),
     });
 
@@ -2811,9 +2853,13 @@ describe("HostedUserRunner execution coordination", () => {
     expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
       activeFenceTargetWasPriorVersion: true,
       activeWakeAccepted: false,
-      activeWakeElapsedMs: expect.any(Number),
+      activeWakeElapsedMs: 50,
+      activeWakeFinishedAtEpochMs: activeWakeStartedAtEpochMs + 50,
       activeWakeFoundNoActiveChild: true,
-      replacementFenceClearElapsedMs: expect.any(Number),
+      activeWakeStartedAtEpochMs,
+      replacementFenceClearElapsedMs: 75,
+      replacementFenceClearedAtEpochMs: activeWakeStartedAtEpochMs + 125,
+      replacementFenceClearStartedAtEpochMs: activeWakeStartedAtEpochMs + 50,
       replacedStaleFence: true,
       runtimeInvocationPreparationElapsedMs: expect.any(Number),
       runtimeStoreEnsureElapsedMs: expect.any(Number),
@@ -4851,8 +4897,9 @@ function createRunnerHarness(input: {
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult | Promise<HostedWorkspaceInvocationResult>>;
   mailboxLag?: HostedRuntimeWebStatusResponse["mailboxLag"];
-  onStatusRead?: () => Promise<void> | void;
+  onCryptoContextRead?: () => Promise<void> | void;
   onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
+  onStatusRead?: () => Promise<void> | void;
   onStorageList?: (input: { prefix?: string }) => Promise<void> | void;
   onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
   readActiveRuntimeUserFence?: HostedExecutionContainerStubLike["readActiveRuntimeUserFence"];
@@ -4979,6 +5026,7 @@ function createRunnerHarness(input: {
 
   installWebControlResponses(input.workspace ?? createWorkspaceState(), {
     readMailboxLag: () => input.mailboxLag ?? [createMailboxLag()],
+    onCryptoContextRead: input.onCryptoContextRead,
     onStatusRead: input.onStatusRead,
     onOwnerReleased: input.onOwnerReleased,
     onWorkspaceRead: input.onWorkspaceRead,
@@ -5152,6 +5200,7 @@ function createDurableObjectState(input: {
 function installWebControlResponses(
   workspace: HostedWorkspaceState | null,
   hooks: {
+    onCryptoContextRead?: () => Promise<void> | void;
     onWorkspaceRead?: (input: { timeoutMs: number }) => Promise<void> | void;
     onOwnerReleased?: (input: { timeoutMs: number }) => Promise<void> | void;
     onStatusRead?: () => Promise<void> | void;
@@ -5184,6 +5233,7 @@ function installWebControlResponses(
       }
 
       if (input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH) {
+        await hooks.onCryptoContextRead?.();
         return jsonResponse(
           await createTestHostedRuntimeCryptoContext(input.boundUserId),
         );
