@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-15
+Last verified: 2026-07-22
 
 ## Purpose
 
@@ -24,6 +24,9 @@ invite has one assigned tier and receives that tier's individual usage cap.
   membership are active.
 - Every sponsored member gets their assigned tier's member-level usage
   allowance. There is no shared Family usage pool.
+- The active owner may buy one fixed $5, $10, or $25 usage-credit pack for one
+  exact active Family member. The owner pays and that member alone receives the
+  credit.
 - An active Family Edge assignment unlocks Edge model choices, including Sol;
   a Family Pulse assignment does not.
 - Every family member remains a separate `HostedMember` with their own routing,
@@ -47,7 +50,7 @@ Do not add in the MVP:
 - child/minor accounts or parental health-data authority
 - family-level mailbox, shared assistant runtime, or shared vault
 - automatic challenge sharing
-- usage top-ups, owner approvals, or shared allowance transfers
+- owner approvals or shared allowance transfers
 - self-paid Family hybrid membership in v1
 
 Sharing health data belongs to future scoped challenge consent. Family plan
@@ -110,6 +113,37 @@ Core invariant:
 ```ts
 activeMembershipCount[tier] + pendingInviteCount[tier] <= billedQuantity[tier]
 ```
+
+## Member Usage Top-Ups
+
+Family Settings composes the existing usage-credit dialog and purchase
+lifecycle. It does not add a Family wallet, shared balance, transfer, catalog,
+ledger, webhook path, or accounting owner. The browser chooses an active member
+row and submits only the existing opaque offer code and request key to that
+row's authenticated same-origin route.
+
+Web authorizes the payer as the current active group owner, resolves the exact
+selected beneficiary from that owner's active roster, rejects suspended or
+synthetic members, and requires the active Family billing projection. The
+purchase uses the canonical Family-group Stripe Customer. The owner remains
+the payer and the selected member is the sole credit beneficiary; buying usage
+never grants the owner access to that member's data.
+
+One payer may have only one nonterminal usage-credit purchase across personal,
+group, or Family targets. The purchase freezes its exact Family group and
+beneficiary before provider I/O. An exact request-key replay may recover that
+purchase after the member leaves, but a fresh request must pass current Family
+authority. While any purchase is active, every other Family member's Add usage
+action is hidden. A request for a different member cannot resume, retry, or
+follow the existing checkout URL; it may only inspect or cancel the payer's
+frozen purchase and refresh the server projection.
+
+Settings names a former beneficiary only from that exact group's accepted
+invite context. If no owner-recognizable label can be recovered, the former
+purchase remains inspectable and cancelable but no payment URL or retry action
+is exposed. A recognizable former member may resume an already-open frozen
+Checkout URL, but Settings does not offer a fresh retry after current membership
+authority has ended.
 
 ## Deployment Order
 

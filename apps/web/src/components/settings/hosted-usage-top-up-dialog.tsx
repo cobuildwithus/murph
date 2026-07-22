@@ -68,10 +68,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const purchase = screen.kind === "purchase" ? screen : null;
   const selection = screen.kind === "selection" ? screen : null;
   const canResume =
-    purchase?.status === "checkout_open" && purchase.checkoutUrl !== null;
+    purchase?.targetConflict !== true &&
+    purchase?.status === "checkout_open" &&
+    purchase.checkoutUrl !== null;
   const canCancel = purchase?.status === "checkout_open";
   const canRetry =
     purchase !== null &&
+    !purchase.targetConflict &&
     purchase.retryOfferCode !== null &&
     (purchase.status === "reconciling" ||
       (purchase.status === "checkout_open" && !canResume));

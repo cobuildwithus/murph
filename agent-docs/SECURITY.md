@@ -60,7 +60,12 @@ Last verified: 2026-07-22
   and malformed states fail closed. Personal, hosted-group, and Family targets
   remain distinct even when payer and beneficiary ids coincide. Mutable Family
   membership gates a fresh purchase; exact request-key replay and fulfillment
-  use the immutable purchase after creation.
+  use the immutable purchase after creation. Family admission first binds the
+  opaque selector to the owner's roster before locking the beneficiary. A
+  payer-wide conflict with another frozen target may be inspected or canceled
+  but must never return a payable URL or retry permission. Former-member
+  recovery may remain payable only when the owner can recognize the frozen
+  beneficiary from the existing accepted-invite label or contact hint.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session state must never grant credit. The verified Stripe
   receipt owner must re-fetch and bind the live one-time Session, line item,

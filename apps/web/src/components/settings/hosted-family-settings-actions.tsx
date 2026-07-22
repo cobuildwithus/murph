@@ -229,6 +229,7 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpFormerMemberLabels?: Readonly<Record<string, string>>;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -567,7 +568,9 @@ export function HostedFamilyManager(props: {
                             : null
                         }
                         checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(member.memberId)}/usage-credit/checkout`}
-                        offers={props.usageTopUpOffers ?? []}
+                        offers={props.usageTopUpActivePurchase
+                          ? []
+                          : props.usageTopUpOffers ?? []}
                         purchaseReturn={
                           props.usageTopUpReturnMemberId === member.memberId
                             ? props.usageTopUpPurchaseReturn
@@ -678,33 +681,45 @@ export function HostedFamilyManager(props: {
           && !props.members.some((member) => member.memberId === memberId)
           && memberIds.indexOf(memberId) === index,
         ))
-        .map((memberId) => (
-          <div
-            key={memberId}
-            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
-          >
-            <p className="text-sm text-muted-foreground">
-              Finish the usage checkout for a former family member.
-            </p>
-            <HostedUsageTopUpDialog
-              activePurchase={
-                props.usageTopUpActiveMemberId === memberId
-                  ? props.usageTopUpActivePurchase
-                  : null
+        .map((memberId) => {
+          const targetLabel =
+            props.usageTopUpFormerMemberLabels?.[memberId]?.trim() || null;
+          const activePurchase = props.usageTopUpActiveMemberId === memberId
+            ? props.usageTopUpActivePurchase ?? null
+            : null;
+          const safeActivePurchase = activePurchase
+            ? {
+                ...activePurchase,
+                retryAllowed: false,
+                ...(!targetLabel ? { url: undefined } : {}),
               }
-              checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
-              deferTerminalRefreshUntilClose
-              offers={[]}
-              purchaseReturn={
-                props.usageTopUpReturnMemberId === memberId
-                  ? props.usageTopUpPurchaseReturn
-                  : null
-              }
-              scope="family"
-              targetLabel="this former family member"
-            />
-          </div>
-        ))}
+            : null;
+          return (
+            <div
+              key={memberId}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <p className="text-sm text-muted-foreground">
+                {targetLabel
+                  ? `Finish the usage checkout for ${targetLabel}.`
+                  : "Review an unfinished checkout for a former family member. Its recipient could not be identified, so it cannot be paid here."}
+              </p>
+              <HostedUsageTopUpDialog
+                activePurchase={safeActivePurchase}
+                checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
+                deferTerminalRefreshUntilClose
+                offers={[]}
+                purchaseReturn={
+                  props.usageTopUpReturnMemberId === memberId
+                    ? props.usageTopUpPurchaseReturn
+                    : null
+                }
+                scope="family"
+                targetLabel={targetLabel ?? "an unidentified former family member"}
+              />
+            </div>
+          );
+        })}
 
       {!props.billingActive ? (
         <p

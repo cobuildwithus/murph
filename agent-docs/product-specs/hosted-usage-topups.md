@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
-Status: Implemented personal and hosted-group funding
-Last verified: 2026-07-20
+Status: Implemented personal, Family-member, and hosted-group funding
+Last verified: 2026-07-22
 
 ## Decision
 
@@ -28,6 +28,10 @@ beneficiary, offer, grant, available usage credit, consumption, and refund and
 dispute adjustments. An authenticated member may also fund an active hosted
 group by presenting that group's existing opaque join code; the group's
 synthetic thread-container member is the beneficiary.
+
+An active Family owner may fund one exact active member through Family
+Settings. The owner is the payer, the selected member is the beneficiary, and
+Checkout uses the existing Family-group Stripe Customer.
 
 ## Enforced Usage Contract
 
@@ -84,6 +88,11 @@ fixed packs for that group's synthetic runtime beneficiary. This does not
 require the payer to have an individual paid plan. The browser still submits
 only offer code and request key; Web resolves payer and beneficiary.
 
+An active Family owner can use the same dialog from an exact active member row
+in Settings. The fixed pack is credited only to that selected member. A
+sponsored member cannot buy a personal pack, and Family credit is neither
+shared nor transferable.
+
 ## Individual MVP
 
 ### Eligibility
@@ -102,8 +111,9 @@ The first release permits purchases only when all of these are true:
 
 Pulse Trial keeps **Start Pulse** rather than selling top-ups. Sponsored Family
 owners and members are excluded because their payer/beneficiary policy belongs
-with later Family funding. An inactive, unpaid, or suspended group relationship
-does not exclude an otherwise eligible direct paid member. Cancellation,
+with the separate Family funding rules below. An inactive, unpaid, or suspended
+group relationship does not exclude an otherwise eligible direct paid member.
+Cancellation,
 past-due, suspension, malformed billing state, and an expired trial fail closed.
 
 One read-only server projection owns these rules and returns only currently
@@ -219,7 +229,9 @@ never marks the purchase expired.
 ### Conversation And Notice Copy
 
 The assistant may explain the server-projected state and offer the first-party
-Settings handoff. It cannot select an offer, create Checkout, choose a payer or
+Settings handoff. For Family management, it must first read current Family
+status and require the explicit active owner, active billing, and exact active
+member. It cannot select an offer, create Checkout, choose a payer or
 beneficiary, or claim that a purchase completed.
 
 A stored reply-anchored personal exhaustion message is neutral, for example:
@@ -297,13 +309,19 @@ notices, allowance exhaustion, and the runtime recheck are derived consumers,
 not new lifecycle owners. The beneficiary row lock is the single serialization
 boundary for grant, debit, adjustment, and projection updates.
 
-Group funding composes these same owners without adding a group wallet, usage
-account, funding-code lifecycle, scheduler, or queue. The existing opaque
+Group and Family funding compose these same owners without adding a group or
+Family wallet, usage account, funding-code lifecycle, scheduler, or queue. The
+existing opaque
 `HostedGroup.joinCode` locates an active group funding target, and the group's
 synthetic thread-container `HostedMember` remains the beneficiary. The
 authenticated contributor is the payer. Checkout, accounting, allowance,
 refund, dispute, runtime-recheck, and delivery idempotency remain owned by the
 same personal top-up services.
+
+For Family funding, the current group owner is the payer, one selected active
+membership identifies the beneficiary, and the active group's billing
+reference supplies the Stripe Customer. No Family identity or authorization is
+copied into the ledger.
 
 ## Durable Model
 
@@ -466,15 +484,16 @@ The dedicated usage-credit service sits beside, not inside, subscription
 onboarding checkout. Subscription onboarding creates `mode=subscription`
 Sessions; top-ups are repeatable one-time payments.
 
-The authenticated personal Settings route and group funding route share this
-sequence:
+The authenticated personal Settings route, Family member route, and group
+funding route share this sequence:
 
 1. Verify same-origin/CSRF protections and the hosted app session.
 2. Parse a strict bounded body containing only offer code and client request
    key.
 3. Derive the payer from the app session and resolve the beneficiary server
-   side: the payer for personal funding, or the active group's synthetic member
-   for `/groups/fund/[joinCode]`.
+   side: the payer for personal funding, the exact active member selected from
+   the payer's active Family roster, or the active group's synthetic member for
+   `/groups/fund/[joinCode]`.
 4. Continue an exact existing request-key purchase; reuse with a different
    offer is a conflict.
 5. Under the payer lock, expire an unattached purchase whose frozen window
@@ -483,11 +502,14 @@ sequence:
    conflicts. Only one created, open, or payment-pending purchase may exist for
    one payer at a time.
 6. For a genuinely new purchase, require a current server-owned offer. Personal
-   funding also requires the direct-paid eligibility projection; active group
-   funding does not require the payer to hold an individual paid plan.
-7. Resolve the payer's canonical Stripe Customer only after authorization.
-   Existing billing state is reused; otherwise the existing idempotent hosted
-   customer owner creates and binds one for the authenticated payer.
+   funding also requires the direct-paid eligibility projection. Family
+   funding requires the current active owner, active group and billing, and an
+   exact active, nonsuspended, personal member. Active group funding does not
+   require the payer to hold an individual paid plan.
+7. Resolve the canonical Stripe Customer only after authorization. Personal
+   and group funding use the payer's customer, creating it through the existing
+   owner when needed. Family funding uses the existing Family-group customer
+   and never creates a replacement member customer.
 8. Create the durable purchase for the client request key.
 9. Freeze the offer, Price, Customer, return URLs, 90-minute expiry, and request
    policy in the `created` purchase before provider I/O.
@@ -514,7 +536,8 @@ The Stripe Session uses:
 - Adaptive Pricing explicitly disabled so Dashboard defaults cannot change the
   frozen USD catalog contract;
 - no adjustable quantity, promotion codes, or caller-selected Price; and
-- server-generated personal Settings or group-funding success/cancel URLs.
+- server-generated personal Settings, exact Family-target Settings, or
+  group-funding success/cancel URLs.
 
 Use a distinct purchase ID for every intentional purchase. A member can buy
 the same pack twice, so member-plus-offer is not an idempotency key.
@@ -674,6 +697,36 @@ Checkout status remains visible only to its authenticated payer; group state
 does not expose contributors, receipts, cash value, or internal USD-micro
 accounting.
 
+## Family Member Funding
+
+The active owner chooses one active member from Family Settings and opens the
+shared fixed-pack dialog. The member route is same-origin and authenticated;
+the browser does not submit payer identity, group identity, price, grant value,
+or Stripe Customer. Web binds the opaque member selector to the owner's active
+roster before locking the beneficiary, then re-reads membership and member
+eligibility under that lock. A foreign selector therefore cannot contend on or
+fund an unrelated member.
+
+The purchase freezes the exact Family group and beneficiary in its
+server-generated return URLs. This distinguishes an owner's personal target
+from that same owner as a Family member and prevents a historical group from
+being reinterpreted as a new Family relationship. Exact request-key replay may
+recover a frozen purchase after membership removal; a fresh request key must
+pass current authority.
+
+Only one payer-wide nonterminal purchase may exist. While it does, Family
+Settings hides every new amount picker and places recovery controls only on the
+frozen member. A request targeting another member receives a conflict with no
+Checkout URL and no resume or retry capability. The owner may inspect or cancel
+the frozen purchase, and closing the conflict refreshes server state.
+
+If the frozen beneficiary is no longer in the roster, Settings recovers an
+owner-recognizable label only from that exact group's accepted invite. Without
+such a label, payment and retry controls fail closed while status and
+cancellation remain available. With a recognizable label, an already-open
+frozen Checkout URL may be resumed, but fresh retry remains unavailable after
+membership authority ends.
+
 ## Operations And Reconciliation
 
 The existing `HostedStripeEvent` receipt is the retry owner and records attempt
@@ -763,6 +816,9 @@ Current focused unit and component coverage exercises:
 - group funding target resolution, active-runtime eligibility, fixed-pack
   checkout without an individual paid plan, target-aware replay/conflicts, and
   reuse of the same dialog state machine;
+- Family owner/member authorization, exact target freezing, former-member
+  recovery, target-conflict payment suppression, and payer-wide single-active
+  purchase presentation;
 - coarse group usage reads, trusted low-capacity next-turn context, and the
   route-authorized exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
@@ -776,7 +832,7 @@ plus webhook smoke.
 
 The implementation does not add arbitrary amounts, auto-recharge, saved-card
 off-session charges, discounts, transfers, cash redemption, public or anonymous
-funding, Family funding, a group wallet, Stripe Meter reporting, or a second
+funding, a Family or group wallet, Stripe Meter reporting, or a second
 usage/accounting service.
 
 ## Rejected Alternatives

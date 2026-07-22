@@ -32,6 +32,11 @@ Last verified: 2026-07-22
   membership, while every fresh key reauthorizes current state. Personal,
   hosted-group, and Family return scopes are frozen distinctly so payer-wide
   active-purchase recovery cannot confuse an owner self top-up across targets.
+  A conflicting Family request may expose status and cancellation only: it must
+  not continue Stripe creation, return a Checkout URL, or offer retry. Settings
+  suppresses every other member's offer while the payer has an active purchase;
+  a departed beneficiary remains payable only when the owner's accepted-invite
+  history yields a recognizable label or contact hint.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked

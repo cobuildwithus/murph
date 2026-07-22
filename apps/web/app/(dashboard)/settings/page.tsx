@@ -36,6 +36,7 @@ import { hasHostedMemberOwnActiveBilling } from "@/src/lib/hosted-onboarding/ent
 import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
+  readHostedFamilyUsageCreditBeneficiaryLabel,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -129,14 +130,16 @@ export default async function SettingsPage({
   const usageTopUpOfferCodes = settingsData?.usageTopUpOfferCodes ?? [];
   const usageTopUpActivePurchase = settingsData?.usageTopUpActivePurchase ?? null;
   const usageTopUpReturnTarget = settingsData?.usageTopUpReturnTarget ?? null;
+  const familyUsageTopUpFormerMemberLabels =
+    settingsData?.familyUsageTopUpFormerMemberLabels ?? {};
   const account = settingsSnapshot?.account ?? null;
   const billingRef = settingsSnapshot?.billingRef ?? null;
   const routing = settingsSnapshot?.routing ?? null;
   const activeFamilyOwner = familyOwner?.billingActive === true;
   const sponsoredMember = familyAccess !== null && familyOwner === null;
   const usageTopUpOffers = projectHostedUsageTopUpOffers(usageTopUpOfferCodes);
-  const familyUsageTopUpOffers = activeFamilyOwner
-    ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodes())
+  const familyUsageTopUpOffers = activeFamilyOwner && !usageTopUpActivePurchase
+    ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodesSafely())
     : [];
   const personalUsageTopUpActivePurchase =
     usageTopUpActivePurchase?.target.kind === "personal"
@@ -292,7 +295,7 @@ export default async function SettingsPage({
       </section>
 
       {familyOwner ? (
-        <section className="flex flex-col gap-4">
+        <section id="family" className="flex scroll-mt-24 flex-col gap-4">
           <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
             Family
           </div>
@@ -300,6 +303,7 @@ export default async function SettingsPage({
             ownerSnapshot={familyOwner}
             usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
+            usageTopUpFormerMemberLabels={familyUsageTopUpFormerMemberLabels}
             usageTopUpOffers={familyUsageTopUpOffers}
             usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}
@@ -430,10 +434,42 @@ async function readSettingsPageData(input: {
         purchaseId: input.usageReturnPurchaseId,
       }).catch(() => null)
     : null;
+  const familyUsageTopUpFormerMemberLabels: Record<string, string> = {};
+  if (familyOwner) {
+    const activeMemberIds = new Set(
+      familyOwner.members.map((member) => member.memberId),
+    );
+    const formerMemberIds = [
+      usageTopUpActivePurchase?.target.kind === "family"
+      && usageTopUpActivePurchase.target.familyGroupId === familyOwner.groupId
+        ? usageTopUpActivePurchase.target.beneficiaryMemberId
+        : null,
+      usageTopUpReturnTarget?.kind === "family"
+      && usageTopUpReturnTarget.familyGroupId === familyOwner.groupId
+        ? usageTopUpReturnTarget.beneficiaryMemberId
+        : null,
+    ].filter((memberId, index, memberIds): memberId is string => Boolean(
+      memberId
+      && !activeMemberIds.has(memberId)
+      && memberIds.indexOf(memberId) === index,
+    ));
+    for (const beneficiaryMemberId of formerMemberIds) {
+      const label = await readHostedFamilyUsageCreditBeneficiaryLabel({
+        beneficiaryMemberId,
+        groupId: familyOwner.groupId,
+        ownerMemberId: memberId,
+        prisma,
+      }).catch(() => null);
+      if (label) {
+        familyUsageTopUpFormerMemberLabels[beneficiaryMemberId] = label;
+      }
+    }
+  }
 
   return {
     familyAccess,
     familyOwner,
+    familyUsageTopUpFormerMemberLabels,
     freshPrivySession: await freshPrivySessionPromise,
     secureApprovalStatus: await secureApprovalStatusPromise,
     settingsSnapshot,
@@ -443,6 +479,14 @@ async function readSettingsPageData(input: {
     usageTopUpOfferCodes,
     usageTopUpReturnTarget,
   };
+}
+
+function readHostedConfiguredUsageCreditOfferCodesSafely(): readonly HostedUsageCreditOfferCode[] {
+  try {
+    return readHostedConfiguredUsageCreditOfferCodes();
+  } catch {
+    return [];
+  }
 }
 
 function readFirstSearchParamValue(

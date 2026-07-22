@@ -318,18 +318,61 @@ describe("createHostedUsageCreditCheckout", () => {
       stripeCustomerId: "cus_family_owner",
     });
 
-    await expect(createHostedFamilyMemberUsageCreditCheckout({
+    const conflict = await createHostedFamilyMemberUsageCreditCheckout({
       beneficiaryMemberId: MEMBER_ID,
       clientRequestKey: "family_owner_key_12",
       now: new Date(NOW.getTime() + 1_000),
       offerCode: "usage_5_usd",
       payerMemberId: MEMBER_ID,
       prisma: fake.prisma as never,
-    })).resolves.toMatchObject({
+    });
+    expect(conflict).toMatchObject({
       recovered: true,
       targetConflict: true,
     });
+    expect(conflict.url).toBeUndefined();
+    expect(conflict.retryAllowed).toBeUndefined();
     expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose member A's payable checkout from member B's Family request", async () => {
+    const fake = createFakePrisma();
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+    const first = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    mocks.resolveHostedFamilyUsageCreditCheckoutTargetTx.mockResolvedValueOnce({
+      beneficiaryMemberId: "hbm_familymember2",
+      groupId: "hbag_abcdefghijklmnop",
+      stripeCustomerId: "cus_family_owner",
+    });
+
+    const conflict = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember2",
+      clientRequestKey: "family_member_b_key",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_25_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(conflict).toMatchObject({
+      purchaseId: first.purchaseId,
+      recovered: true,
+      status: "checkout_open",
+      targetConflict: true,
+    });
+    expect(conflict.url).toBeUndefined();
+    expect(conflict.retryAllowed).toBeUndefined();
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(1);
   });
 
   it("reauthorizes fresh Family requests but recovers an exact frozen request", async () => {

@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 Status: Implemented current-state contract
 
 ## Goal
@@ -11,7 +11,7 @@ and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
 the same web-owned projection. Stripe and the existing web billing services
 remain the payment system; Murph owns allowance and purchased usage capacity.
-The personal and group top-up implementation contract lives in
+The personal, Family-member, and group top-up implementation contract lives in
 `agent-docs/product-specs/hosted-usage-topups.md`.
 
 ## Ownership
@@ -114,9 +114,16 @@ Checkout route described in the top-up spec. Assistant policy uses a matching
 explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
 upgrade a plan, grant credit, or claim that a billing change happened.
 
+Family Settings may expose the same fixed-pack dialog beside each active member
+to the current active owner. That owner pays through the Family billing
+customer and the selected member alone receives the credit. This is account
+management, not a sponsored member recommendation, personal top-up, shared
+Family pool, or transfer.
+
 An explicit request in a private conversation to manage billing, or to perform
-a Family account change outside `murph.family_plan`'s status, checkout, and
-invite actions, may receive the canonical `/settings#subscription` handoff
+a Family account change outside `murph.family_plan`'s status, checkout, invite,
+and member-usage navigation rules, may receive the canonical
+`/settings#subscription` handoff
 after `murph.plan_usage` returns `active`, `exhausted`, or
 `trial_conversion_pending`. This is neutral browser navigation, not a projected
 billing action or recommendation. The assistant must say that no billing or
@@ -274,6 +281,16 @@ inventing a billing menu:
   funding URL without exposing a payer or contributor; the heads-up does not
   promise that URL before the read returns it.
 
+For an explicit Family member-usage management request, the assistant first
+calls `murph.family_plan action="read_status"`. It may provide
+`/settings#family` only when that current private result has `owner: true`,
+`billingActive: true`, and the intended person matches exactly one active
+member row. The handoff is browser navigation only: the assistant does not
+choose an amount, create Checkout, or claim payment or usage completion. It
+asks one narrow clarification for a missing or ambiguous member and provides no
+handoff when any authority gate fails. `murph.plan_usage` and the personal
+subscription handoff are not substitutes for this Family gate.
+
 ## Group Usage
 
 Classify a group-thread allowance from its source, never by comparing its
@@ -301,10 +318,11 @@ mailbox row. The composed usage system adds no second admission gate, persisted
 forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
 wallet or usage account, automatic model switch, custom card form, App Clip,
 or mini app. It does not add a general Stripe API tool: the subscription action contract
-exposes only the three current web-owned operations above, and personal usage
-top-ups remain an authenticated Stripe-hosted Settings handoff. Group funding
+exposes only the three current web-owned operations above, and personal and
+Family-member usage top-ups remain authenticated Stripe-hosted Settings
+handoffs. Group funding
 uses the existing join code and synthetic member through an authenticated
-fixed-pack page; anonymous and Family funding remain unimplemented.
+fixed-pack page; anonymous funding remains unimplemented.
 
 ## Deployment
 
