@@ -2704,8 +2704,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const shouldImportSystemMailbox =
           input.systemMailboxAdmission === "all"
-          || await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
-            initialMailboxPrefetch,
+          || (
+            runtimeStateDirtyBeforeMailboxImport
+            && await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+              initialMailboxPrefetch,
+            )
           );
         if (!shouldImportSystemMailbox) {
           await finishMailboxImportWithoutAssistant(conversationImport);
