@@ -418,7 +418,7 @@ function UsageRow(input: {
           {input.row.suspended ? (
             <Badge variant="destructive">Suspended</Badge>
           ) : null}
-          {period?.blockedAt ? (
+          {period?.blocked ? (
             <Badge variant="destructive">Blocked</Badge>
           ) : null}
           {period?.idempotencyClaimStatus ? (
@@ -427,9 +427,10 @@ function UsageRow(input: {
           {input.row.allowanceStatus === "unavailable" ? (
             <Badge variant="secondary">Unavailable</Badge>
           ) : null}
-          {input.row.allowanceStatus === "available" && period
-              && !input.row.suspended && !period.blockedAt
-              && !period.idempotencyClaimStatus ? (
+          {input.row.allowanceStatus === "available"
+              && period
+              && !input.row.suspended
+              && !period.blocked ? (
             <Badge variant="outline">Available</Badge>
           ) : null}
         </div>

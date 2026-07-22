@@ -1289,16 +1289,17 @@ describe("hosted Linq observability stores", () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
 
-    await expect(recordHostedLinqRuntimeProviderDispatchFenceTx({
+    const fence = await recordHostedLinqRuntimeProviderDispatchFenceTx({
       attemptedAt,
       idempotencyKey: "assistant-outbox:intent-123",
       linqChatId: "chat_123",
       prisma: fixture.prisma as never,
       sourceRef: "intent-123",
       targetKind: "thread",
-    })).resolves.toEqual({
+    });
+    expect(fence).toEqual({
       claimed: true,
-      id: expect.stringMatching(/^hld_[A-Za-z0-9_-]{16}$/u),
+      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
     });
 
     expect(fixture.hostedLinqDeliveryCreateMany).toHaveBeenCalledWith({
@@ -1310,6 +1311,37 @@ describe("hosted Linq observability stores", () => {
         targetKind: "thread",
       })],
       skipDuplicates: true,
+    });
+
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt,
+      deliveredAt: null,
+      failedAt: null,
+      id: fence.id,
+      lastReceiptAt: null,
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_runtime_linq_delivery",
+      status: "provider_dispatch_started",
+    });
+    const outcome = await recordHostedLinqRuntimeDeliveryOutcomeTx({
+      acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      attemptedAt,
+      idempotencyKey: "assistant-outbox:intent-123",
+      linqChatId: "chat_123",
+      messageId: "provider_message_123",
+      prisma: fixture.prisma as never,
+      sourceRef: "intent-123",
+      targetKind: "thread",
+      userId: "member_123",
+    });
+
+    expect(outcome).toMatchObject({
+      deliveryId: fence.id,
+      recorded: true,
     });
   });
 
@@ -1353,7 +1385,7 @@ describe("hosted Linq observability stores", () => {
       template: "invite_signup",
     })).resolves.toEqual({
       claimed: true,
-      id: expect.stringMatching(/^hld_[A-Za-z0-9_-]{16}$/u),
+      id: expect.stringMatching(/^hld_[a-f0-9]{32}$/u),
     });
 
     expect(fixture.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({

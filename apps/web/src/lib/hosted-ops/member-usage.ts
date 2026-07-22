@@ -41,7 +41,7 @@ export interface HostedOpsMemberUsageRow {
 }
 
 export interface HostedOpsMemberUsagePeriod {
-  blockedAt: string | null;
+  blocked: boolean;
   idempotencyClaimStatus: string | null;
   limitUsdMicros: string;
   periodEnd: string;
@@ -267,7 +267,8 @@ export async function readHostedOpsMemberUsage(
       createdAt: member.createdAt.toISOString(),
       currentPeriod: allowanceAvailable && decision && snapshot
         ? {
-            blockedAt: snapshot.periodBlockedAt?.toISOString() ?? null,
+            blocked: !decision.allowed
+              && decision.reason === "ai_usage_limit_exceeded",
             idempotencyClaimStatus: noticeLookupKey
               ? noticeStatusByLookupKey.get(noticeLookupKey) ?? null
               : null,

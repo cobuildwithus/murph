@@ -262,7 +262,7 @@ export async function resolveHostedLinqInviteSignupDispatchEffectIdTx(input: {
   return null;
 }
 
-export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
+type HostedLinqDeliveryProviderDispatchClaimInput = {
   attemptedAt?: Date;
   idempotencyKey?: string | null;
   linqChatId?: string | null;
@@ -274,7 +274,21 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   status?: HostedLinqDeliveryProviderDispatchData["status"];
   targetKind?: string | null;
   template?: string | null;
-}): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+};
+
+export async function claimHostedLinqDeliveryProviderDispatchTx(
+  input: HostedLinqDeliveryProviderDispatchClaimInput,
+): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
+  return claimHostedLinqDeliveryProviderDispatchWithIdTx(
+    input,
+    buildHostedLinqDeliveryId,
+  );
+}
+
+async function claimHostedLinqDeliveryProviderDispatchWithIdTx(
+  input: HostedLinqDeliveryProviderDispatchClaimInput,
+  buildDeliveryId: (idempotencyKey: string) => string,
+): Promise<{ claimed: boolean; id: string | null; retryAt?: Date }> {
   const attemptedAt = input.attemptedAt ?? new Date();
   const idempotencyKey = createHostedLinqDeliveryIdempotencyLookupKey(
     normalizeNullable(input.idempotencyKey),
@@ -314,7 +328,7 @@ export async function claimHostedLinqDeliveryProviderDispatchTx(input: {
   } satisfies HostedLinqDeliveryProviderDispatchData;
   const createData = {
     ...data,
-    id: generateHostedRandomPrefixedId("hld"),
+    id: buildDeliveryId(idempotencyKey),
     idempotencyKey,
   };
   const existing = await input.prisma.hostedLinqDelivery.findUnique({
@@ -442,19 +456,22 @@ export async function startHostedAiUsageLimitNoticeDispatchTx(input: {
       return { status: "already_notified" };
     }
 
-    const claim = await claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt: input.attemptedAt,
-      idempotencyKey,
-      linqChatId: input.linqChatId,
-      phoneNumber: input.phoneNumber,
-      prisma,
-      reclaimStalePreProviderAttempt: true,
-      source: input.source,
-      sourceRef: input.sourceRef,
-      status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
-      targetKind: input.targetKind,
-      template: "ai_usage_quota",
-    });
+    const claim = await claimHostedLinqDeliveryProviderDispatchWithIdTx(
+      {
+        attemptedAt: input.attemptedAt,
+        idempotencyKey,
+        linqChatId: input.linqChatId,
+        phoneNumber: input.phoneNumber,
+        prisma,
+        reclaimStalePreProviderAttempt: true,
+        source: input.source,
+        sourceRef: input.sourceRef,
+        status: HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS,
+        targetKind: input.targetKind,
+        template: "ai_usage_quota",
+      },
+      () => generateHostedRandomPrefixedId("hld"),
+    );
     if (claim.claimed) {
       if (!claim.id) {
         throw new Error("Hosted AI usage notice claim is missing its attempt id.");

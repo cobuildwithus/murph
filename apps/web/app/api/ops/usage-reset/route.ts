@@ -8,6 +8,10 @@ import {
 import {
   signalHostedRuntimeRecheckRuntime,
 } from "@/src/lib/hosted-orchestration/signal-runtime";
+import {
+  createHostedPostCommitDeadline,
+  waitForHostedPostCommitOperation,
+} from "@/src/lib/hosted-onboarding/bounded-post-commit";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
@@ -115,7 +119,13 @@ async function trySignalHostedRuntimeRecheck(
   timestamp = new Date().toISOString(),
 ): Promise<"accepted" | "pending"> {
   try {
-    await signalHostedRuntimeRecheckRuntime({ userId: memberId });
+    await waitForHostedPostCommitOperation({
+      deadlineMs: createHostedPostCommitDeadline(undefined),
+      operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
+        abortSignal,
+        userId: memberId,
+      }),
+    });
     return "accepted";
   } catch (error) {
     console.error("Hosted ops runtime recheck failed.", {

@@ -257,14 +257,20 @@ remains as history. A recent pre-provider dispatch makes the operation
 retryable instead of permitting a concurrent duplicate send.
 
 The table reads decision and concurrency-version facts from one repeatable
-database snapshot. After reset commit, the route signals the existing hosted
-runtime recheck so accepted mailbox work is reconsidered immediately. If that
-wake is not accepted, the route reports the reset as committed and exposes a
-wake-only retry instead of replaying the reset or claiming complete recovery.
-Reusing the logical notice key still permits only one active claim, while each
-explicitly re-released notice gets a fresh durable attempt ID and Linq provider
-idempotency key. This prevents a retained history row or provider deduplication
-from suppressing the next real limit crossing.
+database snapshot. Its blocked/available label comes from the canonical gate
+decision, never from the persisted `blocked_at` marker, because a plan change
+can make that storage marker stale until the mutating gate reconciles it. A
+historical notice claim is shown independently and never suppresses canonical
+availability. After reset commit, the route signals the existing hosted runtime
+recheck so accepted mailbox work is reconsidered immediately. That signal uses the
+existing bounded handoff deadline and forwards its abort signal. A rejection or
+timeout reports the reset as committed and exposes a wake-only retry instead of
+replaying the reset or claiming complete recovery. Reusing the logical notice
+key still permits only one active claim, while each explicitly re-released
+notice gets a fresh durable attempt ID and Linq provider idempotency key. Generic
+runtime and webhook delivery fences retain their deterministic durable IDs.
+This prevents a retained history row or provider deduplication from suppressing
+the next real limit crossing without changing unrelated delivery correlation.
 
 Reset never deletes or rewrites immutable usage rows, purchased-credit entries,
 the purchased-credit balance or version, billing state, mailbox rows, or

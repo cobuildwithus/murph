@@ -96,7 +96,6 @@ describe("hosted ops member usage", () => {
       new Map([
         ["hbm_container", {
           decision: makeUsageGateDecision({ allowed: true }),
-          periodBlockedAt: new Date("2026-07-22T17:25:30.000Z"),
           periodPersistedAt: PERIOD_UPDATED_AT,
         }],
         ["hbm_person", {
@@ -107,7 +106,6 @@ describe("hosted ops member usage", () => {
             spentUsdMicros: 0n,
             usageCreditLedgerVersion: 0n,
           }),
-          periodBlockedAt: null,
           periodPersistedAt: null,
         }],
       ]),
@@ -142,10 +140,14 @@ describe("hosted ops member usage", () => {
       participantCount: 2,
     });
     expect(dashboard.rows[0]?.currentPeriod).toMatchObject({
+      blocked: false,
       idempotencyClaimStatus: "accepted",
       remainingUsdMicros: "500000",
       usageCreditBalanceUsdMicros: "500000",
       usageCreditLedgerVersion: "3",
+    });
+    expect(dashboard.rows[1]?.currentPeriod).toMatchObject({
+      blocked: false,
     });
     expect(dashboard.rows[1]).toMatchObject({
       allTimeUsageUsdMicros: "1250000",
@@ -204,6 +206,29 @@ describe("hosted ops member usage", () => {
       }),
     }));
     expect(findDeliveries).toHaveBeenCalledTimes(1);
+  });
+
+  test("projects blocked status from the canonical decision", async () => {
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
+      new Map([["hbm_person", {
+        decision: makeUsageGateDecision({ memberId: "hbm_person" }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]),
+    );
+    const prisma = asPrismaClientForHostedOpsTest({
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: {
+        findMany: vi.fn(async () => [makeMember({ id: "hbm_person" })]),
+      },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage(NOW, prisma);
+
+    expect(dashboard.rows[0]?.currentPeriod).toMatchObject({
+      blocked: true,
+    });
   });
 
   test("atomically clears included spend and releases only the current notice claim", async () => {

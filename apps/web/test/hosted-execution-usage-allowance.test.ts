@@ -3193,7 +3193,11 @@ describe("readHostedAiUsageGateSnapshots", () => {
       periodPersistedAt: periodUpdatedAt,
     });
     expect(findPeriods).toHaveBeenCalledWith({
-      select: expect.any(Object),
+      select: {
+        memberId: true,
+        periodStart: true,
+        updatedAt: true,
+      },
       where: {
         OR: [{
           memberId: "member_123",
@@ -3205,6 +3209,96 @@ describe("readHostedAiUsageGateSnapshots", () => {
       expect.any(Function),
       { isolationLevel: "RepeatableRead" },
     );
+  });
+
+  it("derives admission from the current plan instead of stale block metadata", async () => {
+    const now = new Date("2026-07-22T18:00:00.000Z");
+    const periodStart = new Date("2026-07-05T00:00:00.000Z");
+    const periodEnd = new Date("2026-08-05T00:00:00.000Z");
+    const periodUpdatedAt = new Date("2026-07-22T17:00:00.000Z");
+
+    const increasedPlan = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_monthly",
+        blockedAt: new Date("2026-07-22T16:55:00.000Z"),
+        limitUsdMicros: 10_000_000n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 10_000_000n,
+      },
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 10_000_000n,
+    });
+    Object.assign(increasedPlan.hostedAiUsagePeriod, {
+      findMany: vi.fn(async () => [{
+        memberId: "member_123",
+        periodStart,
+        updatedAt: periodUpdatedAt,
+      }]),
+    });
+    const increasedTransaction = vi.fn(async (
+      run: (tx: typeof increasedPlan) => Promise<unknown>,
+      _options?: { isolationLevel?: string },
+    ) => run(increasedPlan));
+
+    const increasedSnapshots = await readHostedAiUsageGateSnapshots({
+      memberIds: ["member_123"],
+      now,
+      prisma: { $transaction: increasedTransaction } as never,
+    });
+
+    expect(increasedSnapshots.get("member_123")).toMatchObject({
+      decision: {
+        allowed: true,
+        limitUsdMicros: 25_000_000n,
+        remainingUsdMicros: 15_000_000n,
+      },
+      periodPersistedAt: periodUpdatedAt,
+    });
+
+    const decreasedPlan = createGatePrisma({
+      billingPlanCode: "launch_monthly",
+      findUniquePeriod: {
+        billingPlanCode: "launch_edge_monthly",
+        blockedAt: null,
+        limitUsdMicros: 25_000_000n,
+        periodEnd,
+        periodStart,
+        spentUsdMicros: 11_000_000n,
+      },
+      periodEnd,
+      periodStart,
+      spentUsdMicros: 11_000_000n,
+    });
+    Object.assign(decreasedPlan.hostedAiUsagePeriod, {
+      findMany: vi.fn(async () => [{
+        memberId: "member_123",
+        periodStart,
+        updatedAt: periodUpdatedAt,
+      }]),
+    });
+    const decreasedTransaction = vi.fn(async (
+      run: (tx: typeof decreasedPlan) => Promise<unknown>,
+      _options?: { isolationLevel?: string },
+    ) => run(decreasedPlan));
+
+    const decreasedSnapshots = await readHostedAiUsageGateSnapshots({
+      memberIds: ["member_123"],
+      now,
+      prisma: { $transaction: decreasedTransaction } as never,
+    });
+
+    expect(decreasedSnapshots.get("member_123")).toMatchObject({
+      decision: {
+        allowed: false,
+        limitUsdMicros: 10_000_000n,
+        reason: "ai_usage_limit_exceeded",
+        remainingUsdMicros: 0n,
+      },
+      periodPersistedAt: periodUpdatedAt,
+    });
   });
 });
 

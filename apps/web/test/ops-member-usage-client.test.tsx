@@ -131,7 +131,7 @@ describe("MemberUsageClient", () => {
     if (!period) {
       throw new Error("Expected a usage fixture period.");
     }
-    period.blockedAt = null;
+    period.blocked = false;
     period.idempotencyClaimStatus = null;
     period.remainingUsdMicros = "4500000";
     period.spentUsdMicros = "0";
@@ -146,13 +146,33 @@ describe("MemberUsageClient", () => {
     expect(getButton(rendered.container, "Reset").disabled).toBe(true);
   });
 
+  test("shows canonical availability independently from a notice claim", async () => {
+    const dashboard = makeDashboard();
+    const period = dashboard.rows[0]?.currentPeriod;
+    if (!period) {
+      throw new Error("Expected a usage fixture period.");
+    }
+    period.blocked = false;
+    period.limitUsdMicros = "25000000";
+    period.remainingUsdMicros = "15000000";
+    period.spentUsdMicros = "10000000";
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain("Notice claimed");
+    expect(rendered.container.textContent).toContain("Available");
+    expect(rendered.container.textContent).not.toContain("Blocked");
+  });
+
   test("keeps a clear persisted period actionable for a later runtime wake", async () => {
     const dashboard = makeDashboard();
     const period = dashboard.rows[0]?.currentPeriod;
     if (!period) {
       throw new Error("Expected a usage fixture period.");
     }
-    period.blockedAt = null;
+    period.blocked = false;
     period.idempotencyClaimStatus = null;
     period.spentUsdMicros = "0";
     const rendered = await renderClientComponent(
@@ -309,7 +329,7 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       containerOwnerMemberId: "hbm_owner",
       createdAt: "2026-06-01T00:00:00.000Z",
       currentPeriod: {
-        blockedAt: "2026-07-22T17:25:30.000Z",
+        blocked: true,
         idempotencyClaimStatus: "accepted",
         limitUsdMicros: "4500000",
         periodEnd: "2026-08-01T00:00:00.000Z",

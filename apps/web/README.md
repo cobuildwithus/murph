@@ -1311,10 +1311,15 @@ Current hosted billing assumptions:
   logical notice claim. It preserves immutable usage, purchased credit, billing
   state, mailbox rows, and delivery history, and refuses to race an in-flight
   notice dispatch. After commit it signals the existing runtime recheck; a
-  failed wake is returned as a committed partial result with a wake-only retry.
-  The table reads its decision and reset version from one repeatable database
-  snapshot. A later crossing reuses the logical claim key but receives a fresh
-  durable delivery ID and provider idempotency key.
+  rejected or bounded-timeout wake is returned as a committed partial result
+  with a wake-only retry. The table reads its decision and reset version from
+  one repeatable database snapshot, and derives blocked/available only from
+  that canonical decision rather than the potentially stale persisted marker.
+  Historical notice status is displayed independently from current admission.
+  A later crossing reuses the logical claim key but receives a fresh durable
+  delivery ID and provider idempotency key. Generic runtime and webhook
+  delivery fences keep deterministic durable IDs for latency and receipt
+  correlation.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
   The proof expires after 15 minutes. Active Family sponsorship and paid,

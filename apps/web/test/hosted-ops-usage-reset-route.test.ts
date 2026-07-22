@@ -40,6 +40,9 @@ import {
   HostedOpsMemberUsageResetNoticeInFlightError,
   HostedOpsMemberUsageResetStaleError,
 } from "@/src/lib/hosted-ops/member-usage";
+import {
+  HOSTED_POST_COMMIT_TIMEOUT_MS,
+} from "@/src/lib/hosted-onboarding/bounded-post-commit";
 
 type RouteModule = typeof import("../app/api/ops/usage-reset/route");
 
@@ -95,6 +98,7 @@ describe("hosted ops usage reset route", () => {
       periodStart: new Date(PERIOD_START),
     });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: TARGET_MEMBER_ID,
     });
     expect(
@@ -147,6 +151,40 @@ describe("hosted ops usage reset route", () => {
     }
   });
 
+  test("bounds a stalled post-commit wake and exposes wake-only recovery", async () => {
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+
+    const responsePromise = route.POST(makeRequest());
+    await vi.waitFor(() => {
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(HOSTED_POST_COMMIT_TIMEOUT_MS);
+    const response = await responsePromise;
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      ...makeResult(),
+      runtimeRecheckStatus: "pending",
+    });
+    expect(mocks.resetHostedOpsMemberUsage).toHaveBeenCalledTimes(1);
+    const observedAbortSignal = mocks.signalHostedRuntimeRecheckRuntime
+      .mock.calls[0]?.[0]?.abortSignal;
+    expect(observedAbortSignal).toBeInstanceOf(AbortSignal);
+    expect(observedAbortSignal.aborted).toBe(true);
+
+    mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValueOnce({
+      signalAccepted: true,
+      workflowId: "hosted-user-runtime:hbm_target",
+    });
+    const retry = await route.POST(makeRuntimeRecheckRequest());
+
+    assert.equal(retry.status, 200);
+    expect(mocks.resetHostedOpsMemberUsage).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+  });
+
   test("retries only the runtime wake after a committed reset", async () => {
     const response = await route.POST(makeRuntimeRecheckRequest());
 
@@ -157,8 +195,33 @@ describe("hosted ops usage reset route", () => {
     });
     expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
       userId: TARGET_MEMBER_ID,
     });
+  });
+
+  test("bounds a stalled wake-only retry without replaying the reset", async () => {
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+
+    const responsePromise = route.POST(makeRuntimeRecheckRequest());
+    await vi.waitFor(() => {
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+    });
+    await vi.advanceTimersByTimeAsync(HOSTED_POST_COMMIT_TIMEOUT_MS);
+    const response = await responsePromise;
+
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      memberId: TARGET_MEMBER_ID,
+      runtimeRecheckStatus: "pending",
+    });
+    expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+    const observedAbortSignal = mocks.signalHostedRuntimeRecheckRuntime
+      .mock.calls[0]?.[0]?.abortSignal;
+    expect(observedAbortSignal).toBeInstanceOf(AbortSignal);
+    expect(observedAbortSignal.aborted).toBe(true);
   });
 
   test("hides the route from members outside the ops allowlist", async () => {

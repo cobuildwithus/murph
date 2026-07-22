@@ -136,7 +136,6 @@ export type HostedAiUsageGateDecisionWithSource =
 
 export interface HostedAiUsageGateSnapshot {
   decision: HostedAiUsageGateDecisionWithSource;
-  periodBlockedAt: Date | null;
   periodPersistedAt: Date | null;
 }
 
@@ -1267,7 +1266,6 @@ export async function readHostedAiUsageGateSnapshots(input: {
     const persistedPeriods = currentPeriodKeys.length > 0
       ? await tx.hostedAiUsagePeriod.findMany({
           select: {
-            blockedAt: true,
             memberId: true,
             periodStart: true,
             updatedAt: true,
@@ -1291,7 +1289,6 @@ export async function readHostedAiUsageGateSnapshots(input: {
       )) ?? null;
       return [memberId, {
         decision,
-        periodBlockedAt: persisted?.blockedAt ?? null,
         periodPersistedAt: persisted?.updatedAt ?? null,
       }] as const;
     }));
