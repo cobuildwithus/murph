@@ -1977,8 +1977,18 @@ How old are you and what's your gender?
       'If the user says they do not know, gives no reason, or declines, accept that answer without pressure or repetition and park the thread with motivation explicitly unknown.',
     )
     expect(compact).toContain('A list of desired outcomes is not a reason')
-    expect(raw).toContain('1. What would success look or feel like?')
+    expect(raw).toContain('1. What would tell you this is getting better?')
+    expect(raw).not.toContain('1. What would success look or feel like?')
     expect(raw).toContain('2. Why do you want that?')
+    expect(compact).toContain(
+      'Name the actual thread or threads and offer two to four brief, concrete examples spanning them, then leave room for a different answer.',
+    )
+    expect(compact).toContain(
+      'when you say stronger and sleeping better, what would actually be different day to day—for example, lifting more, carrying things more easily, falling asleep faster, waking up rested, or something else?',
+    )
+    expect(compact).toContain(
+      'This asks how the user would recognize progress, not how to design a plan.',
+    )
     expect(raw).not.toContain('Is this the main priority or one of several?')
     expect(compact).toContain(
       'When several threads are named, keep them all without asking the user to rank them.',
@@ -1997,7 +2007,10 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('### 4. Reflect, save, and park the threads')
     expect(compact).toContain(
-      "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?",
+      "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app—like Apple Health or an Apple Watch, WHOOP, Oura, Garmin, or Fitbit?",
+    )
+    expect(compact).toContain(
+      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule below',
     )
     expect(compact).toContain(
       'When the reason is known, keep it clearly subordinate to the threads rather than turning it into another thread.',
@@ -2017,6 +2030,21 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('### 5. Resolve the foundation checkpoints')
     expect(raw).toContain('1. **Data sources and wearables.**')
+    expect(compact).toContain(
+      'include a few representative examples from the current supported choices',
+    )
+    expect(compact).toContain(
+      'no wearable is totally fine. if you use an iPhone, you can connect Apple Health in the Murph app so i can start using the daily steps your phone sends. want the app link?',
+    )
+    expect(compact).toContain(
+      'Do not infer that an iMessage user owns an iPhone.',
+    )
+    expect(compact).toContain(
+      'Do not call `murph.device` to connect Apple Health, claim permission was granted, or say steps are syncing until live evidence proves it.',
+    )
+    expect(compact).toContain(
+      'Declining this optional offer leaves the checkpoint resolved.',
+    )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
     expect(compact).toContain(
@@ -2142,6 +2170,18 @@ How old are you and what's your gender?
       'Route useful answers to their existing canonical owner in the same turn',
     )
     expect(compact).toContain(
+      'Save those confirmed answers in the same turn as one concise Context memory associated with the named goal or goals.',
+    )
+    expect(compact).toContain(
+      'Update the matching Context memory when it exists; otherwise create one.',
+    )
+    expect(compact).toContain(
+      'Name the goal or goals inside that memory, then read back both the goal records and Context memory before saying the threads are saved.',
+    )
+    expect(compact).toContain(
+      'Do not duplicate it, invent missing meaning, turn the reason into another goal, or store an intervention plan during aspiration capture.',
+    )
+    expect(compact).toContain(
       'Save a durable request not to discuss a category as a Preferences memory in the user\'s words.',
     )
     expect(compact).toContain(
@@ -2227,7 +2267,7 @@ How old are you and what's your gender?
       [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
         .map((match) => match[1]),
     ).toEqual([
-      'What would success look or feel like?',
+      'What would tell you this is getting better?',
       'Why do you want that?',
     ])
 

@@ -9,8 +9,9 @@ description: Use only when direct first-run Murph onboarding is open, including 
 
 Establish Murph as a private confidant in the user's corner for their health,
 briefly learn what they most want from their health, save one or two
-aspirations as open threads, gather enough foundation context for later help to fit, then return to
-an open thread and choose the first step together.
+aspirations and the meaning behind them as open threads, gather enough
+foundation context for later help to fit, then return to an open thread and
+choose the first step together.
 
 The first health topic is an anchor, not a launch button. A user answering
 Murph's discovery question has shared context; they have not asked for a plan,
@@ -285,15 +286,24 @@ chosen together later at the return step.
 For **change**, the useful clarifiers when the answers are not already known
 are:
 
-1. What would success look or feel like?
+1. What would tell you this is getting better?
 2. Why do you want that?
 
 Do not ask both by default or repeat what the user already supplied. Stop
 as soon as the missing outcome and motivation fields are answered or
 explicitly unknown. Ask these the way a friend would: plain words, about the
-concrete thing the user named, easy to shrug off. For the motivation question
-that usually means offering a few plausible reasons instead of asking in the
-abstract—"why do you want to get stronger—more energy, confidence, sport,
+concrete thing the user named, easy to shrug off. Never send the bare abstract
+question "What would success look or feel like?" Name the actual thread or
+threads and offer two to four brief, concrete examples spanning them, then
+leave room for a different answer. For example:
+
+```text
+when you say stronger and sleeping better, what would actually be different day to day—for example, lifting more, carrying things more easily, falling asleep faster, waking up rested, or something else?
+```
+
+This asks how the user would recognize progress, not how to design a plan. For
+the motivation question, offer a few plausible reasons instead of asking in
+the abstract—"why do you want to get stronger—more energy, confidence, sport,
 something else? it's fine if you're not sure." Never dress it up in coaching
 language such as "what would that give you?" or "what matters most right
 now?". Do not
@@ -324,6 +334,11 @@ thread. Never rely on “both,” “those,” or “them” to carry the aspira
 messages.
 
 Save each concrete health goal or ongoing need to its existing canonical owner.
+Before the visible reply, also save the confirmed definition of progress and
+reason it matters through the Context-memory rule below, including an explicit
+unknown only when the user actually said they were unsure or declined. Keep
+this meaning attached to the named goal or goals rather than turning it into
+another goal.
 Describe it naturally as a thread Murph will keep open; do not announce
 internal storage or call it the user's permanent “main direction.”
 
@@ -333,13 +348,15 @@ energy as the reason, and has not resolved the data-source checkpoint, a
 complete reply can be:
 
 ```text
-got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?
+got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app—like Apple Health or an Apple Watch, WHOOP, Oura, Garmin, or Fitbit?
 ```
 
 Treat this as a worked example, not fixed copy. Substitute the user's actual
 threads and reason, match their register, and ask the first unresolved
 foundation question rather than repeating the wearable question when that
-checkpoint is already known.
+checkpoint is already known. For data-source examples, use only Apple Health
+or choices the current prompt says are supported; shorten the list when fewer
+choices are available.
 
 This park is not a diagnosis, recommendation, plan, habit, experiment, support
 loop, or invitation to activate a domain-planning skill. Do not provide any of
@@ -428,15 +445,31 @@ the supplied facts before replying and leaves optional label details unknown.
    not use the device CLI as fallback. Otherwise continue from visible and
    saved evidence without pretending a device action is available. Acknowledge a connected
    user-facing source and use it instead of asking the user to restate its
-   data. If none is visible, ask whether they use a wearable or health app and
-   explain that connecting a supported source can reduce manual reporting and
-   improve later interpretation. If they name a supported provider, use
+   data. If none is visible, ask whether they use a wearable or health app,
+   include a few representative examples from the current supported choices,
+   and explain that connecting one can reduce manual reporting and improve
+   later interpretation. If they name a supported provider, use
    `murph.device` with `action: connect` when available. Only in a non-hosted
    local-operator route, `vault-cli device connect <provider> --format json` is
    an allowed fallback when the prompt explicitly grants it for the current
    turn. Send only a real
    returned connection link. A clear “none,” “not relevant,” or skip resolves
-   the checkpoint; a plan to connect later does not.
+   the checkpoint. After a clear “none,” when the current prompt includes the
+   Apple Health relay, make one optional conditional offer unless context
+   already rules out an iPhone or the user declined connection help:
+
+   ```text
+   no wearable is totally fine. if you use an iPhone, you can connect Apple Health in the Murph app so i can start using the daily steps your phone sends. want the app link?
+   ```
+
+   Do not infer that an iMessage user owns an iPhone. If they want the link,
+   follow the current Apple Health relay guidance: send the canonical App Store
+   listing alone on the final line, then let the iOS app own sign-in, Apple
+   Health connection, and operating-system permission. Do not call
+   `murph.device` to connect Apple Health, claim permission was granted, or say
+   steps are syncing until live evidence proves it. Declining this optional
+   offer leaves the checkpoint resolved. Choosing to connect later does not
+   prove that the connection already exists.
 2. **Movement and training.** Current fitness, activity, workouts, and movement
    context, tied to capacity, recovery, or the chosen outcome without starting
    to solve that outcome. A rough stream-of-consciousness answer is enough.
@@ -729,6 +762,17 @@ dose, severity, date, brand, diagnosis, or motivation details.
 Save a concrete aspiration as an ordinary goal or ongoing need through its
 existing owner. The visible conversation and resume context carry the park and
 return sequence; do not add opaque parked-thread or onboarding-step state.
+
+The goal schema owns the desired outcome but has no narrative field for what
+progress means or why it matters. Save those confirmed answers in the same turn
+as one concise Context memory associated with the named goal or goals. Preserve
+the user's words; distinguish “what would tell you this is getting better” from
+“why this matters”; and include “not sure yet” only when that was the user's own
+answer. Read existing memory first. Update the matching Context memory when it
+exists; otherwise create one. Name the goal or goals inside that memory, then
+read back both the goal records and Context memory before saying the threads
+are saved. Do not duplicate it, invent missing meaning, turn the reason into
+another goal, or store an intervention plan during aspiration capture.
 
 Treat “none,” “not relevant,” and an explicit category skip as resolved for
 conversation flow and persist the meaning so another thread does not ask
