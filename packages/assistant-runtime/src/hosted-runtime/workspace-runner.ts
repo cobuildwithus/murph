@@ -85,6 +85,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
+  compactHostedConversationMailboxHandledThroughSeq,
   compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
@@ -196,6 +197,7 @@ interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
   assistantInputBatchFull(): boolean;
   assistantInputBatchRemaining(): number;
+  conversationConsumedSeq(): string | null;
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
   latestAssistantInputBatch(): HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -272,9 +274,8 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   browserVaultReplicaRefreshRequested?: true;
   deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
-  // ran the foreground assistant reply phase; gates the durable conversation
-  // consumed-watermark ack (only a clean pass with zero failed replies and no
-  // pending foreground assistant input may advance it).
+  // ran the foreground assistant reply phase; selected-prefix repair uses it
+  // to distinguish clean completion from retryable reply work.
   foregroundReplyFailed?: number | null;
   // Ephemeral provenance for an assistant wake created by work selected in
   // this invocation. This is never persisted; the runner and outer hot-wake
@@ -1177,6 +1178,23 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
+    const conversationHandledThroughSeq =
+      await resolveHostedConversationMailboxHandledThroughSeq({
+        conversationConsumedSeq: checkpointRequestSession.conversationConsumedSeq(),
+        latestMailboxImport:
+          checkpointRequestSession.latestMailboxImport() ?? initialMailboxImport,
+        signal: input.signal ?? null,
+        vaultRoot: input.vaultRoot,
+      });
+    if (conversationHandledThroughSeq !== null) {
+      mergeRuntimeRedactedStatus({
+        hostedMailboxConversationHandledThroughSeq: conversationHandledThroughSeq,
+      });
+      // A replay-only restore may have no other dirty state. Force the existing
+      // idle checkpoint so Web can couple this handled prefix to the snapshot
+      // that proves no pending reply work was dropped.
+      checkpointRequestSession.markRuntimeStateDirty();
+    }
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -2668,6 +2686,48 @@ async function reconcilePendingAssistantInputWake(input: {
   }
 }
 
+async function resolveHostedConversationMailboxHandledThroughSeq(input: {
+  conversationConsumedSeq: string | null;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
+  signal: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<string | null> {
+  const consumedSeq = parseHostedConversationMailboxSeq(input.conversationConsumedSeq);
+  const importedSeq = parseHostedConversationMailboxSeq(
+    input.latestMailboxImport.state.watermarks.conversation,
+  );
+  if (consumedSeq === null || importedSeq === null || importedSeq <= consumedSeq) {
+    return null;
+  }
+
+  // Complete and inspect the pending index only after the server-provided
+  // floor proves there is an actual prefix to advance. The compaction and
+  // pending-sequence read share one assistant-state write lock.
+  const handledThroughSeq =
+    await compactHostedConversationMailboxHandledThroughSeq({
+      importedThroughSeq: importedSeq.toString(),
+      ...(input.signal ? { signal: input.signal } : {}),
+      vaultRoot: input.vaultRoot,
+    });
+
+  const handledThrough = parseHostedConversationMailboxSeq(handledThroughSeq);
+  if (handledThrough === null || handledThrough <= consumedSeq) {
+    return null;
+  }
+
+  // This is local handled authority, not provider-delivery authority. A reply
+  // intent that still needs delivery remains durable in the same snapshot;
+  // exact accepted Linq deliveries continue to use per-item consumedAt. A
+  // still-pending input stops the prefix immediately before its lane sequence.
+  return handledThrough.toString();
+}
+
+function parseHostedConversationMailboxSeq(value: string | null): bigint | null {
+  return value !== null && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? BigInt(value)
+    : null;
+}
+
 async function notifyPendingForegroundAssistantInputWake(input: {
   now?: (() => string) | null;
   runtimeWakeSignal: RuntimeWakeSignal | null;
@@ -2793,6 +2853,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   );
   let expectedWorkspaceVersion: string | null = null;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  let conversationConsumedSeq: bigint | null = null;
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
@@ -2812,6 +2873,9 @@ function createHostedWorkspaceCheckpointRequestSession(
         1,
         assistantInputBatchLimit - assistantInputBatchOccupancy(),
       );
+    },
+    conversationConsumedSeq() {
+      return conversationConsumedSeq?.toString() ?? null;
     },
     createRequest(input) {
       const requestInput = expectedWorkspaceVersion === null
@@ -2858,6 +2922,18 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordCheckpointResult(result, recordOptions) {
       latestMailboxImport = result;
+      const importedConsumedSeq = parseHostedConversationMailboxSeq(
+        result.importResult.consumedSeqByLane?.conversation ?? null,
+      );
+      if (
+        importedConsumedSeq !== null
+        && (
+          conversationConsumedSeq === null
+          || importedConsumedSeq > conversationConsumedSeq
+        )
+      ) {
+        conversationConsumedSeq = importedConsumedSeq;
+      }
       const freshBatchLimit = assistantInputFreshBatchLimit();
       if (
         recordOptions?.captureAssistantInputBatch !== false

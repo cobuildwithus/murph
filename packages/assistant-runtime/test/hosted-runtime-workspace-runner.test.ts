@@ -2414,7 +2414,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.mailboxRetryAt, TEST_NOW);
       assert.equal(result.latestMailboxImport.importResult.nextRetryAt ?? null, null);
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "100");
-      assert.equal(result.runtimeStateDirty, false);
+      assert.equal(
+        result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+        "100",
+      );
+      assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);
     } finally {
       await rm(vaultRoot, {
@@ -4617,7 +4621,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     ];
     const importedSeqs: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
-    const { mailboxPort } = createMailboxPort({ fetchRequests, items });
+    const { mailboxPort } = createMailboxPort({
+      consumedSeqByLane: [{ consumedSeq: "0", lane: "conversation" }],
+      fetchRequests,
+      items,
+    });
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     let admissionCount = 0;
@@ -4806,6 +4814,10 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
       assert.equal(result.initialMailboxImport.state.watermarks.conversation, "1");
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
+      assert.equal(
+        result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+        "1",
+      );
       assert.equal(
         result.assistantPhaseResult?.nextWakeAt,
         TEST_PENDING_INDEX_MAINTENANCE_WAKE_AT,
@@ -8790,7 +8802,222 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("publishes the imported prefix when complete local pending evidence has no gap", async () => {
+    const result = await runConversationHandledThroughScenario({});
+
+    assert.equal(
+      result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+      "1",
+    );
+  });
+
+  test.each([
+    {
+      foregroundReplyFailed: 1,
+      pendingAssistantInput: true,
+      reason: "the foreground reply failed",
+    },
+    {
+      foregroundReplyFailed: 0,
+      pendingAssistantInput: true,
+      reason: "assistant input remains pending",
+    },
+  ])("does not publish a handled conversation prefix when $reason", async ({
+    foregroundReplyFailed,
+    pendingAssistantInput,
+  }) => {
+    const result = await runConversationHandledThroughScenario({
+      foregroundReplyFailed,
+      pendingAssistantInput,
+    });
+
+    assert.equal(
+      result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+      undefined,
+    );
+  });
+
+  test("marks replay-only handled progress dirty so a lagging durable prefix can repair", async () => {
+    const result = await runConversationHandledThroughScenario({
+      consumedSeq: "13",
+      initialImportedSeq: "100",
+      items: [],
+    });
+
+    assert.equal(
+      result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+      "100",
+    );
+    assert.equal(result.runtimeStateDirty, true);
+  });
+
+  test("publishes only the safe prefix before a later pending conversation input", async () => {
+    const result = await runConversationHandledThroughScenario({
+      foregroundReplyFailed: 1,
+      items: [
+        createMailboxItem({
+          id: "mailbox_item_runner_handled_prefix_1",
+          laneSeq: "1",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runner_handled_prefix_2",
+          laneSeq: "2",
+        }),
+        createMailboxItem({
+          id: "mailbox_item_runner_handled_prefix_3",
+          laneSeq: "3",
+        }),
+      ],
+      pendingAssistantInputLaneSeq: "2",
+    });
+
+    assert.equal(
+      result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+      "1",
+    );
+  });
+
+  test.each([
+    {
+      consumedSeq: "100",
+      reason: "the durable floor already equals the local prefix",
+    },
+    {
+      consumedSeq: "101",
+      reason: "the durable floor is ahead of the local prefix",
+    },
+    {
+      consumedSeq: null,
+      reason: "the mailbox response omits the durable floor",
+    },
+  ])("does not dirty replay-only state when $reason", async ({ consumedSeq }) => {
+    const result = await runConversationHandledThroughScenario({
+      consumedSeq,
+      initialImportedSeq: "100",
+      items: [],
+    });
+
+    assert.equal(
+      result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
+      undefined,
+    );
+    assert.equal(result.runtimeStateDirty, false);
+  });
+
 });
+
+async function runConversationHandledThroughScenario(input: {
+  channel?: "linq" | "telegram";
+  consumedSeq?: string | null;
+  foregroundReplyFailed?: number;
+  initialImportedSeq?: string;
+  items?: HostedMailboxItem[];
+  pendingAssistantInput?: boolean;
+  pendingAssistantInputLaneSeq?: string;
+}) {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-handled-prefix-"));
+  const items = input.items ?? [
+    createMailboxItem({
+      id: "mailbox_item_runner_handled_prefix",
+      laneSeq: "1",
+    }),
+  ];
+  const { mailboxPort } = createMailboxPort({
+    ...(input.consumedSeq === null
+      ? {}
+      : {
+          consumedSeqByLane: [
+            {
+              consumedSeq: input.consumedSeq ?? "0",
+              lane: "conversation" as const,
+            },
+          ],
+        }),
+    items,
+  });
+
+  try {
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+    if (input.initialImportedSeq !== undefined) {
+      const state = createEmptyHostedMailboxImportState();
+      state.watermarks.conversation = input.initialImportedSeq;
+      await writeHostedMailboxImportState({ state, vaultRoot });
+    }
+    if (
+      input.pendingAssistantInput === true
+      || input.pendingAssistantInputLaneSeq !== undefined
+    ) {
+      await saveAssistantAutomationState(vaultRoot, {
+        autoReply: [{
+          channel: input.channel ?? "telegram",
+          eligibleAfter: null,
+          enabledAt: TEST_NOW,
+        }],
+        updatedAt: TEST_NOW,
+        version: 1,
+      });
+    }
+
+    return await runHostedWorkspaceUntilIdleOrBudget({
+      checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+        attemptId: "attempt_synthetic_runner_handled_prefix",
+        expectedWorkspaceVersion: "0",
+        leaseGeneration: "1",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        snapshotRef: null,
+      }),
+      expectedUserId: TEST_USER_ID,
+      async importItem(item) {
+        const stored = await upsertAssistantInputEvent({
+          event: createStoredAssistantInputEventForMailboxItem(
+            item.item,
+            "handled prefix input",
+            input.channel ?? "telegram",
+          ),
+          vault: vaultRoot,
+        });
+        const remainsPending = input.pendingAssistantInput === true
+          || item.item.laneSeq === input.pendingAssistantInputLaneSeq;
+        if (remainsPending) {
+          await enqueueHostedPendingAssistantInputId({
+            inputId: stored.inputId,
+            vaultRoot,
+          });
+        } else if (input.pendingAssistantInputLaneSeq !== undefined) {
+          await writeTerminalEvidence({
+            evidenceId: stored.inputId,
+            groupInputIds: [stored.inputId],
+            vaultRoot,
+          });
+        }
+        return {
+          assistantInputId: stored.inputId,
+          status: "imported",
+        };
+      },
+      limitPerLane: 10,
+      platform: createPlatform({
+        mailboxPort,
+        workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+      }),
+      requestId: "request_synthetic_runner_handled_prefix",
+      async runAssistantPhase() {
+        return input.foregroundReplyFailed === undefined
+          ? { progressed: false }
+          : {
+              foregroundReplyFailed: input.foregroundReplyFailed,
+              progressed: false,
+            };
+      },
+      vaultRoot,
+      workspace: null,
+      now: () => TEST_NOW,
+    });
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+}
 
 function createPlatform(input: {
   artifactBytesByHash?: ReadonlyMap<string, Uint8Array>;
@@ -9231,7 +9458,11 @@ function createAssistantUsageRecord(
   };
 }
 
-function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, text: string) {
+function createStoredAssistantInputEventForMailboxItem(
+  item: HostedMailboxItem,
+  text: string,
+  channel: "linq" | "telegram" = "linq",
+) {
   return {
     content: {
       text,
@@ -9247,14 +9478,14 @@ function createStoredAssistantInputEventForMailboxItem(item: HostedMailboxItem, 
       accountId: "acct_1",
       actorId: "actor_1",
       actorIsSelf: false,
-      source: "linq",
+      source: channel,
       threadId: "thread_1",
       threadIsDirect: true,
     },
     occurredAt: item.occurredAt,
     receivedAt: item.createdAt,
     replyTarget: {
-      channel: "linq",
+      channel,
       messageId: `msg_${item.id}`,
       threadId: "thread_1",
     },

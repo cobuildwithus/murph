@@ -10909,6 +10909,10 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
         "251",
       );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationHandledThroughSeq,
+        "251",
+      );
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "251");
     } finally {
       await removeTempRoot(vaultRoot);

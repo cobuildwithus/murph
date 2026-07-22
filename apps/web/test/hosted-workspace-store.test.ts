@@ -164,6 +164,221 @@ describe("hosted workspace store", () => {
     });
   });
 
+  it.each([
+    "assistant_runtime_commit",
+    "canonical_runtime_commit",
+  ] as const)("does not advance handled conversation progress on a %s status checkpoint", async (reason) => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      reason,
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_status_only"),
+      tx,
+      userId: "member_workspace_1",
+    })).resolves.toMatchObject({
+      status: "updated",
+    });
+
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        redactedStatusJson: expect.objectContaining({
+          hostedMailboxConversationHandledThroughSeq: "7",
+          hostedMailboxConversationImportedSeq: "7",
+        }),
+      }),
+    }));
+    expect(hostedMailboxLaneCounter.findUnique).not.toHaveBeenCalled();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("advances handled conversation progress in the successful idle checkpoint transaction", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_handled"),
+      tx,
+      userId: "member_workspace_1",
+    })).resolves.toMatchObject({
+      status: "updated",
+    });
+
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 7n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 7n,
+        },
+        lane: "conversation",
+        userId: "member_workspace_1",
+      },
+    });
+  });
+
+  it("rejects handled conversation progress beyond the imported prefix", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "8",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_ahead"),
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/must not exceed its imported sequence/u);
+
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects handled conversation progress without a valid imported prefix", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate();
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "not-a-sequence",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_missing_import"),
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow(/must not exceed its imported sequence/u);
+
+    expect(hostedWorkspace.updateMany).not.toHaveBeenCalled();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("ignores malformed handled conversation progress", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "not-a-sequence",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_malformed_handled"),
+      tx,
+      userId: "member_workspace_1",
+    })).resolves.toMatchObject({
+      status: "updated",
+    });
+
+    expect(hostedMailboxLaneCounter.findUnique).not.toHaveBeenCalled();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("propagates conversation replay-floor failures after the workspace CAS", async () => {
+    const hostedWorkspace = createHostedWorkspaceDelegate({
+      updateMany: vi.fn<HostedWorkspaceUpdateMany>(async () => ({ count: 1 })),
+    });
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 3n,
+      nextSeq: 9n,
+    });
+    hostedMailboxLaneCounter.findUnique.mockRejectedValueOnce(
+      new Error("synthetic lane-counter failure"),
+    );
+    const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
+      hostedMailboxLaneCounter,
+      hostedWorkspace,
+    });
+
+    await expect(checkpointHostedWorkspaceTx({
+      expectedVersion: "4",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
+      redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "7",
+      },
+      snapshotRef: createBundleRef("snapshot_conversation_rollback"),
+      tx,
+      userId: "member_workspace_1",
+    })).rejects.toThrow("synthetic lane-counter failure");
+
+    expect(hostedWorkspace.updateMany).toHaveBeenCalledOnce();
+    expect(hostedMailboxLaneCounter.updateMany).not.toHaveBeenCalled();
+  });
+
   it("reserves canonical receipt protocol fields outside the ordinary status budget", async () => {
     const hostedWorkspace = createHostedWorkspaceDelegate();
     const tx = createHostedWorkspaceTx({ hostedWorkspace });
@@ -223,14 +438,19 @@ describe("hosted workspace store", () => {
       nextSeq: 9n,
     });
     const tx = createHostedWorkspaceTx({
+      $queryRaw: vi.fn<HostedWorkspaceQueryRaw>(async () => []),
       hostedMailboxLaneCounter,
       hostedWorkspace,
     });
 
     const result = await checkpointHostedWorkspaceTx({
       expectedVersion: 4n,
-      reason: "canonical_runtime_commit",
+      nextWakeAt: "2026-04-26T00:00:15.000Z",
+      nextWakeReason: "mailbox",
+      reason: "idle_shutdown",
       redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "7",
+        hostedMailboxConversationImportedSeq: "7",
         hostedMailboxSystemHandledThroughSeq: "7",
       },
       snapshotRef: createBundleRef("snapshot_stale"),
@@ -273,6 +493,10 @@ describe("hosted workspace store", () => {
     const hostedMailboxItem = {
       findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => ({ laneSeq: 2n })),
     };
+    const hostedMailboxLaneCounter = createHostedMailboxLaneCounterDelegate({
+      consumedSeq: 0n,
+      nextSeq: 3n,
+    });
     const rawOperations: string[] = [];
     const executeRaw = vi.fn<HostedWorkspaceExecuteRaw>(async () => 0);
     const queryRaw = vi.fn<HostedWorkspaceQueryRaw>(async (strings) => {
@@ -283,6 +507,7 @@ describe("hosted workspace store", () => {
       $executeRaw: executeRaw,
       $queryRaw: queryRaw,
       hostedMailboxItem,
+      hostedMailboxLaneCounter,
       hostedWorkspace,
     });
 
@@ -292,6 +517,7 @@ describe("hosted workspace store", () => {
       nextWakeReason: "system-mailbox",
       reason: "idle_shutdown",
       redactedStatusJson: {
+        hostedMailboxConversationHandledThroughSeq: "1",
         hostedMailboxConversationImportedSeq: "1",
       },
       snapshotRef: createBundleRef("snapshot_idle"),
@@ -326,6 +552,18 @@ describe("hosted workspace store", () => {
         version: 4n,
       },
     }));
+    expect(hostedMailboxLaneCounter.updateMany).toHaveBeenCalledWith({
+      data: {
+        consumedSeq: 1n,
+      },
+      where: {
+        consumedSeq: {
+          lt: 1n,
+        },
+        lane: "conversation",
+        userId: "member_workspace_1",
+      },
+    });
     expect(result).toMatchObject({
       conversationInputAhead: true,
       replacedSnapshotRef: createBundleRef("snapshot_current"),

@@ -264,7 +264,20 @@ export async function checkpointHostedWorkspaceTx(input: {
   let conversationInputAhead: boolean | undefined;
   let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
+  const conversationHandledThroughSeq =
+    readCheckpointConversationHandledThroughSeq(input.redactedStatusJson);
   const systemHandledThroughSeq = readCheckpointSystemHandledThroughSeq(input.redactedStatusJson);
+  if (
+    conversationHandledThroughSeq !== null
+    && (
+      conversationImportedSeq === null
+      || conversationHandledThroughSeq > conversationImportedSeq
+    )
+  ) {
+    throw new TypeError(
+      "Hosted workspace checkpoint conversation handled-through sequence must not exceed its imported sequence.",
+    );
+  }
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
     await lockHostedWorkspaceForCheckpointTx({
       tx: input.tx,
@@ -328,6 +341,21 @@ export async function checkpointHostedWorkspaceTx(input: {
       userId,
     });
   }
+  if (
+    updated.count === 1
+    && reason === "idle_shutdown"
+    && conversationHandledThroughSeq !== null
+  ) {
+    // The successful workspace CAS durably proves that local reply work through
+    // this prefix is in the published snapshot. Status-only checkpoints retain
+    // the marker but cannot advance the replay floor ahead of snapshot evidence.
+    await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: conversationHandledThroughSeq,
+      lane: "conversation",
+      prisma: input.tx,
+      userId,
+    });
+  }
   const row = await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
@@ -369,6 +397,21 @@ function readCheckpointConversationImportedSeq(
         value,
         "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
       );
+}
+
+function readCheckpointConversationHandledThroughSeq(
+  redactedStatusJson: Record<string, unknown> | null | undefined,
+): bigint | null {
+  if (!redactedStatusJson || typeof redactedStatusJson !== "object" || Array.isArray(redactedStatusJson)) {
+    return null;
+  }
+  const value = redactedStatusJson["hostedMailboxConversationHandledThroughSeq"];
+  return typeof value === "string" && /^\d+$/u.test(value)
+    ? normalizeBigInt(
+        value,
+        "Hosted workspace checkpoint redactedStatus hostedMailboxConversationHandledThroughSeq",
+      )
+    : null;
 }
 
 async function lockHostedWorkspaceForCheckpointTx(input: {

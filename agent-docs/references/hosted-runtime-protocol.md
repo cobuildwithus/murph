@@ -593,8 +593,26 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-checkpoint replay floor. Accepted Linq reply delivery carries the finer
-delivery-time consume authority: the runtime reports
+checkpoint replay floor. The system lane advances that floor from its
+checkpointed handled-through status. The conversation lane advances it in the
+same successful `idle_shutdown` snapshot transaction as a runtime-published
+handled-through prefix. The runtime caps that prefix at its imported watermark
+and immediately before the earliest still-pending hosted conversation input;
+missing index evidence, a missing indexed event, or a malformed conversation
+lane sequence fails closed without advancing it. Retryable reply failures remain
+in that pending index and therefore stop the prefix before the failed input.
+Status-only assistant or canonical-runtime checkpoints may retain the marker,
+but they never advance the floor because their snapshot ref can still predate
+the terminal evidence or durable reply intent.
+The prefix is local handling authority: a durable reply intent in the same
+snapshot remains delivery work, while terminal no-reply evidence needs no
+provider callback. A checkpoint conflict or transaction rollback leaves the
+floor unchanged, and a restored workspace whose local imported prefix is ahead
+of the server floor republishes the handled-through prefix on its next idle
+checkpoint.
+
+Accepted Linq reply delivery carries the finer delivery-time consume authority:
+the runtime reports
 `answeredMailboxItemIds`, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
@@ -605,6 +623,20 @@ restore or restart from re-replying to an already-handled message without a
 side table or lane high-water advance past gaps. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
+
+This handled-through field is an additive Cloudflare-to-Web checkpoint
+extension. Deploy Web first so the consumer understands it, then deploy the
+Cloudflare worker and runner bundle with immediate container rollout and verify
+the managed runner fingerprint. Old runners omit the field and new Web keeps
+the prior replay behavior; new runners talking to old Web have their marker
+stored as ordinary redacted status but do not advance the floor, so they also
+remain replay-safe. Roll back in reverse order (runner producer, then Web
+consumer). There is no hard rollback floor: any already-advanced prefix was
+coupled to a compatible durable snapshot, and old runtimes already honor the
+existing `consumedSeqByLane` response. After rollout, verify that conversation
+lane floors converge toward checkpointed imported prefixes and run a Telegram
+reload smoke proving one reply without replay delay or duplication.
+
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
