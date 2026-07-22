@@ -2868,7 +2868,7 @@ test.sequential(
       assert.equal(requireData(outcome).lookupId, requireData(created).experimentId)
       assert.equal(requireData(outcome).slug, 'focus-sprint')
       assert.equal(requireData(outcome).asOf, '2026-04-25')
-      assert.equal(requireData(outcome).outcome.schema, 'murph.experiment-outcome.v1')
+      assert.equal(requireData(outcome).outcome.schema, 'murph.experiment-outcome.v2')
       assert.equal(
         requireData(outcome).outcome.outcomeId,
         `${requireData(created).experimentId}-outcome-2026-04-25`,
@@ -2922,6 +2922,7 @@ test.sequential(
           interventionMean: null,
           label: 'Resting Heart Rate',
           movedAsExpected: null,
+          points: [],
           unit: null,
         },
       ])

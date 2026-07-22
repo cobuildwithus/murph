@@ -1076,6 +1076,193 @@ test("renders the exact saved outcome after raw metric rows age out", () => {
   assert.equal(result.biomarkers[0]?.movedAsExpected, true);
 });
 
+test("renders current saved daily snapshots without consulting changed live rows", () => {
+  const outcome = savedOutcome({
+    points: [
+      {
+        date: "2026-04-01",
+        phase: "baseline",
+        unit: "bpm",
+        value: 63,
+      },
+      {
+        date: "2026-04-02",
+        phase: "baseline",
+        unit: "bpm",
+        value: 62,
+      },
+      {
+        date: "2026-04-03",
+        phase: "baseline",
+        unit: "bpm",
+        value: 61,
+      },
+      {
+        date: "2026-04-04",
+        phase: "intervention",
+        unit: "bpm",
+        value: 59,
+      },
+      {
+        date: "2026-04-05",
+        phase: "intervention",
+        unit: "bpm",
+        value: 58,
+      },
+      {
+        date: "2026-04-06",
+        phase: "intervention",
+        unit: "bpm",
+        value: 57,
+      },
+    ],
+    schemaVersion: "murph.experiment-outcome.v2",
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          endedOn: "2026-04-06",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "completed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-06",
+            targetSessions: 3,
+            minimumUsefulSessions: 2,
+          },
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      metricRows: restingHeartRateRows([
+        ["2026-04-01", 99],
+        ["2026-04-02", 99],
+        ["2026-04-03", 99],
+        ["2026-04-04", 99],
+        ["2026-04-05", 99],
+        ["2026-04-06", 99],
+      ]),
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.deepEqual(
+    result?.biomarkers[0]?.points.map(({ date, phase, value }) => ({ date, phase, value })),
+    [
+      { date: "2026-04-01", phase: "baseline", value: 63 },
+      { date: "2026-04-02", phase: "baseline", value: 62 },
+      { date: "2026-04-03", phase: "baseline", value: 61 },
+      { date: "2026-04-04", phase: "intervention", value: 59 },
+      { date: "2026-04-05", phase: "intervention", value: 58 },
+      { date: "2026-04-06", phase: "intervention", value: 57 },
+    ],
+  );
+});
+
+test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot be recovered", () => {
+  const outcome = savedOutcome();
+  const primaryMetric = outcome.metricResults[0];
+  if (!primaryMetric) {
+    throw new Error("Expected the saved outcome fixture to contain a metric.");
+  }
+  outcome.metricResults.push({
+    ...primaryMetric,
+    baseline: {
+      daysWithData: 3,
+      mean: 50,
+      totalDays: 3,
+      unit: "ms",
+    },
+    baselineMean: 50,
+    biomarkerKey: "biomarker:hrv-rmssd",
+    deltaAbs: 5,
+    deltaPct: 10,
+    expectedDirection: "increase",
+    intervention: {
+      daysWithData: 3,
+      mean: 55,
+      totalDays: 3,
+      unit: "ms",
+    },
+    interventionMean: 55,
+    label: "Heart rate variability",
+    unit: "ms",
+  });
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      entities: [
+        experimentEntity({
+          analysisPlan: {
+            desiredDirection: "decrease",
+            primaryBiomarkerKey: "biomarker:resting-heart-rate",
+            secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
+          },
+          endedOn: "2026-04-06",
+          outcomeRef: {
+            generatedAt: outcome.generatedAt,
+            outcomeId: outcome.outcomeId,
+            relativePath: "bank/experiments/outcomes/outcome_exp_sauna.json",
+          },
+          status: "completed",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-06",
+            targetSessions: 3,
+            minimumUsefulSessions: 2,
+          },
+        }),
+      ],
+      experimentOutcomes: [outcome],
+      metricRows: [
+        ...restingHeartRateRows([
+          ["2026-04-01", 63],
+          ["2026-04-02", 62],
+          ["2026-04-03", 61],
+          ["2026-04-04", 59],
+          ["2026-04-05", 58],
+          ["2026-04-06", 57],
+        ]),
+        ...[
+          ["2026-04-01", 49],
+          ["2026-04-02", 50],
+          ["2026-04-03", 51],
+          ["2026-04-04", 53],
+          ["2026-04-05", 54],
+          ["2026-04-06", 55],
+        ].map(([date, value]) => metricRow({
+          biomarkerKey: "biomarker:hrv-rmssd",
+          date: String(date),
+          metricKey: "hrv-rmssd",
+          unit: "ms",
+          value: Number(value),
+        })),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(client, "finnish-sauna-run");
+
+  assert.deepEqual(
+    result?.biomarkers.map((biomarker) => ({
+      biomarkerKey: biomarker.biomarkerKey,
+      points: biomarker.points,
+    })),
+    [
+      { biomarkerKey: "biomarker:resting-heart-rate", points: [] },
+      { biomarkerKey: "biomarker:hrv-rmssd", points: [] },
+    ],
+  );
+});
+
 test("treats canonical completed runs with an early endedOn as stopped and clamps evidence", () => {
   const outcome = savedOutcome({
     windows: {
@@ -3740,6 +3927,8 @@ function savedOutcome(input: {
   confidence?: ExperimentOutcome["confidence"];
   generatedAt?: string;
   id?: string;
+  points?: ExperimentOutcome["metricResults"][number]["points"];
+  schemaVersion?: ExperimentOutcome["schemaVersion"];
   slug?: string;
   windows?: ExperimentOutcome["windows"];
 } = {}): ExperimentOutcome {
@@ -3809,11 +3998,12 @@ function savedOutcome(input: {
       interventionMean: 58,
       label: "Resting heart rate",
       movedAsExpected: true,
+      ...(input.points === undefined ? {} : { points: input.points }),
       unit: "bpm",
     }],
     outcomeId: `outcome_${id}`,
     protocolRef: null,
-    schemaVersion: "murph.experiment-outcome.v1",
+    schemaVersion: input.schemaVersion ?? "murph.experiment-outcome.v1",
     windows,
   };
 }

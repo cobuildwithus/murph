@@ -45,11 +45,13 @@ import {
   type CreateBrowserVaultReplicaInput,
 } from "./shared.ts";
 import {
+  browserMetricRowToSeriesPoint,
   createBrowserVaultMetricSelectionRows,
   toBrowserVaultMetricRows,
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
+import { upgradeLegacyExperimentOutcomeForBrowser } from "./legacy-experiment-outcome.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -99,7 +101,13 @@ export async function createBrowserVaultReplica(
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
     experimentOutcomes: (input.experimentOutcomes ?? []).map((outcome) =>
-      experimentOutcomeSchema.parse(outcome)
+      upgradeLegacyExperimentOutcomeForBrowser(
+        experimentOutcomeSchema.parse(outcome),
+        {
+          browserSeriesPoints: metricRows.map(browserMetricRowToSeriesPoint),
+          metricPoints: allMetricPoints,
+        },
+      )
     ),
     generatedAt,
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,

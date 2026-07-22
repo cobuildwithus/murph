@@ -195,7 +195,12 @@ const EXPERIMENT_COVERAGE_STATUSES = [
   "ready_for_review",
 ] as const;
 const EXPERIMENT_ANALYSIS_STATUSES = ["not_ready", "ready", "generated"] as const;
-export const EXPERIMENT_OUTCOME_SCHEMA_VERSION = "murph.experiment-outcome.v1" as const;
+export const LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION = "murph.experiment-outcome.v1" as const;
+export const EXPERIMENT_OUTCOME_SCHEMA_VERSION = "murph.experiment-outcome.v2" as const;
+const EXPERIMENT_OUTCOME_SCHEMA_VERSIONS = [
+  LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+  EXPERIMENT_OUTCOME_SCHEMA_VERSION,
+] as const;
 export const EXPERIMENT_PROGRESS_SCHEMA_VERSION = "murph.experiment-progress.v2" as const;
 export const FAMILY_MEMBER_LIMITS = Object.freeze({
   title: 160,
@@ -2327,6 +2332,21 @@ export const experimentMetricResultSchema = z
   })
   .strict();
 
+export const experimentOutcomeMetricPointSchema = z
+  .object({
+    date: isoDateString(),
+    phase: z.enum(["baseline", "intervention"]),
+    unit: patternedString(UNIT_PATTERN).nullable(),
+    value: z.number(),
+  })
+  .strict();
+
+export const experimentOutcomeMetricResultSchema = experimentMetricResultSchema
+  .extend({
+    points: z.array(experimentOutcomeMetricPointSchema).max(366).optional(),
+  })
+  .strict();
+
 export const experimentProgressMetricSignalSchema = z
   .object({
     biomarkerKey: healthCommonsKeySchema,
@@ -2439,8 +2459,8 @@ export const experimentProgressSnapshotSchema = z
 
 export const experimentOutcomeSchema = z
   .object({
-    schemaVersion: z.literal(EXPERIMENT_OUTCOME_SCHEMA_VERSION),
-    schema: z.literal(EXPERIMENT_OUTCOME_SCHEMA_VERSION).optional(),
+    schemaVersion: z.enum(EXPERIMENT_OUTCOME_SCHEMA_VERSIONS),
+    schema: z.enum(EXPERIMENT_OUTCOME_SCHEMA_VERSIONS).optional(),
     outcomeId: boundedString(1, 160).optional(),
     generatedAt: isoDateTimeString().optional(),
     adherenceSummary: z
@@ -2477,11 +2497,163 @@ export const experimentOutcomeSchema = z
       .strict(),
     commonsProtocolRef: commonsProtocolRefSchema.nullable(),
     effectiveProtocolSnapshot: effectiveProtocolSnapshotSchema.nullable().optional(),
-    metricResults: z.array(experimentMetricResultSchema).max(50),
+    metricResults: z.array(experimentOutcomeMetricResultSchema).max(50),
     protocolRef: protocolRefSchema.nullable().optional(),
     windows: experimentWindowSummarySchema,
   })
-  .strict();
+  .strict()
+  .superRefine((outcome, context) => {
+    if (outcome.schema !== undefined && outcome.schema !== outcome.schemaVersion) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Experiment outcome schema must match schemaVersion.",
+        path: ["schema"],
+      });
+    }
+
+    for (const [metricIndex, metric] of outcome.metricResults.entries()) {
+      if (outcome.schemaVersion === LEGACY_EXPERIMENT_OUTCOME_SCHEMA_VERSION) {
+        if (metric.points !== undefined) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Legacy experiment outcomes cannot contain daily point snapshots.",
+            path: ["metricResults", metricIndex, "points"],
+          });
+        }
+        continue;
+      }
+
+      if (metric.points === undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Current experiment outcomes must contain a daily point snapshot.",
+          path: ["metricResults", metricIndex, "points"],
+        });
+        continue;
+      }
+
+      const baselinePoints = metric.points.filter((point) => point.phase === "baseline");
+      const interventionPoints = metric.points.filter((point) => point.phase === "intervention");
+      const baselineMean = metric.baseline ? metric.baseline.mean : metric.baselineMean;
+      const interventionMean = metric.intervention
+        ? metric.intervention.mean
+        : metric.interventionMean;
+      validateExperimentOutcomeMetricPointDates({
+        context,
+        metricIndex,
+        points: metric.points,
+      });
+      validateExperimentOutcomeMetricPointWindow({
+        context,
+        daysWithData: metric.baseline?.daysWithData ?? metric.baselineDayCount,
+        mean: baselineMean,
+        metricIndex,
+        phase: "baseline",
+        points: baselinePoints,
+        unit: metric.baseline?.unit ?? metric.unit,
+      });
+      validateExperimentOutcomeMetricPointWindow({
+        context,
+        daysWithData: metric.intervention?.daysWithData ?? metric.interventionDayCount,
+        mean: interventionMean,
+        metricIndex,
+        phase: "intervention",
+        points: interventionPoints,
+        unit: metric.intervention?.unit ?? metric.unit,
+      });
+      validateExperimentOutcomeMetricDelta({
+        baselineMean,
+        context,
+        deltaAbs: metric.deltaAbs,
+        deltaPct: metric.deltaPct,
+        interventionMean,
+        metricIndex,
+      });
+    }
+  });
+
+function validateExperimentOutcomeMetricPointDates(input: {
+  context: z.RefinementCtx;
+  metricIndex: number;
+  points: Array<z.infer<typeof experimentOutcomeMetricPointSchema>>;
+}): void {
+  const dates = new Set<string>();
+  for (const [pointIndex, point] of input.points.entries()) {
+    if (dates.has(point.date)) {
+      input.context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Experiment outcome metric point dates must be unique.",
+        path: ["metricResults", input.metricIndex, "points", pointIndex, "date"],
+      });
+    }
+    dates.add(point.date);
+  }
+}
+
+function validateExperimentOutcomeMetricPointWindow(input: {
+  context: z.RefinementCtx;
+  daysWithData: number;
+  mean: number | null;
+  metricIndex: number;
+  phase: "baseline" | "intervention";
+  points: Array<z.infer<typeof experimentOutcomeMetricPointSchema>>;
+  unit: string | null;
+}): void {
+  if (input.points.length !== input.daysWithData) {
+    input.context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Experiment outcome ${input.phase} point count must match daysWithData.`,
+      path: ["metricResults", input.metricIndex, "points"],
+    });
+  }
+
+  const mean = input.points.length > 0
+    ? Math.round(
+        (input.points.reduce((sum, point) => sum + point.value, 0) / input.points.length) * 100,
+      ) / 100
+    : null;
+  if (mean !== input.mean) {
+    input.context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Experiment outcome ${input.phase} point mean must match the saved summary.`,
+      path: ["metricResults", input.metricIndex, "points"],
+    });
+  }
+  if (input.points.some((point) => point.unit !== input.unit)) {
+    input.context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `Experiment outcome ${input.phase} point units must match the saved summary.`,
+      path: ["metricResults", input.metricIndex, "points"],
+    });
+  }
+}
+
+function validateExperimentOutcomeMetricDelta(input: {
+  baselineMean: number | null;
+  context: z.RefinementCtx;
+  deltaAbs: number | null;
+  deltaPct: number | null;
+  interventionMean: number | null;
+  metricIndex: number;
+}): void {
+  const deltaAbs = input.baselineMean !== null && input.interventionMean !== null
+    ? Math.round((input.interventionMean - input.baselineMean) * 100) / 100
+    : null;
+  const deltaPct = input.baselineMean !== null &&
+      input.interventionMean !== null &&
+      input.baselineMean !== 0
+    ? Math.round(
+        ((input.interventionMean - input.baselineMean) / Math.abs(input.baselineMean)) * 10_000,
+      ) / 100
+    : null;
+  if (deltaAbs !== input.deltaAbs || deltaPct !== input.deltaPct) {
+    input.context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Experiment outcome metric deltas must match the saved window means.",
+      path: ["metricResults", input.metricIndex, "deltaAbs"],
+    });
+  }
+}
 
 export const experimentFrontmatterSchema = withContractMetadata(
   z
@@ -3144,6 +3316,8 @@ export type ExperimentOutcomeTracking = z.infer<typeof experimentOutcomeTracking
 export type ExperimentOutcomeRef = z.infer<typeof experimentOutcomeRefSchema>;
 export type ExperimentMetricPeriodSummary = z.infer<typeof experimentMetricPeriodSummarySchema>;
 export type ExperimentMetricResult = z.infer<typeof experimentMetricResultSchema>;
+export type ExperimentOutcomeMetricPoint = z.infer<typeof experimentOutcomeMetricPointSchema>;
+export type ExperimentOutcomeMetricResult = z.infer<typeof experimentOutcomeMetricResultSchema>;
 export type ExperimentProgressMetricSignal = z.infer<typeof experimentProgressMetricSignalSchema>;
 export type ExperimentWindowSummary = z.infer<typeof experimentWindowSummarySchema>;
 export type ExperimentProgressSnapshot = z.infer<typeof experimentProgressSnapshotSchema>;

@@ -1781,7 +1781,7 @@ describe("record service seams", () => {
           outcome: {
             ...input.outcome,
             generatedAt: "2026-04-09T01:02:03.000Z",
-            schema: "murph.experiment-outcome.v1",
+            schema: "murph.experiment-outcome.v2",
           },
           outcomePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
           updatedExperiment: true,
@@ -1827,7 +1827,8 @@ describe("record service seams", () => {
         listMetricPoints: vi.fn(async () => []),
         listMetricPointsBatch: vi.fn(async () => []),
         analyzeExperimentOutcome: vi.fn(() => ({
-          schemaVersion: "murph.experiment-outcome.v1",
+          schemaVersion: "murph.experiment-outcome.v2",
+          schema: "murph.experiment-outcome.v2",
           asOf: "2026-04-08",
           adherenceSummary: {
             adherenceLevel: "good",
@@ -1898,10 +1899,10 @@ describe("record service seams", () => {
         outcomePath: "bank/experiments/outcomes/focus-sprint-2026-04-08.json",
         updatedExperiment: true,
         outcome: {
-          schemaVersion: "murph.experiment-outcome.v1",
+          schemaVersion: "murph.experiment-outcome.v2",
           generatedAt: "2026-04-09T01:02:03.000Z",
           outcomeId: `${experimentId}-outcome-2026-04-08`,
-          schema: "murph.experiment-outcome.v1",
+          schema: "murph.experiment-outcome.v2",
         },
       });
       expect(experimentOutcomeCore.writeExperimentOutcome).toHaveBeenCalledTimes(2);
