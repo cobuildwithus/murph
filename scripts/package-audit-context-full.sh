@@ -45,8 +45,14 @@ review_gpt_is_ancestor() {
 review_gpt_add_rendered_evidence() {
   local evidence_manifest="$review_gpt_pr_context_dir/rendered-evidence.txt"
   local evidence_absolute_path
+  local evidence_index=0
+  local evidence_package_dir="$review_gpt_pr_context_dir/rendered-evidence"
+  local evidence_package_name
+  local evidence_package_path
   local evidence_path
 
+  rm -rf "$evidence_package_dir"
+  mkdir -p "$evidence_package_dir"
   : > "$evidence_manifest"
   while IFS= read -r evidence_path; do
     [[ -z "$evidence_path" ]] && continue
@@ -86,8 +92,14 @@ review_gpt_add_rendered_evidence() {
         exit 1
         ;;
     esac
-    printf '%s\n' "$evidence_path" >> "$evidence_manifest"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_path"
+    evidence_index=$((evidence_index + 1))
+    printf -v evidence_package_name '%02d-%s' \
+      "$evidence_index" \
+      "$(basename "$evidence_path")"
+    evidence_package_path="$evidence_package_dir/$evidence_package_name"
+    cp -- "$evidence_path" "$evidence_package_path"
+    printf '%s\n' "$evidence_package_path" >> "$evidence_manifest"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_package_path"
   done <<< "$review_gpt_rendered_evidence_paths"
 }
 

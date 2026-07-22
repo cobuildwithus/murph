@@ -113,5 +113,7 @@ Updated: 2026-07-22
   model guards but returned `INVALID`: the guarded ZIP named ignored evidence
   copies that its pruned `audit-packages` directory did not include, and omitted
   the frontend lens's required `agent-docs/FRONTEND.md`. The next retry uses the
-  supported `.artifacts/review-gpt` root and the packager now always includes the
-  required frontend guidance.
+  supported `.artifacts/review-gpt` root. The packager now always includes the
+  required frontend guidance and stages every validated evidence image into the
+  guarded review-context directory so the manifest cannot name an ignored file
+  that the ZIP scanner omitted.
