@@ -378,7 +378,7 @@ export function selectBrowserVaultExperimentResults(
         buildMetricWindowContext(context.run.windows, context.evidenceThrough),
       );
   const biomarkers = persistedOutcome
-    ? buildPersistedOutcomeBiomarkers(persistedOutcome)
+    ? buildPersistedOutcomeBiomarkers(client, persistedOutcome)
     : liveBiomarkers ?? [];
   const adherence = buildAdherenceResult(context);
   const schedule = buildScheduleResult(adherence);
@@ -665,8 +665,10 @@ function buildPersistedOutcomeResult(
 }
 
 function buildPersistedOutcomeBiomarkers(
+  client: BrowserVaultQueryClient,
   outcome: ExperimentOutcome,
 ): BrowserVaultExperimentBiomarkerResult[] {
+  const metricWindow = buildMetricWindowContext(outcome.windows, outcome.asOf);
   return outcome.metricResults.map((metric) => {
     const sourceMetric = resolveBiomarkerMetricSource(metric.biomarkerKey);
     const baselineUnit = metric.baseline?.unit ?? metric.unit;
@@ -715,7 +717,13 @@ function buildPersistedOutcomeBiomarkers(
             unit: point.unit,
             value: point.value,
           }))
-        : [],
+        : sourceMetric
+          ? metricRowsToExperimentPoints(
+              collectMetricRows(client, sourceMetric, metricWindow),
+              sourceMetric,
+              metricWindow,
+            )
+          : [],
       sourceMetric,
       status: "available",
       statusReason: "Saved experiment analysis is available.",

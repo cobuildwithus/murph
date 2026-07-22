@@ -1,6 +1,7 @@
 import type {
   EventSource,
   ExperimentFrontmatter,
+  ExperimentOutcome,
   ExperimentProgressCardData,
   ExperimentRunScheduleIntent,
   ExperimentStatus,
@@ -46,7 +47,6 @@ import type {
 import type {
   QueryCanonicalEntity,
   QueryExperimentFollowupDueDecision,
-  QueryExperimentOutcomeSummary,
   QueryExperimentProgressSummary,
   QueryMealNutritionDayTotal,
   QueryMealNutritionMetricTotal,
@@ -467,7 +467,7 @@ export interface ExperimentOutcomeResult {
   lookupId: string
   slug: string
   asOf: string
-  outcome: QueryExperimentOutcomeSummary
+  outcome: ExperimentOutcome
   outcomePath?: string | null
   updatedExperiment?: boolean
 }

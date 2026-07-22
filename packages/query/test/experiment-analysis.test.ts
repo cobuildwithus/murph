@@ -3339,7 +3339,6 @@ test("experiment outcome stays deterministic and expresses uncertainty through c
   });
   assert.deepEqual(repeatedOutcome, outcome);
 });
-
 test("experiment progress prioritizes safety follow-up over ordinary reminder logic", () => {
   const progress = summarizeExperimentProgress(
     createExperimentVaultWithSafetyFollowUp(),

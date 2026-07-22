@@ -54,7 +54,6 @@ const PLAN_HABIT_SERIES_ID_PREFIX = 'habit:'
 const PLAN_SUPPLEMENT_SERIES_ID_PREFIX = 'supplement:'
 const REGIMEN_ID_PREFIX = 'reg_'
 const ACTIVITY_NUDGE_AUTOMATION_SLUG_PREFIX = 'experiment-activity-nudge-'
-const OUTCOME_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 interface ExperimentLifecycleContext {
   experiments: ExperimentFrontmatter[]
@@ -224,10 +223,8 @@ export async function prepareExperimentLifecycleAutomations(
 /**
  * Persist every deterministic experiment outcome whose final-review instant
  * is due, independent of delivery routes, messaging consent, or outbound
- * notification expiry. A linked stable outcome is rechecked at most daily
- * during the bounded final-review window so late wearable, session, or
- * confounder evidence can update it. After that window, the stable link is
- * complete for maintenance; a missing outcome is still written even late.
+ * notification expiry. A linked stable outcome is complete for maintenance;
+ * a missing outcome is still written even late.
  */
 export async function persistDueExperimentOutcomes(
   input: BuildExperimentLifecycleSeedsInput,
@@ -280,14 +277,7 @@ async function persistDueExperimentOutcomesFromContext(
     }
     const expectedOutcomeId = `${experiment.experimentId}-outcome-${interventionEnd}`
     if (experiment.outcomeRef?.outcomeId === expectedOutcomeId) {
-      const refreshUntilMs = dueAtMs + FINAL_RESULTS_ACTIVE_WINDOW_MS
-      const generatedAtMs = Date.parse(experiment.outcomeRef.generatedAt ?? '')
-      const wasRecentlyRefreshed = Number.isFinite(generatedAtMs) &&
-        generatedAtMs <= nowMs &&
-        nowMs - generatedAtMs < OUTCOME_REFRESH_INTERVAL_MS
-      if (nowMs >= refreshUntilMs || wasRecentlyRefreshed) {
-        continue
-      }
+      continue
     }
 
     if (shouldYield?.() === true) {
@@ -678,15 +668,20 @@ async function runExperimentLifecyclePrecondition(
   }
 
   await archiveActivityNudge()
-  // The writer is stable-ID and content-aware. Invoke it on every eligible
-  // closeout/retry so corrected or late-arriving evidence can refresh the
-  // deterministic result without coupling outcome persistence to delivery.
-  await services.core.writeExperimentOutcome({
+  // The write-once owner validates an existing link or creates the missing
+  // deterministic result without coupling persistence to delivery.
+  const outcomeResult = await services.core.writeExperimentOutcome({
     vault: input.vault,
     lookup: experimentLookup,
     asOf: interventionEnd,
     requestId: null,
   })
+  if (outcomeResult.outcome.experiment.status !== 'completed') {
+    return {
+      kind: 'skip',
+      reason: 'canonical experiment outcome is not completed',
+    }
+  }
 
   if (!hasScheduledSummaryConsent(experiment)) {
     return {

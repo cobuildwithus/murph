@@ -20,6 +20,7 @@ import {
   TrendChart,
   buildTrendChartPoints,
   buildWindowAverageDomain,
+  formatTrendDay,
 } from "@/src/components/experiments/experiment-detail/trend-chart";
 import {
   resolveBrowserVaultExperimentRun,
@@ -936,6 +937,19 @@ describe("experiment detail private-run composition", () => {
     expect(markup).toContain("flex min-w-0 flex-col gap-4");
     expect(markup).not.toContain("md:grid-cols-2");
     expect(markup).not.toContain("xl:grid-cols-2");
+    expect(markup).toContain("Daily measurements and window averages, where available.");
+  });
+
+  it("keeps daily trend dates stable outside UTC", () => {
+    const previousTimeZone = process.env.TZ;
+    process.env.TZ = "America/New_York";
+
+    try {
+      expect(formatTrendDay("2026-05-29", 1)).toBe("May 29");
+      expect(formatTrendDay("2026-05-29", 2)).toBe("May 30");
+    } finally {
+      process.env.TZ = previousTimeZone;
+    }
   });
 
   it("renders done private runs as finished results", async () => {

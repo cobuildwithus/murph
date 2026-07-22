@@ -135,6 +135,12 @@ export interface WriteExperimentOutcomeResult {
   updatedExperiment: boolean;
 }
 
+export interface ReadReferencedExperimentOutcomeInput {
+  vaultRoot: string;
+  relativePath: string;
+  expectedFrontmatter: ExperimentFrontmatter;
+}
+
 interface AppendExperimentLifecycleEventInput {
   vaultRoot: string;
   relativePath: string;
@@ -681,6 +687,25 @@ export async function writeExperimentOutcome(
     );
   }
 
+  const referencedOutcome = await resolveReferencedExperimentOutcome({
+    attributes: document.attributes,
+    relativePath: input.relativePath,
+    vaultRoot: input.vaultRoot,
+  });
+  const shouldAdvanceReferencedOutcome =
+    referencedOutcome !== null &&
+    shouldAdvanceReferencedExperimentOutcome({
+      frontmatter: document.attributes,
+      referencedOutcome: referencedOutcome.outcome,
+      requestedAsOf: input.outcome.asOf,
+    });
+  if (
+    referencedOutcome !== null &&
+    !shouldAdvanceReferencedOutcome
+  ) {
+    return referencedOutcome;
+  }
+
   const requestedOutcome = validateContract(
     experimentOutcomeSchema,
     input.outcome,
@@ -764,34 +789,31 @@ export async function writeExperimentOutcome(
     "EXPERIMENT_OUTCOME_INVALID",
     "Experiment outcome failed contract validation before write.",
   );
-  const existingOutcome = await readExistingExperimentOutcome(
-    input.vaultRoot,
-    outcomePath,
-  );
-  if (
-    existingOutcome?.outcomeId === outcomeId &&
-    existingOutcome.asOf === requestedOutcome.asOf &&
-    existingOutcome.generatedAt === attributes.outcomeRef?.generatedAt &&
-    existingOutcome.experiment.status === nextStatus &&
-    attributes.status === nextStatus &&
-    attributes.endedOn === nextEndedOn &&
-    attributes.outcome?.finalAnalysisStatus === "generated" &&
-    attributes.outcomeRef?.outcomeId === outcomeId &&
-    attributes.outcomeRef.relativePath === outcomePath &&
-    experimentOutcomesAreEquivalent(existingOutcome, candidateOutcome)
-  ) {
-    return {
-      experimentId: attributes.experimentId,
-      slug: attributes.slug,
-      relativePath: input.relativePath,
-      status: attributes.status,
-      outcome: existingOutcome,
-      outcomePath,
-      updatedExperiment: false,
-    };
+  const existingOutcome = await readExistingExperimentOutcome(input.vaultRoot, outcomePath);
+
+  if (attributes.outcomeRef !== undefined && !shouldAdvanceReferencedOutcome) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The experiment already references a different immutable outcome artifact.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
   }
 
-  const generatedAt = nextExperimentOutcomeGeneratedAt(existingOutcome?.generatedAt);
+  if (existingOutcome !== null) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_UNREFERENCED",
+      "An unreferenced experiment outcome artifact already exists and requires explicit repair.",
+      {
+        experimentId: attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const generatedAt = new Date().toISOString();
   const validatedOutcome = validateContract(
     experimentOutcomeSchema,
     {
@@ -871,6 +893,143 @@ export async function writeExperimentOutcome(
   return result.result;
 }
 
+export async function readReferencedExperimentOutcome(
+  input: ReadReferencedExperimentOutcomeInput,
+): Promise<WriteExperimentOutcomeResult | null> {
+  const { document } = await readExperimentFrontmatterDocument(
+    input.vaultRoot,
+    input.relativePath,
+  );
+  const expectedFrontmatter = validateExperimentFrontmatter(
+    input.expectedFrontmatter,
+    input.relativePath,
+  );
+  if (!isDeepStrictEqual(document.attributes, expectedFrontmatter)) {
+    throw new VaultError(
+      "EXPERIMENT_REVISION_CONFLICT",
+      "Experiment changed while its saved outcome was being resolved. Retry against the current experiment revision.",
+      {
+        experimentId: document.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  return resolveReferencedExperimentOutcome({
+    attributes: document.attributes,
+    relativePath: input.relativePath,
+    vaultRoot: input.vaultRoot,
+  });
+}
+
+async function resolveReferencedExperimentOutcome(input: {
+  attributes: ExperimentFrontmatter;
+  relativePath: string;
+  vaultRoot: string;
+}): Promise<WriteExperimentOutcomeResult | null> {
+  const reference = input.attributes.outcomeRef;
+  if (reference === undefined) {
+    return null;
+  }
+  if (reference.relativePath === undefined) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The saved experiment outcome reference is missing or does not match its immutable artifact.",
+      {
+        experimentId: input.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  const outcome = await readExistingExperimentOutcome(
+    input.vaultRoot,
+    reference.relativePath,
+  );
+  const expectedOutcomeId = outcome === null
+    ? null
+    : `${input.attributes.experimentId}-outcome-${outcome.asOf}`;
+  const expectedOutcomePath = outcome === null
+    ? null
+    : `${VAULT_LAYOUT.experimentsDirectory}/outcomes/${input.attributes.slug}-${outcome.asOf}.json`;
+  if (
+    outcome === null ||
+    outcome.generatedAt !== reference.generatedAt ||
+    outcome.outcomeId !== reference.outcomeId ||
+    outcome.outcomeId !== expectedOutcomeId ||
+    reference.relativePath !== expectedOutcomePath ||
+    outcome.experiment.id !== input.attributes.experimentId ||
+    outcome.experiment.slug !== input.attributes.slug ||
+    !isDeepStrictEqual(
+      outcome.commonsProtocolRef ?? null,
+      input.attributes.commonsProtocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      outcome.protocolRef ?? null,
+      input.attributes.protocolRef ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      outcome.effectiveProtocolSnapshot ?? null,
+      input.attributes.effectiveProtocolSnapshot ?? null,
+    ) ||
+    input.attributes.outcome?.latestOutcomeId !== reference.outcomeId ||
+    input.attributes.outcome?.finalAnalysisStatus !== "generated"
+  ) {
+    throw new VaultError(
+      "EXPERIMENT_OUTCOME_REFERENCE_INVALID",
+      "The saved experiment outcome reference is missing or does not match its immutable artifact.",
+      {
+        experimentId: input.attributes.experimentId,
+        relativePath: input.relativePath,
+      },
+    );
+  }
+
+  return {
+    experimentId: input.attributes.experimentId,
+    slug: input.attributes.slug,
+    relativePath: input.relativePath,
+    status: input.attributes.status,
+    outcome,
+    outcomePath: reference.relativePath,
+    updatedExperiment: false,
+  };
+}
+
+export function shouldAdvanceReferencedExperimentOutcome(input: {
+  frontmatter: ExperimentFrontmatter;
+  referencedOutcome: ExperimentOutcome;
+  requestedAsOf: string;
+}): boolean {
+  const currentInterventionEnd = input.frontmatter.runPlan?.interventionEnd;
+  const savedInterventionEnd = input.referencedOutcome.windows.interventionEnd;
+  if (
+    currentInterventionEnd === undefined ||
+    input.referencedOutcome.experiment.status !== "active" ||
+    input.requestedAsOf <= input.referencedOutcome.asOf
+  ) {
+    return false;
+  }
+  const interventionEnd =
+    savedInterventionEnd !== null && savedInterventionEnd > currentInterventionEnd
+      ? savedInterventionEnd
+      : currentInterventionEnd;
+  if (input.requestedAsOf < interventionEnd) {
+    return false;
+  }
+
+  return (
+    input.frontmatter.status === "active" ||
+    (
+      input.frontmatter.status === "completed" &&
+      (
+        input.frontmatter.endedOn === undefined ||
+        input.frontmatter.endedOn >= interventionEnd
+      )
+    )
+  );
+}
+
 async function readExistingExperimentOutcome(
   vaultRoot: string,
   outcomePath: string,
@@ -888,36 +1047,6 @@ async function readExistingExperimentOutcome(
     }
     throw error;
   }
-}
-
-function experimentOutcomesAreEquivalent(
-  left: ExperimentOutcome,
-  right: ExperimentOutcome,
-): boolean {
-  const {
-    generatedAt: leftGeneratedAt,
-    schema: leftSchema,
-    ...leftComparable
-  } = left;
-  const {
-    generatedAt: rightGeneratedAt,
-    schema: rightSchema,
-    ...rightComparable
-  } = right;
-  void leftGeneratedAt;
-  void leftSchema;
-  void rightGeneratedAt;
-  void rightSchema;
-  return isDeepStrictEqual(leftComparable, rightComparable);
-}
-
-function nextExperimentOutcomeGeneratedAt(previous: string | undefined): string {
-  const now = new Date().toISOString();
-  if (!previous || now > previous) {
-    return now;
-  }
-
-  return new Date(Date.parse(previous) + 1).toISOString();
 }
 
 async function appendExperimentLifecycleEvent(
