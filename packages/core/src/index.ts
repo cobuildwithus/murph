@@ -351,6 +351,7 @@ export {
   MAX_INTEGRATION_INGEST_PARTS,
   MAX_INTEGRATION_INGEST_ZIP_ARCHIVE_BYTES,
   MAX_INTEGRATION_INGEST_ZIP_ENTRY_BYTES,
+  archiveClosedIntegrationIngestShards,
   assertIntegrationIngestRecordIntegrity,
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
@@ -363,15 +364,20 @@ export {
   readIntegrationEvidencePart,
   readIntegrationIngestById,
   readIntegrationIngestEntries,
+  recoverInterruptedClosedIntegrationIngestArchives,
   stableSerializeIntegrationIngest,
   stageIntegrationIngestAppendPlan,
 } from "./integration-ingests.ts";
 export type {
+  ArchiveClosedIntegrationIngestShardsInput,
+  ArchiveClosedIntegrationIngestShardsResult,
   ArchivedIntegrationIngestShardText,
   BuildIntegrationEvidencePartInput,
   BuildIntegrationIngestAppendPlanOptions,
   BuildIntegrationIngestRecordInput,
   IntegrationIngestAppendPlan,
+  RecoverInterruptedClosedIntegrationIngestArchivesInput,
+  RecoverInterruptedClosedIntegrationIngestArchivesResult,
   StoredIntegrationIngestEntry,
 } from "./integration-ingests.ts";
 export * from "./integration-ingest-migration.ts";

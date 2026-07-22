@@ -19,6 +19,10 @@ import {
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
 import {
+  archiveClosedIntegrationIngestShards,
+  type ArchiveClosedIntegrationIngestShardsResult,
+} from "@murphai/core";
+import {
   runInboxMediaRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
@@ -33,6 +37,7 @@ import type { RuntimeWakeSignal } from "./runtime-wake.ts";
 // next wake pays the full resend cost.
 export const HOSTED_IDLE_COMPACT_MIN_THREAD_TOKENS = 100_000;
 export const HOSTED_IDLE_COMPACT_TIMEOUT_MS = 120_000;
+export const HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS = 30_000;
 export const HOSTED_INBOX_MEDIA_RETENTION_RETRY_DELAY_MS = 5 * 60 * 1000;
 
 type HostedIdleMaintenanceWake = {
@@ -54,12 +59,13 @@ export type HostedIdleMaintenanceOutcome =
       threadContextTokensBefore: number | null;
     } & HostedIdleMaintenanceWake);
 
-// One idle-checkpoint maintenance step: opportunistic, fail-open thread
-// compaction. Runs only on TTL idle shutdown (never deploy evacuation). A
-// pending wake aborts it immediately; the engine kills the warm process before
-// returning, so the idle checkpoint that snapshots the Codex home never
-// captures a rollout mid-teardown. Future idle-time maintenance belongs here
-// as additional plain statements.
+// One idle-checkpoint maintenance step: bounded media retention, abortable
+// integration-ingest archiving, and opportunistic fail-open thread compaction.
+// Runs only on TTL idle shutdown (never deploy evacuation). A pending wake
+// aborts it immediately; the engine kills the warm process before returning,
+// so the idle checkpoint that snapshots the Codex home never captures a rollout
+// mid-teardown. Future idle-time maintenance belongs here as additional plain
+// statements.
 export async function runHostedIdleCheckpointMaintenance(input: {
   credentialSource: AssistantUsageCredentialSource;
   materializeRetentionCandidatePaths?: ((
@@ -147,11 +153,54 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     if (input.pendingWork) {
       // The checkpoint is on a prompt-return path (mailbox budget exhausted or
       // an imminent projected wake); retention is bounded and privacy-critical,
-      // but Codex compaction would delay member-visible work.
+      // but archive or Codex compaction would delay member-visible work.
       return attachInboxMediaRetentionWake(
         { kind: "skipped", reason: "pending_work", threadContextTokensBefore: null },
         retentionWake,
       );
+    }
+    if (input.vaultRoot) {
+      const archiveSignal = AbortSignal.any([
+        abortController.signal,
+        AbortSignal.timeout(HOSTED_INTEGRATION_INGEST_ARCHIVE_TIMEOUT_MS),
+      ]);
+      try {
+        const archiveResult = await archiveClosedIntegrationIngestShards({
+          signal: archiveSignal,
+          vaultRoot: input.vaultRoot,
+        });
+        if (
+          archiveResult.archivedShardCount > 0
+          || archiveResult.repairedShardCount > 0
+          || archiveResult.blockedShardCount > 0
+        ) {
+          emitIntegrationIngestArchiveLog({
+            memberId: input.memberId,
+            result: archiveResult,
+          });
+        }
+      } catch (error) {
+        if (abortController.signal.aborted) {
+          return buildInterruptedMaintenanceOutcome({
+            retentionWake,
+            shutdownSignal: input.shutdownSignal,
+            vaultRoot: input.vaultRoot,
+            wakeInterrupted,
+          });
+        }
+        emitIntegrationIngestArchiveFailureLog({
+          error,
+          memberId: input.memberId,
+        });
+      }
+    }
+    if (abortController.signal.aborted) {
+      return buildInterruptedMaintenanceOutcome({
+        retentionWake,
+        shutdownSignal: input.shutdownSignal,
+        vaultRoot: input.vaultRoot,
+        wakeInterrupted,
+      });
     }
     // Without a priced hosted model id the compact call's usage cannot be
     // accounted against the member's allowance, so do not spend unattributable
@@ -258,6 +307,62 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     wakeWatchAbort.abort();
     await wakeWatch;
   }
+}
+
+function emitIntegrationIngestArchiveLog(input: {
+  memberId: string;
+  result: ArchiveClosedIntegrationIngestShardsResult;
+}): void {
+  const blocked = input.result.blockedShardCount > 0;
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      integrationIngestArchiveBytes: input.result.archivedByteCount,
+      integrationIngestArchiveRepairedShards: input.result.repairedShardCount,
+      integrationIngestArchiveSourceBytes: input.result.sourceByteCount,
+      integrationIngestArchivedShards: input.result.archivedShardCount,
+      integrationIngestBlockedShards: input.result.blockedShardCount,
+      integrationIngestScannedShards: input.result.scannedShardCount,
+    },
+    level: blocked ? "warn" : "info",
+    message: blocked
+      ? "Hosted idle maintenance archived eligible integration ingest shards, but one or more shards require repair."
+      : "Hosted idle maintenance archived eligible integration ingest shards.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
+}
+
+function emitIntegrationIngestArchiveFailureLog(input: {
+  error: unknown;
+  memberId: string;
+}): void {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  emitHostedExecutionStructuredLog({
+    component: "runtime",
+    details: {
+      failureCode: "integration_ingest_archive_failed",
+      ...(typeof diagnostics?.errorCode === "string"
+        ? { failureErrorCode: diagnostics.errorCode }
+        : {}),
+      ...(typeof diagnostics?.errorName === "string"
+        ? { failureErrorName: diagnostics.errorName }
+        : {}),
+      failureErrorDetailPresent: typeof diagnostics?.errorDetail === "string",
+      ...(typeof diagnostics?.errorStatus === "number"
+        ? { failureErrorStatus: diagnostics.errorStatus }
+        : {}),
+      failureMessagePresent:
+        input.error instanceof Error && input.error.message.trim().length > 0,
+      failureName: readHostedExecutionSafeErrorName(input.error) ?? null,
+    },
+    error: input.error,
+    level: "warn",
+    message:
+      "Hosted idle maintenance could not archive closed integration ingest shards; checkpointing will continue.",
+    phase: "checkpoint",
+    userId: input.memberId,
+  });
 }
 
 function isInboxMediaRetentionAbortError(
