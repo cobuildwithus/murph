@@ -130,6 +130,19 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+## Phone-Call Result Context Deployment
+
+`phone-call.resulted` is a new system-mailbox kind and has no safe old-runner,
+new-web compatibility window. Deploy Cloudflare and the runner consumer first
+with `container_rollout=immediate`, require managed-container smoke to report
+the expected runner-bundle fingerprint, and verify there are no hosted mailbox
+parse or quarantine failures. Only then deploy Web, which replaces the prior
+automatic result notification with the internal context event. The first
+compatible runner is the rollback floor while that Web producer is active or
+any result event can remain durable or imported. New runners remain compatible
+with older Web producers, although those older producers retain the prior
+automatic-message behavior.
+
 ## Consented Group Disclosure Rollout
 
 The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,

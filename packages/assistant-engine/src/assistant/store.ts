@@ -605,6 +605,67 @@ export async function appendAssistantTranscriptEntriesWithRefs(
   })
 }
 
+export async function appendAssistantConversationContextEntry(input: {
+  createdAt: string
+  sessionId: string
+  text: string
+  vault: string
+}): Promise<{
+  appended: boolean
+  session: AssistantSession
+}> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const session = await readAssistantSession({
+      paths,
+      sessionId: input.sessionId,
+    })
+    if (!session) {
+      throw await createAssistantSessionNotFoundError({
+        paths,
+        sessionId: input.sessionId,
+      })
+    }
+
+    const existingEntries = await readAssistantTranscriptEntries(
+      paths,
+      input.sessionId,
+    )
+    const appended = !existingEntries.some((entry) =>
+      entry.kind === 'status' && entry.text === input.text
+    )
+    if (appended) {
+      await appendTranscriptEntries(paths, input.sessionId, [
+        assistantTranscriptEntrySchema.parse({
+          schema: 'murph.assistant-transcript-entry.v1',
+          kind: 'status',
+          text: input.text,
+          createdAt: input.createdAt,
+        }),
+      ])
+    }
+
+    if (
+      !appended
+      && session.codexResume === null
+      && session.resumeState === null
+    ) {
+      return { appended, session }
+    }
+
+    const updatedSession = await saveAssistantSessionAtPaths(paths, {
+      ...session,
+      codexResume: null,
+      resumeState: null,
+      updatedAt: new Date().toISOString(),
+    })
+    return {
+      appended,
+      session: updatedSession,
+    }
+  })
+}
+
 async function createAssistantSessionNotFoundError(input: {
   paths: AssistantStatePaths
   sessionId: string

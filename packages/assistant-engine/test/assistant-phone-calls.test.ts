@@ -279,6 +279,9 @@ describe("assistant phone calls", () => {
       success: true,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "The completed result becomes context when the user next talks to Murph; do not promise a proactive update.",
+    );
   });
 
   it.each([
@@ -321,6 +324,11 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]?.text).toContain(expectedText);
     expect(result.rpcResult.contentItems[0]?.text).toContain("hpc_123");
+    if (status === "starting") {
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        "The completed result becomes context when the user next talks to Murph; do not promise a proactive update.",
+      );
+    }
   });
 });
 

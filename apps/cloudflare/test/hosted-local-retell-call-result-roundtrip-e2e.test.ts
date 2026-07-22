@@ -10,13 +10,11 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
-  buildHostedAssistantNotificationDecisionResponse,
-} from "./helpers/hosted-local-e2e-support.js";
-import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
 import {
+  buildHostedLinqInboundEvent,
   buildLinqHomePhoneNumber,
   buildLinqRecipientPhoneNumber,
   startHostedLocalLinqStub,
@@ -29,9 +27,11 @@ const chatId = `chat_local_retell_result_${runId}`;
 const phoneCallId = `hpc_local_retell_result_${runId}`;
 const providerCallId = `retell_call_local_${runId}`;
 const retellApiKey = "retell-local-test-key";
+const linqWebhookSecret = "linq-local-retell-result-secret";
 const assistantModel = "gpt-5.6-terra";
 const resultSummary = "The pharmacy confirmed the prescription will be ready this afternoon.";
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
+const resultQuestion = "Did the pharmacy call return?";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -56,8 +56,11 @@ describe("hosted local Retell result roundtrip e2e", () => {
       additionalEnv: {
         HOSTED_ASSISTANT_MODEL: assistantModel,
         HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS:
+          buildLinqRecipientPhoneNumber(userId),
         LINQ_API_BASE_URL: requireLinqStub().runnerBaseUrl,
         LINQ_API_TOKEN: "linq-local-test-token",
+        LINQ_WEBHOOK_SECRET: linqWebhookSecret,
         MURPH_DEV_SKIP_HEALTH_COMMONS_WATCH: "1",
         OPENAI_API_KEY: "stub-local-openai-key",
         RETELL_API_KEY: retellApiKey,
@@ -72,7 +75,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     });
   }, 300_000);
 
-  it("turns one signed call result into one durable assistant notification", async () => {
+  it("records one signed call result for the next attended turn without automatic delivery", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -104,21 +107,32 @@ describe("hosted local Retell result roundtrip e2e", () => {
       requestKey: `retell-result-e2e:${runId}`,
     });
 
-    requireScenario().queueAssistantResponses([
-      buildHostedAssistantNotificationDecisionResponse({
-        privateSummary: "report completed phone call result",
-        text: resultReply,
-      }),
-    ], {
-      matchInputContains: resultSummary,
-    });
-
     const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const baselineSends = requireLinqStub().countObservedSends(replyPath);
+    const baselineProviderRequests = countAssistantProviderRequests();
     const payload = buildRetellCallAnalyzedPayload();
     const response = await postSignedRetellWebhook(payload);
     expect(response.status).toBe(204);
 
+    await requireScenario().waitForLatestPendingWake(userId);
+    const contextStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(contextStatus.lastErrorCode ?? null).toBeNull();
+    expect(contextStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends);
+    expect(countAssistantProviderRequests()).toBe(baselineProviderRequests);
+
+    requireScenario().queueAssistantResponses([resultReply], {
+      matchInputContains: resultSummary,
+    });
+    const questionResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_retell_result_question_${runId}`,
+        messageId: `msg_retell_result_question_${runId}`,
+        text: resultQuestion,
+      }),
+    );
+    expect(questionResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
     const send = await requireLinqStub().waitForAdditionalSend({
       baselineCount: baselineSends,
       expectedPath: replyPath,
@@ -130,7 +144,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(requireScenario().assistantProviderRequests.some((request) =>
+    expect(requireScenario().assistantProviderRequests.slice(baselineProviderRequests).some((request) =>
       request.url === "/v1/responses"
       && request.body.includes(resultSummary)
       && request.body.includes("untrusted provider/callee text")
@@ -154,6 +168,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     expect(replay.status).toBe(204);
     await requireScenario().waitForHostedIdle(userId);
     expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends + 1);
+    expect(countAssistantProviderRequests()).toBe(baselineProviderRequests + 1);
   }, 360_000);
 });
 
@@ -205,6 +220,33 @@ async function postSignedRetellWebhook(payload: Record<string, unknown>): Promis
     },
     method: "POST",
   });
+}
+
+async function postSignedLinqWebhook(event: Record<string, unknown>): Promise<Response> {
+  const rawBody = JSON.stringify(event);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = createHmac("sha256", linqWebhookSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest("hex");
+
+  return await fetch(
+    `${requireScenario().harness.webBaseUrl}/api/hosted-onboarding/linq/webhook`,
+    {
+      body: rawBody,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "x-webhook-signature": `sha256=${signature}`,
+        "x-webhook-timestamp": timestamp,
+      },
+      method: "POST",
+    },
+  );
+}
+
+function countAssistantProviderRequests(): number {
+  return requireScenario().assistantProviderRequests.filter(
+    (request) => request.url === "/v1/responses",
+  ).length;
 }
 
 function requireScenario(): HostedLocalFullStackScenario {

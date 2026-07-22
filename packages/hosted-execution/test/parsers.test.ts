@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS,
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -504,6 +505,80 @@ describe("parseHostedExecutionEvent", () => {
       },
       userId: "user-1",
     });
+  });
+
+  it("parses bounded phone-call result context for a bound direct route", () => {
+    const value = {
+      kind: "phone-call.resulted",
+      phoneCall: {
+        context: "Internal call result context.",
+        route: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
+      },
+      userId: "user-1",
+    } as const;
+
+    expect(parseHostedExecutionEvent(value)).toEqual(value);
+    expect(parseHostedExecutionWake({
+      ...value,
+      eventId: "phone-call.resulted:call-1",
+      occurredAt: "2026-07-22T16:24:46.000Z",
+    })).toEqual({
+      ...value,
+      eventId: "phone-call.resulted:call-1",
+      occurredAt: "2026-07-22T16:24:46.000Z",
+    });
+  });
+
+  it("rejects phone-call result context without a bounded direct binding", () => {
+    const route = {
+      actorId: "+15550002222",
+      channel: "linq",
+      delivery: {
+        kind: "thread",
+        target: "chat_home_123",
+      },
+      identityId: "hbidx:phone:v1:test",
+      threadId: "chat_home_123",
+      threadIsDirect: true,
+    } as const;
+    const value = {
+      kind: "phone-call.resulted",
+      phoneCall: {
+        context: "Internal call result context.",
+        route,
+      },
+      userId: "user-1",
+    } as const;
+
+    expect(() => parseHostedExecutionEvent({
+      ...value,
+      phoneCall: {
+        ...value.phoneCall,
+        route: {
+          ...route,
+          threadIsDirect: false,
+        },
+      },
+    })).toThrow(/bound direct conversation/u);
+    expect(() => parseHostedExecutionEvent({
+      ...value,
+      phoneCall: {
+        ...value.phoneCall,
+        context: "x".repeat(
+          HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS + 1,
+        ),
+      },
+    })).toThrow(/Unicode code points/u);
   });
 
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {

@@ -587,6 +587,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
+    || item.route.action === "record-phone-call-result-context"
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"

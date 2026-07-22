@@ -14,7 +14,7 @@ import {
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 
-export function resolveHostedPhoneCallResultNotificationRoute(input: {
+export function resolveHostedPhoneCallResultContextRoute(input: {
   member: HostedMemberAssistantNotificationState | null;
   memberId: string;
 }): HostedExecutionAssistantNotificationRoute | null {
@@ -37,7 +37,7 @@ export function resolveHostedPhoneCallResultNotificationRoute(input: {
   });
 }
 
-export async function requireHostedPhoneCallResultNotificationRoute(input: {
+export async function requireHostedPhoneCallResultContextRoute(input: {
   memberId: string;
   prisma?: HostedOnboardingReadClient;
 }): Promise<HostedExecutionAssistantNotificationRoute> {
@@ -45,15 +45,15 @@ export async function requireHostedPhoneCallResultNotificationRoute(input: {
     memberId: input.memberId,
     prisma: input.prisma ?? getPrisma(),
   });
-  const route = resolveHostedPhoneCallResultNotificationRoute({
+  const route = resolveHostedPhoneCallResultContextRoute({
     member,
     memberId: input.memberId,
   });
   if (!route) {
     throw hostedOnboardingError({
-      code: "HOSTED_PHONE_CALL_NOTIFICATION_ROUTE_REQUIRED",
+      code: "HOSTED_PHONE_CALL_RESULT_CONTEXT_ROUTE_REQUIRED",
       httpStatus: 409,
-      message: "Hosted phone calls require a deliverable result notification route.",
+      message: "Hosted phone calls require a bound direct result context route.",
       retryable: true,
     });
   }

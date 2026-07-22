@@ -943,8 +943,26 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
-External outcomes that require generated user-facing prose, such as phone-call
-results, continue to use `assistant.notification.requested` instead.
+Detached `assistant.notification.requested` work remains output-only and cannot
+mutate resident conversation history or native provider resume state. Phone-call
+analysis therefore uses the dedicated `phone-call.resulted` system-mailbox event
+instead. Web stores a bounded untrusted context record plus the exact bound
+direct route; the runtime appends one idempotent internal transcript entry to
+that route's resident session without starting a provider turn, exposing tools,
+or delivering a message. The append clears native provider resume metadata so
+the next attended user turn rebuilds from committed transcript history and sees
+both the prior conversation and the call outcome. A repeated webhook or mailbox
+delivery may clear stale resume again, but it must not append the same context
+entry twice.
+
+`phone-call.resulted` is a hard-cut consumer-first mailbox rollout. An old
+runner quarantines the unknown system row and blocks system-lane progress, so
+deploy Cloudflare and the runner with `container_rollout=immediate`, prove the
+new runner-bundle fingerprint and no mailbox parse failures, and only then
+deploy the web producer. The first compatible runner remains the rollback floor
+while web can produce the event or any result event can remain durable or
+imported. During the deployment window, an older web producer can still emit
+the prior automatic notification; the new runner accepts that existing event.
 
 Approval decisions always append the generation-scoped reconciliation wake in
 the same transaction as the decision. Browser returns use a bare conversation

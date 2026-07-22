@@ -24,6 +24,9 @@ import {
   executeHostedAssistantAskCompletedWake,
 } from "./events/assistant-ask-completion.ts";
 import {
+  executeHostedPhoneCallResultedWake,
+} from "./events/phone-call-result.ts";
+import {
   createNoopMailboxEffect,
   type HostedMailboxOutcome,
 } from "./events/mailbox-outcome.ts";
@@ -47,6 +50,7 @@ import {
 } from "./wake-candidates.ts";
 
 export { executeHostedAssistantNotificationWake };
+export { executeHostedPhoneCallResultedWake };
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
 const DIRECT_CONVERSATION_WAKE_ERROR_MESSAGE =
@@ -243,6 +247,12 @@ async function executeHostedSystemWake(input: {
           vaultRoot: input.vaultRoot,
         }),
         vaultRoot: input.vaultRoot,
+      });
+    case "phone-call.resulted":
+      return executeHostedPhoneCallResultedWake({
+        executionContext: input.executionContext,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
       });
     case "assistant.ask.completed":
       return executeHostedAssistantAskCompletedWake({

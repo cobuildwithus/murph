@@ -2750,13 +2750,18 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
+        const resultContextGuidance =
+          'The completed result becomes context when the user next talks to Murph; do not promise a proactive update.'
         if (result.status === "calling") {
-          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+          return toolTextResult(
+            true,
+            `phone call accepted or placed: ${result.phoneCallId}. ${resultContextGuidance}`,
+          )
         }
         return toolTextResult(
           false,
           result.status === "starting"
-            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            ? `phone call start is still being reconciled: ${result.phoneCallId}. ${resultContextGuidance}`
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch {

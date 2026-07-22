@@ -33,8 +33,8 @@ import {
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
 import {
-  requireHostedPhoneCallResultNotificationRoute,
-} from "./notification-route";
+  requireHostedPhoneCallResultContextRoute,
+} from "./result-context-route";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
 import {
   hasPhoneCallAdvancedBeyondStart,
@@ -103,7 +103,7 @@ export async function createHostedPhoneCall(input: {
   prisma?: HostedPhoneCallStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
   requestKey: string;
-  resultNotificationRouteResolver?: (resolverInput: {
+  resultContextRouteResolver?: (resolverInput: {
     memberId: string;
   }) => Promise<void>;
   runtime?: PhoneCallRuntime;
@@ -134,12 +134,12 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     ?? startHostedPhoneCallReconciliationWorkflow;
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
-  const requireResultNotificationRoute: NonNullable<
-    typeof input.resultNotificationRouteResolver
+  const requireResultContextRoute: NonNullable<
+    typeof input.resultContextRouteResolver
   > =
-    input.resultNotificationRouteResolver
+    input.resultContextRouteResolver
     ?? (async ({ memberId }) => {
-      await requireHostedPhoneCallResultNotificationRoute({ memberId });
+      await requireHostedPhoneCallResultContextRoute({ memberId });
     });
 
   const existing = await store.hostedPhoneCall.findUnique({
@@ -177,7 +177,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   input.signal.throwIfAborted();
-  await requireResultNotificationRoute({
+  await requireResultContextRoute({
     memberId: input.memberId,
   });
   input.signal.throwIfAborted();

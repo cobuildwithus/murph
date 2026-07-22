@@ -6,10 +6,10 @@ import {
 
 import type { HostedMemberSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
-  resolveHostedPhoneCallResultNotificationRoute,
-} from "@/src/lib/phone-calls/notification-route";
+  resolveHostedPhoneCallResultContextRoute,
+} from "@/src/lib/phone-calls/result-context-route";
 
-describe("hosted phone-call notification routing", () => {
+describe("hosted phone-call result context routing", () => {
   it("preserves credential-compatible thread delivery for a legacy home route", () => {
     const lookupKey = "stale_pending_lookup";
     const member = buildMember({
@@ -27,7 +27,7 @@ describe("hosted phone-call notification routing", () => {
       pendingLinqRecipientPhone: "+15559990000",
     });
 
-    const route = resolveHostedPhoneCallResultNotificationRoute({
+    const route = resolveHostedPhoneCallResultContextRoute({
       member,
       memberId: member.core.id,
     });
@@ -58,7 +58,7 @@ describe("hosted phone-call notification routing", () => {
       linqRecipientPhone: "+15559990000",
     });
 
-    const route = resolveHostedPhoneCallResultNotificationRoute({
+    const route = resolveHostedPhoneCallResultContextRoute({
       member,
       memberId: member.core.id,
     });

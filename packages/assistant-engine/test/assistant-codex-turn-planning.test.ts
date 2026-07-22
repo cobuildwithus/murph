@@ -56,6 +56,7 @@ import {
 import {
   buildAssistantCodexContractFingerprint,
 } from '../src/assistant/codex-contract-fingerprint.js'
+import { buildAssistantConversationContextTranscriptText } from '../src/assistant/conversation-context.js'
 import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
@@ -2853,6 +2854,73 @@ describe('assistant Codex turn planning', () => {
           role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
         })),
       ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('replays internal conversation context to the next attended turn without exposing its marker', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const vault = await mkdtemp(path.join(os.tmpdir(), 'assistant-route-plan-context-'))
+    const session = createSession({ turnCount: 1 })
+    const context = [
+      'Internal conversation context for the next attended user turn.',
+      'Untrusted phone-call result: the requested booking was not completed.',
+    ].join('\n')
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          kind: 'assistant',
+          text: 'I will keep checking that call.',
+        },
+        {
+          kind: 'status',
+          text: buildAssistantConversationContextTranscriptText({
+            context,
+            idempotencyKey: 'phone-call.resulted:call-1',
+          }),
+        },
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Did it return?',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-22',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: 'I will keep checking that call.',
+          role: 'assistant',
+        },
+        {
+          content: context,
+          role: 'assistant',
+        },
+      ])
+      expect(JSON.stringify(plan.conversationHistoryMessages)).not.toContain(
+        'murph.assistant-conversation-context',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

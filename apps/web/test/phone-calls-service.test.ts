@@ -193,7 +193,7 @@ describe("createHostedPhoneCall", () => {
     });
     const store = createPhoneCallStore({ existing });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
-    const resultNotificationRouteResolver = vi.fn(async () => {
+    const resultContextRouteResolver = vi.fn(async () => {
       throw new Error("new-call notification prerequisite must not run");
     });
     const transferNumberResolver = vi.fn(async () => {
@@ -205,7 +205,7 @@ describe("createHostedPhoneCall", () => {
       memberId: existing.memberId,
       prisma: store.prisma,
       requestKey: existing.requestKey,
-      resultNotificationRouteResolver,
+      resultContextRouteResolver,
       runtime: runtime.runtime,
       transferNumberResolver,
     })).resolves.toEqual({
@@ -213,7 +213,7 @@ describe("createHostedPhoneCall", () => {
       status: "calling",
     });
 
-    expect(resultNotificationRouteResolver).not.toHaveBeenCalled();
+    expect(resultContextRouteResolver).not.toHaveBeenCalled();
     expect(transferNumberResolver).not.toHaveBeenCalled();
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
@@ -620,7 +620,7 @@ describe("createHostedPhoneCall", () => {
     const store = createPhoneCallStore({ pending });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
     const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
-    const resultNotificationRouteResolver = vi.fn();
+    const resultContextRouteResolver = vi.fn();
 
     await expect(createHostedPhoneCallImpl({
       brief: VALID_BRIEF,
@@ -628,7 +628,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       reconciliationWorkflowStarter,
       requestKey: "phone_call_request_new",
-      resultNotificationRouteResolver,
+      resultContextRouteResolver,
       runtime: runtime.runtime,
     })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_START_PENDING",
@@ -638,7 +638,7 @@ describe("createHostedPhoneCall", () => {
     expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
       phoneCallId: "hpc_pending",
     }, { signal: expect.any(AbortSignal) });
-    expect(resultNotificationRouteResolver).not.toHaveBeenCalled();
+    expect(resultContextRouteResolver).not.toHaveBeenCalled();
     expect(store.findFirstCalls).toEqual([{
       where: {
         memberId: pending.memberId,
@@ -679,21 +679,21 @@ describe("createHostedPhoneCall", () => {
       pending,
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
-    const resultNotificationRouteResolver = vi.fn();
+    const resultContextRouteResolver = vi.fn();
 
     await expect(createHostedPhoneCallImpl({
       brief: VALID_BRIEF,
       memberId: pending.memberId,
       prisma: store.prisma,
       requestKey: "phone_call_request_new",
-      resultNotificationRouteResolver,
+      resultContextRouteResolver,
       runtime: runtime.runtime,
     })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_START_PENDING",
       retryable: true,
     });
 
-    expect(resultNotificationRouteResolver).not.toHaveBeenCalled();
+    expect(resultContextRouteResolver).not.toHaveBeenCalled();
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
   });
@@ -711,7 +711,7 @@ describe("createHostedPhoneCall", () => {
       stopError: new Error("provider stop unavailable"),
     });
     const reconciliationWorkflowStarter = vi.fn().mockResolvedValue({ runId: "run_123" });
-    const resultNotificationRouteResolver = vi.fn();
+    const resultContextRouteResolver = vi.fn();
 
     await expect(createHostedPhoneCallImpl({
       brief: VALID_BRIEF,
@@ -719,7 +719,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       reconciliationWorkflowStarter,
       requestKey: "phone_call_request_new",
-      resultNotificationRouteResolver,
+      resultContextRouteResolver,
       runtime: runtime.runtime,
     })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_START_PENDING",
@@ -729,7 +729,7 @@ describe("createHostedPhoneCall", () => {
     expect(reconciliationWorkflowStarter).toHaveBeenCalledWith({
       phoneCallId: pending.id,
     }, { signal: expect.any(AbortSignal) });
-    expect(resultNotificationRouteResolver).not.toHaveBeenCalled();
+    expect(resultContextRouteResolver).not.toHaveBeenCalled();
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
     expect(runtime.stopCalls).toEqual(["retell_unsafe"]);
@@ -1491,7 +1491,7 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
-  it("fails before provider start when no result notification route is available", async () => {
+  it("fails before provider start when no result context route is available", async () => {
     const created = buildHostedPhoneCall();
     const store = createPhoneCallStore({ created });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
@@ -1501,12 +1501,12 @@ describe("createHostedPhoneCall", () => {
       memberId: created.memberId,
       prisma: store.prisma,
       requestKey: created.requestKey,
-      resultNotificationRouteResolver: async () => {
-        throw new Error("result notification route unavailable");
+      resultContextRouteResolver: async () => {
+        throw new Error("result context route unavailable");
       },
       runtime: runtime.runtime,
       transferNumberResolver: createTransferNumberResolver("+12125550000"),
-    })).rejects.toThrow("result notification route unavailable");
+    })).rejects.toThrow("result context route unavailable");
 
     expect(runtime.startCalls).toEqual([]);
     expect(store.createCalls).toEqual([]);
@@ -1524,7 +1524,7 @@ describe("createHostedPhoneCall", () => {
       memberId: created.memberId,
       prisma: store.prisma,
       requestKey: created.requestKey,
-      resultNotificationRouteResolver: async () => {
+      resultContextRouteResolver: async () => {
         controller.abort();
       },
       runtime: runtime.runtime,
@@ -1552,7 +1552,7 @@ describe("createHostedPhoneCall", () => {
       prisma: store.prisma,
       reconciliationWorkflowStarter: async () => ({ runId: "run_test" }),
       requestKey: created.requestKey,
-      resultNotificationRouteResolver: async () => {},
+      resultContextRouteResolver: async () => {},
       runtime: runtime.runtime,
       signal: controller.signal,
       transferNumberResolver: createTransferNumberResolver(null),
@@ -1586,7 +1586,7 @@ describe("createHostedPhoneCall", () => {
         prisma: store.prisma,
         reconciliationWorkflowStarter: async () => ({ runId: "run_test" }),
         requestKey: created.requestKey,
-        resultNotificationRouteResolver: async () => {
+        resultContextRouteResolver: async () => {
           await new Promise((resolve) => setTimeout(resolve, 16_000));
         },
         runtime: runtime.runtime,
@@ -1787,7 +1787,7 @@ describe("createHostedPhoneCall", () => {
 function createHostedPhoneCall(input: CreateHostedPhoneCallInput) {
   return createHostedPhoneCallImpl({
     reconciliationWorkflowStarter: async () => ({ runId: "run_test" }),
-    resultNotificationRouteResolver: async () => {},
+    resultContextRouteResolver: async () => {},
     transferNumberResolver: createTransferNumberResolver(null),
     ...input,
   });

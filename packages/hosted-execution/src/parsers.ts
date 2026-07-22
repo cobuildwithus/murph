@@ -19,6 +19,7 @@ import {
 import {
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
+  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS,
   isHostedConversationMessageChannel,
   isHostedExecutionWakeKind,
   isHostedLinqConversationContactKind,
@@ -43,6 +44,7 @@ import type {
   HostedExecutionMemberPersonalityPreferences,
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
+  HostedExecutionPhoneCallResultedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionGroupNewsletterEmailNeededDirectRoute,
@@ -85,6 +87,7 @@ import {
   buildHostedExecutionDeviceSyncWake,
   buildHostedExecutionGroupNewsletterEmailNeededWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
+  buildHostedExecutionPhoneCallResultedWake,
   buildHostedExecutionRuntimeControlWake,
   buildHostedExecutionTelegramConversationMessageWake,
 } from "./builders.ts";
@@ -286,6 +289,23 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           "Hosted execution wake assistant.notification.requested notification",
         ),
         occurredAt,
+      });
+    case "phone-call.resulted":
+      assertExactHostedExecutionKeys(record, [
+        "eventId",
+        "kind",
+        "occurredAt",
+        "phoneCall",
+        "userId",
+      ], "Hosted execution phone-call.resulted wake");
+      return buildHostedExecutionPhoneCallResultedWake({
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        phoneCall: parseHostedExecutionPhoneCallResultedPayload(
+          record.phoneCall,
+          "Hosted execution phone-call.resulted wake phoneCall",
+        ),
       });
     case "assistant.ask.requested":
       assertExactHostedExecutionKeys(record, [
@@ -1125,6 +1145,20 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
+    case "phone-call.resulted":
+      assertExactHostedExecutionKeys(record, [
+        "kind",
+        "phoneCall",
+        "userId",
+      ], "Hosted execution phone-call.resulted event");
+      return {
+        kind,
+        phoneCall: parseHostedExecutionPhoneCallResultedPayload(
+          record.phoneCall,
+          "Hosted execution phone-call.resulted event phoneCall",
+        ),
+        userId,
+      };
     case "assistant.ask.requested":
       assertExactHostedExecutionKeys(record, [
         "ask",
@@ -1314,6 +1348,36 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionPhoneCallResultedPayload(
+  value: unknown,
+  label: string,
+): HostedExecutionPhoneCallResultedPayload {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["context", "route"], label);
+  const context = requireString(record.context, `${label}.context`);
+  if (
+    context.trim().length === 0
+    || [...context].length > HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS
+  ) {
+    throw new TypeError(
+      `${label}.context must contain between 1 and `
+      + `${HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_CODE_POINTS} Unicode code points.`,
+    );
+  }
+  const route = parseHostedExecutionAssistantNotificationRoute(
+    record.route,
+    `${label}.route`,
+  );
+  if (route.threadIsDirect !== true || route.delivery.kind === "explicit") {
+    throw new TypeError(`${label}.route must identify a bound direct conversation.`);
+  }
+
+  return {
+    context,
+    route,
   };
 }
 
