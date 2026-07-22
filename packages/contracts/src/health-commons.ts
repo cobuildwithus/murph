@@ -265,6 +265,42 @@ export const HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES = [
 export type HealthCommonsBiomarkerCommunityOutcomeState =
   (typeof HEALTH_COMMONS_BIOMARKER_COMMUNITY_OUTCOME_STATES)[number];
 
+export const HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS = [
+  "generally_applicable_numeric",
+  "conditional_numeric",
+  "qualitative",
+  "calculated_or_method_specific",
+  "source_range_only",
+  "no_universal_range",
+] as const;
+
+export type HealthCommonsBiomarkerGuidanceClassification =
+  (typeof HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_GUIDANCE_ITEM_KINDS = [
+  "decision_limit",
+  "reference_interval",
+  "qualitative_interpretation",
+  "method_note",
+  "evidence_limit",
+] as const;
+
+export type HealthCommonsBiomarkerGuidanceItemKind =
+  (typeof HEALTH_COMMONS_BIOMARKER_GUIDANCE_ITEM_KINDS)[number];
+
+export const HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES = [
+  "clinical_guideline",
+  "consensus_statement",
+  "primary_literature",
+  "systematic_review",
+  "academic_reference",
+  "assay_documentation",
+  "regulatory_guidance",
+] as const;
+
+export type HealthCommonsBiomarkerGuidanceSourceType =
+  (typeof HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES)[number];
+
 const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -1487,6 +1523,120 @@ export type HealthCommonsBiomarkerMeasurement = z.infer<
   typeof healthCommonsBiomarkerMeasurementSchema
 >;
 
+export const healthCommonsBiomarkerGuidanceBoundSchema = z
+  .object({
+    value: z.number().finite(),
+    inclusive: z.boolean(),
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerGuidanceBound = z.infer<
+  typeof healthCommonsBiomarkerGuidanceBoundSchema
+>;
+
+export const healthCommonsBiomarkerGuidanceNumericValueSchema = z
+  .object({
+    label: shortStringSchema,
+    unit: shortStringSchema,
+    lowerBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+    upperBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!value.lowerBound && !value.upperBound) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Numeric guidance must preserve at least one explicit bound.",
+      });
+    }
+    if (
+      value.lowerBound
+      && value.upperBound
+      && value.lowerBound.value >= value.upperBound.value
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Numeric guidance lower bounds must be lower than upper bounds.",
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerGuidanceNumericValue = z.infer<
+  typeof healthCommonsBiomarkerGuidanceNumericValueSchema
+>;
+
+export const healthCommonsBiomarkerGuidanceSourceSchema = z
+  .object({
+    title: shortStringSchema,
+    organization: shortStringSchema,
+    year: z.number().int().min(1900).max(2100),
+    sourceType: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES),
+    url: z.string().url().optional(),
+    doi: shortStringSchema.optional(),
+    pmid: z.string().regex(/^\d+$/u).optional(),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    if (!source.url && !source.doi && !source.pmid) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Guidance sources require a URL, DOI, or PMID.",
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerGuidanceSource = z.infer<
+  typeof healthCommonsBiomarkerGuidanceSourceSchema
+>;
+
+export const healthCommonsBiomarkerGuidanceItemSchema = z
+  .object({
+    kind: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_ITEM_KINDS),
+    guidance: longStringSchema,
+    applicability: longStringSchema,
+    numericValues: z.array(healthCommonsBiomarkerGuidanceNumericValueSchema).min(1).optional(),
+    source: healthCommonsBiomarkerGuidanceSourceSchema,
+  })
+  .strict();
+
+export type HealthCommonsBiomarkerGuidanceItem = z.infer<
+  typeof healthCommonsBiomarkerGuidanceItemSchema
+>;
+
+export const healthCommonsBiomarkerReferenceGuidanceSchema = z
+  .object({
+    classification: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS),
+    reviewStatus: z.literal("reviewed"),
+    use: z.literal("context_only"),
+    items: z.array(healthCommonsBiomarkerGuidanceItemSchema).min(1),
+  })
+  .strict()
+  .superRefine((guidance, context) => {
+    if (
+      (guidance.classification === "generally_applicable_numeric"
+        || guidance.classification === "conditional_numeric")
+      && !guidance.items.some((item) => item.numericValues && item.numericValues.length > 0)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Numeric guidance classifications require at least one bounded numeric value.",
+      });
+    }
+    if (
+      guidance.classification === "qualitative"
+      && guidance.items.some((item) => item.numericValues && item.numericValues.length > 0)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Qualitative guidance must not manufacture numeric values.",
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerReferenceGuidance = z.infer<
+  typeof healthCommonsBiomarkerReferenceGuidanceSchema
+>;
+
 export const healthCommonsBiomarkerDetailSchema = z
   .object({
     shortName: shortStringSchema.optional(),
@@ -1559,6 +1709,7 @@ export const healthCommonsPageFrontmatterSchema = z
     measurementContexts: z.array(shortStringSchema).optional(),
     interpretationFrame: healthCommonsInterpretationFrameSchema.optional(),
     biomarker: healthCommonsBiomarkerDetailSchema.optional(),
+    referenceGuidance: healthCommonsBiomarkerReferenceGuidanceSchema.optional(),
     measurementMethod: healthCommonsMeasurementMethodSchema.optional(),
     communityOutcomeSummary: healthCommonsBiomarkerCommunityOutcomeSummarySchema.optional(),
     testPlans: z.array(healthCommonsTestPlanSchema).optional(),
@@ -1653,6 +1804,14 @@ export const healthCommonsPageFrontmatterSchema = z
         code: z.ZodIssueCode.custom,
         message: "measurementMethod is only valid on measurement_method pages.",
         path: ["measurementMethod"],
+      });
+    }
+
+    if (page.entityType !== "biomarker" && page.referenceGuidance) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "referenceGuidance is only valid on biomarker pages.",
+        path: ["referenceGuidance"],
       });
     }
 

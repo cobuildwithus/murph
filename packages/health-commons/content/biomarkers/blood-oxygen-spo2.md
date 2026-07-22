@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:blood-oxygen-spo2
 slug: biomarkers/blood-oxygen-spo2
 title: "Blood Oxygen Saturation (SpO₂)"
-summary: Percentage of hemoglobin carrying oxygen in the blood, where a consistently high reading means the lungs are loading red blood cells efficiently and tissue is getting the oxygen it needs.
+summary: "SpO₂ estimates the percentage of hemoglobin carrying oxygen, which can matter because sustained or repeated changes may reflect breathing, circulation, altitude, or measurement limitations."
 status: field-testing
 quality: usable
 aliases:
@@ -39,7 +39,7 @@ biomarker:
   valuePrecision: 1
   direction:
     desired: stable
-    label: "Stable in your normal range is usually the goal."
+    label: "Stable same-device patterns are more informative than chasing a higher number."
     nuance: "For many healthy sea-level adults, SpO₂ already sits near a physiological ceiling. Higher is not an experiment target; repeated lows, drops from baseline, or lows paired with shortness of breath, chest pain, confusion, bluish lips or nails, or unusual fatigue deserve medical context."
   privateMetricBindings:
     -
@@ -66,7 +66,7 @@ biomarker:
       body: "Contextualizes breathing during sleep, respiratory illness, altitude exposure, recovery strain, and symptom-matched low-oxygen warnings."
     -
       title: How to read it
-      body: "Typical sea-level range: 95-100%. Stable is expected; repeated drops or symptom-matched lows matter more than higher readings."
+      body: "No universal wearable target is encoded; repeated same-device changes, signal quality, altitude, symptoms, and any clinician-specific target matter more than maximizing the number."
     -
       title: What moves it
       body: "Altitude, illness, sleep apnea, perfusion, movement, sensor fit, nail polish, skin pigmentation, smoke exposure, and device limits."
@@ -79,7 +79,7 @@ biomarker:
       - "For overnight wearable data, separate the nightly median or average from desaturation events; a stable median can hide repeated dips, and a single dip can be movement artifact."
       - "Do not use consumer wearable SpO₂ alone to diagnose sleep apnea, pneumonia, COPD exacerbation, heart disease, or any other condition. Use it to decide whether a symptom pattern or repeated trend deserves clinical follow-up."
       - "Treat low readings that match concerning symptoms as safety context even if the wearable is imperfect; clinician-specific thresholds and emergency instructions override generic wellness ranges."
-      - "Do not try to optimize SpO₂ upward if it is already in your normal range. The practical goal is stable normal oxygenation and absence of repeated unexplained drops."
+      - "Do not treat SpO₂ as a score to maximize; interpret repeated unexplained changes against your usual pattern, symptoms, measurement quality, altitude, and any clinician-specific target."
     confounders:
       - device class
       - skin pigmentation
@@ -178,6 +178,20 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
   placeholder: Early outcome summaries will appear here once enough opted-in experiment runs are available.
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for Blood oxygen / SpO₂ (%); use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies with device class, signal quality, perfusion, skin pigmentation, movement, altitude, symptoms, and daytime-versus-overnight context recorded."
+      source:
+        title: "Pulse Oximeters"
+        organization: "US Food and Drug Administration"
+        year: 2025
+        sourceType: "regulatory_guidance"
+        url: "https://www.fda.gov/medical-devices/products-and-medical-procedures/pulse-oximeters"
 ---
 
 SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percentage of hemoglobin binding sites carrying oxygen at the moment of measurement. In consumer health tracking, it is best treated as a respiratory and sleep-context biomarker, not as a score to maximize.
@@ -186,7 +200,7 @@ SpO₂ is the pulse-oximetry estimate of arterial oxygen saturation: the percent
 
 Many healthy sea-level adults will usually see readings in the mid-to-high 90s. The exact acceptable range is contextual: altitude, chronic lung disease, congenital or cardiac conditions, medication effects, recent respiratory illness, and clinician-directed oxygen targets can all change what is normal for a specific person.
 
-The most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in your own normal range and whether there are repeated unexplained lows, especially overnight or during illness.
+The most useful pattern is not “highest possible SpO₂.” It is whether the value remains stable in your usual same-device pattern and whether there are repeated unexplained lows, especially overnight or during illness.
 
 ## Daytime spot checks versus overnight wearable trends
 

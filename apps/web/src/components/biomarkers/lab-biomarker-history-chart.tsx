@@ -24,6 +24,7 @@ import {
 
 export interface LabBiomarkerChartPoint {
   date: string;
+  displayValue?: string;
   id: string;
   value: number;
 }
@@ -69,6 +70,7 @@ export function LabBiomarkerHistoryChart({
 
         return [{
           date: point.date,
+          displayValue: point.displayValue,
           id: point.id,
           time,
           value: point.value,
@@ -111,8 +113,8 @@ export function LabBiomarkerHistoryChart({
           padding={range ? { bottom: 16, top: 16 } : undefined}
           tickFormatter={(value) => formatLabNumber(Number(value))}
           tickLine={false}
-          tickMargin={8}
-          width={72}
+          tickMargin={6}
+          width="auto"
         />
         {range && range.low !== null && range.high !== null ? (
           <ReferenceArea
@@ -147,14 +149,19 @@ export function LabBiomarkerHistoryChart({
                 const item = payload[0]?.payload as { date?: string } | undefined;
                 return item?.date ? formatFullDate(item.date) : "";
               }}
-              formatter={(value) => (
-                <div className="flex min-w-32 items-baseline justify-between gap-3">
-                  <span className="text-muted-foreground">Result</span>
-                  <span className="font-mono font-medium tabular-nums text-foreground">
-                    {formatLabNumber(Number(value))}{labUnitSuffix(unit)}
-                  </span>
-                </div>
-              )}
+              formatter={(value, _name, item) => {
+                const point = item?.payload as { displayValue?: string } | undefined;
+                const displayValue = point?.displayValue ?? formatLabNumber(Number(value));
+
+                return (
+                  <div className="flex min-w-32 items-baseline justify-between gap-3">
+                    <span className="text-muted-foreground">Result</span>
+                    <span className="font-mono font-medium tabular-nums text-foreground">
+                      {displayValue}{labUnitSuffix(unit)}
+                    </span>
+                  </div>
+                );
+              }}
             />
           }
         />

@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:rem-sleep-minutes
 slug: biomarkers/rem-sleep-minutes
 title: REM Sleep
-summary: Time spent in rapid-eye-movement sleep each night, where the brain fires almost as actively as when awake to consolidate memory, process emotion, and rehearse learned patterns.
+summary: "REM sleep minutes estimate time spent in rapid-eye-movement sleep, which can add context to sleep architecture and continuity when tracked consistently with the same device."
 status: field-testing
 quality: usable
 aliases:
@@ -53,7 +53,7 @@ biomarker:
       body: "Tracks REM-related dreaming, emotion, memory, and autonomic physiology; useful as a trend, not an optimization target."
     -
       title: How to read it
-      body: "Typical range: about 90 minutes to 2 hours, or 20-25% of total sleep. Best with fewer awakenings and better daytime function."
+      body: "There is no universal wearable target; compare same-device trends with total sleep, continuity, and next-day function rather than treating one stage estimate as a verdict."
     -
       title: What moves it
       body: "Sleep duration, early alarms, alcohol, medications, apnea, CPAP changes, substance withdrawal, stress, circadian disruption, illness, and algorithms."
@@ -119,6 +119,20 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 20
   placeholder: Early outcome summaries will appear here once enough opted-in runs include consistent REM sleep estimates and contextual sleep notes.
+referenceGuidance:
+  classification: no_universal_range
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: evidence_limit
+      guidance: "No universal numeric range is encoded for REM sleep (minutes); use the named method, population, and source interpretation rather than a wellness “optimal” range."
+      applicability: "Applies to repeated same-device estimates under comparable wear, sleep-window, firmware, and signal-quality conditions; consumer staging is contextual rather than diagnostic."
+      source:
+        title: "Consumer Sleep Technology: An American Academy of Sleep Medicine Position Statement"
+        organization: "American Academy of Sleep Medicine; Journal of Clinical Sleep Medicine"
+        year: 2018
+        sourceType: "consensus_statement"
+        url: "https://aasm.org/advocacy/position-statements/consumer-sleep-technology/"
 ---
 
 REM sleep minutes are useful because they give a simple view of one part of sleep architecture that many people already see in their wearable dashboards.

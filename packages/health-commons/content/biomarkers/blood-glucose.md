@@ -4,7 +4,7 @@ entityType: biomarker
 key: biomarker:blood-glucose
 slug: biomarkers/blood-glucose
 title: Blood Glucose
-summary: Sugar circulating in the blood, where insulin signals cells to pull it in for energy and how fast it clears after eating reflects how well that signaling works.
+summary: "Glucose measures sugar circulating in the blood, which matters because meals, fasting, hormones, illness, and medications can change how much fuel is available and regulated."
 status: field-testing
 hidden: true
 quality: usable
@@ -63,7 +63,7 @@ biomarker:
       body: "Shows fasting control, post-meal spikes, overnight stability, hypoglycemia risk, and how lifestyle, illness, or medications affect metabolism."
     -
       title: How to read it
-      body: "Fasting lab reference: <100 mg/dL; post-meal readings need separate timing. Treat lows as safety signals."
+      body: "Interpret a glucose value only in its measurement context—fasting laboratory, random, post-meal, capillary meter, or continuous sensor—and keep low readings visible as safety context."
     -
       title: What moves it
       body: "Carbohydrates, meal timing, activity, medications, illness, stress, sleep loss, alcohol, dehydration, sensor placement, and calibration changes."
@@ -206,6 +206,47 @@ communityOutcomeSummary:
   state: coming_soon
   minimumCohortSize: 30
   placeholder: Early glucose outcome summaries will appear once enough opted-in experiment runs include glucose samples with timing context.
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: decision_limit
+      guidance: "For fasting plasma glucose, ADA decision guidance uses 100 through 125 mg/dL for increased diabetes risk and at least 126 mg/dL as a diabetes decision threshold, with confirmation unless hyperglycemia is unequivocal."
+      applicability: "For venous plasma after at least 8 hours without caloric intake in nonpregnant people; random, post-meal, gestational, capillary, and continuous-glucose results require different guidance."
+      numericValues:
+        - label: "Fasting increased-risk interval"
+          unit: "mg/dL"
+          lowerBound:
+            value: 100
+            inclusive: true
+          upperBound:
+            value: 125
+            inclusive: true
+        - label: "Fasting increased-risk interval"
+          unit: "mmol/L"
+          lowerBound:
+            value: 5.6
+            inclusive: true
+          upperBound:
+            value: 6.9
+            inclusive: true
+        - label: "Fasting diabetes decision threshold"
+          unit: "mg/dL"
+          lowerBound:
+            value: 126
+            inclusive: true
+        - label: "Fasting diabetes decision threshold"
+          unit: "mmol/L"
+          lowerBound:
+            value: 7.0
+            inclusive: true
+      source:
+        title: "2. Diagnosis and Classification of Diabetes: Standards of Care in Diabetes—2026"
+        organization: "American Diabetes Association; Diabetes Care"
+        year: 2026
+        sourceType: "clinical_guideline"
+        url: "https://diabetesjournals.org/care/article/49/Supplement_1/S27/163926/2-Diagnosis-and-Classification-of-Diabetes"
 ---
 
 Blood glucose is one of the most useful and most easily misread biomarkers. It changes quickly enough to reveal meal, activity, sleep, stress, alcohol, illness, and medication effects. But the same number can mean different things depending on whether it came from a fasting laboratory draw, a waking finger-stick, a post-meal check, a CGM trace, an exercise window, or an illness day.

@@ -1,6 +1,6 @@
 # Health Commons
 
-Last verified: 2026-07-16
+Last verified: 2026-07-21
 
 ## Current State
 
@@ -35,6 +35,84 @@ The storage primitive is a typed wiki page plus generated projections. Product/d
 Protocol pages must include lineage, attribution, a performable protocol block, safety, and at least one test plan. Claims must cite source pages unless they are explicitly labeled as community outcomes.
 Protocol pages may also include an optional compact `experimentOnboarding` block that stores only protocol-specific onboarding deltas, such as start intent, safety-screen questions, setup slots, selected test plan, first-session guidance, adaptation policy, and tracking/support hints. Generic vault-read behavior, plan timing, adherence targets, readable logging labels, and stable session log ids come from assistant instructions plus canonical `testPlans`, `protocol.logFields`, `protocol.sessionFieldIds`, `protocol`, and `safety` fields; only stable extra confounder log ids belong in `trackingHints.confounderFields`, while prose confounder guidance stays in `trackingHints.confounders` or `notes`.
 Protocol and source pages may also include an optional `media` array for small public presentation assets such as header imagery. Keep those assets lightweight and repo-local, and do not use `media` as a substitute for research artifact manifests, PDFs, or other large external files.
+
+## Biomarker Reference Guidance
+
+Authored biomarker pages may carry calm educational context for measured
+health data under `referenceGuidance`. This content does not diagnose,
+prescribe, or decide whether a saved result is in or out of range. For saved
+laboratory results, the reporting source's flag and per-result reference
+interval remain authoritative in result UI. Commons guidance always uses
+`use: context_only`; it must never relabel a result, synthesize an absent flag,
+or override the source range.
+
+The contract lives in `packages/contracts/src/health-commons.ts`; authored
+guidance remains in `packages/health-commons/content/biomarkers/*.md`, and the
+generated biomarker research projection carries the parsed structure. Do not
+create a frontend-only guidance lookup or commit generated catalog artifacts.
+
+```yaml
+referenceGuidance:
+  classification: conditional_numeric
+  reviewStatus: reviewed
+  use: context_only
+  items:
+    - kind: decision_limit
+      guidance: "What the reviewed source says, in concise member-readable language."
+      applicability: "The population, specimen, timing, assay, method, or clinical context in which it applies."
+      numericValues:
+        - label: "Named comparator"
+          unit: "mg/dL"
+          upperBound:
+            value: 100
+            inclusive: false
+      source:
+        title: "Source title"
+        organization: "Issuing organization or journal"
+        year: 2026
+        sourceType: clinical_guideline
+        url: "https://example.org/source"
+```
+
+A source records its title, organization or journal, year, source type, and at
+least one stable locator (`url`, `doi`, or `pmid`). For a living assay catalog
+without a stated publication date, `year` records the reviewed revision year;
+the exact title and URL identify the living document.
+
+| Classification | Meaning |
+| --- | --- |
+| `generally_applicable_numeric` | A broadly used numeric decision framework with explicit exclusions and assay requirements; it remains context, not a result label. |
+| `conditional_numeric` | Numeric guidance changes materially with population, age, sex, pregnancy, fasting state, collection time, risk stratum, treatment context, or another named condition. |
+| `qualitative` | The result is categorical, narrative, titer-based, or otherwise not represented by a manufactured numeric interval. |
+| `calculated_or_method_specific` | The value depends on a formula, component inputs, instrument, specimen, or named assay and retains that provenance. |
+| `source_range_only` | A local laboratory or assay interval is the defensible numeric source, so Commons does not substitute a portable interval. |
+| `no_universal_range` | Evidence does not support one universal numeric range for the requested entity; this is a reviewed conclusion, not missing work. |
+
+Guidance may retain conflicting sources as separate items instead of choosing a
+false consensus. Numeric values store explicit lower and upper bounds with an
+`inclusive` flag. A comparator such as `<10` is an exclusive upper bound at 10,
+never the exact point 10. Keep each source's units; add equivalents only for
+straightforward, dimensionally valid, verified conversions. Never merge
+non-equivalent assays, particle and mass concentrations, percentages and
+absolute counts, direct and calculated values, specimen types, or similarly
+named analytes.
+
+Metric identities are canonicalized in `@murphai/health-metrics`. Reuse an
+existing authored Commons entity only through
+`packages/health-commons/src/biomarker-entity-mappings.ts` and only for a true
+analyte identity. Percentage and absolute differential counts; generic,
+CKD-EPI, and historical MDRD eGFR outputs; LDL calculation methods; fatty-acid
+panels and components; specimen-specific exposures; and point-of-care troponin
+assays remain distinct when their provenance or interpretation differs.
+
+Every measured biomarker admitted to the reviewed content set has an authored
+page or an explicit mapping to the correct page. Its `summary` is one
+non-placeholder sentence explaining what the marker measures and why it can
+matter without diagnosis, hype, commands, or treating one result as a verdict.
+It also has reviewed guidance or an explicit reviewed `no_universal_range`
+classification. `packages/health-commons/test/requested-biomarker-content.test.ts`
+locks these identity, summary, source, classification, comparator, and coverage
+rules.
 
 ## Publishing And Start Identity
 

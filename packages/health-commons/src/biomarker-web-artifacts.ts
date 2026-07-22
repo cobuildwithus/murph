@@ -3,6 +3,7 @@ import type {
   HealthCommonsBiomarkerExplainerCard,
   HealthCommonsBiomarkerPrivateMetricBinding,
   HealthCommonsBiomarkerProtocolExpectedDirection,
+  HealthCommonsBiomarkerReferenceGuidance,
   HealthCommonsBiomarkerTrendAggregation,
   HealthCommonsCatalogEntity,
   HealthCommonsClaim,
@@ -145,6 +146,7 @@ export interface HealthCommonsWebBiomarkerResearch {
   pageRevisionId: string;
   revision: HealthCommonsWebBiomarkerRevisionRef;
   route: HealthCommonsWebBiomarkerRoute;
+  referenceGuidance: HealthCommonsBiomarkerReferenceGuidance | null;
   routeId: string;
   schemaVersion: typeof HEALTH_COMMONS_WEB_BIOMARKER_RESEARCH_SCHEMA_VERSION;
   shortName: string;
@@ -278,6 +280,7 @@ export function buildHealthCommonsWebBiomarkerResearch(
     pageRevisionId: input.biomarker.revision.pageRevisionId,
     revision: input.biomarker.revision,
     route: biomarkerRoute(input),
+    referenceGuidance: input.biomarker.referenceGuidance ?? null,
     routeId: input.routeId,
     schemaVersion: HEALTH_COMMONS_WEB_BIOMARKER_RESEARCH_SCHEMA_VERSION,
     shortName: resolveHealthCommonsWebBiomarkerShortName(input.biomarker),
