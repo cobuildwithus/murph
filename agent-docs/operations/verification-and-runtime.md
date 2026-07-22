@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 
 ## Verification Execution Location
 
@@ -104,9 +104,10 @@ hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
 assistant-runtime bridge, and assistant-engine tool/prompt tests; then run
 `pnpm test:diff` for every touched owner and `pnpm test:scenario-integrity`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete
-`product-experience-review`, `frontend-review`, `coverage-write`, the
-review-only Fable UI pass, and ReviewGPT before handoff.
+putting a real query or ZIP in a durable artifact. Complete the local
+`product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
+pass, the review-only Fable UI pass, and the separate final ReviewGPT gate
+before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 

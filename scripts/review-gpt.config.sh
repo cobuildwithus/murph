@@ -202,6 +202,11 @@ review_gpt_register_dir_preset "pr-review" "pr-deep-review.md" \
   "pr-deep-review" \
   "deep-pr-review" \
   "pr-bugs-and-architecture"
+review_gpt_register_dir_preset "completion-specialists" "completion-specialists.md" \
+  "Preliminary combined prompt, frontend, and coverage review for an exact pushed PR head." \
+  "completion-review" \
+  "specialist-review" \
+  "prompt-frontend-coverage"
 review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "Package-boundary, circular-dependency, and mixed-concern audit focused on workspace ownership seams." \
   "package-boundary" \
@@ -212,8 +217,8 @@ review_gpt_register_dir_preset "package-boundaries" "package-boundaries.md" \
   "mixed-package-concerns"
 
 # Keep the PR-only evidence and REVIEW_COMPLETE contract out of aggregate
-# exploratory reviews. The dedicated `pr-review` preset is invoked only by the
-# pushed-head PR loop.
+# exploratory reviews. The dedicated `completion-specialists` and `pr-review`
+# presets are invoked only by their pushed-head completion workflows.
 review_gpt_register_preset_group "all" \
   "Run every non-PR ReviewGPT audit preset." \
   "security" \

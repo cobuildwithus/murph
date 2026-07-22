@@ -125,9 +125,6 @@ contract from PR #146 — this design deliberately requires neither.
 
 Standard repo workflow: worktree (`murph-*` naming), exec plan +
 COORDINATION_LEDGER row, required completion audits per
-`agent-docs/operations/completion-workflow.md` (simplify is likely
-warranted given the projection.ts table-driven refactor; coverage-write;
-task-finish-review; security-privacy-review not required — local
-rebuildable state, no trust boundary), `scripts/finish-task`, push, open a
-PR. Do not merge. The post-CI external deep-review loop is run by the
-requester, not the implementer.
+`agent-docs/operations/completion-workflow.md`, `scripts/finish-task`, push,
+and open a PR. Apply the preliminary specialist ReviewGPT pass and the separate
+final cross-cutting gate when routed by that workflow. Do not merge.
