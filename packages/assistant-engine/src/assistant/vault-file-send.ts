@@ -60,7 +60,6 @@ export interface AssistantActionApprovalPort {
 
 export type AssistantVaultFileSendRequestResult =
   & {
-    file: AssistantVaultFileResponseMedia
     filename: string
   }
   & HostedActionApprovalResult
@@ -158,7 +157,7 @@ export async function requestAssistantVaultFileSend(input: {
         status: 'awaiting_approval',
       },
       media: [file],
-      message: buildAssistantVaultFileDeliveryMessage(file.filename),
+      message: file.filename,
       replyToMessageId: input.replyToMessageId ?? null,
       sessionId: input.sessionId,
       threadId: input.threadId ?? null,
@@ -169,12 +168,8 @@ export async function requestAssistantVaultFileSend(input: {
     })
   }
 
-  const approvedFile = approval.status === 'approved'
-    ? applyAssistantVaultFileApprovalToMedia({ approval, file })
-    : file
   return {
     approvalId: approval.approvalId,
-    file: approvedFile,
     filename: file.filename,
     ...(approval.status === 'pending'
       ? {
@@ -196,10 +191,6 @@ export function buildAssistantVaultFileDeliveryIdempotencyKey(input: {
   expiresAt: string
 }): string {
   return buildHostedActionApprovalCycleOwnerKey(input)
-}
-
-export function buildAssistantVaultFileDeliveryMessage(filename: string): string {
-  return `Here it is: ${filename}`
 }
 
 export function buildAssistantVaultFileApprovalFallbackWakeAt(

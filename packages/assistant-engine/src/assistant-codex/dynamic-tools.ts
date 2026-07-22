@@ -896,7 +896,7 @@ export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
   description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, attach the file through your normal reply path and write a natural acknowledgment instead of reciting internal queue or delivery-status wording. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
+    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1763,9 +1763,14 @@ export type MurphDynamicToolResponseMediaPatch = {
   op: 'append' | 'replace'
 }
 
-export type MurphDynamicToolFinalActionPatch = {
-  kind: 'none'
-}
+export type MurphDynamicToolFinalActionPatch =
+  | {
+      kind: 'none'
+      owner?: 'vault-file'
+    }
+  | {
+      kind: 'reply-required'
+    }
 
 export type MurphDynamicToolReactionPatch = {
   reaction: AssistantMessageReaction
@@ -2557,12 +2562,6 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-response-media': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'response media cannot be changed after an approved vault file is attached',
-        )
-      }
       return {
         ...toolTextResult(
           true,
@@ -2638,19 +2637,26 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
     case 'send-vault-file': {
+      const replyRequiredResult = (
+        success: boolean,
+        text: string,
+      ): MurphDynamicToolExecutionResult => ({
+        ...toolTextResult(success, text),
+        finalActionPatch: { kind: 'reply-required' },
+      })
       const hostedToolContext = input.hostedToolContext ?? null
       const sendVaultFile = hostedToolContext?.sendVaultFile
       if (
         !hostedToolContext?.vaultFileSendAvailable
         || typeof sendVaultFile !== 'function'
       ) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'secure vault-file approval is unavailable for this conversation',
         )
       }
       if ((input.currentResponseMedia ?? []).length > 0) {
-        return toolTextResult(
+        return replyRequiredResult(
           false,
           'vault-file sending cannot be combined with other response media',
         )
@@ -2679,38 +2685,40 @@ export async function executeMurphDynamicToolRequest(input: {
               ...toolTextResult(
                 true,
                 JSON.stringify({
-                  deliveryStatus: 'queued_with_reply',
                   filename: result.filename,
                   note:
-                    'Approval succeeded. Attach this file through your normal reply path. Do not quote this note or claim final iMessage delivery unless later delivery evidence confirms it.',
+                    'Approval succeeded. The runtime owns delivery of the existing attachment intent. End the turn without attaching the file or sending a companion acknowledgment.',
                   status: result.status,
                 }),
               ),
-              responseMediaPatch: {
-                media: [result.file],
-                op: 'append' as const,
-              },
+              finalActionPatch: { kind: 'none', owner: 'vault-file' },
             }
           case 'denied':
-            return toolTextResult(false, 'vault-file delivery was denied')
+            return replyRequiredResult(false, 'vault-file delivery was denied')
           case 'expired':
-            return toolTextResult(false, 'vault-file delivery approval expired')
+            return replyRequiredResult(
+              false,
+              'vault-file delivery approval expired',
+            )
         }
       } catch (error) {
         if (
           error instanceof VaultCliError
           && error.code === 'ASSISTANT_VAULT_FILE_SEND_ALREADY_ACTIVE'
         ) {
-          return toolTextResult(
+          return replyRequiredResult(
             true,
             JSON.stringify({
               note:
-                'An earlier exact vault-file send for this conversation remains active. Do not prepare another file or approval; let the runtime resume the existing send.',
+                'A different generated vault-file send for this conversation remains active, so this file was not queued. Do not call finish_without_reply; explain that the earlier send must finish before retrying this file.',
               status: 'already_in_progress',
             }),
           )
         }
-        return toolTextResult(false, 'secure vault-file approval could not be prepared')
+        return replyRequiredResult(
+          false,
+          'secure vault-file approval could not be prepared',
+        )
       }
     }
     case 'create-phone-call': {
@@ -2882,12 +2890,6 @@ export async function executeMurphDynamicToolRequest(input: {
         }
       }
     case 'generate-image': {
-      if (hasVaultFileResponseMedia(input.currentResponseMedia ?? [])) {
-        return toolTextResult(
-          false,
-          'image generation cannot be combined with an approved vault file',
-        )
-      }
       if (hasVoiceMemoResponseMedia(input.currentResponseMedia ?? [])) {
         return toolTextResult(false, 'image generation cannot be combined with a voice memo')
       }
@@ -3043,12 +3045,6 @@ function hasVoiceMemoResponseMedia(
   media: readonly AssistantResponseMedia[],
 ): boolean {
   return media.some((item) => item.kind === 'voice_memo')
-}
-
-function hasVaultFileResponseMedia(
-  media: readonly AssistantResponseMedia[],
-): boolean {
-  return media.some((item) => item.kind === 'vault_file')
 }
 
 async function executeSubmitProductFeedbackTool(input: {

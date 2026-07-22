@@ -33,7 +33,6 @@ type TerminalActionApprovalView = HostedActionApprovalView & {
   status: Exclude<HostedActionApprovalStatus, "pending">;
 };
 
-const APPROVED_REPLY_BODY = "I approved the secure request.";
 const EXPIRED_APPROVAL_REPLY_BODY =
   "That approval link expired. Please send a new one.";
 
@@ -94,9 +93,9 @@ async function ActionApprovalTerminalState({
         preferredKind: approval.returnContactKind,
       }).catch(() => []);
 
-  // Approved revisits return to the originating conversation with the same
-  // foreground continuation as a fresh decision. Denied/expired stay on-screen
-  // so the member can read what happened before navigating away.
+  // Approved revisits return to the originating conversation. The durable
+  // system wake resumes the action without requiring a foreground message.
+  // Denied/expired stay on-screen so the member can read what happened first.
   if (approval.status === "approved" && contactOptions[0]?.href) {
     redirect(contactOptions[0].href);
   }
@@ -146,7 +145,7 @@ function terminalReplyBody(
 ): string | null {
   switch (status) {
     case "approved":
-      return APPROVED_REPLY_BODY;
+      return null;
     case "expired":
       return EXPIRED_APPROVAL_REPLY_BODY;
     case "denied":

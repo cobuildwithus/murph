@@ -101,9 +101,12 @@ export type {
 } from "./history/api.ts";
 export {
   MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,
+  readReferencedExperimentOutcome,
   readExperimentLifecycleFrontmatterDocuments,
+  shouldAdvanceReferencedExperimentOutcome,
 } from "./domains/experiments.ts";
 export type {
+  ReadReferencedExperimentOutcomeInput,
   ReadExperimentLifecycleFrontmatterResult,
 } from "./domains/experiments.ts";
 export {

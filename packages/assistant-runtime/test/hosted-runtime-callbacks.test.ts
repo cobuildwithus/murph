@@ -1578,6 +1578,28 @@ describe("hosted runtime callbacks", () => {
       threadId: "thread_2",
       turnId: "turn_unrelated",
     };
+    const unrelatedNewsletterRecipient = {
+      ...unrelatedPendingIntent,
+      actorId: null,
+      bindingDelivery: null,
+      channel: "email",
+      dedupeKey: "dedupe_unrelated_newsletter_recipient",
+      deliveryIdempotencyKey:
+        "group-newsletter:automation_unrelated:2026-04-08T00:00:00.000Z:group_unrelated",
+      deliveryTransportIdempotent: false,
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: "group_unrelated",
+        recipientMemberId: "member_unrelated",
+        subject: "Unrelated newsletter",
+        targetKind: "group",
+      }),
+      identityId: null,
+      intentId: "intent_unrelated_newsletter_recipient",
+      message: "Unrelated newsletter.",
+      replyToMessageId: null,
+      threadId: null,
+      threadIsDirect: false,
+    };
     const selectedActionId = "vault-file-send:shared-approval-cycle";
     const approvalId = `haa_${"b".repeat(32)}`;
     const selectedEffectId = buildHostedActionApprovalOutcomeEffectId({
@@ -1625,6 +1647,7 @@ describe("hosted runtime callbacks", () => {
       request: vi.fn(),
     };
     mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      unrelatedNewsletterRecipient,
       unrelatedPendingIntent,
       ...storedIntents,
     ]);
@@ -1669,6 +1692,7 @@ describe("hosted runtime callbacks", () => {
     );
     expect(sideEffects).toHaveLength(1);
     expect(sideEffects[0]?.effectId).toBe("intent_vault_file_2");
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
 
     actionApprovalPort.read.mockClear();
     mocks.applyAssistantVaultFileSendApprovalResult.mockClear();
@@ -3338,7 +3362,7 @@ describe("hosted runtime callbacks", () => {
         lastAttemptAt: null,
         lastError: null,
         media: [vaultFile],
-        message: "Here it is: report.pdf",
+        message: "",
         nextAttemptAt: "2026-04-08T00:06:00.000Z",
         replyToMessageId: "message_1",
         sessionId: "session_1",
@@ -3434,7 +3458,7 @@ describe("hosted runtime callbacks", () => {
       identityId: "identity_1",
       intentId: "intent_vault_file",
       lastError: null,
-      message: "Here it is: report.pdf",
+      message: "",
       nextAttemptAt: "2026-04-08T00:06:00.000Z",
       replyToMessageId: "message_1",
       sessionId: "session_1",

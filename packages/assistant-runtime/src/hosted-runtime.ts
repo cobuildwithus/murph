@@ -506,6 +506,17 @@ async function hasPrefetchedAssistantAskRequestPrefix(
 const isAssistantAskRequestMailboxItem: HostedMailboxItemPrefixPredicate =
   (item) => item.lane === "system" && item.kind === "assistant.ask.requested";
 
+async function hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+  prefetch: HostedMailboxPrefixPrefetch,
+): Promise<boolean> {
+  const response = await prefetch.response;
+  return response.items.length > 0
+    && response.items.every((item) =>
+      item.lane === "system"
+      && item.kind === "runtime.pending-effects-reconcile-requested"
+    );
+}
+
 function isHostedInitialBootstrapPending(input: {
   bootstrapRequired: boolean;
   result: HostedMailboxImportCheckpointResult;
@@ -1681,6 +1692,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
+      causalPendingEffectsOnly?: boolean;
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -1751,6 +1763,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                causalPendingEffectsOnly:
+                  passInput.causalPendingEffectsOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
@@ -2486,6 +2500,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
+        causalPendingEffectsOnly?: boolean;
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -2523,6 +2538,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             presentedInvocationLocalProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
+            causalPendingEffectsOnly:
+              singleWakeInput.causalPendingEffectsOnly === true,
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
@@ -2564,7 +2581,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
         signal?: AbortSignal;
-        systemMailboxMode: "all" | "assistant-ask-request";
+        systemMailboxAdmission: "all" | "pre_checkpoint";
       }): Promise<boolean> => {
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
@@ -2719,12 +2736,20 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        const prefetchedAssistantAskRequest = input.systemMailboxMode === "assistant-ask-request"
+        const prefetchedAssistantAskRequest = input.systemMailboxAdmission === "pre_checkpoint"
           ? await hasPrefetchedAssistantAskRequestPrefix(initialMailboxPrefetch)
           : false;
-        if (
-          input.systemMailboxMode === "assistant-ask-request"
+        const prefetchedOnlyCausalPendingEffects =
+          input.systemMailboxAdmission === "pre_checkpoint"
           && !prefetchedAssistantAskRequest
+          && runtimeStateDirtyBeforeMailboxImport
+          && await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+            initialMailboxPrefetch,
+          );
+        if (
+          input.systemMailboxAdmission === "pre_checkpoint"
+          && !prefetchedAssistantAskRequest
+          && !prefetchedOnlyCausalPendingEffects
         ) {
           await finishMailboxImportWithoutAssistant(conversationImport);
           return false;
@@ -2734,10 +2759,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         const systemImport = await importMailboxLanes(
           ["system"],
-          input.systemMailboxMode === "assistant-ask-request"
+          prefetchedAssistantAskRequest
             ? importForegroundMailboxItem
             : importMailboxItem,
-          input.systemMailboxMode === "assistant-ask-request"
+          prefetchedAssistantAskRequest
             ? {
                 importContext: {
                   ...initialMailboxImportContext,
@@ -2758,12 +2783,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
         }
-        if (input.systemMailboxMode === "assistant-ask-request") {
+        if (prefetchedAssistantAskRequest) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return systemImport.importResult.importedCount > 0;
         }
         try {
           await runForegroundPassAfterMailboxImport({
+            causalPendingEffectsOnly:
+              prefetchedOnlyCausalPendingEffects,
             initialMailboxImport: systemImport,
             initialMailboxImportContext,
             latencySeed: input.latencySeed,
@@ -2798,7 +2825,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ),
           shouldContinue: options.shouldContinue,
           signal: options.signal,
-          systemMailboxMode: "assistant-ask-request",
+          systemMailboxAdmission: "pre_checkpoint",
         });
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
@@ -2810,7 +2837,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requestIdKind: "checkpoint-wake",
           shouldContinue: input.shouldContinue,
           signal: input.signal,
-          systemMailboxMode: "all",
+          systemMailboxAdmission: "all",
         });
       };
       const resolveHotProjectedAssistantWake = (): {

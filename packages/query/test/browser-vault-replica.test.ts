@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   computeHabitatCoverage,
+  experimentOutcomeSchema,
   type ExperimentOutcome,
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
@@ -21,7 +22,7 @@ import {
   selectBrowserVaultOverview,
   selectBrowserVaultTrackedExperiments,
 } from "../src/browser.ts";
-import { buildMetricProjection } from "../src/index.ts";
+import { analyzeExperimentOutcome, buildMetricProjection } from "../src/index.ts";
 
 type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 type CreateReplicaInput = Omit<Parameters<typeof createBrowserVaultReplica>[0], "metricPoints">;
@@ -362,13 +363,129 @@ test("browser vault replicas validate and round-trip canonical experiment outcom
     }),
   });
 
-  assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [
-    {
-      ...outcome,
-      schema: "murph.experiment-outcome.v2",
-      schemaVersion: "murph.experiment-outcome.v2",
+  assert.deepEqual(parseBrowserVaultReplica(replica).experimentOutcomes, [outcome]);
+});
+
+test("legacy outcomes stay immutable while results show current daily measurements", async () => {
+  const experimentId = "exp_01ARZ3NDEKTSV4RRFFQ69G5FAW";
+  const slug = "legacy-saved-time-evidence";
+  const frontmatter = {
+    schemaVersion: "murph.frontmatter.experiment.v1" as const,
+    docType: "experiment" as const,
+    experimentId,
+    slug,
+    title: "Legacy saved-time evidence",
+    status: "completed" as const,
+    startedOn: "2026-04-01",
+    endedOn: "2026-04-04",
+    runPlan: {
+      baselineStart: "2026-04-01",
+      baselineEnd: "2026-04-02",
+      interventionStart: "2026-04-03",
+      interventionEnd: "2026-04-04",
     },
-  ]);
+    analysisPlan: {
+      primaryBiomarkerKey: "biomarker:deep-sleep-minutes",
+      desiredDirection: "increase" as const,
+    },
+    outcome: {
+      latestOutcomeId: `${experimentId}-outcome-2026-04-04`,
+      finalAnalysisStatus: "generated" as const,
+    },
+    outcomeRef: {
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      outcomeId: `${experimentId}-outcome-2026-04-04`,
+      relativePath: `bank/experiments/outcomes/${slug}-2026-04-04.json`,
+    },
+  };
+  const vault = createVaultReadModel({
+    entities: [
+      createEntity("experiment", experimentId, {
+        attributes: frontmatter,
+        experimentSlug: slug,
+        frontmatter,
+        kind: "experiment",
+        status: "completed",
+        title: frontmatter.title,
+      }),
+    ],
+    metadata: null,
+    vaultRoot: "browser://legacy-saved-time-evidence",
+  });
+  const originalPoints = [
+    ["2026-04-01", 60],
+    ["2026-04-02", 62],
+    ["2026-04-03", 70],
+    ["2026-04-04", 72],
+  ].map(([effectiveDate, value], index) => ({
+    ...createMetricPoint({
+      biomarkerKey: "biomarker:deep-sleep-minutes",
+      effectiveDate: String(effectiveDate),
+      metricKey: "deep-sleep-minutes",
+      recordId: `original-${index}`,
+      unit: "minutes",
+      value: Number(value),
+    }),
+    id: `metric-point:original-${index}`,
+    recordedAt: `${String(effectiveDate)}T12:00:00.000Z`,
+  }));
+  const analyzed = analyzeExperimentOutcome(vault, slug, {
+    asOf: "2026-04-04",
+    metricPoints: originalPoints,
+  });
+  const legacyOutcome = experimentOutcomeSchema.parse({
+    ...analyzed,
+    generatedAt: "2026-04-05T12:00:00.000Z",
+    schema: "murph.experiment-outcome.v1",
+    schemaVersion: "murph.experiment-outcome.v1",
+    metricResults: analyzed.metricResults.map(({ points: _points, ...metric }) => {
+      void _points;
+      return metric;
+    }),
+  });
+  const currentValues = [160, 162, 170, 172];
+  const currentPoints = originalPoints.map((point, index) => {
+    const value = currentValues[index];
+    if (value === undefined) {
+      throw new Error("Expected one current value for each original point.");
+    }
+    return {
+      ...point,
+      canonicalValue: value,
+      context: {
+        ...point.context,
+        contributingRecordIds: [`current-${index}`],
+      },
+      id: `metric-point:current-${index}`,
+      recordedAt: "2026-04-06T12:00:00.000Z",
+      source: {
+        ...point.source,
+        recordId: `current-${index}`,
+      },
+      value,
+    };
+  });
+  const replica = await createBrowserVaultReplica({
+    experimentOutcomes: [legacyOutcome],
+    generatedAt: "2026-04-07T12:00:00.000Z",
+    metricPoints: currentPoints,
+    sourceBundleHash: "b".repeat(64),
+    vault,
+  });
+
+  const persistedOutcome = replica.experimentOutcomes?.[0];
+  assert.deepEqual(persistedOutcome, legacyOutcome);
+  const results = selectBrowserVaultExperimentResults(
+    createBrowserVaultQueryClient(replica),
+    { experimentId },
+  );
+  assert.ok(results);
+  assert.equal(results.persistedOutcome?.schemaVersion, "murph.experiment-outcome.v1");
+  assert.equal(results.biomarkers[0]?.baseline.mean, 61);
+  assert.deepEqual(
+    results.biomarkers[0]?.points.map((point) => point.value),
+    currentValues,
+  );
 });
 
 test("browser vault parser defaults legacy replicas without outcomes to an empty list", async () => {

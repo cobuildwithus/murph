@@ -1166,7 +1166,7 @@ test("renders current saved daily snapshots without consulting changed live rows
   );
 });
 
-test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot be recovered", () => {
+test("keeps multi-metric legacy summaries saved while pairing each metric with current bounded points", () => {
   const outcome = savedOutcome();
   const primaryMetric = outcome.metricResults[0];
   if (!primaryMetric) {
@@ -1200,9 +1200,15 @@ test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot 
       entities: [
         experimentEntity({
           analysisPlan: {
-            desiredDirection: "decrease",
-            primaryBiomarkerKey: "biomarker:resting-heart-rate",
-            secondaryBiomarkerKeys: ["biomarker:hrv-rmssd"],
+            desiredDirection: "increase",
+            primaryBiomarkerKey: "biomarker:deep-sleep-minutes",
+            measurementAnchors: [{
+              role: "baseline",
+              kind: "wearable_summary",
+              recordId: "post-save-selector",
+              biomarkerKeys: ["biomarker:deep-sleep-minutes"],
+              observedOn: "2026-03-01",
+            }],
           },
           endedOn: "2026-04-06",
           outcomeRef: {
@@ -1212,10 +1218,13 @@ test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot 
           },
           status: "completed",
           runPlan: {
-            baselineStart: "2026-04-01",
-            baselineEnd: "2026-04-03",
-            interventionStart: "2026-04-04",
-            interventionEnd: "2026-04-06",
+            baselineStart: "2026-03-01",
+            baselineEnd: "2026-03-03",
+            interventionStart: "2026-03-04",
+            interventionEnd: "2026-03-06",
+            logging: {
+              sessionFields: ["estimated-sleep-onset-minutes"],
+            },
             targetSessions: 3,
             minimumUsefulSessions: 2,
           },
@@ -1230,6 +1239,7 @@ test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot 
           ["2026-04-04", 59],
           ["2026-04-05", 58],
           ["2026-04-06", 57],
+          ["2026-04-07", 999],
         ]),
         ...[
           ["2026-04-01", 49],
@@ -1245,6 +1255,13 @@ test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot 
           unit: "ms",
           value: Number(value),
         })),
+        metricRow({
+          biomarkerKey: "biomarker:deep-sleep-minutes",
+          date: "2026-04-01",
+          metricKey: "deep-sleep-minutes",
+          unit: "minutes",
+          value: 999,
+        }),
       ],
     }),
   );
@@ -1253,12 +1270,41 @@ test("keeps a multi-metric legacy outcome aggregate-only when any metric cannot 
 
   assert.deepEqual(
     result?.biomarkers.map((biomarker) => ({
+      baselineMean: biomarker.baseline.mean,
       biomarkerKey: biomarker.biomarkerKey,
-      points: biomarker.points,
+      dates: biomarker.points.map((point) => point.date),
+      interventionMean: biomarker.intervention.mean,
+      values: biomarker.points.map((point) => point.value),
     })),
     [
-      { biomarkerKey: "biomarker:resting-heart-rate", points: [] },
-      { biomarkerKey: "biomarker:hrv-rmssd", points: [] },
+      {
+        baselineMean: 62,
+        biomarkerKey: "biomarker:resting-heart-rate",
+        dates: [
+          "2026-04-01",
+          "2026-04-02",
+          "2026-04-03",
+          "2026-04-04",
+          "2026-04-05",
+          "2026-04-06",
+        ],
+        interventionMean: 58,
+        values: [63, 62, 61, 59, 58, 57],
+      },
+      {
+        baselineMean: 50,
+        biomarkerKey: "biomarker:hrv-rmssd",
+        dates: [
+          "2026-04-01",
+          "2026-04-02",
+          "2026-04-03",
+          "2026-04-04",
+          "2026-04-05",
+          "2026-04-06",
+        ],
+        interventionMean: 55,
+        values: [49, 50, 51, 53, 54, 55],
+      },
     ],
   );
 });

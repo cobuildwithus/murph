@@ -589,10 +589,13 @@ describe('assistant execution prompt contract', () => {
       'On `status: "approved"`',
     )
     expect(prompt).toContain(
-      'reply naturally with the filename',
+      'the runtime owns the attachment delivery',
     )
     expect(prompt).toContain(
-      'for example, "Here it is: report.pdf."',
+      'Do not send a companion chat reply or repeat the filename',
+    )
+    expect(prompt).toContain(
+      'call `finish_without_reply`',
     )
     expect(prompt).toContain(
       'Never expose `deliveryStatus`, approval/queue mechanics, or stock "delivery is not confirmed" copy',

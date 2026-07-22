@@ -354,7 +354,7 @@ export async function sendLinqChatMessage(
   } = {},
 ): Promise<MessageSendResponse> {
   const chatId = normalizeRequiredString(input.chatId, 'chat id')
-  const message = normalizeRequiredString(input.message, 'message')
+  const message = normalizeNullableString(input.message) ?? ''
   const idempotencyKey = normalizeNullableString(input.idempotencyKey)
   const replyToMessageId = normalizeNullableString(input.replyToMessageId)
   const body = buildLinqMessageBody({
@@ -1579,19 +1579,27 @@ function buildLinqMessageBody(input: {
     ? normalizeRequiredString(input.replyToMessageId, 'native reply target message id')
     : null
   const media = normalizeLinqMediaList(input.media ?? [])
-  const renderedText = renderMarkdownMessageText(
-    normalizeRequiredString(input.message, 'message'),
-  )
-  const textPart: TextPart = {
-    ...(renderedText.decorations.length > 0
-      ? {
-          text_decorations: renderedText.decorations,
-        }
-      : {}),
-    type: 'text' as const,
-    value: renderedText.text,
+  const normalizedMessage = normalizeNullableString(input.message)
+  let textPart: TextPart | null = null
+  if (normalizedMessage !== null) {
+    const renderedText = renderMarkdownMessageText(normalizedMessage)
+    textPart = {
+      ...(renderedText.decorations.length > 0
+        ? {
+            text_decorations: renderedText.decorations,
+          }
+        : {}),
+      type: 'text',
+      value: renderedText.text,
+    }
   }
-  const parts: MessageContent['parts'] = [textPart, ...media]
+  const parts: MessageContent['parts'] = textPart ? [textPart, ...media] : media
+  if (parts.length === 0) {
+    throw new VaultCliError(
+      'LINQ_INVALID_INPUT',
+      'Linq messages must include text or media.',
+    )
+  }
   if (parts.length > LINQ_MAX_MESSAGE_PARTS) {
     throw new VaultCliError('LINQ_INVALID_INPUT', `Linq message must contain at most ${LINQ_MAX_MESSAGE_PARTS} parts.`)
   }

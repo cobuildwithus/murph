@@ -144,10 +144,8 @@ collect_tree_files() {
     ! -name '.env'
     ! -name '.env.*'
     ! -name '.DS_Store'
-    ! -name '*.zip'
     ! -name '*.tar'
     ! -name '*.tgz'
-    ! -name '*.gz'
     ! -name '*.bz2'
     ! -name '*.xz'
     ! -name '*.7z'
@@ -158,6 +156,23 @@ collect_tree_files() {
     cd "$source_root"
     find "${find_args[@]}"
   )
+}
+
+is_canonical_integration_ingest_archive() {
+  local relative_path="$1"
+  [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|zip)$ ]]
+}
+
+should_copy_tree_file() {
+  local relative_path="$1"
+  local tree_kind="$2"
+
+  if [[ "$relative_path" == *.gz || "$relative_path" == *.zip ]]; then
+    [[ "$tree_kind" == "vault" ]] && is_canonical_integration_ingest_archive "$relative_path"
+    return
+  fi
+
+  return 0
 }
 
 copy_tree_into_stage() {
@@ -171,6 +186,9 @@ copy_tree_into_stage() {
 
   while IFS= read -r -d '' relative_path; do
     relative_path="${relative_path#./}"
+    if ! should_copy_tree_file "$relative_path" "$tree_kind"; then
+      continue
+    fi
     source_path="$source_root/$relative_path"
     target_path="$target_root/$relative_path"
     mkdir -p "$(dirname "$target_path")"
@@ -181,6 +199,64 @@ copy_tree_into_stage() {
   if [[ "$tree_kind" == "vault" ]]; then
     vault_file_count=$copied_count
   fi
+}
+
+compress_closed_integration_ingest_shards() {
+  local staged_vault_root="$1"
+  local archive_size archive_temp_path current_month relative_path shard_month source_path source_size
+  local max_archive_bytes=$((128 * 1024 * 1024))
+  local max_uncompressed_bytes=$((256 * 1024 * 1024))
+  current_month="$(date -u '+%Y-%m')"
+
+  while IFS= read -r -d '' source_path; do
+    relative_path="${source_path#"$staged_vault_root"/}"
+    if [[ ! "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/([0-9]{4}-(0[1-9]|1[0-2]))\.jsonl$ ]]; then
+      continue
+    fi
+    shard_month="${BASH_REMATCH[1]}"
+    if [[ "$shard_month" == "$current_month" || "$shard_month" > "$current_month" ]]; then
+      continue
+    fi
+    source_size="$(wc -c < "$source_path" | tr -d '[:space:]')"
+    if (( source_size > max_uncompressed_bytes )); then
+      continue
+    fi
+    archive_temp_path="$(mktemp "$source_path.gz.tmp.XXXXXX")"
+    gzip -9 -n -c "$source_path" > "$archive_temp_path"
+    archive_size="$(wc -c < "$archive_temp_path" | tr -d '[:space:]')"
+    if (( archive_size > max_archive_bytes )); then
+      rm -f "$archive_temp_path"
+      continue
+    fi
+    mv "$archive_temp_path" "$source_path.gz"
+    rm -f "$source_path"
+  done < <(find "$staged_vault_root/ledger/integration-ingests" -type f -name '*.jsonl' -print0 2>/dev/null || true)
+}
+
+assert_single_integration_ingest_shard_representations() {
+  local staged_vault_root="$1"
+  local current_logical_path previous_logical_path="" relative_path source_path
+
+  while IFS= read -r source_path; do
+    relative_path="${source_path#"$staged_vault_root"/}"
+    if [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl$ ]]; then
+      current_logical_path="$relative_path"
+    elif [[ "$relative_path" =~ ^ledger/integration-ingests/[0-9]{4}/[0-9]{4}-(0[1-9]|1[0-2])\.jsonl\.(gz|zip)$ ]]; then
+      current_logical_path="${relative_path%.*}"
+    else
+      continue
+    fi
+
+    if [[ "$current_logical_path" == "$previous_logical_path" ]]; then
+      echo "Error: integration-ingest shard has multiple physical representations: $current_logical_path" >&2
+      exit 1
+    fi
+    previous_logical_path="$current_logical_path"
+  done < <(
+    find "$staged_vault_root/ledger/integration-ingests" -type f \
+      \( -name '*.jsonl' -o -name '*.jsonl.gz' -o -name '*.jsonl.zip' \) \
+      -print 2>/dev/null | LC_ALL=C sort || true
+  )
 }
 
 while [[ $# -gt 0 ]]; do
@@ -230,8 +306,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! command -v zip >/dev/null 2>&1; then
-  echo "Error: zip is required to package a data bundle." >&2
+if ! command -v zip >/dev/null 2>&1 || ! command -v gzip >/dev/null 2>&1; then
+  echo "Error: zip and gzip are required to package a data bundle." >&2
   exit 1
 fi
 
@@ -263,6 +339,8 @@ trap 'rm -rf "$stage_dir"' EXIT
 
 mkdir -p "$bundle_root"
 copy_tree_into_stage "$absolute_vault_root" "$bundle_root/vault" "vault"
+assert_single_integration_ingest_shard_representations "$bundle_root/vault"
+compress_closed_integration_ingest_shards "$bundle_root/vault"
 
 total_file_count=$((vault_file_count + 1))
 
@@ -271,16 +349,18 @@ cat > "$bundle_root/bundle-manifest.json" <<EOF
   "format": "murph.data-bundle.v1",
   "generatedAt": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
   "includes": {
-    "vault": true
+    "vault": true,
+    "canonicalIntegrationIngestArchives": true,
+    "closedIntegrationIngestShardCompression": "gzip-9"
   },
   "excludes": [
     ".env*",
     ".runtime/**",
     "exports/packs/**",
-    "*.zip",
+    "non-canonical *.zip",
     "*.tar",
     "*.tgz",
-    "*.gz",
+    "non-canonical *.gz",
     "*.bz2",
     "*.xz",
     "*.7z"

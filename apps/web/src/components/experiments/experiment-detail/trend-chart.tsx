@@ -172,7 +172,7 @@ export function TrendChart({ data, className, signal }: TrendChartProps) {
                 return (
                   <div className="rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs">
                     <div className="font-medium text-foreground">
-                      {dayToDate(data.startDate, day)}
+                      {formatTrendDay(data.startDate, day)}
                     </div>
                     <div className="mt-1 grid gap-1">
                       {rows.map((row) => (
@@ -456,8 +456,14 @@ function formatTooltipRow(
   return { key: seriesKey, label, value: `${entry.value} ${unit}` };
 }
 
-function dayToDate(startDate: string, day: number): string {
-  const date = new Date(startDate);
-  date.setDate(date.getDate() + day - 1);
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+export function formatTrendDay(startDate: string, day: number): string {
+  const date = new Date(`${startDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return startDate;
+
+  date.setUTCDate(date.getUTCDate() + day - 1);
+  return new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(date);
 }

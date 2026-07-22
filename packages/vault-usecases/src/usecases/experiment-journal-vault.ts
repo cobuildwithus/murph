@@ -261,6 +261,24 @@ interface ExperimentJournalVaultCoreRuntime {
     updatedAt: string
     updated: true
   }>
+  readReferencedExperimentOutcome(input: {
+    vaultRoot: string
+    relativePath: string
+    expectedFrontmatter: z.infer<typeof experimentFrontmatterSchema>
+  }): Promise<{
+    experimentId: string
+    slug: string
+    relativePath: string
+    status: ExperimentStatusValue
+    outcome: z.infer<typeof experimentOutcomeSchema>
+    outcomePath: string
+    updatedExperiment: false
+  } | null>
+  shouldAdvanceReferencedExperimentOutcome(input: {
+    frontmatter: ExperimentFrontmatter
+    referencedOutcome: z.infer<typeof experimentOutcomeSchema>
+    requestedAsOf: string
+  }): boolean
   writeExperimentOutcome(input: {
     vaultRoot: string
     relativePath: string
@@ -2013,11 +2031,45 @@ export async function writeExperimentOutcomeRecord(input: {
   for (let attempt = 0; attempt < EXPERIMENT_OUTCOME_WRITE_MAX_ATTEMPTS; attempt += 1) {
     try {
       return await core.withCanonicalWriteLock(input.vault, async () => {
+        const requestedAsOf = input.asOf ?? new Date().toISOString().slice(0, 10)
+        const target = await resolveExperimentQueryTarget({
+          invalidSlugMessage: 'Experiment outcome analysis requires a canonical slug.',
+          lookup: input.lookup,
+          vault: input.vault,
+        })
+        const expectedFrontmatter = requireExperimentFrontmatter(target.entity)
+        const referenced = await core.readReferencedExperimentOutcome({
+          vaultRoot: input.vault,
+          relativePath: target.entity.path,
+          expectedFrontmatter,
+        })
+        if (
+          referenced !== null &&
+          !core.shouldAdvanceReferencedExperimentOutcome({
+            frontmatter: expectedFrontmatter,
+            referencedOutcome: referenced.outcome,
+            requestedAsOf,
+          })
+        ) {
+          return {
+            vault: input.vault,
+            experimentId: referenced.experimentId,
+            lookupId: referenced.experimentId,
+            slug: referenced.slug,
+            asOf: referenced.outcome.asOf,
+            outcome: referenced.outcome,
+            outcomePath: referenced.outcomePath,
+            updatedExperiment: false,
+          }
+        }
+
         const {
           analysis,
-          expectedFrontmatter,
           experimentPath,
-        } = await analyzeExperimentOutcomeRecordWithSource(input)
+        } = await analyzeExperimentOutcomeRecordWithSource({
+          ...input,
+          asOf: requestedAsOf,
+        })
         const outcomeId = `${expectedFrontmatter.experimentId}-outcome-${analysis.asOf}`
         const candidateOutcome = experimentOutcomeSchema.parse({
           ...analysis.outcome,
@@ -2032,16 +2084,7 @@ export async function writeExperimentOutcomeRecord(input: {
 
         return {
           ...analysis,
-          outcome: {
-            ...analysis.outcome,
-            schema: analysis.outcome.schema,
-            generatedAt: written.outcome.generatedAt,
-            outcomeId: written.outcome.outcomeId,
-            experiment: {
-              ...analysis.outcome.experiment,
-              status: written.outcome.experiment.status,
-            },
-          },
+          outcome: written.outcome,
           outcomePath: written.outcomePath,
           updatedExperiment: written.updatedExperiment,
         }

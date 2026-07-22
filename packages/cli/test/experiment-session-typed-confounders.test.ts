@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { loadGeneratedHealthCommonsProtocolRunSpecs } from '@murphai/health-commons/runtime'
@@ -593,6 +593,11 @@ test.sequential(
         requireData(repeatedFinalWrite).outcome.generatedAt,
         requireData(finalWrite).outcome.generatedAt,
       )
+      const frozenOutcomePath = path.join(
+        vaultRoot,
+        'bank/experiments/outcomes/sleep-diary-2026-04-06.json',
+      )
+      const frozenOutcomeBytes = await readFile(frozenOutcomePath, 'utf8')
       assert.equal(requireData(completedExperiment).entity.data.status, 'completed')
       assert.equal(requireData(completedExperiment).entity.data.endedOn, '2026-04-06')
 
@@ -643,23 +648,20 @@ test.sequential(
         true,
         correctedFinalWrite.ok ? undefined : correctedFinalWrite.error.message,
       )
-      assert.equal(requireData(correctedFinalWrite).updatedExperiment, true)
+      assert.equal(requireData(correctedFinalWrite).updatedExperiment, false)
       assert.equal(
         requireData(correctedFinalWrite).outcome.outcomeId,
         requireData(finalWrite).outcome.outcomeId,
       )
-      assert.notEqual(
+      assert.equal(
         requireData(correctedFinalWrite).outcome.generatedAt,
         requireData(finalWrite).outcome.generatedAt,
       )
-      assert.ok(
-        requireData(correctedFinalWrite).outcome.generatedAt >
-          requireData(finalWrite).outcome.generatedAt,
-      )
-      assert.notDeepEqual(
+      assert.deepEqual(
         requireData(correctedFinalWrite).outcome.metricResults,
         requireData(finalWrite).outcome.metricResults,
       )
+      assert.equal(await readFile(frozenOutcomePath, 'utf8'), frozenOutcomeBytes)
       assert.equal(
         requireData(correctedFinalWrite).outcome.experiment.status,
         'completed',
