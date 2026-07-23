@@ -42,10 +42,6 @@ import {
 } from "./member-activation-runtime-wake";
 import { requireHostedStripeBillingPlanConfig } from "./runtime";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedMemberRow,
-} from "./shared";
-import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -58,6 +54,7 @@ import {
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
 
 const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
+const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 120_000;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS = 3;
@@ -265,49 +262,61 @@ export async function ensureHostedAutoPulseTrialEnrollment(
       stripe,
     });
 
-  const reservation = await prisma.$transaction(
-    (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
-      runWithHostedDomainRootUnwrapCache(async () => {
-        await lockHostedMemberRow(tx, invite.member.id);
-        const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-          memberId: invite.member.id,
-          prisma: tx,
-        });
-        const currentStatus =
-          resolveHostedAutoPulseTrialExistingStatus(currentMember);
-        if (currentStatus) {
-          return {
-            kind: "existing",
-            result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
-          };
-        }
-
-        assertHostedAutoPulseTrialEligible(currentMember);
-        const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
-          ? currentMember.billingRef
-          : await bindHostedMemberStripeCustomerIdIfMissingTx({
-              memberId: invite.member.id,
-              stripeCustomerId: candidateStripeCustomerId,
-              tx,
-            });
-        const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
-        if (!stripeCustomerId) {
-          throw hostedOnboardingError({
-            code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-            httpStatus: 409,
-            message:
-              "Murph could not reserve Stripe billing for trial activation. Try again.",
-            retryable: true,
+  let reservation: HostedAutoPulseTrialReservationOutcome;
+  try {
+    reservation = await withHostedMemberStripeMutationLockForOps({
+      acquisitionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
+      memberId: invite.member.id,
+      prisma,
+      run: (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
+        runWithHostedDomainRootUnwrapCache(async () => {
+          const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+            memberId: invite.member.id,
+            prisma: tx,
           });
-        }
+          const currentStatus =
+            resolveHostedAutoPulseTrialExistingStatus(currentMember);
+          if (currentStatus) {
+            return {
+              kind: "existing",
+              result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+            };
+          }
 
-        return {
-          kind: "reserved",
-          stripeCustomerId,
-        };
-      }),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
+          assertHostedAutoPulseTrialEligible(currentMember);
+          const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
+            ? currentMember.billingRef
+            : await bindHostedMemberStripeCustomerIdIfMissingTx({
+                memberId: invite.member.id,
+                stripeCustomerId: candidateStripeCustomerId,
+                tx,
+              });
+          const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
+          if (!stripeCustomerId) {
+            throw hostedOnboardingError({
+              code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+              httpStatus: 409,
+              message:
+                "Murph could not reserve Stripe billing for trial activation. Try again.",
+              retryable: true,
+            });
+          }
+
+          return {
+            kind: "reserved",
+            stripeCustomerId,
+          };
+        }),
+      transactionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
+    }
+    throw error;
+  }
 
   if (reservation.kind === "existing") {
     const currentMember = await readHostedAutoPulseTrialEnrollmentMember({

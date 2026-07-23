@@ -323,13 +323,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         stripeCustomerId: "cus_auto_trial_123",
       }),
     });
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
-      expect.anything(),
-      "member_123",
-      {
-        timeoutMs: 2_000,
-      },
-    );
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow.mock.calls).toEqual([
+      [expect.anything(), "member_123", { timeoutMs: 2_000 }],
+      [expect.anything(), "member_123", { timeoutMs: 2_000 }],
+    ]);
     expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       stripeCustomerId: "cus_auto_trial_123",
@@ -353,7 +351,16 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 5_000,
       },
     );
-    expect(prisma.$transaction).toHaveBeenLastCalledWith(
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      2,
       expect.any(Function),
       {
         maxWait: 5_000,
@@ -425,6 +432,53 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps reservation lock contention to the retryable setup disposition before subscription work", async () => {
+    const prisma = makePrisma();
+    mocks.lockHostedMemberRow.mockRejectedValueOnce(
+      makeMemberLockTimeoutError(),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
+      expect.anything(),
+      "member_123",
+      {
+        timeoutMs: 2_000,
+      },
+    );
+    expect(mocks.stripe.customers.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("retries member-lock contention in a fresh transaction before the authoritative Stripe read", async () => {

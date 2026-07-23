@@ -289,7 +289,13 @@ test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount"
 });
 
 test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(new Error("Trial unavailable"));
+  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      message: "Murph is still finishing this trial setup. Try again.",
+      retryable: true,
+    }),
+  );
 
   const { container, cleanup } = await renderClientComponent(
     createElement(JoinInviteAutoTrialIsland, {
@@ -304,7 +310,9 @@ test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment 
 
   expect(container.textContent).toContain("Trial setup paused");
   expect(container.textContent).toContain("Unable to start your trial");
-  expect(container.textContent).toContain("Trial unavailable");
+  expect(container.textContent).toContain(
+    "Murph is still finishing this trial setup. Try again.",
+  );
   expect(container.textContent).toContain("Try again");
   expect(container.textContent).not.toContain("Setting up your Murph");
   expect(container.querySelector("[role='status']")).toBeNull();
