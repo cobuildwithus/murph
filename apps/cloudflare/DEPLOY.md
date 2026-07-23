@@ -27,6 +27,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Conversation Consumed-Watermark Rollout
+
+The exact conversation acknowledgement release changes the durable hosted
+pending-input file from v1 to cursor-bearing v2. Deploy the Cloudflare Worker
+and runner bundle first with `container_rollout=immediate`, require managed
+container smoke to report the exact new runner fingerprint, and only then
+deploy Web. Old Web ignores the additive checkpoint field, so producer-first
+skew is safe.
+
+The first accepted workspace snapshot containing the v2 pending-input envelope
+is a hard rollback floor for that workspace because the preceding v1-only
+runner cannot read it. Treat the new runner as the production fleet floor before
+admitting turns: after traffic begins, forward-fix the runner rather than
+rolling it back. Web may roll back independently while the v2-capable runner
+stays deployed. Restoring a v1-only runner requires a separate offline workspace
+migration that preserves unresolved input IDs and the batch cursor; Web-first
+rollback alone is not recovery proof.
+
+After both deploys, verify the managed runner fingerprint, confirm conversation
+lane consumed floors converge toward imported prefixes, and run one Telegram
+reply across a controlled reload with no duplicate reply or multi-minute stall.
+
 ## Shared Message Targeting Rollout
 
 The first release with shared exact-message reply and reaction targeting must

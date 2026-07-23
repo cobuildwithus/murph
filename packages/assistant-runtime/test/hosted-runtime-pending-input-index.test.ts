@@ -1276,24 +1276,88 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
   });
 
-  it("does not trust a base-generated v1 index that dropped a dormant nonterminal input", async () => {
+  it("keeps ambiguous v1 omissions nonreplyable while recovering terminal acknowledgements", async () => {
     const vaultRoot = await createTempVault();
-    const pending = await upsertAssistantInputEvent({
+    const terminal = await upsertAssistantInputEvent({
       vault: vaultRoot,
       event: createAssistantInputEvent({
-        dedupeKey: "dedupe_legacy_v1_dormant",
-        eventId: "evt_legacy_v1_dormant",
-        itemId: "item_legacy_v1_dormant",
-        laneSeq: "20",
-        messageId: "msg_legacy_v1_dormant",
+        dedupeKey: "dedupe_legacy_v1_terminal",
+        eventId: "evt_legacy_v1_terminal",
+        itemId: "item_legacy_v1_terminal",
+        laneSeq: "5",
+        messageId: "msg_legacy_v1_terminal",
         occurredAt: "2026-04-23T00:00:01.000Z",
         receivedAt: "2026-04-23T00:00:02.000Z",
         source: "telegram",
-        text: "dormant input hidden by the legacy index",
+        text: "terminal input omitted by the legacy index",
       }),
     });
+    const previouslyAdmitted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_previously_admitted",
+        eventId: "evt_legacy_v1_previously_admitted",
+        itemId: "item_legacy_v1_previously_admitted",
+        laneSeq: "10",
+        messageId: "msg_legacy_v1_previously_admitted",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        source: "telegram",
+        text: "previously admitted input later omitted by v1",
+      }),
+    });
+    const recordedPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_recorded_pending",
+        eventId: "evt_legacy_v1_recorded_pending",
+        itemId: "item_legacy_v1_recorded_pending",
+        laneSeq: "15",
+        messageId: "msg_legacy_v1_recorded_pending",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        source: "telegram",
+        text: "pending input that v1 still records",
+      }),
+    });
+    const contextOnly = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_context_only",
+        eventId: "evt_legacy_v1_context_only",
+        itemId: "item_legacy_v1_context_only",
+        laneSeq: "20",
+        messageId: "msg_legacy_v1_context_only",
+        occurredAt: "2026-04-23T00:00:07.000Z",
+        receivedAt: "2026-04-23T00:00:08.000Z",
+        source: "telegram",
+        text: "context-only input that was never admitted",
+      }),
+    });
+    // These histories are intentionally indistinguishable once deployed v1
+    // has omitted the only admitted ID: one was genuinely pending, while the
+    // other was retained only as context. The migration must not infer that
+    // either is safe to reply to.
+    await enqueueHostedPendingAssistantInputId({
+      inputId: previouslyAdmitted.inputId,
+      vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: terminal.inputId,
+      mailboxItemId: "item_legacy_v1_terminal",
+      vault: vaultRoot,
+    });
+    await writeTerminalEvidence({
+      evidenceId: terminal.inputId,
+      groupInputIds: [terminal.inputId],
+      vaultRoot,
+    });
     await saveAssistantAutomationState(vaultRoot, {
-      autoReply: [],
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: contextOnly.cursor,
+        enabledAt: "2026-04-23T00:01:00.000Z",
+      }],
       updatedAt: "2026-04-23T00:01:00.000Z",
       version: 1,
     });
@@ -1305,21 +1369,22 @@ describe("hosted pending assistant input index", () => {
       schemaVersion: 1,
       value: {
         backfilled: true,
-        inputIds: [],
+        inputIds: [recordedPending.inputId],
       },
     }, null, 2)}\n`, "utf8");
 
     await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
       .resolves.toEqual({
-        hasCandidate: false,
+        hasCandidate: true,
         indexComplete: false,
       });
     await expect(compactHostedConversationMailboxHandledItemIds({
       consumedThroughSeq: "0",
       vaultRoot,
-    })).resolves.toEqual([]);
+    })).resolves.toEqual(["item_legacy_v1_terminal"]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
-      pending.inputId,
+      terminal.inputId,
+      recordedPending.inputId,
     ]);
     await expect(readFile(filePath, "utf8").then((value) => JSON.parse(value)))
       .resolves.toMatchObject({
@@ -1327,37 +1392,25 @@ describe("hosted pending assistant input index", () => {
         schemaVersion: 2,
       });
 
-    await saveAssistantAutomationState(vaultRoot, {
-      autoReply: [{
-        channel: "telegram",
-        eligibleAfter: null,
-        enabledAt: "2026-04-23T00:02:00.000Z",
-      }],
-      updatedAt: "2026-04-23T00:02:00.000Z",
-      version: 1,
-    });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
-      pending.inputId,
+      recordedPending.inputId,
     ]);
-    await recordHostedMailboxAssistantInputItem({
-      inputId: pending.inputId,
-      mailboxItemId: "item_legacy_v1_dormant",
-      vault: vaultRoot,
-    });
-    await writeTerminalEvidence({
-      evidenceId: pending.inputId,
-      groupInputIds: [pending.inputId],
-      vaultRoot,
-    });
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({
+        hasCandidate: true,
+        indexComplete: true,
+      });
     await expect(compactHostedConversationMailboxHandledItemIds({
       consumedThroughSeq: "0",
       vaultRoot,
-    })).resolves.toEqual(["item_legacy_v1_dormant"]);
+    })).resolves.toEqual(["item_legacy_v1_terminal"]);
     await expect(compactHostedConversationMailboxHandledItemIds({
-      consumedThroughSeq: "20",
+      consumedThroughSeq: "5",
       vaultRoot,
     })).resolves.toEqual([]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      recordedPending.inputId,
+    ]);
   });
 
   it("does not backfill before eligibleAfter when compacting for consume-ack safety", async () => {

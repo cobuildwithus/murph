@@ -461,14 +461,8 @@ async function compactHostedPendingAssistantInputState(input: {
   });
   input.signal?.throwIfAborted();
   const backfilledState = existingBeforeLock.missing
-    || existingBeforeLock.legacy
-    || !existingBeforeLock.state.backfilled
+    || (!existingBeforeLock.legacy && !existingBeforeLock.state.backfilled)
     ? await createBackfilledHostedPendingAssistantInputState({
-      // Deployed v1 snapshots may have deleted an accepted input solely
-      // because its reply channel was temporarily unavailable. Rebuild those
-      // legacy projections from every retained input event; a greenfield or
-      // pre-backfill index keeps the existing eligibility boundary.
-      respectEligibleAfter: !existingBeforeLock.legacy,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
     })
@@ -484,17 +478,32 @@ async function compactHostedPendingAssistantInputState(input: {
     });
     const stateBeforeCompaction = existingForWrite.state;
     input.signal?.throwIfAborted();
-    const state = stateBeforeCompaction.backfilled && !existingForWrite.legacy
-      ? stateBeforeCompaction
-      : mergeHostedPendingAssistantInputBackfill({
-        backfilledState: backfilledState
-          ?? await createBackfilledHostedPendingAssistantInputState({
-            respectEligibleAfter: !existingForWrite.legacy,
+    let state: HostedPendingAssistantInputState;
+    if (existingForWrite.legacy) {
+      // V1 did not record why an input ID was absent. Recover only omitted
+      // events whose terminal evidence proves they cannot become a stale
+      // reply; retain every ID v1 still carried. Ambiguous omitted
+      // nonterminal events remain categorically nonreplyable.
+      state = mergeHostedPendingAssistantInputBackfill({
+        backfilledState:
+          await createLegacyHostedPendingAssistantTerminalRecoveryState({
             signal: input.signal,
             vaultRoot: input.vaultRoot,
           }),
         state: stateBeforeCompaction,
       });
+    } else if (stateBeforeCompaction.backfilled) {
+      state = stateBeforeCompaction;
+    } else {
+      state = mergeHostedPendingAssistantInputBackfill({
+        backfilledState: backfilledState
+          ?? await createBackfilledHostedPendingAssistantInputState({
+            signal: input.signal,
+            vaultRoot: input.vaultRoot,
+          }),
+        state: stateBeforeCompaction,
+      });
+    }
     input.signal?.throwIfAborted();
     return await compactHostedPendingAssistantInputStateForWrite({
       backfilled: true,
@@ -837,23 +846,10 @@ function resolveHostedPendingAssistantInputStatePathFromRoot(
 }
 
 async function createBackfilledHostedPendingAssistantInputState(input: {
-  respectEligibleAfter: boolean;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputState> {
   input.signal?.throwIfAborted();
-  if (!input.respectEligibleAfter) {
-    const listed = await listAssistantInputEvents({
-      limit: Number.MAX_SAFE_INTEGER,
-      signal: input.signal,
-      vault: input.vaultRoot,
-    });
-    return createHostedPendingAssistantInputState(
-      listed.events.map((event) => event.inputId),
-      { backfilled: true },
-    );
-  }
-
   const automationState = await readAssistantAutomationState(input.vaultRoot);
   input.signal?.throwIfAborted();
   if (automationState.autoReply.length === 0) {
@@ -869,7 +865,7 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
 
   for (const channelState of automationState.autoReply) {
     input.signal?.throwIfAborted();
-    let cursor = input.respectEligibleAfter ? channelState.eligibleAfter : null;
+    let cursor = channelState.eligibleAfter;
 
     while (true) {
       input.signal?.throwIfAborted();
@@ -930,6 +926,40 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   }
 
   return createHostedPendingAssistantInputState(inputIds, {
+    backfilled: true,
+  });
+}
+
+async function createLegacyHostedPendingAssistantTerminalRecoveryState(input: {
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputState> {
+  input.signal?.throwIfAborted();
+  const listed = await listAssistantInputEvents({
+    limit: Number.MAX_SAFE_INTEGER,
+    signal: input.signal,
+    vault: input.vaultRoot,
+  });
+  const terminalInputIds: string[] = [];
+  for (const event of listed.events) {
+    input.signal?.throwIfAborted();
+    if (
+      event.sourceRef.kind !== "hosted-mailbox"
+      || event.sourceRef.lane !== "conversation"
+    ) {
+      continue;
+    }
+    const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: event.projection.captureId,
+      inputId: event.inputId,
+      vault: input.vaultRoot,
+    });
+    input.signal?.throwIfAborted();
+    if (complete) {
+      terminalInputIds.push(event.inputId);
+    }
+  }
+  return createHostedPendingAssistantInputState(terminalInputIds, {
     backfilled: true,
   });
 }

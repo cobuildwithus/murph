@@ -616,12 +616,17 @@ batch cursor in the same snapshot and rotates later checkpoints through the
 remaining ids. It never deletes an id merely because it was selected, so a
 blocked earlier sequence cannot make the first batch permanently starve later
 terminal rows.
-On first compaction of a deployed v1 index, the runtime rebuilds it from all
-retained assistant-input events rather than trusting v1's channel-filtered
-`backfilled` projection. This recovers dormant Telegram or other temporarily
-disabled-channel inputs that v1 could have deleted. The exact item stamps are
-idempotent, and repeated idle checkpoints safely resend them until the durable
-floor confirms the accepted transaction.
+On first compaction of a deployed v1 index, the runtime preserves every input
+id that v1 still records and recovers an omitted retained event only when its
+terminal evidence already proves handling completed. V1 did not record whether
+an omitted nonterminal event had once been admitted and later dropped or had
+always been context-only while auto-reply was unavailable. Those ambiguous
+events are therefore categorically nonreplyable; enabling a channel later must
+not resurrect them as stale outbound work. This fail-closed migration can leave
+a bounded legacy admitted input unreplied, but it cannot send an unsolicited
+historical message. Exact terminal item stamps are idempotent, and repeated
+idle checkpoints safely resend them until the durable floor confirms the
+accepted transaction.
 
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
@@ -645,14 +650,21 @@ runner retains terminal local ids until `consumedSeqByLane` confirms them, so
 that producer-first window is replay-safe. If Web lands first, an old runner
 sends no exact ids; Web stamps none and therefore cannot repair Telegram
 progress until the runner converges, but it does not infer acknowledgement from
-the old local index. Roll back in the opposite order—Web first, then the runner
-producer—so the newer producer keeps retaining exact evidence while the
-consumer is absent. There is no hard rollback floor:
-already-advanced floors were derived from exact row stamps in an accepted
-snapshot transaction, and old runtimes already honor both `consumedAt` and the
-existing `consumedSeqByLane` response. After rollout, verify that conversation
-lane floors converge toward checkpointed imported prefixes and run a Telegram
-reload smoke proving one reply without replay delay or duplication.
+the old local index.
+
+The v2 pending-index envelope is not readable by the preceding v1-only runner.
+The first accepted workspace snapshot containing v2 is therefore a hard runner
+rollback floor for that workspace; operationally, treat the new runner bundle
+as the fleet rollback floor before admitting production traffic. After that
+point, Web may roll back while the v2-capable runner remains deployed, but the
+runner must be forward-fixed rather than restored below this floor. Returning
+to a v1-only runner requires an explicit offline workspace migration that
+preserves unresolved IDs and the exact batch cursor; incident-time Web-first
+rollback is not sufficient. Already-advanced server floors remain valid because
+they were derived from exact row stamps in an accepted snapshot transaction.
+After rollout, verify that conversation lane floors converge toward
+checkpointed imported prefixes and run a Telegram reply across a controlled
+reload with no duplicate reply or multi-minute stall.
 
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
