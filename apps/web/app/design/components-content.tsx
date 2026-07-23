@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
-import { DeviceSyncCompletionDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import {
+  DeviceSyncCompletionDialog,
+  DeviceSyncSetupGuideDialog,
+} from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -76,6 +79,7 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
@@ -149,6 +153,10 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+const WHOOP_COMPLETION_SETUP_GUIDE = buildWhoopAppleHealthSetupGuide(
+  "/audio/whoop-sync-memos/grandpa.mp3",
+);
+
 const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   contactAction: {
     href: "sms:?body=I%20just%20connected%20my%20WHOOP",
@@ -160,31 +168,7 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   failed: false,
   kind: "device-sync",
   retryHref: null,
-  setupGuide: {
-    actionAriaLabel: "See how to sync all of your WHOOP data",
-    actionLabel: "Get full sync",
-    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
-    downloadAction: {
-      ariaLabel: "Download App to sync WHOOP through Apple Health",
-      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
-      label: "Download App",
-      rel: "noopener noreferrer",
-      target: "_blank",
-    },
-    steps: [
-      {
-        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
-        title: "Download Murph and sign in",
-      },
-      {
-        detail:
-          "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
-        title: "Turn on Apple Health in WHOOP",
-      },
-    ],
-    title: "Get your full sync",
-    voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
-  },
+  setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
   title: "WHOOP is connected",
   unverified: false,
 };
@@ -218,6 +202,9 @@ export function ComponentsContent() {
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
+  const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
+  const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
+    useState(false);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -594,12 +581,21 @@ export function ComponentsContent() {
         <div id="whoop-completion-dialog" className="scroll-mt-24">
           <Section title="WHOOP Completion Dialog">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              Production completion flow for WHOOP. Open the preview, then choose
-              Get full sync to review the voice memo, setup steps, and action hierarchy.
+              Production WHOOP completion and capacity fallback. The normal flow
+              starts with confirmation; the capacity path opens the same setup guide directly.
             </p>
-            <div className="flex">
+            <div className="flex flex-wrap gap-2">
               <Button onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}>
                 Preview WHOOP completion
+              </Button>
+              <Button variant="outline" onClick={() => setWhoopCapacityPreviewOpen(true)}>
+                Preview capacity fallback
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setWhoopCapacityNoContactPreviewOpen(true)}
+              >
+                Preview capacity fallback without contact route
               </Button>
             </div>
             {whoopCompletionPreviewKey > 0 ? (
@@ -608,6 +604,18 @@ export function ComponentsContent() {
                 model={WHOOP_COMPLETION_DIALOG_MODEL}
               />
             ) : null}
+            <DeviceSyncSetupGuideDialog
+              contactAction={WHOOP_COMPLETION_DIALOG_MODEL.contactAction}
+              guide={WHOOP_COMPLETION_SETUP_GUIDE}
+              open={whoopCapacityPreviewOpen}
+              onOpenChange={setWhoopCapacityPreviewOpen}
+            />
+            <DeviceSyncSetupGuideDialog
+              contactAction={null}
+              guide={WHOOP_COMPLETION_SETUP_GUIDE}
+              open={whoopCapacityNoContactPreviewOpen}
+              onOpenChange={setWhoopCapacityNoContactPreviewOpen}
+            />
           </Section>
         </div>
 
