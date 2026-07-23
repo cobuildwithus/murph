@@ -20,8 +20,9 @@ Updated: 2026-07-23
   emits the vague phrase "react positively."
 - Challenge kickoff asks the next unresolved question without a standalone
   setup-status preamble.
-- A successful or already-active `post_join_offer` result records the offered
-  scopes but does not trigger a second member-facing announcement.
+- A handled `post_join_offer` result never triggers a second member-facing
+  announcement. Murph records the offered scopes unless the returned group
+  proves every current member already grants them.
 - Focused prompt/skill tests, canonical diff verification, acceptance
   verification, required product/prompt/coverage reviews, and the final
   cross-cutting review pass.
@@ -29,8 +30,8 @@ Updated: 2026-07-23
 ## Scope
 
 - In scope: group-challenge and group-chat skill guidance; group-channel
-  reply-shape guidance; exact prompt/skill regression tests; the group
-  challenge diagnostics product contract.
+  reply-shape and progress-tool guidance; exact prompt/skill/planning regression
+  tests; the group challenge diagnostics product contract.
 - Out of scope: Web-owned permission-card copy and accepted reactions; challenge
   scoring, scheduling, consent state, group membership, and direct-message reply
   splitting.
@@ -79,6 +80,12 @@ Updated: 2026-07-23
 - Make the one-message rule explicit in the assembled group prompt because the
   generic developer-level multi-bubble guidance otherwise conflicts with the
   skill-level group rule.
+- Keep the group one-message invariant true across the complete effective
+  contract: omit the direct-chat visible-progress mandate and tool from group
+  turns, and specialize the shared reply-target guidance.
+- Treat `post_join_offer: sent` as opaque. Use its returned grant matrix for
+  bookkeeping instead of adding a runtime status variant or inferring that a
+  visible card exists.
 
 ## Verification
 
@@ -89,8 +96,11 @@ Updated: 2026-07-23
   multi-bubble guidance; group Linq/Telegram prompts require one message; skill
   assets contain exact Like language and prohibit redundant card announcements.
 - Current evidence:
-  - Focused assistant-engine prompt and skill tests pass: 45 tests across five
-    files.
+  - Focused assistant-engine prompt, skill, planning, and model-behavior tests
+    pass: 166 tests across eight files; assistant-engine typecheck also passes.
+  - The complete Web group-tool test file passes all 79 tests, including the
+    existing regression proving `status: sent` can accompany an all-granted
+    result with no provider card send.
   - Local `test:diff` passed all affected typechecks, assistant-engine (2,604
     tests), and assistant-cli (128 tests). Its downstream assistant-runtime
     shard was blocked by an unrelated shared `/tmp` test vault containing a v2
@@ -104,3 +114,10 @@ Updated: 2026-07-23
   - Required local product-experience review returned `NO FINDINGS`. It recorded
     the absence of a paid-model/live-Linq transcript as an evidence gap rather
     than treating prompt assertions as live-provider proof.
+  - Preliminary GPT-5.6 Sol specialist review found three issues: group turns
+    still exposed visible-progress guidance and its delivery tool; shared
+    reply-target text still described multi-bubble group output; and
+    `post_join_offer: sent` was incorrectly treated as proof that a card was
+    visible. All were accepted and corrected in the prompt, tool profile,
+    permission bookkeeping guidance, durable spec, and focused tests. The
+    specialist returned no patch artifact.

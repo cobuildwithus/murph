@@ -403,13 +403,16 @@ automation action rules with a `dailyLocal` schedule and
    disclosure, recipient-safe delivery, and active-offer/all-granted dedupe.
    Never author generic permission copy or tell someone to Like the standings.
 
-   A `sent` result may mean a matching card was already active. Web's card is
-   the visible confirmation. Do not send or append a separate assistant
-   announcement that the card is available. If the turn also owes a substantive
-   standings update, keep that one assistant-authored message focused on the
-   standings and do not restate the card. Record those scopes as offered on the
-   challenge page so future standings do not repost or nag. If the tool is absent
-   or returns `unavailable`, do not claim a card exists. If a participant
+   Treat a `sent` result as an opaque handled result: Web may have posted a
+   card, reused an active one, or found that no card was needed because every
+   current member already grants the requested scopes. Do not infer, announce,
+   or append a separate assistant message claiming that a card is visible or
+   newly posted. If the returned group proves that every current member grants
+   every requested scope, do not record those scopes as offered. Otherwise
+   record them as offered on the challenge page so future standings do not
+   repost or nag. If the turn also owes a substantive standings update, keep
+   that one assistant-authored message focused on the standings. If the tool is
+   absent or returns `unavailable`, do not claim a card exists. If a participant
    explicitly says they do not want to share a scope, record that choice and do
    not offer, repeat, or nag. A permission offer cannot connect a source, grant
    Apple Health or operating-system Steps access, or fix missing or stale data.

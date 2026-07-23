@@ -699,7 +699,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
         computerToolsAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.computerToolsAvailable === true,
-        progressUpdatesAvailable: input.progressDelivery != null,
+        progressUpdatesAvailable:
+          privateInteractiveAudience && input.progressDelivery != null,
         connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
         connectedAppsManageAvailable: privateInteractiveAudience,
         deviceAvailable:

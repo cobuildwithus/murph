@@ -246,16 +246,19 @@ frozen scope disclosure, recipient-safe delivery, active-offer/all-granted
 dedupe, and first-party customize link. Liking or hearting adds only that
 disclosed snapshot. The standings message itself never grants permission.
 
-After a successful or already-active result, Web's card is the visible
-confirmation. Murph records the offered scopes on the challenge page, does not
-append a separate assistant announcement, and does not repost or nag. If the
-turn also owes a substantive standings update, that one assistant-authored
-message stays focused on the standings and does not restate the card. An
-explicit sharing decline is also recorded there and excludes that participant
-from the scope decision. The scoring scope is never offered merely because its
-grant exists but current data is missing. Apart from the exact missing
-diagnostic grant above, stale, disconnected, reconnect, and other sync/device
-cases never enter the permission path.
+A `sent` result is an opaque handled result: Web may have posted a card, reused
+an active one, or found that no card was needed because every current member
+already grants the requested scopes. Murph does not infer or announce that a
+card is visible or newly posted. When the returned group proves every current
+member grants every requested scope, Murph does not record those scopes as
+offered. Otherwise it records the offered scopes on the challenge page so
+future standings do not repost or nag. If the turn also owes a substantive
+standings update, that one assistant-authored message stays focused on the
+standings. An explicit sharing decline is also recorded there and excludes that
+participant from the scope decision. The scoring scope is never offered merely
+because its grant exists but current data is missing. Apart from the exact
+missing diagnostic grant above, stale, disconnected, reconnect, and other
+sync/device cases never enter the permission path.
 This extra member-facing card is limited to this explicitly approved challenge
 case under the automatic-message invariant.
 
@@ -324,8 +327,9 @@ drain, or foreground reconciliation step in either deployment or rollback.
   has neither a recorded decline nor a prior offer.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
   produces ordinary-language recovery guidance and no permission card.
-- A `sent` result records the offered scopes without a separate assistant
-  announcement; the server-owned card itself is the visible confirmation,
-  whether newly posted or already active.
+- A `sent` result does not prove a card is visible or newly posted. Murph sends
+  no separate announcement and uses the returned current-grant matrix to avoid
+  recording an offer when every current member already grants the requested
+  scopes.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.

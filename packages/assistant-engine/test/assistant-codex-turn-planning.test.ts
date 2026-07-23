@@ -1711,6 +1711,9 @@ describe('assistant Codex turn planning', () => {
       groupSharedReader,
       groupTool: null,
     }
+    const progressDelivery = {
+      send: vi.fn(async () => ({ kind: 'sent' as const, source: 'model' as const })),
+    }
 
     const resolveGroupPlan = (scheduledOccurrence = false) =>
       resolveAssistantRouteTurnPlan({
@@ -1725,6 +1728,7 @@ describe('assistant Codex turn planning', () => {
           },
         },
         hostedToolContext,
+        progressDelivery,
         input: {
           ...createMessageInput(),
           ...(scheduledOccurrence
@@ -1777,6 +1781,16 @@ describe('assistant Codex turn planning', () => {
     })
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    expect(attendedPlan.dynamicTools).not.toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    expect(attendedPlan.systemPrompt).not.toContain('murph.send_progress_update')
+    expect(attendedPlan.systemPrompt).not.toContain(
+      'including every `---` bubble',
+    )
 
     const directPlan = await resolveAssistantRouteTurnPlan({
       executionContext: {
@@ -1790,6 +1804,7 @@ describe('assistant Codex turn planning', () => {
         },
       },
       hostedToolContext,
+      progressDelivery,
       input: {
         ...createMessageInput(),
         scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
@@ -1810,6 +1825,16 @@ describe('assistant Codex turn planning', () => {
     })
     expect(directPlan.dynamicTools).not.toContainEqual(
       expect.objectContaining({ namespace: 'murph', name: 'group' }),
+    )
+    expect(directPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(directPlan.systemPrompt).toContain(
+      'including every `---` bubble',
     )
   })
 

@@ -23,6 +23,10 @@ describe('assistant reply bubble prompt guidance', () => {
       )
 
       expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
+      expect(layers.prompt).toContain('murph.send_progress_update')
+      expect(layers.prompt).toContain(
+        'including every `---` bubble',
+      )
     },
   )
 
@@ -37,6 +41,13 @@ describe('assistant reply bubble prompt guidance', () => {
       expect(layers.threadContextPrompt).not.toContain(TEXTING_RHYTHM_PROMPT)
       expect(layers.threadContextPrompt).not.toContain(
         'use one bubble per section',
+      )
+      expect(layers.prompt).not.toContain('murph.send_progress_update')
+      expect(layers.prompt).not.toContain(
+        'including every `---` bubble',
+      )
+      expect(layers.prompt).toContain(
+        'annotates the eventual single response',
       )
     },
   )

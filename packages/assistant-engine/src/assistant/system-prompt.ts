@@ -320,7 +320,7 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantNonBlockingDelegationText()
       : null,
     buildAssistantCapabilityOffersText(),
-    buildAssistantMessageReactionGuidanceText(),
+    buildAssistantMessageReactionGuidanceText(conversationScope),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct" && input.assistantHostedLabsAvailable === true
       ? buildAssistantLabsGuidanceText()
@@ -343,6 +343,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
+      progressUpdatesAvailable: conversationScope === "direct",
     }),
     conversationScope === "direct" ? buildAssistantComputerUseGuidanceText() : null,
     conversationScope === "direct" ? buildAssistantPhoneCallGuidanceText() : null,
@@ -1114,10 +1115,15 @@ function buildAssistantNonBlockingDelegationText(): string {
 - Keep internal machinery out of visible replies: no subagent, child-worker, or spawn jargon, no record ids, and no save/verification bookkeeping such as "user-reported" or "unconfirmed". If the user asks what happened, explain it in plain words.`;
 }
 
-function buildAssistantMessageReactionGuidanceText(): string {
+function buildAssistantMessageReactionGuidanceText(
+  conversationScope: AssistantConversationScope,
+): string {
+  const replyTargetGuidance = conversationScope === "group"
+    ? "- When available, `murph.select_reply_target` annotates the eventual single response; it sends nothing."
+    : "- When available, `murph.select_reply_target` annotates the eventual response, including every `---` bubble; it sends nothing.";
   return `Message reactions:
 - Message refs label accepted messages visible now. Use one exactly as shown only when helpful; never invent or force one.
-- When available, \`murph.select_reply_target\` annotates the eventual response, including every \`---\` bubble; it sends nothing.
+${replyTargetGuidance}
 - When available, \`murph.react_to_message\` reacts independently; it never selects a reply target. With a message ref you can react to that exact accepted message, not only the newest one.
 - A reaction is a public stance toward the exact message it lands on. Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
 - Before using \`laugh\`, mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣". If what remains is not independently funny—a joke, witty observation, absurdity, comic mishap, or callback—do not use \`laugh\`.
