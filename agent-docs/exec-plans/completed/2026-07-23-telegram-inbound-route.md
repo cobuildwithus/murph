@@ -1,6 +1,6 @@
 # Require inbound Telegram route for onboarding delivery
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -22,8 +22,8 @@ Updated: 2026-07-23
 - In scope: the shared hosted messaging-state boundary, direct Telegram ingress route
   materialization for uniquely linked non-suspended members, and focused production-path
   onboarding tests.
-- Out of scope: Telegram identity lookup, ingress persistence, historical resend or
-  backfill, Cloudflare runtime behavior, and onboarding copy/UI.
+- Out of scope: Telegram identity lookup, other Telegram ingress behavior, historical
+  resend or backfill, Cloudflare runtime behavior, and onboarding copy/UI.
 
 ## Constraints
 
@@ -77,3 +77,10 @@ Updated: 2026-07-23
     pre-existing warnings only, dev smoke, and production build.
   - Product-experience remediation review passed with no findings or material evidence
     gaps.
+  - Preliminary ReviewGPT found two coverage gaps. Both were accepted: setup polling
+    now proves a stored Telegram thread unlocks checkout, and suspended ingress now
+    proves routing is not mutated.
+  - The two remediation test files passed 40 tests. The canonical rerun passed Web
+    typecheck, 6,305 tests, lint with pre-existing warnings only, dev smoke, and the
+    production build.
+Completed: 2026-07-23

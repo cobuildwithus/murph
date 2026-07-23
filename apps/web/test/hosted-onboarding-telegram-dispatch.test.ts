@@ -1571,6 +1571,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedWebhookReceiptCreate = vi.fn().mockResolvedValue({});
     const hostedWebhookReceiptUpdateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const hostedMemberRoutingUpsert = vi.fn();
     const prisma = withPrismaTransaction({
       hostedWebhookReceipt: {
         create: hostedWebhookReceiptCreate,
@@ -1595,6 +1596,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             suspendedAt: new Date("2026-03-26T12:00:00.000Z"),
           },
         }),
+        upsert: hostedMemberRoutingUpsert,
       },
     });
 
@@ -1628,6 +1630,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
+    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
   });
 
   it("persists an inactive signup's direct thread without waking the runtime", async () => {
