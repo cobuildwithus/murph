@@ -309,6 +309,14 @@ ensures the device-sync reconciler Schedule and starts
 The schedule ensure command is idempotent, so concurrent instance startup keeps
 one canonical Schedule.
 
+The 200-Activity aggregate is an execution ceiling, not a request-rate target.
+Reconciliation Activities reach the signed hosted-Web callback and its pooled
+Prisma path; pending work then reaches Cloudflare's per-user runtime admission
+owner. During rollout, monitor Activity retries/timeouts, hosted-Web
+database-pool failures, unrelated signed callback health, and Cloudflare
+ensure-processing acceptance. The Activity execution env override and Render
+instance count are the rollback controls if those shared boundaries regress.
+
 Use Render Blueprint sync from the dashboard or validate it with:
 
 ```bash
