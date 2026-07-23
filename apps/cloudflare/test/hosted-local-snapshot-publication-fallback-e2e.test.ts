@@ -43,6 +43,7 @@ import {
   buildLinqRecipientPhoneNumber,
   startHostedLocalLinqStub,
   type HostedLocalLinqStub,
+  type ObservedLinqRequest,
 } from "./helpers/hosted-local-linq-support.js";
 
 const runId = Date.now();
@@ -146,7 +147,8 @@ describe("hosted local snapshot publication fallback e2e", () => {
       throw new Error("Activation did not publish the production v2 baseline snapshot.");
     }
     const initialWorkspaceVersion = requireWorkspaceVersion(baselineStatus);
-    const baselineReplyCount = requireLinqStub().countObservedSends(replyPath);
+    const baselineObservedReplyCount = requireLinqStub().countObservedSends(replyPath);
+    const baselineAcceptedReplyCount = requireLinqStub().countAcceptedSends(replyPath);
     const baselineFaultCount = countSnapshotPublicationFaults();
     const baselineInvokeFailureDestroyCount = countInvokeFailureDestroyRequests();
 
@@ -169,7 +171,7 @@ describe("hosted local snapshot publication fallback e2e", () => {
 
     await requireScenario().waitForLatestPendingWake(userId);
     const firstReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: baselineReplyCount,
+      baselineCount: baselineObservedReplyCount,
       expectedPath: replyPath,
       scenario: requireScenario(),
       userId,
@@ -201,9 +203,27 @@ describe("hosted local snapshot publication fallback e2e", () => {
     if (!restoredSnapshotRef || !isHostedWorkspaceSnapshotV2Ref(restoredSnapshotRef)) {
       throw new Error("Recovered provider turn did not publish a clean v2 snapshot.");
     }
-    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineReplyCount + 1);
+    const firstReplyAttempts = requireLinqStub().observedRequests.filter((request) =>
+      request.method === "POST"
+      && request.url === replyPath
+      && requireLinqStub().readObservedMessageText(request) === firstReplyText
+    );
+    expect(firstReplyAttempts.length).toBeGreaterThanOrEqual(1);
+    expect(firstReplyAttempts.length).toBeLessThanOrEqual(2);
+    const firstReplyIdempotencyKeys =
+      firstReplyAttempts.map(readLinqMessageIdempotencyKey);
+    expect(firstReplyIdempotencyKeys[0]).toMatch(/^\S+$/u);
+    expect(new Set(firstReplyIdempotencyKeys)).toEqual(
+      new Set([firstReplyIdempotencyKeys[0]]),
+    );
+    expect(requireLinqStub().countAcceptedSends(replyPath))
+      .toBe(baselineAcceptedReplyCount + 1);
 
     const providerRequestBaseline = countAssistantProviderResponsesApiRequests();
+    const secondReplyMatcher = (request: ObservedLinqRequest) =>
+      requireLinqStub().readObservedMessageText(request) === secondReplyText;
+    const secondReplyBaseline =
+      requireLinqStub().countObservedSends(replyPath, secondReplyMatcher);
     requireScenario().queueAssistantResponses([
       buildAssistantProviderShellCommandCall(`sha256sum ${vaultRelativePath}`),
       secondReplyText,
@@ -225,12 +245,15 @@ describe("hosted local snapshot publication fallback e2e", () => {
 
     await requireScenario().waitForLatestPendingWake(userId);
     const secondReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: baselineReplyCount + 1,
+      baselineCount: secondReplyBaseline,
       expectedPath: replyPath,
+      matchRequest: secondReplyMatcher,
       scenario: requireScenario(),
       userId,
     });
     expect(requireLinqStub().readObservedMessageText(secondReply)).toBe(secondReplyText);
+    expect(requireLinqStub().countAcceptedSends(replyPath))
+      .toBe(baselineAcceptedReplyCount + 2);
 
     const recoveryProviderText = requireScenario().assistantProviderRequests
       .filter((request) => request.url === "/v1/responses")
@@ -383,6 +406,21 @@ function countSnapshotPublicationFaults(): number {
   return readStructuredLogRecords().filter((record) =>
     record.message === publicationFaultMessage
   ).length;
+}
+
+function readLinqMessageIdempotencyKey(request: {
+  body: string;
+}): string | null {
+  const payload: unknown = JSON.parse(request.body);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const message = (payload as Record<string, unknown>).message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+  const idempotencyKey = (message as Record<string, unknown>).idempotency_key;
+  return typeof idempotencyKey === "string" ? idempotencyKey : null;
 }
 
 function readSnapshotPublicationValidationStatuses(): number[] {
