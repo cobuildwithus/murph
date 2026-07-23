@@ -106,11 +106,12 @@ Updated: 2026-07-23
   reply instead of announcing a server-owned card.
 - Current evidence:
   - Focused assistant-engine prompt, skill, planning, and model-behavior tests
-    pass: 167 tests across eight files; assistant-engine typecheck also passes.
+    pass: 168 tests across eight files; assistant-engine typecheck also passes.
   - The complete Web group-tool test file passes all 79 tests, including the
     existing regression proving `status: sent` can accompany an all-granted
     result with no provider card send.
-  - Local `test:diff` passed all affected typechecks, assistant-engine (2,604
+  - Final local `test:diff` passed all affected typechecks, assistant-engine
+    (2,606
     tests), and assistant-cli (128 tests). Its downstream assistant-runtime
     shard was blocked by an unrelated shared `/tmp` test vault containing a v2
     synthetic state file while this base expects v1.
@@ -143,3 +144,12 @@ Updated: 2026-07-23
     contradicted the sparse group system prompt. The group route now receives a
     matching group-specific tool description; the direct route remains
     unchanged.
+  - Final product-experience and cross-cutting review reruns returned
+    `NO FINDINGS`. They confirmed group/direct progress separation, preserved
+    `---` bubbles, participant-and-scope offer eligibility, and card-only
+    `finish_without_reply` behavior.
+  - `pnpm verify:acceptance` passed the full workspace typecheck, the
+    assistant-engine coverage lane (2,606 tests), broad package coverage, Web
+    lint/tests/build progress, and repository guards before the same unrelated
+    assistant-runtime shared-vault schema mismatch failed the package-coverage
+    aggregate.
