@@ -1,10 +1,9 @@
 import Link from "next/link";
 
 const PROMISES = [
-  "We don't sell your data.",
-  "Encrypted by default.",
-  "Your chats never train models.",
-  "Open source. See for yourself.",
+  "We do not sell health data.",
+  "We do not use Murph-managed health data to train general-purpose AI models.",
+  "Access is limited to authorized systems, providers, and personnel.",
 ] as const;
 
 export function SecurityTeaserSection() {
@@ -23,8 +22,9 @@ export function SecurityTeaserSection() {
             <span className="italic text-[#8a6a3a]">stays</span> yours.
           </h2>
           <p className="mt-6 max-w-[52ch] text-base leading-[1.7] text-pretty text-[#4d4533] sm:text-[1.0625rem]">
-            Your records stay locked by default. Murph opens them for a few
-            seconds to run a task, then locks them again.
+            Your data is encrypted in transit and at rest. Murph and its
+            service providers may process it to run, secure, and support the
+            service.
           </p>
 
           <ul className="mt-8 grid gap-3 sm:grid-cols-2">
