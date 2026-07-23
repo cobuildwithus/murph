@@ -38,6 +38,13 @@ test("Terms keep health data model-training and adtech promises aligned with the
     terms,
     /We do not use consumer health data for advertising, sale, data brokerage, or general-purpose model training/u,
   );
+  assert.match(terms, /### Observational Results and Illustrative Examples/u);
+  assert.match(terms, /does not establish that an intervention caused an outcome/u);
+  assert.match(terms, /This is limited task-specific authority only/u);
+  assert.match(terms, /### Groups, Family, Newsletters, and Delivered Copies/u);
+  assert.match(terms, /### Source-Specific Connected-Service Rules/u);
+  assert.match(terms, /Your instruction or consent does not authorize Murph to use data in a way the source provider prohibits/u);
+  assert.match(terms, /### Connected-Service Provider Disclaimer/u);
   assert.doesNotMatch(terms, /Unless we present a separate, specific opt-in consent/u);
 });
 
@@ -54,11 +61,11 @@ test("Privacy Policy keeps tightened health-data commitments and consumer-health
   );
   assert.match(
     privacyPolicy,
-    /Consent screens will describe the data source, categories of data requested, purpose of use, whether data will be stored or queried on demand, the categories of recipients or named providers involved, and how you can withdraw consent/u,
+    /Murph does not connect an optional health source until you affirmatively enable it and authorize the permissions requested by the source, device, or platform/u,
   );
   assert.match(
     privacyPolicy,
-    /Where applicable law requires separate consent for collection and sharing, Murph will request those consents separately/u,
+    /Where applicable law requires separate consent for a disclosure beyond the service providers necessary to deliver the feature, Murph will request that consent separately/u,
   );
   assert.match(
     privacyPolicy,
@@ -108,6 +115,14 @@ test("Privacy Policy keeps tightened health-data commitments and consumer-health
     privacyPolicy,
     /You can access the Consumer Health Data Notice at \[withmurph\.ai\/consumer-health-data-privacy-policy\]/u,
   );
+  assert.match(privacyPolicy, /### H\. Calls, browser actions, and user-directed transactions/u);
+  assert.match(privacyPolicy, /\*\*Source-specific provider limits\.\*\*/u);
+  assert.match(privacyPolicy, /Strava states that it may monitor and collect usage data relating to access to its API/u);
+  assert.match(privacyPolicy, /A portal, laboratory, wearable company, merchant, or other service does not become a Murph subprocessor/u);
+  assert.match(
+    privacyPolicy,
+    /Paying for another adult's Family access does not give the payer access to that adult's private health data or conversations/u,
+  );
   assert.doesNotMatch(
     privacyPolicy,
     /## 17\. U\.S\. Consumer Health Data Supplemental Notice/u,
@@ -149,8 +164,43 @@ test("Consumer Health Data Notice keeps the stronger model-training promise", ()
     consumerHealthPolicy,
     /provide the applicable complaint mechanism or other method for contacting the relevant regulator or attorney general/u,
   );
+  assert.match(consumerHealthPolicy, /Family sponsorship is not health-data sharing/u);
+  assert.match(consumerHealthPolicy, /\*\*Source-specific restrictions\.\*\*/u);
+  assert.match(consumerHealthPolicy, /shorter deletion, cache, or display period/u);
+  assert.match(
+    consumerHealthPolicy,
+    /Murph cannot delete copies that another person or independent third party already received and controls/u,
+  );
   assert.doesNotMatch(
     consumerHealthPolicy,
     /Unless we present a separate, specific opt-in consent/u,
   );
+});
+
+test("Health AI Safety Disclosure states AI, causation, and action boundaries", () => {
+  const disclosure = readLegalMarkdown("health-ai-safety-disclosure.md");
+
+  assert.match(disclosure, /Murph is an artificial intelligence system/u);
+  assert.match(disclosure, /## 3\. Patterns are not proof of causation/u);
+  assert.match(disclosure, /A before-and-after change, correlation, timing relationship/u);
+  assert.match(disclosure, /provider-controlled interface or separate written authorization/u);
+  assert.match(disclosure, /## 8\. AI calls and user-directed actions/u);
+  assert.match(disclosure, /Murph is not your general agent, healthcare proxy/u);
+});
+
+test("Subprocessor register separates connected services and powers the public page", () => {
+  const register = readLegalMarkdown("subprocessors.md");
+  const page = readFileSync(
+    path.resolve(process.cwd(), "apps/web/app/subprocessors/page.tsx"),
+    "utf8",
+  );
+
+  assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
+  assert.match(register, /\| Oura \|/u);
+  assert.match(register, /\| WHOOP \|/u);
+  assert.match(register, /\| Garmin \|/u);
+  assert.match(register, /\| Strava \|/u);
+  assert.match(register, /Strava \| Optional user-authorized activity connection through Murph's approved processing path/u);
+  assert.doesNotMatch(register, /Oura, WHOOP, Garmin, Strava, and similar wearable providers/u);
+  assert.match(page, /markdownFileName: "subprocessors\.md"/u);
 });

@@ -19,6 +19,8 @@ test("the persistent dashboard layout fences fresh vault authority to its server
   assert.doesNotMatch(layoutSource, /getHostedBrowserVaultPageAuthority/u);
   assert.doesNotMatch(layoutSource, /authorized=/u);
   assert.match(layoutSource, /getHostedPageAuthSnapshot/u);
+  assert.match(layoutSource, /DashboardLegalConsentGate/u);
+  assert.match(layoutSource, /!consentStatus\.launchGranted/u);
   assert.match(
     layoutSource,
     /initialMemberId=\{pageAuth\.authenticatedMember\?\.id \?\? null\}/u,

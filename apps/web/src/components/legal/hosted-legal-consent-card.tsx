@@ -22,6 +22,8 @@ interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
   className?: string;
   initialStatus?: HostedConsentStatus | null;
+  launchDescription?: string;
+  launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
   onRequirementChange?: (required: boolean) => void;
@@ -42,6 +44,8 @@ function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
   className,
   initialStatus = null,
+  launchDescription = "Please review and agree to the following.",
+  launchTitle = "Before you start",
   mode = "panel",
   onAccepted,
   onRequirementChange,
@@ -211,9 +215,9 @@ function HostedLegalConsentCardState({
     return null;
   }
 
-  const title = isLaunchFlow ? "Before you start" : "Connect health sources";
+  const title = isLaunchFlow ? launchTitle : "Connect health sources";
   const description = isLaunchFlow
-    ? "Please review and agree to the following."
+    ? launchDescription
     : "Review and accept the health source consent for this integration.";
 
   const checkboxes = isLaunchFlow ? (
@@ -306,6 +310,13 @@ function LaunchConsentCheckboxes({
 }) {
   return (
     <div className="space-y-6">
+      <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+        Hosted Murph processes readable health data through contracted AI and other service
+        providers to provide features you request. Murph does not sell health data or use it for
+        advertising or general-purpose AI model training. Connected-source rules may further limit
+        AI use, sharing, storage, retention, or available features.
+      </p>
+
       {legalScope && !legalScope.granted ? (
         <ConsentCheckbox
           checked={legalAccepted}
@@ -336,8 +347,9 @@ function LaunchConsentCheckboxes({
           checked={healthDataAccepted}
           onChange={onHealthDataChange}
           label={
-            <>
-              I agree to the{" "}
+            <span className="block">
+              I authorize Murph to collect, use, and process the health data I choose to submit or
+              connect to provide the features I request, as described in the{" "}
               <a
                 href={healthDataScope.documents[0]?.href ?? "#"}
                 target="_blank"
@@ -346,8 +358,12 @@ function LaunchConsentCheckboxes({
               >
                 Consumer Health Data Notice
               </a>
-              , which explains what health data Murph collects and why
-            </>
+              .
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                You can stop future collection from a connected source by disconnecting it or
+                revoking its permissions. You can request deletion in Settings.
+              </span>
+            </span>
           }
         />
       ) : null}

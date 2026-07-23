@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** June 24, 2026
+**Last Updated:** July 23, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -34,7 +34,7 @@ Murph is designed for sensitive personal and health-related information. We make
 - **No health data for insurance, employment, credit, or eligibility decisions.** We do not disclose health data to employers, insurers, lenders, benefits administrators, or credit agencies for eligibility, underwriting, pricing, employment, benefits, credit, or risk-scoring decisions, unless you expressly direct us to do so for a specific feature and applicable law permits it.
 - **No AI training on health data.** We do not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, assistant outputs based on health data, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models.
 - **Limited provider use.** When we use service providers, subprocessors, model providers, search providers, wearable connectors, health-record connectors, or infrastructure providers, we authorize them to process information only as needed to provide, secure, support, or troubleshoot Murph, subject to contractual and legal safeguards where applicable.
-- **Feature-specific consent for optional health integrations.** We collect health data from optional integrations only when you enable the integration or otherwise provide affirmative, feature-specific consent. You can withdraw consent by disconnecting the integration or contacting us.
+- **User choice for optional health integrations.** Murph does not connect an optional health source until you affirmatively enable it and authorize the permissions requested by the source, device, or platform. You can stop future collection from that source by disconnecting it or revoking its permissions. Disconnecting does not automatically delete information already stored by Murph or an independent third party.
 - **Need-to-know access.** We limit access to personal information and hosted health data to authorized personnel and service providers who need it to operate, secure, support, or troubleshoot Murph. We use aggregated or de-identified information for service improvement as described below.
 - **No hidden ad-tech on health surfaces.** We do not intentionally place third-party advertising pixels, retargeting tags, behavioral advertising SDKs, or similar technologies on pages, screens, APIs, or workflows where users enter, view, upload, connect, or receive health data.
 - **Transparent hosted processing.** Unless we expressly state otherwise for a specific feature, Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted. Hosted Murph may require Murph and its providers to process readable content to provide requested features, support users, debug problems, secure the service, or comply with law.
@@ -119,6 +119,19 @@ We may collect information such as:
 - cookie, local-storage, or session-token data used to operate core features; and
 - security, abuse-prevention, and diagnostic information.
 
+### H. Calls, browser actions, and user-directed transactions
+
+If you ask Murph to call, message, browse, book, purchase, cancel, submit information, or interact with a third party, we may collect:
+
+- recipient, provider, merchant, website, portal, and contact information;
+- your task instructions, limits, preferences, and information needed to carry out the request;
+- call, message, browser-session, form, appointment, order, and transaction metadata;
+- content or health information you direct Murph to transmit;
+- confirmations, status information, summaries, receipts, and results returned by the third party; and
+- security, authorization, audit, error, and troubleshooting records associated with the action.
+
+Murph does not need to store full payment-card numbers or account passwords to perform ordinary browser actions. Sensitive credentials may be processed by the applicable website, browser provider, identity provider, payment processor, or other third party under its own terms and privacy notice.
+
 ## 4. Sources of information
 
 We collect information from several sources:
@@ -129,6 +142,7 @@ We collect information from several sources:
 - **From identity and authentication providers**, when you sign in, verify an account, or complete an onboarding flow through them.
 - **From payment processors**, when you purchase or subscribe to hosted services.
 - **From other Murph users**, such as when someone sends you an invite link.
+- **From recipients, websites, portals, providers, and merchants you ask Murph to contact or use**, when they return status, confirmation, transaction, or result information.
 - **From service providers and security tools**, where needed to operate, support, analyze, or secure Murph.
 
 ## 5. How we use information
@@ -145,6 +159,8 @@ We use information to:
 - operate wearable and provider connections;
 - process prompts, messages, attachments, and requested outputs;
 - deliver hosted onboarding, invite, import, and export flows;
+- perform user-directed calls, messages, browser actions, bookings, purchases, cancellations, submissions, and other tasks;
+- verify and present resulting confirmations, statuses, summaries, receipts, and outcomes;
 - enable billing, entitlement, and subscription management; and
 - provide customer support and respond to requests.
 
@@ -200,6 +216,8 @@ We may use information to:
 
 ## 6. Health data, AI, and model providers
 
+Murph is an artificial intelligence system. Messages, summaries, calls, and other outputs or actions may be generated automatically and may not be reviewed by a human before they are shown, sent, or used in a workflow.
+
 Murph may use AI, search, parsing, transcription, embedding, summarization, extraction, retrieval, and automation features to provide the functionality you request. These features may process prompts, messages, health records, journal entries, wearable data, files, attachments, transcripts, health memories, and related context.
 
 Murph tries to limit the data shared with those systems or providers to what is reasonably necessary for the requested feature. Where feasible, Murph may minimize, pseudonymize, redact, hash, or otherwise reduce the data used.
@@ -235,9 +253,11 @@ We may disclose information in the following circumstances.
 We may share information with vendors, service providers, and subprocessors that help us operate Murph, such as providers for:
 
 - identity and authentication;
-- cloud hosting, storage, and infrastructure;
-- messaging, email, and communications;
+- cloud hosting, storage, infrastructure, and workflow orchestration;
+- messaging, email, phone, voice, and communications;
+- browser automation, managed authentication, and user-directed actions;
 - payments and billing;
+- wearable, Apple Health, and clinical-record synchronization;
 - customer support, logging, monitoring, and security;
 - search, model, parsing, or other optional feature providers; and
 - analytics or diagnostics used to operate and improve Murph.
@@ -250,17 +270,29 @@ These parties are authorized to process information on Murph’s behalf only as 
 
 If you connect Murph to devices, wearable providers, messaging channels, identity providers, or other third-party services, Murph may exchange information with those services as needed to provide the feature you requested.
 
-**Feature-specific consent.** We collect, use, or disclose health data from optional integrations only after you enable the integration or otherwise provide affirmative, feature-specific consent. Consent screens will describe the data source, categories of data requested, purpose of use, whether data will be stored or queried on demand, the categories of recipients or named providers involved, and how you can withdraw consent. Where applicable law requires separate consent for collection and sharing, Murph will request those consents separately. You can withdraw consent by disconnecting the integration or contacting us. Withdrawal stops future collection from that integration, but may not affect data already processed as permitted by law, data retained for security or legal reasons, or data already extracted by an independent third party you directed us to share with.
+**User choice for optional integrations.** Murph collects data from an optional health source only after you take an affirmative step to enable the source and authorize the available permissions through Murph, the source, the device, or the platform. Before or when you enable an integration, Murph's linked notices and the provider or platform permission flow describe the information available from that source, how it is used, relevant provider recipients, and how to disconnect. Some service-provider processing is necessary to provide the feature you requested. Where applicable law requires separate consent for a disclosure beyond the service providers necessary to deliver the feature, Murph will request that consent separately.
+
+You can stop future collection from an integration by disconnecting it, revoking provider or platform permissions, or contacting us. Withdrawal or disconnection does not affect processing that already occurred, information retained for security or legal reasons, or information already delivered to an independent third party at your direction.
+
+**Source-specific provider limits.** A Connected Service's current developer terms, user permissions, or technical controls may impose stricter limits than Murph's general practices. Those limits may restrict AI processing, analytics, cross-source combination, embeddings, retrieval, persistent indexing, group or newsletter disclosure, export, caching, retention, or downstream providers. Murph may limit or disable an integration or particular feature when a permitted processing path is unavailable. A user instruction or permission cannot override a restriction imposed by the source provider.
+
+**Provider API monitoring.** Connected-service providers may monitor and collect technical and usage information about Murph's access to their APIs for security, support, compliance, platform administration, service development, or other purposes described in their own terms and privacy policies. For example, Strava states that it may monitor and collect usage data relating to access to its API and use that information for its business purposes.
+
+**Connection pathways and user-provided exports.** Data may reach Murph directly from a Connected Service, through a synchronization provider such as Junction/Vital, or through a file that you lawfully download and upload. A portal, laboratory, wearable company, merchant, or other service does not become a Murph subprocessor merely because you upload an export from it or ask Murph to contact it.
 
 When you direct Murph to share information with a third-party provider, that provider may act as an independent controller of the information it receives under its own privacy policy and terms. Please review those policies carefully before enabling a connection.
 
-### C. Invites and user-directed disclosures
+### C. Invites, groups, calls, browser actions, and other user-directed disclosures
 
 If you create, send, or accept a Murph invite or similar user-directed flow, Murph may disclose the information reasonably necessary to complete that flow to the intended recipient or the service providers involved in carrying it out. Depending on the feature, this may include preview information, invite status, or imported records.
 
-Information you intentionally make available to other users or recipients may become visible to them under the settings or permissions you choose.
+If you ask Murph to call, message, browse, book, purchase, cancel, submit information, or otherwise interact with a third party, Murph may disclose the minimum information reasonably necessary to the recipient, merchant, healthcare or wellness provider, portal, communications provider, browser provider, model provider, payment processor, or other party needed to carry out the action you requested.
 
-**Recipient responsibility.** If you direct Murph to share health data with another person, organization, workspace, coach, clinician, researcher, or third-party app, that recipient may become an independent controller or separately responsible party for the data it receives. Their privacy policy, security practices, retention periods, and deletion practices may apply. Murph is not responsible for data that a recipient independently extracts, stores, or further discloses outside Murph, except where applicable law says otherwise.
+If you choose to share information in a group, challenge, or newsletter, the selected health information, summary, display name, or email address may be visible to the recipients identified in the applicable flow. Paying for another adult's Family access does not give the payer access to that adult's private health data or conversations.
+
+Information you intentionally make available to other users or recipients may become visible to them under the settings or permissions you choose. Murph cannot recall or delete copies already delivered to another person, an email inbox, a messaging service, or an independent third party.
+
+**Recipient responsibility.** If you direct Murph to share health data with another person, organization, workspace, coach, clinician, researcher, merchant, provider, or third-party app, that recipient may become an independent controller or separately responsible party for the data it receives. Their privacy policy, security practices, retention periods, and deletion practices may apply. Murph is not responsible for data that a recipient independently extracts, stores, or further discloses outside Murph, except where applicable law says otherwise.
 
 ### D. Legal, compliance, and protection purposes
 

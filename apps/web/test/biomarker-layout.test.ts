@@ -8,6 +8,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedSidebarAuthSnapshot: vi.fn(),
+  hostedConsentGrantFindMany: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -22,6 +23,14 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
   getHostedSidebarAuthSnapshot: mocks.getHostedSidebarAuthSnapshot,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({
+    hostedConsentGrant: {
+      findMany: mocks.hostedConsentGrantFindMany,
+    },
+  }),
 }));
 
 vi.mock("@/src/components/dashboard/sidebar", () => ({
@@ -43,6 +52,7 @@ beforeEach(() => {
     authenticated: false,
     label: null,
   });
+  mocks.hostedConsentGrantFindMany.mockResolvedValue([]);
 });
 
 test("the dashboard layout is the single shell owner for biomarker pages", async () => {
@@ -89,4 +99,33 @@ test("dashboard layout leaves access decisions to dashboard pages", async () => 
 
   assert.match(markup, /data-dashboard-sidebar="true"/);
   assert.match(markup, /data-dashboard-child="true"/);
+});
+
+test("dashboard layout shows current legal acceptance before vault-backed pages", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticatedMember: { id: "member_current" },
+  });
+  mocks.getHostedSidebarAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    label: null,
+  });
+
+  const markup = renderToStaticMarkup(
+    await DashboardLayout({
+      children: createElement(
+        "div",
+        { "data-dashboard-child": "true" },
+        "dashboard child",
+      ),
+    }),
+  );
+
+  assert.match(markup, /data-dashboard-legal-consent-gate="true"/);
+  assert.match(markup, /Review what changed/u);
+  assert.match(markup, /Current documents/u);
+  assert.doesNotMatch(markup, /data-dashboard-child="true"/);
+  expect(mocks.hostedConsentGrantFindMany).toHaveBeenCalledWith({
+    orderBy: [{ scope: "asc" }],
+    where: { memberId: "member_current" },
+  });
 });

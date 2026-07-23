@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-05-13
+Last verified: 2026-07-23
 
 ## Purpose
 
@@ -61,6 +61,14 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - `assertHostedLaunchRequiredConsentGranted`.
 
 Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection setup requires current launch-required consent before starting a provider OAuth flow; the user's explicit connect action supplies the feature intent for that source, so the connect flow does not require a second connected-source consent grant. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond launch consent plus an explicit user action.
+
+## Document updates and existing members
+
+A grant is current only when its recorded document-version snapshot exactly matches every document required by that scope. Publishing a new required version therefore preserves the old append-only acceptance event as historical evidence but makes the corresponding current grant stale. Members do not lose their account, subscription, data, device connection, or container when that happens.
+
+The authenticated dashboard layout reads consent status before starting the browser-vault provider. A member with stale launch consent sees the current legal card and returns to the requested dashboard route after accepting both launch scopes. This prevents vault-backed pages from degrading into an unrelated session-expired error.
+
+The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake, and current-conversation reply path do not use launch consent as an admission gate. A stale document version therefore does not stop an existing member from texting Murph or stop Murph from replying in that active conversation. Independently guarded browser-vault, new device connection, clinical-record, export, billing, group-join, iMessage mini-app, and companion actions still fail closed with `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents.
 
 ## Privacy Notes
 

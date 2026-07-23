@@ -563,7 +563,7 @@ function createConsentStatus(input: {
   const grant = input.withGrant
     ? {
         documentVersions: {
-          "terms-of-service": "2026-04-29",
+          "terms-of-service": "2026-07-23",
         },
         grantedAt: "2026-04-30T00:00:00.000Z",
         lastEventId: "event_123",
@@ -595,7 +595,13 @@ function createConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes: [
       consentScope("launch.legal", "Terms, privacy, and AI disclosure", [legalDocument], input.launchGranted, grant),
-      consentScope("launch.health-data", "Health data collection consent", [healthDocument], input.launchGranted, grant),
+      consentScope(
+        "launch.health-data",
+        "Health data notice and processing authorization",
+        [healthDocument],
+        input.launchGranted,
+        grant,
+      ),
     ],
   };
 }
@@ -610,7 +616,7 @@ function consentDocument(
     id,
     pdfHref: `${href}.pdf`,
     title,
-    version: "2026-04-29",
+    version: "2026-07-23",
   };
 }
 

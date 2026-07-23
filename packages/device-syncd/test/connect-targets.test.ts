@@ -94,7 +94,7 @@ test("reconnect targets retain duplicate direct and Junction routes for exact re
   );
 });
 
-test("Strava remains configured for status and self-hosted routing while its offer gate is disabled", () => {
+test("configured wearable sources remain available for fresh and existing connections", () => {
   const configs = readConfiguredDeviceSyncProviderConfigs({
     JUNCTION_API_KEY: "sk_us_junction-test",
     JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
@@ -106,7 +106,8 @@ test("Strava remains configured for status and self-hosted routing while its off
   });
 
   assert.ok(configs.strava);
-  assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), false);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("oura"), true);
+  assert.equal(isDeviceConnectSourceAvailableForConnection("strava"), true);
   assert.deepEqual(listConfiguredDeviceSyncConnectTargets(configs), [{
     connectSourceId: "strava",
     connectTarget: "strava",

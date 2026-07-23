@@ -17,9 +17,9 @@ describe("hosted legal consent registry", () => {
       "launch.legal",
     );
     expect(legalVersions).toEqual({
-      "health-ai-safety-disclosure": "2026-04-29",
-      "privacy-policy": "2026-06-24",
-      "terms-of-service": "2026-04-29",
+      "health-ai-safety-disclosure": "2026-07-23",
+      "privacy-policy": "2026-07-23",
+      "terms-of-service": "2026-07-23",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: legalVersions,
@@ -35,7 +35,7 @@ describe("hosted legal consent registry", () => {
       "launch.health-data",
     );
     expect(healthDataVersions).toEqual({
-      "consumer-health-data-notice": "2026-04-29",
+      "consumer-health-data-notice": "2026-07-23",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: healthDataVersions,
@@ -75,7 +75,7 @@ describe("hosted legal consent registry", () => {
   it("rejects accepted document versions outside the requested scope", () => {
     const acceptedDocumentVersions = {
       ...buildCurrentHostedConsentDocumentVersions("feature.health-ai"),
-      "terms-of-service": "2026-04-29",
+      "terms-of-service": "2026-07-23",
     };
 
     expect(() => parseHostedConsentAcceptRequest({
@@ -118,8 +118,8 @@ describe("hosted legal consent registry", () => {
   it("marks stale grants as not currently granted", () => {
     const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "privacy-policy": "2026-06-24",
-        "terms-of-service": "2026-04-29",
+        "privacy-policy": "2026-07-23",
+        "terms-of-service": "2026-07-23",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_legal",
@@ -131,7 +131,7 @@ describe("hosted legal consent registry", () => {
     };
     const healthDataGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "consumer-health-data-notice": "2026-04-29",
+        "consumer-health-data-notice": "2026-07-23",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_health",
@@ -157,6 +157,60 @@ describe("hosted legal consent registry", () => {
       current: false,
       granted: false,
     });
+  });
+
+  it("requires existing members on the previous document set to re-accept", () => {
+    const status = buildHostedConsentStatus({
+      grants: [
+        {
+          documentVersions: {
+            "health-ai-safety-disclosure": "2026-04-29",
+            "privacy-policy": "2026-06-24",
+            "terms-of-service": "2026-04-29",
+          },
+          grantedAt: "2026-06-24T00:00:00.000Z",
+          lastEventId: "hbce_previous_legal",
+          revokedAt: null,
+          scope: "launch.legal",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+        {
+          documentVersions: {
+            "consumer-health-data-notice": "2026-04-29",
+          },
+          grantedAt: "2026-04-29T00:00:00.000Z",
+          lastEventId: "hbce_previous_health",
+          revokedAt: null,
+          scope: "launch.health-data",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-04-29T00:00:00.000Z",
+        },
+      ],
+      now: new Date("2026-07-23T12:00:00.000Z"),
+    });
+
+    expect(status.launchGranted).toBe(false);
+    expect(status.launchScopes).toEqual([
+      {
+        granted: false,
+        missingDocuments: expect.arrayContaining([
+          expect.objectContaining({ id: "terms-of-service" }),
+          expect.objectContaining({ id: "privacy-policy" }),
+          expect.objectContaining({ id: "health-ai-safety-disclosure" }),
+        ]),
+        scope: "launch.legal",
+      },
+      {
+        granted: false,
+        missingDocuments: [
+          expect.objectContaining({ id: "consumer-health-data-notice" }),
+        ],
+        scope: "launch.health-data",
+      },
+    ]);
   });
 
   it("keeps current launch consent valid when a historical removed scope exists", () => {

@@ -23,6 +23,7 @@ import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -76,6 +77,7 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
@@ -191,6 +193,81 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
 
 type SegmentedControlDemoValue = "phone" | "email" | "telegram";
 
+const DESIGN_LEGAL_DOCUMENTS: HostedConsentStatus["documents"] = [
+  {
+    href: "/legal/terms",
+    id: "terms-of-service",
+    pdfHref: "/legal/terms.pdf",
+    title: "Murph Terms of Service",
+    version: "2026-07-23",
+  },
+  {
+    href: "/legal/privacy",
+    id: "privacy-policy",
+    pdfHref: "/legal/privacy.pdf",
+    title: "Murph Privacy Policy",
+    version: "2026-07-23",
+  },
+  {
+    href: "/legal/health-ai-safety-disclosure",
+    id: "health-ai-safety-disclosure",
+    pdfHref: "/legal/health-ai-safety-disclosure.pdf",
+    title: "Murph Health AI Safety Disclosure",
+    version: "2026-07-23",
+  },
+  {
+    href: "/consumer-health-data-privacy-policy",
+    id: "consumer-health-data-notice",
+    pdfHref: "/legal/consumer-health-data-notice.pdf",
+    title: "Murph Consumer Health Data Notice",
+    version: "2026-07-23",
+  },
+];
+
+const DESIGN_LEGAL_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(0, 3);
+const DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(3);
+const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
+  documents: DESIGN_LEGAL_DOCUMENTS,
+  generatedAt: "2026-07-23T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [
+    {
+      granted: false,
+      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      scope: "launch.legal",
+    },
+    {
+      granted: false,
+      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      scope: "launch.health-data",
+    },
+  ],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [
+    {
+      current: false,
+      documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      grant: null,
+      granted: false,
+      label: "Terms, privacy, and AI disclosure",
+      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      revocable: false,
+      scope: "launch.legal",
+    },
+    {
+      current: false,
+      documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      grant: null,
+      granted: false,
+      label: "Health data notice and processing authorization",
+      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      revocable: false,
+      scope: "launch.health-data",
+    },
+  ],
+};
+
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
 > = [
@@ -227,6 +304,16 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Dashboard legal update">
+          <div className="rounded-2xl border border-border bg-background px-5 py-4 sm:px-8">
+            <DashboardLegalConsentGate
+              initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+            />
+          </div>
+        </Section>
 
         <Separator />
 
