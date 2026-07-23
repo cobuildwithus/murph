@@ -17,6 +17,7 @@ import type {
 } from "@/src/lib/legal/consent";
 
 type HostedLegalConsentCardMode = "compact" | "panel";
+type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
 
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
@@ -27,6 +28,18 @@ interface HostedLegalConsentCardProps {
   onRequirementChange?: (required: boolean) => void;
   preferredScope?: HostedConsentScope;
   source: string;
+}
+
+interface HostedLaunchConsentPromptProps {
+  acceptedPendingLabel?: string;
+  className?: string;
+  documents: HostedConsentScopeStatus["documents"];
+  errorMessage?: string | null;
+  handoffPending?: boolean;
+  mode?: HostedLegalConsentCardMode;
+  onContinue: () => void;
+  pending?: boolean;
+  variant?: HostedLaunchConsentVariant;
 }
 
 export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
@@ -53,8 +66,6 @@ function HostedLegalConsentCardState({
   const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [legalAccepted, setLegalAccepted] = useState(false);
-  const [healthDataAccepted, setHealthDataAccepted] = useState(false);
   const [featureAccepted, setFeatureAccepted] = useState(false);
   const status = initialStatus ?? loadedStatus;
 
@@ -65,11 +76,14 @@ function HostedLegalConsentCardState({
       setLoadedStatus(nextStatus);
       setErrorMessage(null);
     } catch (error) {
-      setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
+      setErrorMessage(
+        readConsentErrorMessage(error, "Could not load Murph legal consent right now."),
+      );
     } finally {
       setLoading(false);
     }
   }, []);
+
   useEffect(() => {
     if (initialStatus) {
       return;
@@ -90,7 +104,9 @@ function HostedLegalConsentCardState({
           return;
         }
 
-        setErrorMessage(readConsentErrorMessage(error, "Could not load Murph legal consent right now."));
+        setErrorMessage(
+          readConsentErrorMessage(error, "Could not load Murph legal consent right now."),
+        );
       })
       .finally(() => {
         if (!cancelled) {
@@ -105,9 +121,10 @@ function HostedLegalConsentCardState({
 
   const pendingScopes = useMemo(() => {
     if (!status) return [];
+
     const launchPending = status.launchScopes
-      .filter((s) => !s.granted)
-      .map((s) => s.scope);
+      .filter((scope) => !scope.granted)
+      .map((scope) => scope.scope);
     if (launchPending.length > 0) return launchPending;
 
     const preferred = findConsentScope(status, preferredScope);
@@ -116,33 +133,26 @@ function HostedLegalConsentCardState({
     return [];
   }, [preferredScope, status]);
 
-  const isLaunchFlow = pendingScopes.some((s) => s.startsWith("launch."));
+  const isLaunchFlow = pendingScopes.some((scope) => scope.startsWith("launch."));
   const isFeatureFlow = !isLaunchFlow && pendingScopes.length > 0;
-
-  const legalScope = status ? findConsentScope(status, "launch.legal") : null;
-  const healthDataScope = status ? findConsentScope(status, "launch.health-data") : null;
-
   const featureScope = useMemo(() => {
     if (!isFeatureFlow || !status) return null;
     return findConsentScope(status, preferredScope);
   }, [isFeatureFlow, preferredScope, status]);
+  const launchDocuments = useMemo(
+    () => (status ? collectScopeDocuments(status, pendingScopes) : []),
+    [pendingScopes, status],
+  );
+  const actionPending = pending || acceptedHandoffPending;
+  const canSubmit = isLaunchFlow || (isFeatureFlow && featureAccepted);
+
   useEffect(() => {
     if (!status) return;
     onRequirementChange?.(pendingScopes.length > 0);
   }, [pendingScopes, onRequirementChange, status]);
 
-  const launchLegalChecked = !legalScope || legalScope.granted || legalAccepted;
-  const launchHealthDataChecked =
-    !healthDataScope || healthDataScope.granted || healthDataAccepted;
-  const allChecked = isLaunchFlow
-    ? launchLegalChecked && launchHealthDataChecked
-    : isFeatureFlow
-      ? featureAccepted
-      : false;
-  const actionPending = pending || acceptedHandoffPending;
-
   async function handleAccept() {
-    if (actionPending || !allChecked || !status) return;
+    if (actionPending || !canSubmit || !status) return;
 
     setPending(true);
     setAcceptedHandoffPending(false);
@@ -166,13 +176,16 @@ function HostedLegalConsentCardState({
           });
         }
       }
+
       setAcceptedHandoffPending(true);
       if (onAccepted) {
         await onAccepted(latestStatus);
       }
     } catch (error) {
       setAcceptedHandoffPending(false);
-      setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
+      setErrorMessage(
+        readConsentErrorMessage(error, "Could not record Murph legal consent right now."),
+      );
     } finally {
       setPending(false);
     }
@@ -211,30 +224,25 @@ function HostedLegalConsentCardState({
     return null;
   }
 
-  const title = isLaunchFlow ? "Before you start" : "Connect health sources";
-  const description = isLaunchFlow
-    ? "Please review and agree to the following."
-    : "Review and accept the health source consent for this integration.";
-
-  const checkboxes = isLaunchFlow ? (
-    <LaunchConsentCheckboxes
-      legalAccepted={legalAccepted}
-      healthDataAccepted={healthDataAccepted}
-      onLegalChange={setLegalAccepted}
-      onHealthDataChange={setHealthDataAccepted}
-      legalScope={legalScope}
-      healthDataScope={healthDataScope}
-    />
-  ) : featureScope ? (
-    <div className="space-y-3">
-      <DocumentLinks documents={featureScope.documents} />
-      <ConsentCheckbox
-        checked={featureAccepted}
-        onChange={setFeatureAccepted}
-        label="I agree to the above"
+  if (isLaunchFlow) {
+    return (
+      <HostedLaunchConsentPrompt
+        acceptedPendingLabel={acceptedPendingLabel}
+        className={className}
+        documents={launchDocuments}
+        errorMessage={errorMessage}
+        handoffPending={acceptedHandoffPending}
+        mode={mode}
+        onContinue={handleAccept}
+        pending={pending}
+        variant={resolveLaunchConsentVariant(pendingScopes)}
       />
-    </div>
-  ) : null;
+    );
+  }
+
+  if (!featureScope) {
+    return null;
+  }
 
   const continueButton = (
     <Button
@@ -242,26 +250,47 @@ function HostedLegalConsentCardState({
       className={mode === "compact" ? "w-full" : undefined}
       type="button"
       onClick={handleAccept}
-      disabled={!allChecked || actionPending}
+      disabled={!canSubmit || actionPending}
       size={mode === "compact" ? "xl" : "lg"}
     >
-      {acceptedHandoffPending ? acceptedPendingLabel : pending ? "Saving..." : "Continue"}
+      {acceptedHandoffPending
+        ? acceptedPendingLabel
+        : pending
+          ? "Saving..."
+          : "Continue"}
     </Button>
   );
 
-  if (mode === "compact") {
-    return (
-      <div className={joinClassNames("w-full space-y-8", className)}>
-        {checkboxes}
-        {errorMessage ? (
-          <Alert variant="destructive">
-            <AlertTitle>Unable to record consent</AlertTitle>
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-        {continueButton}
+  const content = (
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="font-serif text-xl font-normal tracking-tight text-foreground">
+          Connect health sources
+        </p>
+        <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          Review and accept the health source consent for this integration.
+        </p>
       </div>
-    );
+      <div className="space-y-3">
+        <DocumentLinks documents={featureScope.documents} />
+        <ConsentCheckbox
+          checked={featureAccepted}
+          onChange={setFeatureAccepted}
+          label="I agree to the above"
+        />
+      </div>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to record consent</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+      {continueButton}
+    </div>
+  );
+
+  if (mode === "compact") {
+    return <div className={joinClassNames("w-full", className)}>{content}</div>;
   }
 
   return (
@@ -270,87 +299,73 @@ function HostedLegalConsentCardState({
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
           <ShieldCheckIcon className="size-4" aria-hidden />
         </span>
-        <div className="min-w-0 flex-1 space-y-5">
-          <div className="space-y-1">
-            <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
-          </div>
-          {checkboxes}
-          {errorMessage ? (
-            <Alert variant="destructive">
-              <AlertTitle>Unable to record consent</AlertTitle>
-              <AlertDescription>{errorMessage}</AlertDescription>
-            </Alert>
-          ) : null}
-          {continueButton}
-        </div>
+        <div className="min-w-0 flex-1">{content}</div>
       </div>
     </div>
   );
 }
 
-function LaunchConsentCheckboxes({
-  legalAccepted,
-  healthDataAccepted,
-  onLegalChange,
-  onHealthDataChange,
-  legalScope,
-  healthDataScope,
-}: {
-  healthDataAccepted: boolean;
-  healthDataScope: HostedConsentScopeStatus | null;
-  legalAccepted: boolean;
-  legalScope: HostedConsentScopeStatus | null;
-  onHealthDataChange: (checked: boolean) => void;
-  onLegalChange: (checked: boolean) => void;
-}) {
-  return (
+export function HostedLaunchConsentPrompt({
+  acceptedPendingLabel = "Continuing...",
+  className,
+  documents,
+  errorMessage = null,
+  handoffPending = false,
+  mode = "compact",
+  onContinue,
+  pending = false,
+  variant = "combined",
+}: HostedLaunchConsentPromptProps) {
+  const copy = resolveLaunchConsentCopy(variant);
+  const actionPending = pending || handoffPending;
+  const content = (
     <div className="space-y-6">
-      {legalScope && !legalScope.granted ? (
-        <ConsentCheckbox
-          checked={legalAccepted}
-          onChange={onLegalChange}
-          label={
-            <>
-              I agree to the{" "}
-              {legalScope.documents.map((doc, i) => (
-                <span key={doc.id}>
-                  {i > 0 ? (i === legalScope.documents.length - 1 ? " and " : ", ") : ""}
-                  <a
-                    href={doc.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="font-medium text-foreground underline-offset-4 hover:underline"
-                  >
-                    {doc.title.replace("Murph ", "")}
-                  </a>
-                </span>
-              ))}
-            </>
-          }
-        />
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <p className="font-serif text-xl font-normal tracking-tight text-foreground">
+            {copy.title}
+          </p>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {copy.description}
+          </p>
+        </div>
+        <LaunchDocumentLinks documents={documents} />
+      </div>
+      {errorMessage ? (
+        <Alert variant="destructive">
+          <AlertTitle>Unable to record consent</AlertTitle>
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
       ) : null}
+      <Button
+        aria-busy={actionPending}
+        className={mode === "compact" ? "w-full" : undefined}
+        disabled={actionPending}
+        onClick={onContinue}
+        size={mode === "compact" ? "xl" : "lg"}
+        type="button"
+      >
+        {handoffPending
+          ? acceptedPendingLabel
+          : pending
+            ? "Saving..."
+            : copy.actionLabel}
+      </Button>
+    </div>
+  );
 
-      {healthDataScope && !healthDataScope.granted ? (
-        <ConsentCheckbox
-          checked={healthDataAccepted}
-          onChange={onHealthDataChange}
-          label={
-            <>
-              I agree to the{" "}
-              <a
-                href={healthDataScope.documents[0]?.href ?? "#"}
-                target="_blank"
-                rel="noreferrer"
-                className="font-medium text-foreground underline-offset-4 hover:underline"
-              >
-                Consumer Health Data Notice
-              </a>
-              , which explains what health data Murph collects and why
-            </>
-          }
-        />
-      ) : null}
+  if (mode === "compact") {
+    return <div className={joinClassNames("w-full", className)}>{content}</div>;
+  }
+
+  return (
+    <div className={joinClassNames(cardClassName(mode), className)}>
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
+          <ShieldCheckIcon className="size-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">{content}</div>
+      </div>
     </div>
   );
 }
@@ -380,6 +395,28 @@ function ConsentCheckbox({
   );
 }
 
+function LaunchDocumentLinks({
+  documents,
+}: {
+  documents: HostedConsentScopeStatus["documents"];
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed text-muted-foreground">
+      {documents.map((document) => (
+        <a
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+          href={document.href}
+          key={document.id}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {shortDocumentTitle(document.title)}
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function DocumentLinks({
   documents,
 }: {
@@ -402,6 +439,69 @@ function DocumentLinks({
       ))}
     </ul>
   );
+}
+
+function collectScopeDocuments(
+  status: HostedConsentStatus,
+  scopes: HostedConsentScope[],
+): HostedConsentScopeStatus["documents"] {
+  const documents = new Map<string, HostedConsentScopeStatus["documents"][number]>();
+
+  for (const scope of scopes) {
+    const scopeStatus = findConsentScope(status, scope);
+    for (const document of scopeStatus?.documents ?? []) {
+      documents.set(document.id, document);
+    }
+  }
+
+  return [...documents.values()];
+}
+
+function resolveLaunchConsentVariant(
+  scopes: HostedConsentScope[],
+): HostedLaunchConsentVariant {
+  const legalPending = scopes.includes("launch.legal");
+  const healthDataPending = scopes.includes("launch.health-data");
+
+  if (legalPending && healthDataPending) return "combined";
+  if (healthDataPending) return "health-data";
+  return "legal";
+}
+
+function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
+  actionLabel: string;
+  description: string;
+  title: string;
+} {
+  if (variant === "legal") {
+    return {
+      actionLabel: "Agree & continue",
+      description: "We updated the terms and disclosures that govern your use of Murph.",
+      title: "Review Murph’s terms",
+    };
+  }
+
+  return {
+    actionLabel: variant === "combined" ? "Agree, consent & continue" : "Consent & continue",
+    description:
+      "Murph uses health data you add or connect to personalize your experience, including through contracted AI providers. We don’t sell it, use it for ads, or train general-purpose AI models with it.",
+    title: "Use your health data with Murph",
+  };
+}
+
+function shortDocumentTitle(title: string): string {
+  switch (title) {
+    case "Murph Terms of Service":
+      return "Terms";
+    case "Murph Privacy Policy":
+      return "Privacy";
+    case "Murph Consumer Health Data Notice":
+      return "Health Data Notice";
+    case "Murph Health AI Safety Disclosure":
+      return "AI Safety";
+    default:
+      return title.replace(/^Murph\s+/u, "");
+  }
 }
 
 function findConsentScope(
@@ -463,22 +563,17 @@ function joinClassNames(...values: Array<string | null | undefined>): string {
 
 export function ConsentSkeleton() {
   return (
-    <div className="w-full animate-pulse space-y-8">
-      <div className="space-y-6">
-        <div className="flex items-start gap-4">
-          <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2.5 pt-0.5">
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-3/4 rounded-full bg-muted" />
-          </div>
+    <div className="w-full animate-pulse space-y-6">
+      <div className="space-y-3">
+        <div className="h-5 w-56 rounded-full bg-muted" />
+        <div className="space-y-2.5">
+          <div className="h-4 w-full rounded-full bg-muted" />
+          <div className="h-4 w-4/5 rounded-full bg-muted" />
         </div>
-        <div className="flex items-start gap-4">
-          <div className="size-7 shrink-0 rounded-lg bg-muted" />
-          <div className="flex-1 space-y-2.5 pt-0.5">
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-full rounded-full bg-muted" />
-            <div className="h-4 w-3/5 rounded-full bg-muted" />
-          </div>
+        <div className="flex gap-3">
+          <div className="h-3.5 w-14 rounded-full bg-muted" />
+          <div className="h-3.5 w-14 rounded-full bg-muted" />
+          <div className="h-3.5 w-24 rounded-full bg-muted" />
         </div>
       </div>
       <div className="h-14 w-full rounded-2xl bg-muted" />
