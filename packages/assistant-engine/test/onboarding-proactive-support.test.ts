@@ -13,7 +13,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 
 describe('proactive onboarding support', () => {
-  it('makes the first reminder-and-review package proactive but bounded', () => {
+  it('makes the first reminder-and-review package proactive but keeps the launch text-only', () => {
     const prompt = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantContextSnapshotPrompt: null,
@@ -51,6 +51,9 @@ describe('proactive onboarding support', () => {
     expect(prompt).toContain(
       'Onboarding itself never triggers music or requires media for completion.',
     )
+    expect(prompt).not.toContain(
+      'Do not generate or offer a song during onboarding.',
+    )
     expect(prompt).toContain(
       'put no text or later bubble after it. An owning skill may still require attached response media',
     )
@@ -59,7 +62,7 @@ describe('proactive onboarding support', () => {
     )
   })
 
-  it('requires schedule resolution, same-turn support writes, and a warm close', async () => {
+  it('requires schedule resolution, modality matching, and a text-only onboarding close', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
     const [behaviorRaw, onboardingRaw, musicRaw] = await Promise.all([
       readFile(
@@ -131,6 +134,29 @@ describe('proactive onboarding support', () => {
     expect(music).toContain(
       'Use this skill during onboarding only when the user explicitly asks for a song',
     )
+    expect(onboarding).toContain(
+      'You can type it out instead — either works just as well.',
+    )
+    expect(onboarding).toContain(
+      'I can walk you through sending a voice memo.',
+    )
+    expect(onboarding).toContain(
+      'Do not offer it based on guessed age, and do not make unknown age block or delay the invitation.',
+    )
+    expect(onboarding).toContain(
+      'Only when they answered that invitation with a voice memo',
+    )
+    expect(onboarding).toContain(
+      'have not since declined voice, and `murph.generate_voice_memo` is available',
+    )
+    expect(onboarding).toContain(
+      'That response is voice-only: do not duplicate the question or the already-sent delegation acknowledgement in text.',
+    )
+    expect(onboarding).toContain(
+      'Also use text when voice generation is unavailable, fails, or the user prefers text.',
+    )
+    expect(onboarding).not.toContain('Read `music-generation` and call `generate_song`')
+
     expect(music).toContain(
       "The song is the reply's only media item, but it may accompany text.",
     )

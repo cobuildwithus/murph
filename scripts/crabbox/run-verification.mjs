@@ -9,6 +9,7 @@ const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
   "verify:acceptance",
 ]);
+const TRUSTED_ENTRYPOINT_ENV = "MURPH_CRABBOX_TRUSTED_ENTRYPOINT";
 
 const SENSITIVE_ENVIRONMENT_NAMES = [
   "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
@@ -100,6 +101,7 @@ export function assertNoSensitiveEnvironment(environment) {
 }
 
 export async function runRemoteVerification(argv, sourceEnvironment = process.env) {
+  assertTrustedEntrypoint(sourceEnvironment);
   const request = parseRemoteVerificationRequest(argv);
   const environment = buildSanitizedVerificationEnvironment(sourceEnvironment);
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -129,6 +131,14 @@ export async function runRemoteVerification(argv, sourceEnvironment = process.en
     ],
     { cwd: repoRoot, env: environment },
   );
+}
+
+export function assertTrustedEntrypoint(environment) {
+  if (environment[TRUSTED_ENTRYPOINT_ENV] !== "1") {
+    throw new Error(
+      "Crabbox verification must enter through the trusted Testbox entrypoint.",
+    );
+  }
 }
 
 function requireEnvironmentValue(environment, name) {

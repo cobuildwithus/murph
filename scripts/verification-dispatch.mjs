@@ -6,7 +6,25 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const BLACKSMITH_PROVIDER = "blacksmith-testbox";
+const BLACKSMITH_ORG = "cobuildwithus";
+const BLACKSMITH_REF = "main";
+const BLACKSMITH_WORKFLOW = ".github/workflows/crabbox.yml";
+const BLACKSMITH_JOB = "hydrate";
 const DEFAULT_CRABBOX_PROFILE = "murph-verification";
+const TRUSTED_CRABBOX_ENTRYPOINT = "/usr/local/bin/murph-crabbox-verify";
+const SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES = [
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "TMPDIR",
+  "USER",
+  "XDG_CACHE_HOME",
+  "XDG_CONFIG_HOME",
+];
 const VALID_EXECUTORS = new Set(["auto", "local", "crabbox"]);
 const SUPPORTED_VERIFICATION_COMMANDS = new Set([
   "test:diff",
@@ -24,7 +42,7 @@ export function parseVerificationRequest(argv) {
   return { commandArgs, verificationCommand };
 }
 
-export function resolveBlacksmithTarget(env) {
+function assertSafeBlacksmithRoutingInputs(env) {
   const leaseId = readOptionalValue(
     env.MURPH_CRABBOX_LEASE_ID,
     "MURPH_CRABBOX_LEASE_ID",
@@ -36,14 +54,15 @@ export function resolveBlacksmithTarget(env) {
 
   if (legacyPool) {
     throw new Error(
-      "Blacksmith Testbox does not use Crabbox pools; set MURPH_CRABBOX_BLACKSMITH=1 for a fresh Testbox or MURPH_CRABBOX_LEASE_ID for an existing Testbox.",
+      "Blacksmith Testbox does not use Crabbox pools; set MURPH_CRABBOX_BLACKSMITH=1 for a fresh pinned Testbox.",
     );
   }
 
   if (leaseId) {
-    return { kind: "lease", value: leaseId };
+    throw new Error(
+      "MURPH_CRABBOX_LEASE_ID is not supported for canonical verification because an arbitrary existing lease cannot prove the organization that installed its trusted entrypoint. Use a fresh pinned Testbox run.",
+    );
   }
-  return null;
 }
 
 export function resolveVerificationExecutor({
@@ -61,7 +80,7 @@ export function resolveVerificationExecutor({
   );
 
   if (env.CI || env.MURPH_CRABBOX_REMOTE === "1") {
-    return { executor: "local", reason: env.CI ? "ci" : "already-remote", target: null };
+    return { executor: "local", reason: env.CI ? "ci" : "already-remote" };
   }
 
   if (requiresVercelDevelopmentEnvironment) {
@@ -70,29 +89,28 @@ export function resolveVerificationExecutor({
         "MURPH_VERIFY_REQUIRES_VERCEL_ENV=1 cannot be combined with MURPH_VERIFY_EXECUTOR=crabbox; the default Crabbox verification lane never forwards Vercel development credentials.",
       );
     }
-    return { executor: "local", reason: "vercel-development-env", target: null };
+    return { executor: "local", reason: "vercel-development-env" };
   }
 
   if (requestedExecutor === "local") {
-    return { executor: "local", reason: "explicit", target: null };
+    return { executor: "local", reason: "explicit" };
   }
 
   const codexThreadId = env.CODEX_THREAD_ID?.trim();
   if (requestedExecutor === "auto" && !codexThreadId) {
-    return { executor: "local", reason: "non-codex", target: null };
+    return { executor: "local", reason: "non-codex" };
   }
 
-  const target = resolveBlacksmithTarget(env);
+  assertSafeBlacksmithRoutingInputs(env);
   const blacksmithEnabled = readBooleanFlag(
     env.MURPH_CRABBOX_BLACKSMITH,
     "MURPH_CRABBOX_BLACKSMITH",
   );
   if (
     requestedExecutor === "auto" &&
-    !blacksmithEnabled &&
-    !target
+    !blacksmithEnabled
   ) {
-    return { executor: "local", reason: "no-blacksmith-config", target: null };
+    return { executor: "local", reason: "no-blacksmith-config" };
   }
   if (!isCrabboxAvailable()) {
     if (requestedExecutor === "crabbox") {
@@ -100,13 +118,12 @@ export function resolveVerificationExecutor({
         "MURPH_VERIFY_EXECUTOR=crabbox was requested, but the Crabbox and Blacksmith CLIs are unavailable.",
       );
     }
-    return { executor: "local", reason: "crabbox-unavailable", target: null };
+    return { executor: "local", reason: "crabbox-unavailable" };
   }
 
   return {
     executor: "crabbox",
     reason: requestedExecutor === "crabbox" ? "explicit" : "codex-auto",
-    target,
   };
 }
 
@@ -121,30 +138,29 @@ export function buildLocalInvocation(request) {
   };
 }
 
-export function buildCrabboxInvocation(request, target, env = process.env) {
-  const profile = readOptionalValue(
-    env.MURPH_CRABBOX_PROFILE,
-    "MURPH_CRABBOX_PROFILE",
-  ) ?? DEFAULT_CRABBOX_PROFILE;
+export function buildCrabboxInvocation(request) {
   const args = [
     "run",
     "--profile",
-    profile,
+    DEFAULT_CRABBOX_PROFILE,
     "--provider",
     BLACKSMITH_PROVIDER,
+    "--blacksmith-org",
+    BLACKSMITH_ORG,
+    "--blacksmith-ref",
+    BLACKSMITH_REF,
+    "--blacksmith-workflow",
+    BLACKSMITH_WORKFLOW,
+    "--blacksmith-job",
+    BLACKSMITH_JOB,
     "--label",
     `murph ${request.verificationCommand}`,
     "--timing-json",
   ];
 
-  if (target) {
-    args.push("--id", target.value);
-  }
-
   args.push(
     "--",
-    "node",
-    "scripts/crabbox/run-verification.mjs",
+    TRUSTED_CRABBOX_ENTRYPOINT,
     request.verificationCommand,
     ...request.commandArgs,
   );
@@ -156,14 +172,11 @@ export async function runVerification(argv, env = process.env) {
   const request = parseVerificationRequest(argv);
   const resolution = resolveVerificationExecutor({ env });
   const invocation = resolution.executor === "crabbox"
-    ? buildCrabboxInvocation(request, resolution.target, env)
+    ? buildCrabboxInvocation(request)
     : buildLocalInvocation(request);
 
-  const targetLabel = resolution.executor === "crabbox"
-    ? ` target=${resolution.target?.kind ?? "one-shot"}`
-    : "";
   process.stderr.write(
-    `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason}${targetLabel}\n`,
+    `[verification-dispatch] command=${request.verificationCommand} executor=${resolution.executor} reason=${resolution.reason}\n`,
   );
 
   const childEnvironment = resolution.executor === "crabbox"
@@ -172,15 +185,27 @@ export async function runVerification(argv, env = process.env) {
   if (resolution.executor === "crabbox") {
     assertSafeBlacksmithSync(
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
+      childEnvironment,
     );
   }
   return await runChild(invocation, childEnvironment);
 }
 
 export function buildCrabboxCliEnvironment(env) {
-  const childEnvironment = { ...env };
-  delete childEnvironment.CRABBOX_ENV_ALLOW;
-  delete childEnvironment.MURPH_CRABBOX_NO_FORWARD;
+  const childEnvironment = {};
+  for (const name of SAFE_CRABBOX_CLI_ENVIRONMENT_NAMES) {
+    const value = env[name];
+    if (value === undefined || value === "") {
+      continue;
+    }
+    if (/[\0\r\n]/u.test(value)) {
+      throw new Error(`Crabbox CLI environment ${name} must not contain control characters.`);
+    }
+    childEnvironment[name] = value;
+  }
+  if (!childEnvironment.HOME || !childEnvironment.PATH) {
+    throw new Error("Crabbox CLI execution requires HOME and PATH.");
+  }
   return childEnvironment;
 }
 
@@ -188,9 +213,9 @@ export function findSensitiveBlacksmithSyncPaths(paths) {
   return paths.filter(isSensitiveBlacksmithSyncPath);
 }
 
-export function assertSafeBlacksmithSync(repoRoot) {
+export function assertSafeBlacksmithSync(repoRoot, environment = process.env) {
   const unsafeStates = findUnsafeBlacksmithWorktreeStates(
-    readGitWorktreeStates(repoRoot),
+    readGitWorktreeStates(repoRoot, environment),
   );
   if (unsafeStates.length > 0) {
     const counts = new Map();
@@ -205,7 +230,11 @@ export function assertSafeBlacksmithSync(repoRoot) {
     );
   }
 
-  const cachedPaths = listGitPaths(repoRoot, ["ls-files", "--cached", "-z"]);
+  const cachedPaths = listGitPaths(
+    repoRoot,
+    ["ls-files", "--cached", "-z"],
+    environment,
+  );
   const sensitivePaths = findSensitiveBlacksmithSyncPaths(cachedPaths);
   if (sensitivePaths.length > 0) {
     const renderedPaths = sensitivePaths
@@ -279,13 +308,14 @@ export function parseGitStatusPorcelainV1Z(output) {
   return entries;
 }
 
-function readGitWorktreeStates(repoRoot) {
+function readGitWorktreeStates(repoRoot, environment) {
   const result = spawnSync(
     "git",
     ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
     {
       cwd: repoRoot,
       encoding: "utf8",
+      env: environment,
       maxBuffer: 16 * 1024 * 1024,
     },
   );
@@ -295,10 +325,11 @@ function readGitWorktreeStates(repoRoot) {
   return parseGitStatusPorcelainV1Z(result.stdout);
 }
 
-function listGitPaths(repoRoot, args) {
+function listGitPaths(repoRoot, args, environment) {
   const result = spawnSync("git", args, {
     cwd: repoRoot,
     encoding: "utf8",
+    env: environment,
     maxBuffer: 16 * 1024 * 1024,
   });
   if (result.status !== 0) {
@@ -346,11 +377,14 @@ function isSensitiveBlacksmithSyncPath(filePath) {
 }
 
 function detectCrabboxStack() {
-  return isCommandAvailable("crabbox") && isCommandAvailable("blacksmith");
+  const environment = buildCrabboxCliEnvironment(process.env);
+  return isCommandAvailable("crabbox", environment) &&
+    isCommandAvailable("blacksmith", environment);
 }
 
-function isCommandAvailable(command) {
+function isCommandAvailable(command, environment) {
   const result = spawnSync(command, ["--version"], {
+    env: environment,
     stdio: "ignore",
   });
   return result.status === 0;

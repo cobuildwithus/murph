@@ -32,6 +32,12 @@ import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shar
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import {
+  HostedUsageTopUpDialog,
+  type HostedUsageTopUpActivePurchase,
+  type HostedUsageTopUpOffer,
+  type HostedUsageTopUpReturn,
+} from "./hosted-usage-top-up-dialog";
 
 export interface FamilyManagerTier {
   name: string;
@@ -221,6 +227,11 @@ export function HostedFamilyManager(props: {
     used: number;
   };
   tiers: FamilyManagerTier[];
+  usageTopUpActiveMemberId?: string | null;
+  usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
+  usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpReturnMemberId?: string | null;
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -514,6 +525,9 @@ export function HostedFamilyManager(props: {
           <tbody className="divide-y divide-border">
             {props.members.map((member) => {
               const isRetry = member.pendingPlanCode !== null;
+              const usageTargetLabel = member.isOwner
+                ? "you"
+                : member.label ?? "this family member";
               const targetPlanCode = member.pendingPlanCode
                 ?? props.tiers.find((tier) => tier.planCode !== member.planCode)?.planCode;
               const targetTier = props.tiers.find(
@@ -546,6 +560,24 @@ export function HostedFamilyManager(props: {
                   </td>
                   <td className="py-3 text-right align-top">
                     <div className="inline-flex items-center gap-1">
+                      <HostedUsageTopUpDialog
+                        activePurchase={
+                          props.usageTopUpActiveMemberId === member.memberId
+                            ? props.usageTopUpActivePurchase
+                            : null
+                        }
+                        checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(member.memberId)}/usage-credit/checkout`}
+                        offers={props.usageTopUpActivePurchase
+                          ? []
+                          : props.usageTopUpOffers ?? []}
+                        purchaseReturn={
+                          props.usageTopUpReturnMemberId === member.memberId
+                            ? props.usageTopUpPurchaseReturn
+                            : null
+                        }
+                        scope="family"
+                        targetLabel={usageTargetLabel}
+                      />
                       {targetTier ? (
                         <Button
                           type="button"
@@ -641,6 +673,42 @@ export function HostedFamilyManager(props: {
         </tbody>
       </table>
       </div>
+
+      {[props.usageTopUpActiveMemberId, props.usageTopUpReturnMemberId]
+        .filter((memberId, index, memberIds): memberId is string => Boolean(
+          memberId
+          && !props.members.some((member) => member.memberId === memberId)
+          && memberIds.indexOf(memberId) === index,
+        ))
+        .map((memberId) => {
+          const activePurchase = props.usageTopUpActiveMemberId === memberId
+            ? props.usageTopUpActivePurchase ?? null
+            : null;
+          return (
+            <div
+              key={memberId}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <p className="text-sm text-muted-foreground">
+                Review an unfinished checkout for a former family member. It
+                cannot be paid here.
+              </p>
+              <HostedUsageTopUpDialog
+                activePurchase={activePurchase}
+                checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
+                deferTerminalRefreshUntilClose
+                offers={[]}
+                purchaseReturn={
+                  props.usageTopUpReturnMemberId === memberId
+                    ? props.usageTopUpPurchaseReturn
+                    : null
+                }
+                scope="family"
+                targetLabel="a former family member"
+              />
+            </div>
+          );
+        })}
 
       {!props.billingActive ? (
         <p

@@ -133,7 +133,9 @@ function createHostedUsageTopUpState(input: {
     screen: {
       ...createPurchaseScreen(purchaseId),
       checkoutUrl:
-        status === "checkout_open" && input.activePurchase?.url
+        status === "checkout_open" &&
+        input.activePurchase?.targetConflict !== true &&
+        input.activePurchase?.url
           ? readOptionalCheckoutUrl(input.activePurchase.url)
           : null,
       restartAt:
@@ -141,10 +143,13 @@ function createHostedUsageTopUpState(input: {
           ? readOptionalRestartAt(input.activePurchase?.restartAt)
           : null,
       retryOfferCode:
-        status === "reconciling" && input.activePurchase?.retryAllowed
+        status === "reconciling" &&
+        input.activePurchase?.targetConflict !== true &&
+        input.activePurchase?.retryAllowed
           ? input.activePurchase.offerCode
           : null,
       status,
+      targetConflict: input.activePurchase?.targetConflict === true,
     },
   };
 }
@@ -372,7 +377,7 @@ function screenFromResponse(
   return {
     ...createPurchaseScreen(response.purchaseId),
     checkoutUrl:
-      response.status === "checkout_open"
+      !response.targetConflict && response.status === "checkout_open"
         ? responseUrl ?? previous?.checkoutUrl ?? null
         : null,
     poll:
@@ -382,8 +387,9 @@ function screenFromResponse(
           ? previousPoll
           : createPoll(previousPoll.run),
     restartAt: response.status === "reconciling" ? response.restartAt : null,
-    retryOfferCode,
-    retryRequestKey: retryOfferCode ? retryRequestKey : null,
+    retryOfferCode: response.targetConflict ? null : retryOfferCode,
+    retryRequestKey:
+      response.targetConflict || !retryOfferCode ? null : retryRequestKey,
     status: response.status,
     targetConflict: response.targetConflict || previous?.targetConflict === true,
   };

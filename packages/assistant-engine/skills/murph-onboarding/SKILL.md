@@ -402,12 +402,16 @@ they are not a script to read one question at a time.
 #### The brain-dump memo (checkpoints 2–5)
 
 After the data-source step, ask for movement, current protocols, supplements,
-and medical context as a single low-effort voice-memo invitation instead of
-four serial questions. Send one message in this shape, adapting the lead-in
-wording but keeping the bulleted list and the explicit voice-memo ask:
+and medical context as one low-effort invitation instead of four serial
+questions. Say that voice and typing work equally well. When visible or saved
+evidence shows the user is over 40, also offer to walk them through sending a
+voice memo. Send one message in this shape, adapting the lead-in wording but
+keeping the bulleted list and both input options:
 
 ```text
 Can you send me a voice memo covering a few things?
+
+You can type it out instead — either works just as well.
 
 - how you move right now — gym, running, sports, mostly desk-bound — and whether you're training for anything specific
 - anything you take regularly — supplements, protein, that stuff — brands if you know them
@@ -417,8 +421,9 @@ Can you send me a voice memo covering a few things?
 Ramble as long as you want, I'll sort it out.
 ```
 
-Only add a "type instead if that's easier" note to the lead-in when saved
-evidence shows the user is over 55; otherwise leave the voice-memo ask as-is.
+For a user known to be over 40, add this short sentence before the list: “I can
+walk you through sending a voice memo.” Do not offer it based on guessed age,
+and do not make unknown age block or delay the invitation.
 
 Do not send this as a generated voice memo (a bulleted list has to be text),
 and do not add a companion text to narrate it. One reply covers all four
@@ -498,8 +503,9 @@ the supplied facts before replying and leaves optional label details unknown.
    Normally the brain-dump memo above covers this and the
    movement-and-current-protocols child owns its bounded persistence. If it is
    left open and must be asked on its own later, ask one natural optional
-   question and end that visible message with exactly: “Feel free to send me a
-   voice memo.”
+   question, say that typing works just as well as voice, and offer to walk the
+   user through sending a voice memo when visible or saved evidence shows they
+   are over 40.
 3. **Current protocols or experiments.** Whether they are already trying a
    health protocol, routine change, diet pattern, recovery practice, or
    experiment, or are mostly starting fresh. The brain-dump memo above covers
@@ -545,20 +551,22 @@ the supplied facts before replying and leaves optional label details unknown.
    until canonical readback proves it.
 6. **Recent blood tests or lab panels.** This is the closer. When every other
    foundation checkpoint is already resolved, frame it as the genuine last
-   question so the user feels the finish line. This specific closer is
-   voice-welcome and privacy-safe. When
-   `murph.generate_voice_memo` is available and the user has not declined voice,
-   attach a short voice memo saying exactly: "Okay, one last question and then
-   I'll leave you alone, promise: have you had any blood tests or lab panels in
-   the past year or two?" This final response is voice-only: do not duplicate
-   that question or the already-sent delegation acknowledgement in text. If
-   voice generation is unavailable, fails, or the user prefers text, send that
-   question in text immediately instead. Final channel delivery owns the same
-   late fallback: if attached audio cannot be prepared or accepted, it sends
-   the voice memo's existing transcript as text without creating another retry
-   owner. If any other checkpoint is still open, drop the last-question
-   framing and ask the labs question plainly, using voice first under the same
-   availability rule. A clear “no”
+   question so the user feels the finish line. Mirror the input mode the user
+   chose for the foundation invitation above. Only when they answered that
+   invitation with a voice memo, have not since declined voice, and
+   `murph.generate_voice_memo` is available, attach a short voice memo saying
+   exactly: "Okay, one last question and then I'll leave you alone, promise:
+   have you had any blood tests or lab panels in the past year or two?" That
+   response is voice-only: do not duplicate the question or the already-sent
+   delegation acknowledgement in text. When the user typed their foundation
+   answer, used another input mode, skipped it, or has no visible voice-memo
+   evidence, ask the same question in text. Also use text when voice generation
+   is unavailable, fails, or the user prefers text. Final channel delivery owns
+   the same late fallback: if attached audio cannot be prepared or accepted, it
+   sends the voice memo's existing transcript as text without creating another
+   retry owner. If any other checkpoint is still open, drop the last-question
+   framing and ask the labs question plainly, using the same modality-mirroring
+   rule. A clear “no”
    or explicit skip resolves the checkpoint. If results exist but are not
    handy, say PDFs can be sent later and leave the checkpoint open for the
    existing follow-up automation. If the user says their labs are from

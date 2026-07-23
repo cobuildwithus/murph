@@ -260,12 +260,15 @@ not relevant, or explicitly skipped before answered completion:
    owns every supported fact and negative assertion across the named clinical
    owners.
 6. **Recent blood tests or lab panels:** whether they exist and can be shared
-   now or later. This closer is a short generated voice memo when the tool is
-   available and the member has not declined voice; the same question is the
-   immediate text fallback. Do not duplicate the question when audio delivery
-   succeeds. If audio preparation or delivery fails, the existing channel
-   adapter sends the media transcript as text and remains the only delivery
-   owner. If the member names Function Health, proactively send
+   now or later. Match this closer to how the member answered the foundation
+   invitation: generate a short voice memo only when the member answered with
+   a voice memo, has not since declined voice, and the tool is available. If
+   the member typed, used another modality, skipped the invitation, or there is
+   no visible evidence that they sent a voice memo, ask over text. Do not
+   duplicate the question when audio delivery succeeds. If audio preparation or
+   delivery fails, the existing channel adapter sends the media transcript as
+   text and remains the only delivery owner. If the member names Function
+   Health, proactively send
    https://my.functionhealth.com/documents and ask for the Lab Results of Record
    PDFs. Naming the provider alone does not start a child. Once a PDF or paste
    exists in durably accepted input, Murph immediately sends one short,
@@ -288,9 +291,13 @@ voice note may resolve several checkpoints. Never re-ask facts Murph already
 has.
 
 After the data-source checkpoint, ask for checkpoints 2–5 in one low-effort
-voice-memo invitation covering movement/training, current protocols,
-supplements, and medical basics. When a supplied memo contains all three
-independent work families, immediately start three children before replying:
+invitation covering movement/training, current protocols, supplements, and
+medical basics. Offer a voice memo, while telling every member that typing it
+out works just as well. When visible or saved evidence shows that the member is
+over 40, also offer: “I can walk you through sending a voice memo.” Never guess
+age, and never delay or block the invitation when age is unknown. When a
+supplied memo contains all three independent work families, immediately start
+three children before replying:
 
 1. movement plus current-protocol context;
 2. supplement persistence plus useful exact-label enrichment; and
@@ -300,9 +307,10 @@ The parent does not wait. Immediately after accepted spawns, it sends one
 progress update saying, in natural words, that Murph's best people are sorting,
 saving, and checking what the member shared. That is a same-turn start
 acknowledgement, not a completion claim, and it is not repeated in the final
-reply. The final labs response is voice-only when generation is available, with
-no text duplicate unless the channel adapter must deliver the existing
-transcript after audio fails.
+reply. The final labs response follows the member's foundation-response
+modality: voice after a voice memo, otherwise text. Do not duplicate a
+successfully delivered voice question in text; the channel adapter may deliver
+the existing transcript after audio fails.
 
 A clear `none`, `not relevant`, or explicit category skip resolves that
 checkpoint; a positive fact, connected wearable, supplement inventory,
