@@ -571,8 +571,9 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
  * The chart prefers the latest lab-reported range because older results may
  * have come from a different lab or range. Exact one-sided source limits are
  * valid context; qualified ranges that cannot be normalized stay in the
- * ledger. A sourced adult fallback is used only when the latest comparable
- * result has no lab range and the authored unit and specimen match exactly.
+ * ledger. A sourced adult comparator is used only when the latest comparable
+ * result has no lab range and the authored unit and specimen match exactly. It
+ * is labeled as published context rather than the reporting lab's range.
  */
 function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
@@ -633,8 +634,8 @@ function resolveChartedReferenceContext(
       high: fallback.upperBound?.value ?? null,
       low: fallback.lowerBound?.value ?? null,
     },
-    sourceLabel: fallback.label,
-    title: "General adult reference",
+    sourceLabel: `${fallback.label} · not the reporting lab's range`,
+    title: "Published adult comparator",
   };
 }
 

@@ -28,7 +28,7 @@ referenceGuidance:
       upperBound:
         value: 7.9
         inclusive: true
-      applicability: "For contextual fallback display on serum results from adults when the saved result uses this exact unit and has no range; the source establishes this interval for people age 1 or older, and source-laboratory flags and per-result ranges remain authoritative."
+      applicability: "For published adult comparison on serum results from adults when the saved result uses this exact unit and has no range; the source establishes this interval for people age 1 or older, this comparator is not the reporting laboratory's range, and source-laboratory flags and per-result ranges remain authoritative."
       source:
         title: "Protein, Total, Serum"
         organization: "Mayo Clinic Laboratories"

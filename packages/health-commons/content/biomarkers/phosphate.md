@@ -28,7 +28,7 @@ referenceGuidance:
       upperBound:
         value: 4.5
         inclusive: true
-      applicability: "For contextual fallback display on serum results from adults age 18 or older when the saved result uses this exact unit and has no range; source-laboratory flags and per-result ranges remain authoritative."
+      applicability: "For published adult comparison on serum results from adults age 18 or older when the saved result uses this exact unit and has no range; this comparator is not the reporting laboratory's range, and source-laboratory flags and per-result ranges remain authoritative."
       source:
         title: "Phosphorus (Inorganic), Serum"
         organization: "Mayo Clinic Laboratories"

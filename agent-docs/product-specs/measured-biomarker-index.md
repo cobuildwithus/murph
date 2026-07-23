@@ -70,20 +70,22 @@ member-facing biomarker.
   two-sided rules to the data-focused vertical scale rather than compressing the
   historical trend; extend that scale only enough to keep a one-sided limit
   visible. Do not imply that older labs used the same range.
-- When that latest comparable result has no usable numeric source range, use an
-  exact-unit authored Health Commons fallback only when the imported result has
-  an explicitly eligible coarse specimen kind and the source covers the full
-  adult population. Label it `General adult reference`, keep the imported source
-  flag authoritative, and fail closed when the specimen is missing or when age,
-  sex, pregnancy, fasting, assay, treatment, or risk context is required. A
-  qualified source range stays exact in the ledger and is not replaced by a
-  generic fallback.
-- The initial reviewed fallback catalog is intentionally sparse: Mayo Clinic
-  Laboratories adult serum intervals are authored for chloride, LDH, phosphate,
-  and total protein only. Calcium is withheld because its reviewed adult range
-  changes with age and sex. The generated biomarker index projects display
-  fields and eligible specimen kinds; primary source metadata remains with the
-  authored Commons guidance.
+- When that latest comparable result has no usable numeric source range, an
+  exact-unit authored Health Commons range may appear only as a named published
+  adult comparator when the imported result has an explicitly eligible coarse
+  specimen kind and the source covers the full adult population. Label it
+  `Published adult comparator`, retain its exact source, and state that it is not
+  the reporting lab's range. Keep the imported source flag authoritative and
+  fail closed when the specimen is missing or when age, sex, pregnancy, fasting,
+  treatment, or risk context is required. A qualified source range stays exact
+  in the ledger and is not replaced by a comparator.
+- The initial reviewed comparator catalog is intentionally sparse: named Mayo
+  Clinic Laboratories adult serum intervals are authored for chloride, LDH,
+  phosphate, and total protein only. They provide published context, never an
+  inferred range for the reporting laboratory. Calcium is withheld because its
+  reviewed adult range changes with age and sex. The generated biomarker index
+  projects display fields and eligible specimen kinds; primary source metadata
+  remains with the authored Commons guidance.
 - Let the graph follow the latest-reading block without a redundant visible
   chart title or a single-result instruction. The accessible chart name still
   identifies the biomarker and reference context.

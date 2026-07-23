@@ -1185,7 +1185,7 @@ test("qualified structured ranges keep their exact text and never become a chart
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("70-99 fasting; <140 non-fasting");
     expect(text).not.toContain("Latest lab range");
-    expect(text).not.toContain("General adult reference");
+    expect(text).not.toContain("Published adult comparator");
     expect(text).not.toContain("shaded area");
     expect(text).not.toContain("Range 70 to 99 mg/dL");
   } finally {
@@ -1193,7 +1193,7 @@ test("qualified structured ranges keep their exact text and never become a chart
   }
 });
 
-test("a unit-matched fallback appears only when the latest lab range is absent", async () => {
+test("a unit-matched published comparator appears only when the latest lab range is absent", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       analyte: "Chloride",
@@ -1236,11 +1236,12 @@ test("a unit-matched fallback appears only when the latest lab range is absent",
     expect(text).not.toContain("Lab rangeNot listed");
     expect(text).toContain("98 to 107 mmol/L");
     expect(text).toContain("Mayo Clinic Laboratories adult serum reference interval");
-    expect(text).toContain("General adult reference");
+    expect(text).toContain("Published adult comparator");
+    expect(text).toContain("not the reporting lab's range");
     expect(text).not.toContain("Latest lab range");
     expect(
       rendered.container.querySelector(
-        '[aria-label="Chloride results over time; general adult reference 98 to 107 mmol/L from Mayo Clinic Laboratories adult serum reference interval"]',
+        '[aria-label="Chloride results over time; published adult comparator 98 to 107 mmol/L from Mayo Clinic Laboratories adult serum reference interval · not the reporting lab\'s range"]',
       ),
     ).not.toBeNull();
   } finally {
@@ -1253,7 +1254,7 @@ test.each([
   { expected: false, specimenType: "urine" },
   { expected: false, specimenType: null },
 ] as const)(
-  "production projection selects a canonical-unit fallback only for $specimenType specimen",
+  "production projection selects a canonical-unit published comparator only for $specimenType specimen",
   async ({ expected, specimenType }) => {
     const vault = createVaultReadModel({
       entities: [importedTotalProteinTest(specimenType)],
@@ -1273,7 +1274,7 @@ test.each([
       <LabBiomarkerDetailClient
         authenticated
         fallbackRanges={[{
-          applicability: "For contextual fallback display on adult serum results.",
+          applicability: "For published adult comparison on serum results.",
           eligibleSpecimenKinds: ["serum"],
           label: "Reviewed serum interval",
           lowerBound: { inclusive: true, value: 6.3 },
@@ -1289,7 +1290,8 @@ test.each([
       const text = rendered.container.textContent ?? "";
       expect(text).toContain("7 g/dL");
       expect(text).toContain("In range");
-      expect(text.includes("General adult reference")).toBe(expected);
+      expect(text.includes("Published adult comparator")).toBe(expected);
+      expect(text.includes("not the reporting lab's range")).toBe(expected);
       expect(text.includes("6.3 to 7.9 g/dL")).toBe(expected);
     } finally {
       await rendered.cleanup();
@@ -1297,7 +1299,7 @@ test.each([
   },
 );
 
-test("a specimen-mismatched fallback is withheld", async () => {
+test("a specimen-mismatched published comparator is withheld", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       analyte: "Chloride",
@@ -1323,13 +1325,13 @@ test("a specimen-mismatched fallback is withheld", async () => {
   );
 
   try {
-    expect(rendered.container.textContent).not.toContain("General adult reference");
+    expect(rendered.container.textContent).not.toContain("Published adult comparator");
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("the reporting lab range wins over a matching general fallback", async () => {
+test("the reporting lab range wins over a matching published comparator", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       analyte: "Chloride",
@@ -1371,14 +1373,14 @@ test("the reporting lab range wins over a matching general fallback", async () =
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("Latest lab range");
     expect(text).toContain("98 to 106 mmol/L");
-    expect(text).not.toContain("General adult reference");
+    expect(text).not.toContain("Published adult comparator");
     expect(text).not.toContain("Mayo Clinic Laboratories adult serum reference interval");
   } finally {
     await rendered.cleanup();
   }
 });
 
-test("a fallback with a different unit is withheld", async () => {
+test("a published comparator with a different unit is withheld", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       analyte: "Chloride",
@@ -1405,8 +1407,7 @@ test("a fallback with a different unit is withheld", async () => {
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).not.toContain("Adult reference");
-    expect(text).not.toContain("General adult reference");
+    expect(text).not.toContain("Published adult comparator");
   } finally {
     await rendered.cleanup();
   }
@@ -1421,7 +1422,7 @@ test.each([
     bound: { lowerBound: { inclusive: true, value: 97 } },
     expectedRange: ">=97 mmol/L",
   },
-] as const)("a one-sided fallback preserves $expectedRange", async ({ bound, expectedRange }) => {
+] as const)("a one-sided published comparator preserves $expectedRange", async ({ bound, expectedRange }) => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       analyte: "Chloride",
@@ -1441,7 +1442,7 @@ test.each([
     <LabBiomarkerDetailClient
       authenticated
       fallbackRanges={[{
-        applicability: "For contextual fallback display on adult serum or plasma results.",
+        applicability: "For published adult comparison on serum or plasma results.",
         ...bound,
         eligibleSpecimenKinds: ["serum"],
         label: "Reviewed adult limit",
@@ -1454,7 +1455,7 @@ test.each([
 
   try {
     const text = rendered.container.textContent ?? "";
-    expect(text).toContain("General adult reference");
+    expect(text).toContain("Published adult comparator");
     expect(text).toContain(expectedRange);
     expect(text).toContain("Reviewed adult limit");
   } finally {
@@ -1502,7 +1503,7 @@ function clientWithRows(rows: BrowserVaultLabResultRow[]): BrowserVaultQueryClie
 }
 
 const TEST_ADULT_FALLBACK_RANGES: readonly HealthCommonsWebBiomarkerFallbackRange[] = [{
-  applicability: "For contextual fallback display on adult serum or plasma results.",
+  applicability: "For published adult comparison on serum results.",
   eligibleSpecimenKinds: ["serum"],
   label: "Mayo Clinic Laboratories adult serum reference interval",
   lowerBound: { inclusive: true, value: 98 },

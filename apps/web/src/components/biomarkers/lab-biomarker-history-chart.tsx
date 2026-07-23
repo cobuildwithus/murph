@@ -103,10 +103,10 @@ export function LabBiomarkerHistoryChart({
           <span>{referenceRangeTitle}</span>
           <span className="font-mono tabular-nums text-foreground">{rangeLabel}</span>
           {rangeSourceLabel ? (
-            <>
-              <span aria-hidden="true" className="text-border">/</span>
-              <span>{rangeSourceLabel}</span>
-            </>
+            <span className="min-w-0">
+              <span aria-hidden="true" className="mr-2 text-border">/</span>
+              {rangeSourceLabel}
+            </span>
           ) : null}
         </div>
       ) : null}

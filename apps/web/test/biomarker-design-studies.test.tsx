@@ -342,15 +342,16 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).not.toContain('role="img"');
 });
 
-test("reference context study covers an exact source limit and reviewed fallback", () => {
+test("reference context study covers an exact source limit and published comparator", () => {
   const markup = renderToStaticMarkup(createElement(BiomarkerReferenceContextStudy));
 
   expect(markup).toContain('data-design-study="biomarker-reference-context"');
   expect(markup).toContain("latest lab range");
   expect(markup).toContain("&lt;5.7%");
-  expect(markup).toContain("general adult reference");
+  expect(markup).toContain("published adult comparator");
   expect(markup).toContain("98 to 107 mmol/L");
   expect(markup).toContain("Mayo Clinic Laboratories adult serum reference interval");
+  expect(markup).toContain("not the reporting lab&#x27;s range");
   expect(markup).not.toContain("Results over time");
 });
 
