@@ -6,8 +6,6 @@ import {
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { requireHostedPrivyIdentityToken } from "./privy-token";
 import {
-  HOSTED_PRIVY_MEMBER_ID_METADATA_KEY,
-  readHostedPrivyMemberIdFromVerifiedUser,
   resolveHostedPrivyIdentityFromVerifiedUser,
   type HostedPrivyIdentity,
   type HostedPrivyUser,
@@ -18,10 +16,7 @@ const globalForHostedPrivy = globalThis as typeof globalThis & {
   __murphHostedPrivyManagementClient?: PrivyClient | null;
 };
 
-type HostedPrivyCustomMetadata = NonNullable<HostedPrivyUser["custom_metadata"]>;
-
 export {
-  HOSTED_PRIVY_MEMBER_ID_METADATA_KEY,
   resolveHostedPrivyIdentityFromVerifiedUser,
 } from "./privy-user";
 export type {
@@ -61,33 +56,6 @@ export async function verifyHostedPrivyIdentityToken(identityToken: string): Pro
       },
     });
   }
-}
-
-export async function syncHostedPrivyMemberIdMetadata(input: {
-  memberId: string;
-  privyUserId: string;
-  verifiedPrivyUser?: HostedPrivyUser | null;
-}): Promise<boolean> {
-  if (input.verifiedPrivyUser && readHostedPrivyMemberIdFromVerifiedUser(input.verifiedPrivyUser) === input.memberId) {
-    return false;
-  }
-
-  const client = getHostedPrivyManagementClient();
-
-  if (!client) {
-    return false;
-  }
-
-  const customMetadata: HostedPrivyCustomMetadata = {
-    ...(input.verifiedPrivyUser?.custom_metadata ?? {}),
-    [HOSTED_PRIVY_MEMBER_ID_METADATA_KEY]: input.memberId,
-  };
-
-  await client.users().setCustomMetadata(input.privyUserId, {
-    custom_metadata: customMetadata,
-  });
-
-  return true;
 }
 
 export async function readHostedPrivyUserById(privyUserId: string): Promise<HostedPrivyUser> {

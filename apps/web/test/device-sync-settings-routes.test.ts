@@ -1276,7 +1276,7 @@ describe("device sync settings routes", () => {
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
-  it("starts Strava through the preferred direct route when direct and Junction are configured", async () => {
+  it("rejects Strava source starts even when direct and Junction credentials are configured", async () => {
     vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -1298,20 +1298,15 @@ describe("device sync settings routes", () => {
       createRouteContext({ sourceId: "strava" }),
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.startConnection).toHaveBeenCalledWith(
-      "member_123",
-      "strava",
-      "/device-sync/connect/complete?source=connect&connectSource=strava&connectTarget=strava",
-      {
-        connectSourceId: "strava",
-        connectTarget: "strava",
-        sourceProviderSlug: null,
-      },
-    );
+    expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
-      authorizationUrl: "https://provider.example.test/oauth/start",
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
+        message: "Hosted device connect source is not configured.",
+        retryable: false,
+      },
     });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
   it("starts a hosted connect source flow through Junction by source id", async () => {
@@ -1598,7 +1593,7 @@ describe("device sync settings routes", () => {
     });
   });
 
-  it("requires launch consent before starting a connect source flow", async () => {
+  it("starts a connect source flow when launch-document acceptance is stale", async () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
       httpStatus: 403,
@@ -1618,15 +1613,12 @@ describe("device sync settings routes", () => {
       createRouteContext({ sourceId: "oura" }),
     );
 
-    expect(response.status).toBe(403);
-    expect(mocks.startConnection).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_CONSENT_REQUIRED",
-        message: "Accept the current Murph legal consent before continuing.",
-        retryable: false,
-      },
+      authorizationUrl: "https://provider.example.test/oauth/start",
     });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.startConnection).toHaveBeenCalledTimes(1);
   });
 
   it("rejects connect source requests from an untrusted origin", async () => {

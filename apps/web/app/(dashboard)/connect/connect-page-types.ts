@@ -41,12 +41,6 @@ export type InitialDeviceConnectIntent = {
   connectSource: string | null;
 } | null;
 
-export type ConnectConsentRequest = {
-  garminHistoricalDataConfirmed?: boolean;
-  intentClaim?: string;
-  source: ConnectSource;
-};
-
 export type ConnectIntentRecoveryRequest = {
   message: string;
   sourceName: string;

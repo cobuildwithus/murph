@@ -551,6 +551,30 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
   assert.ok(outside.readCount() > outsideFirst);
 });
 
+test("nested domain root cache scopes reuse the transaction-owned cache", async () => {
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  let outerCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let nestedCache: ReturnType<typeof getHostedDomainRootUnwrapCache> = undefined;
+  let resumedOuterCache: ReturnType<typeof getHostedDomainRootUnwrapCache> =
+    undefined;
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    outerCache = getHostedDomainRootUnwrapCache();
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      nestedCache = getHostedDomainRootUnwrapCache();
+    });
+    resumedOuterCache = getHostedDomainRootUnwrapCache();
+  });
+
+  assert.ok(outerCache);
+  assert.equal(nestedCache, outerCache);
+  assert.equal(resumedOuterCache, outerCache);
+  assert.equal(getHostedDomainRootUnwrapCache(), undefined);
+});
+
 test("scoped domain root cache does not cache failed unwraps", async () => {
   const { tx } = await createHostedWebCryptoTransactionFixture();
   const {

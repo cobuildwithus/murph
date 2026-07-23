@@ -26,14 +26,14 @@ export function DashboardLegalConsentGate({
       </h1>
       <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
         We updated Murph&apos;s terms, privacy disclosures, health data notice,
-        and AI safety boundaries. Accept the current documents to continue into
-        your private dashboard.
+        and AI safety boundaries. You can still connect and sync devices now.
+        Accept the current documents to restore protected dashboard features.
       </p>
       <HostedLegalConsentCard
-        acceptedPendingLabel="Opening your dashboard"
+        acceptedPendingLabel="Refreshing your dashboard"
         className="mt-7"
         initialStatus={initialStatus}
-        launchDescription="Review and accept both items to reopen your private dashboard."
+        launchDescription="Review and accept both items to restore protected dashboard features."
         launchTitle="Current documents"
         onAccepted={reloadDashboardAfterConsentHandoff}
         source="dashboard-legal-update"

@@ -200,7 +200,10 @@ test("Subprocessor register separates connected services and powers the public p
   assert.match(register, /\| WHOOP \|/u);
   assert.match(register, /\| Garmin \|/u);
   assert.match(register, /\| Strava \|/u);
-  assert.match(register, /Strava \| Optional user-authorized activity connection through Murph's approved processing path/u);
+  assert.match(
+    register,
+    /Strava \| Existing user-authorized activity connection lifecycle support; new connections and reconnect offers are currently disabled/u,
+  );
   assert.doesNotMatch(register, /Oura, WHOOP, Garmin, Strava, and similar wearable providers/u);
   assert.match(page, /markdownFileName: "subprocessors\.md"/u);
 });

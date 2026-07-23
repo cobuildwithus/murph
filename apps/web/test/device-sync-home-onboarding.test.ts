@@ -212,7 +212,7 @@ describe("shouldShowHomeDeviceSyncStep", () => {
     await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).resolves.toBe(true);
   });
 
-  it("keeps the device step visible when access is unavailable", async () => {
+  it("rejects when member access cannot be confirmed", async () => {
     mocks.findUniqueHostedMember.mockResolvedValueOnce({
       accountGroupMemberships: [],
       billingStatus: "canceled",
@@ -224,17 +224,34 @@ describe("shouldShowHomeDeviceSyncStep", () => {
       "@/src/lib/device-sync/home-onboarding"
     );
 
-    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).resolves.toBe(true);
+    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).rejects.toThrow();
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
-  it("keeps the device step visible when device-sync state cannot be read", async () => {
+  it("rejects when device-sync state cannot be read", async () => {
     mocks.findManyDeviceConnections.mockRejectedValueOnce(new Error("unavailable"));
 
     const { shouldShowHomeDeviceSyncStep } = await import(
       "@/src/lib/device-sync/home-onboarding"
     );
 
-    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).resolves.toBe(true);
+    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).rejects.toThrow(
+      "unavailable",
+    );
+  });
+
+  it("rejects when configured device providers cannot be read", async () => {
+    mocks.readConfiguredDeviceSyncProviderConfigs.mockImplementationOnce(() => {
+      throw new Error("provider configuration unavailable");
+    });
+
+    const { shouldShowHomeDeviceSyncStep } = await import(
+      "@/src/lib/device-sync/home-onboarding"
+    );
+
+    await expect(shouldShowHomeDeviceSyncStep({ member: MEMBER })).rejects.toThrow(
+      "provider configuration unavailable",
+    );
+    expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 });

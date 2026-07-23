@@ -146,7 +146,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 154.00 Tm (Connected Service) Tj ET
 endstream
 endobj
 6 0 obj
-<< /Length 5966 >>
+<< /Length 6004 >>
 stream
 BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Provider: Garmin; Service: Optional user-authorized health and activity connection, directly or through) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (an approved synchronization provider such as Junction/Vital.; Data categories: Connection metadata,) Tj ET
@@ -156,13 +156,13 @@ BT /F1 10 Tf 1 0 0 1 54.00 682.00 Tm (or secondary use?: No model training or un
 BT /F1 10 Tf 1 0 0 1 54.00 668.00 Tm (depends on the applicable Garmin and synchronization-provider agreements and user consent.; Retention:) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 654.00 Tm (Per the applicable Garmin and synchronization-provider contract, source permissions, and Murph) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 640.00 Tm (deletion rules.; Role: Independent Connected Service / upstream source) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (Provider: Strava; Service: Optional user-authorized activity connection through Murph's approved) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (processing path.; Data categories: Connection metadata, athlete identifier, activities, workouts, routes) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (or location-related data, and related authorized metadata.; Country/region: Provider-specific;) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (Murph-authorized model training or secondary use?: No model training or unrelated secondary use) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (authorized by Murph. Provider-specific restrictions continue to apply unless covered by written) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (authorization.; Retention: Subject to Strava's applicable cache, display, revocation, and deletion) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (requirements.; Role: Independent Connected Service) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 622.00 Tm (Provider: Strava; Service: Existing user-authorized activity connection lifecycle support; new) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 608.00 Tm (connections and reconnect offers are currently disabled.; Data categories: Connection metadata, athlete) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 594.00 Tm (identifier, activities, workouts, routes or location-related data, and related authorized metadata.;) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 580.00 Tm (Country/region: Provider-specific; Murph-authorized model training or secondary use?: No model) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 566.00 Tm (training or unrelated secondary use authorized by Murph. Provider-specific restrictions continue to) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 552.00 Tm (apply unless covered by written authorization.; Retention: Subject to Strava's applicable cache, display,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 538.00 Tm (revocation, and deletion requirements.; Role: Independent Connected Service) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 520.00 Tm (Provider: Configured clinical-record providers; Service: Optional user-authorized clinical-record) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 506.00 Tm (connection and retrieval.; Data categories: Patient-context and authorization metadata, clinical-record) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 492.00 Tm (data and files requested by the user, retrieval status, and operational metadata.; Country/region:) Tj ET
@@ -239,17 +239,17 @@ xref
 0000005725 00000 n 
 0000011548 00000 n 
 0000017283 00000 n 
-0000023301 00000 n 
-0000024383 00000 n 
-0000024520 00000 n 
-0000024657 00000 n 
-0000024795 00000 n 
-0000024933 00000 n 
-0000025071 00000 n 
-0000025156 00000 n 
-0000025337 00000 n 
+0000023339 00000 n 
+0000024421 00000 n 
+0000024558 00000 n 
+0000024695 00000 n 
+0000024833 00000 n 
+0000024971 00000 n 
+0000025109 00000 n 
+0000025194 00000 n 
+0000025375 00000 n 
 trailer
 << /Size 16 /Root 15 0 R /Info 14 0 R >>
 startxref
-25388
+25426
 %%EOF

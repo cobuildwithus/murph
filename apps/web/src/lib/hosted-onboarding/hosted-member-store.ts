@@ -20,6 +20,7 @@ import {
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
 } from "../hosted-web/encryption";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   type HostedMemberStripeBillingRefSnapshot,
   projectHostedMemberStripeBillingRefSnapshot,
@@ -517,10 +518,12 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
 
   if (prismaClient && "$transaction" in prismaClient && typeof prismaClient.$transaction === "function") {
     return prismaClient.$transaction((tx: Prisma.TransactionClient) =>
-      upsertHostedMemberVerifiedEmailAuthorizationTx({
-        ...input,
-        prisma: tx,
-      })
+      runWithHostedDomainRootUnwrapCache(() =>
+        upsertHostedMemberVerifiedEmailAuthorizationTx({
+          ...input,
+          prisma: tx,
+        })
+      )
     );
   }
 

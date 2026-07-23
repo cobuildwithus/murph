@@ -141,7 +141,6 @@ beforeEach(() => {
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       identity: {
         phone: {
@@ -360,7 +359,6 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       identity: null,
       linkedAccounts: [],

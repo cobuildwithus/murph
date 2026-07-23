@@ -211,6 +211,82 @@ describe("hosted dashboard page auth", () => {
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
   });
 
+  it("builds dashboard layout auth from one strict session read without checkout redirects", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).resolves.toEqual({
+      pageAuth: {
+        authenticated: true,
+        authenticatedMember: member,
+        session,
+      },
+      sidebarAuth: {
+        authenticated: true,
+        label: null,
+      },
+      status: "ready",
+    });
+    expect(mocks.getHostedAppSession).toHaveBeenCalledTimes(1);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns a distinct unavailable dashboard layout state for a session-store outage", async () => {
+    const error = Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("rethrows unexpected dashboard layout auth failures", async () => {
+    const error = new Error("session row invariant failed");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).rejects.toBe(error);
+  });
+
+  it("rethrows a session-store outage instead of presenting an anonymous dashboard", async () => {
+    const error = Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).rejects.toBe(error);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
   it.each([
     HostedBillingStatus.incomplete,
     HostedBillingStatus.not_started,

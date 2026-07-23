@@ -68,12 +68,12 @@ describe("hosted device reconnect link tool", () => {
     expect(result.status === "ambiguous" ? result.matches : []).toHaveLength(2);
   });
 
-  it("requires the provider identity when direct and Junction Strava routes are configured", async () => {
+  it("does not issue a hosted reconnect target for configured Strava routes", async () => {
     const { resolveHostedDeviceReconnectLinkTarget } = await import(
       "@/src/lib/device-sync/reconnect-link-tool"
     );
 
-    const result = resolveHostedDeviceReconnectLinkTarget({
+    expect(resolveHostedDeviceReconnectLinkTarget({
       ...configuredWhoopEnv,
       JUNCTION_PROVIDER_FILTER: "strava",
       STRAVA_CLIENT_ID: "strava-client",
@@ -84,10 +84,7 @@ describe("hosted device reconnect link tool", () => {
       connectSourceId: "strava",
       connectTarget: null,
       sourceProviderSlug: null,
-    });
-
-    expect(result.status).toBe("ambiguous");
-    expect(result.status === "ambiguous" ? result.matches : []).toHaveLength(2);
+    })).toEqual({ status: "missing" });
   });
 
   it("creates a long-lived source-specific connect intent for the selected target", async () => {

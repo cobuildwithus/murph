@@ -106,10 +106,16 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
   "README.md" \
+  "PRODUCT.md" \
+  "DESIGN.md" \
+  "agent-docs/ARCHITECTURE_GUIDANCE.md" \
   "docs/architecture.md" \
   "docs/contracts/00-invariants.md" \
+  "agent-docs/FRONTEND.md" \
   "agent-docs/index.md" \
   "agent-docs/PLANS.md" \
+  "agent-docs/PRODUCT_CONSTITUTION.md" \
+  "agent-docs/PRODUCT_SENSE.md" \
   "agent-docs/RELIABILITY.md" \
   "agent-docs/SECURITY.md" \
   "agent-docs/references/hosted-runtime-protocol.md" \

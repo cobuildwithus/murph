@@ -33,6 +33,7 @@ export {
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
+  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-linq";
 export {

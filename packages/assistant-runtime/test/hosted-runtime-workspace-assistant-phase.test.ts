@@ -5945,7 +5945,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           connectUrl: `https://connect.example.test/${request.connectTarget}`,
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
-          providerLabel: request.connectTarget === "strava" ? "Strava" : "WHOOP",
+          providerLabel: "WHOOP",
         };
       },
       async fetchSnapshot(request) {
@@ -6022,7 +6022,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       hosted: expect.objectContaining({
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
-          { label: "Strava", provider: "strava" },
           { label: "Fitbit", provider: "fitbit" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
@@ -6095,20 +6094,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await expect(deviceTool.request({
       action: "connect",
       provider: "strava",
-    })).resolves.toEqual({
-      action: "connect",
-      link: {
-        authorizationUrl: "https://connect.example.test/strava",
-        connectUrl: "https://connect.example.test/strava",
-        expiresAt: "2026-04-29T00:05:00.000Z",
-        provider: "strava",
-        providerLabel: "Strava",
-      },
-    });
-    expect(connectLinkRequests).toEqual([
-      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
-      { connectTarget: "strava", messagingReturnTarget: "telegram" },
-    ]);
+    })).rejects.toThrow("not available to connect");
+    expect(connectLinkRequests).toHaveLength(1);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -6117,8 +6104,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 3,
-        deviceConnectProviders: ["whoop", "strava", "fitbit"],
+        deviceConnectProviderCount: 2,
+        deviceConnectProviders: ["whoop", "fitbit"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -6134,19 +6121,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectReturnTarget: "telegram",
         expiresAtPresent: true,
         provider: "whoop",
-      }),
-      expect.objectContaining({
-        deviceConnectStage: "request",
-        deviceConnectStatus: "requested",
-        deviceConnectReturnTarget: "telegram",
-        provider: "strava",
-      }),
-      expect.objectContaining({
-        deviceConnectStage: "request",
-        deviceConnectStatus: "issued",
-        deviceConnectReturnTarget: "telegram",
-        expiresAtPresent: true,
-        provider: "strava",
       }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
@@ -6368,7 +6342,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it("uses a direct Strava reconnect while omitting ambiguous Junction source commands", async () => {
+  it("omits Junction source commands when the public connect target resolves direct", async () => {
     const deviceSyncPort = {
       ...createNoDirtyRuntimeDeviceSyncPortMethods(),
       async applyUpdates() {
@@ -6500,10 +6474,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(prompt).toContain("generic device-connect command is ambiguous");
     expect(prompt).not.toContain("vault-cli device connect oura --format json");
     expect(prompt).toContain("Strava currently needs reconnect");
-    expect(prompt).toContain("vault-cli device connect strava --format json");
-    expect(prompt).not.toContain(
-      "No hosted reconnect target is configured for this wearable/source",
-    );
+    expect(prompt).toContain("No hosted reconnect target is configured for this wearable/source");
+    expect(prompt).not.toContain("vault-cli device connect strava --format json");
   });
 
   it("skips lazy device context when pending input appears before the automation lane", async () => {
@@ -12340,7 +12312,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
@@ -12376,7 +12352,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
         expect.objectContaining({
           preferredEffectIds: [scenario.effectId],
@@ -12402,7 +12382,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -12436,7 +12420,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,

@@ -70,7 +70,6 @@ beforeEach(() => {
     authenticated: false,
     authenticatedMember: null,
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -103,7 +102,6 @@ test("SidebarChatWithMurphAction opens a contact picker when multiple channels a
         type: "email",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -138,7 +136,6 @@ test("SidebarChatWithMurphAction routes signed-in members without a chat channel
       id: "member_no_channel",
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   const { SidebarChatWithMurphAction } = await import(
@@ -159,7 +156,6 @@ test("SidebarChatWithMurphAction does not treat a checkout email as a chat chann
       id: "member_checkout_email",
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -190,7 +186,6 @@ test("SidebarChatWithMurphAction skips verified email without a reply alias", as
       id: "member_email_without_alias",
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -227,7 +222,6 @@ test("SidebarChatWithMurphAction does not use assigned SMS without a connected p
         type: "email",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -275,7 +269,6 @@ test("SidebarChatWithMurphAction discloses Telegram new-tab behavior", async () 
         username: "member_handle",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({

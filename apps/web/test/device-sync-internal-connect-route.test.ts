@@ -104,7 +104,7 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
-  it("issues a hosted connect link through the preferred direct Strava route", async () => {
+  it("does not issue a hosted connect link for configured Strava routes", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "");
     vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
@@ -114,12 +114,6 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
     vi.stubEnv("JUNCTION_REGION", "us");
-    mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
-      claim: "dc_strava_opaque",
-      connectUrl:
-        "https://join.example.test/connect#deviceConnectIntent=dc_strava_opaque&connectSource=strava",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-    });
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/connect-targets/strava/connect-link", {
@@ -132,23 +126,13 @@ describe("device sync internal connect-link route", () => {
       },
     );
 
-    expect(response.status).toBe(200);
-    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
-      connectSourceId: "strava",
-      connectTarget: "strava",
-      memberId: "member_123",
-      provider: "strava",
-      request: expect.any(Request),
-      sourceProviderSlug: null,
-    });
-    await expect(response.json()).resolves.toEqual({
-      authorizationUrl:
-        "https://join.example.test/connect#deviceConnectIntent=dc_strava_opaque&connectSource=strava",
-      connectUrl:
-        "https://join.example.test/connect#deviceConnectIntent=dc_strava_opaque&connectSource=strava",
-      expiresAt: "2026-04-04T12:00:00.000Z",
-      provider: "strava",
-      providerLabel: "Strava",
+    expect(response.status).toBe(404);
+    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
+        retryable: false,
+      },
     });
   });
 
