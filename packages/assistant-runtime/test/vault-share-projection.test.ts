@@ -10,6 +10,8 @@ import {
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
+  HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliverRequest,
@@ -85,6 +87,7 @@ const SAUNA_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 const ACTIVITY_DAY = {
   date: "2026-07-03",
   metricKey: "activity-minutes",
+  metricSemantics: HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   unit: "minutes",
   value: 73,
 };
@@ -113,7 +116,7 @@ type WorkoutMetricRow = Pick<
 
 function workoutMetricRow(input: {
   date: string;
-  metricKey: "activity-minutes" | "workout-count";
+  metricKey: "workout-count" | "workout-minutes";
   recordIds?: string[];
   value: number;
 }): WorkoutMetricRow {
@@ -153,7 +156,7 @@ function workoutRows(input: {
     })],
     minuteRows: [workoutMetricRow({
       date: input.date,
-      metricKey: "activity-minutes",
+      metricKey: "workout-minutes",
       recordIds: input.minuteRecordIds ?? recordIds,
       value: input.workoutMinutes,
     })],
@@ -628,6 +631,8 @@ describe("selectProjectableWorkoutDays", () => {
       {
         data: {
           date: ACTIVITY_DAY.date,
+          metricSemantics:
+            HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
           workoutCount: 2,
           workoutMinutes: 85,
         },

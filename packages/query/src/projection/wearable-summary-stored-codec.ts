@@ -1,9 +1,14 @@
+import { z } from "zod";
+
 import { resolveMetric } from "../wearables/selection.ts";
 import {
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
+  type WearableActivityMetricCandidateEvidence,
+  type WearableActivitySessionEvidence,
   type WearableMetricKey,
 } from "../wearables/types.ts";
 import { parseJsonValue } from "./schema.ts";
@@ -42,6 +47,17 @@ import type { QueryWearableSummaryKind } from "./wearable-summary-store.ts";
 
 export type StoredWearableMetricSummaryKind = Exclude<QueryWearableSummaryKind, "source_health">;
 
+export const STORED_ACTIVITY_EVIDENCE_KEY = "activityEvidence";
+
+interface StoredWearableProjectionSummaryOptions {
+  activityEvidence?: {
+    /** Ranking is not associative, so provider-local winners are insufficient. */
+    metricCandidates: readonly WearableActivityMetricCandidateEvidence[];
+    /** Session overlap reduction is likewise not associative across providers. */
+    sessions: readonly WearableActivitySessionEvidence[];
+  };
+}
+
 const WEARABLE_SUMMARY_METRIC_KEYS: Record<StoredWearableMetricSummaryKind, ReadonlySet<WearableMetricKey>> = {
   activity: ACTIVITY_METRIC_KEYS,
   body_state: BODY_METRIC_KEYS,
@@ -66,6 +82,7 @@ const STORED_SELECTION_KEYS = [
 export function stringifyStoredWearableProjectionSummary(
   summaryKind: StoredWearableMetricSummaryKind,
   summary: object,
+  options: StoredWearableProjectionSummaryOptions = {},
 ): string {
   const stored = { ...(summary as Record<string, unknown>) };
 
@@ -75,7 +92,26 @@ export function stringifyStoredWearableProjectionSummary(
     }
   }
 
-  return stringifyPublicWearableProjectionSummary(stored);
+  const publicStored = stringifyPublicWearableProjectionSummary(stored);
+  if (summaryKind !== "activity") {
+    return publicStored;
+  }
+  if (
+    options.activityEvidence === undefined
+    || (
+      options.activityEvidence.metricCandidates.length === 0
+      && options.activityEvidence.sessions.length === 0
+    )
+  ) {
+    throw new Error("Stored activity rows require source evidence.");
+  }
+
+  const storedWithEvidence = parseJsonValue<Record<string, unknown> | null>(publicStored, null);
+  if (!storedWithEvidence) {
+    return publicStored;
+  }
+  storedWithEvidence[STORED_ACTIVITY_EVIDENCE_KEY] = options.activityEvidence;
+  return JSON.stringify(storedWithEvidence);
 }
 
 export function parseStoredWearableSummary<TSummary>(
@@ -89,8 +125,129 @@ export function parseStoredWearableSummary<TSummary>(
     return null;
   }
 
+  delete summary.activitySessions;
+  delete summary[STORED_ACTIVITY_EVIDENCE_KEY];
   restoreStoredWearableMetricEnvelopes(summaryKind, summary);
   return summary;
+}
+
+export function parseStoredWearableActivityRow<TSummary>(
+  summaryJson: string,
+): {
+  summary: TSummary;
+  metricCandidates: WearableActivityMetricCandidateEvidence[];
+  sessions: WearableActivitySessionEvidence[];
+} | null {
+  const summary = parseJsonValue<TSummary | null>(summaryJson, null);
+  if (!isJsonObject(summary)) {
+    return null;
+  }
+  const evidence = storedActivityEvidenceSchema.safeParse(
+    summary[STORED_ACTIVITY_EVIDENCE_KEY],
+  );
+  if (!evidence.success) {
+    return null;
+  }
+
+  delete summary.activitySessions;
+  delete summary[STORED_ACTIVITY_EVIDENCE_KEY];
+  restoreStoredWearableMetricEnvelopes("activity", summary);
+  return { summary, ...evidence.data };
+}
+
+const storedTokenSchema = z.string().max(120).regex(
+  /^[a-z0-9]+(?:[ ._:/-][a-z0-9]+)*$/u,
+);
+const storedTimestampSchema = z.iso.datetime({ offset: true }).nullable();
+const storedActivityMetricSchema = z.custom<WearableMetricKey>(
+  (value) =>
+    typeof value === "string"
+    && ACTIVITY_METRIC_KEYS.has(value as WearableMetricKey),
+);
+const storedActivityMetricCandidateEvidenceSchema:
+  z.ZodType<WearableActivityMetricCandidateEvidence> = z.strictObject({
+    candidateKey: z.string().regex(/^activity-metric-candidate:\d{10}$/u),
+    date: z.iso.date(),
+    exactKey: z.string().regex(/^activity-metric-exact:\d{10}$/u),
+    hasDayStrainFacet: z.boolean(),
+    metric: storedActivityMetricSchema,
+    occurredAt: storedTimestampSchema,
+    origin: z.strictObject({
+      aggregatorProvider: storedTokenSchema.nullable(),
+      sourceProviderSlug: storedTokenSchema.nullable(),
+      sourceType: storedTokenSchema.nullable(),
+    }),
+    provider: storedTokenSchema,
+    publicProvider: storedTokenSchema,
+    recordedAt: storedTimestampSchema,
+    resourceClass: z.enum(["activity", "cycle", "generic", "none"]),
+    sourceFamily: z.enum(["canonical", "event", "sample", "derived"]),
+    sourceKind: storedTokenSchema,
+    unit: boundedStoredStringSchema(80).nullable(),
+    value: z.number(),
+  });
+const storedHeartRateZoneSchema = z.strictObject({
+  durationMinutes: z.number(),
+  label: z.string().optional(),
+  maxHeartRate: z.number().optional(),
+  minHeartRate: z.number().optional(),
+  zone: z.number().optional(),
+});
+const storedWorkoutMetricValuesSchema = z.partialRecord(
+  z.enum(ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.map(({ metric }) => metric)),
+  z.number(),
+);
+const storedActivitySessionEvidenceSchema:
+  z.ZodType<WearableActivitySessionEvidence> = z.strictObject({
+    activityType: z.string().nullable(),
+    date: z.iso.date(),
+    durationMinutes: z.number().positive(),
+    durationConsistent: z.boolean(),
+    endedAt: storedTimestampSchema,
+    heartRateZones: z.array(storedHeartRateZoneSchema),
+    provider: z.string().min(1),
+    reconciliationExactKey: z.string().regex(
+      /^activity-session-exact:\d{10}$/u,
+    ),
+    reconciliationResourceKey: z.string().regex(
+      /^activity-session-resource:\d{10}$/u,
+    ).nullable(),
+    recordedAt: storedTimestampSchema,
+    startedAt: storedTimestampSchema,
+    workoutMetricKeys: z.array(z.string()),
+    workoutMetricValues: storedWorkoutMetricValuesSchema,
+  }).superRefine((session, context) => {
+    if (session.startedAt === null && session.endedAt !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "endedAt requires startedAt",
+      });
+    }
+    if (
+      session.startedAt !== null
+      && session.endedAt !== null
+      && Date.parse(session.endedAt) <= Date.parse(session.startedAt)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "endedAt must follow startedAt",
+      });
+    }
+  });
+const storedActivityEvidenceSchema = z.strictObject({
+  metricCandidates: z.array(storedActivityMetricCandidateEvidenceSchema),
+  sessions: z.array(storedActivitySessionEvidenceSchema),
+}).refine(
+  (evidence) =>
+    evidence.metricCandidates.length > 0 || evidence.sessions.length > 0,
+);
+
+function boundedStoredStringSchema(maxLength: number) {
+  return z.string().min(1).max(maxLength).refine(
+    (value) =>
+      value.trim() === value
+      && !/[\u0000-\u001f\u007f]/u.test(value),
+  );
 }
 
 function restoreStoredWearableMetricEnvelopes(

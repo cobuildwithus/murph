@@ -392,15 +392,22 @@ export interface HostedVaultShareSleepTimesData {
   sleepStartAt: string;
 }
 
+export const HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS =
+  "broad-movement" as const;
+export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
+  "canonical-workout-day" as const;
+
 export interface HostedVaultShareDailyMetricData {
   date: string;
   metricKey: string;
+  metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
   unit: string | null;
   value: number;
 }
 
 export interface HostedVaultShareWorkoutDayData {
   date: string;
+  metricSemantics?: typeof HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS;
   workoutCount: number;
   workoutMinutes: number;
 }
@@ -1158,9 +1165,28 @@ function parseHostedVaultShareDailyMetricData(
     );
   }
 
+  const metricSemantics = data.metricSemantics === undefined
+    ? undefined
+    : requireString(
+        data.metricSemantics,
+        `Vault share ${spec.projectionKind} data metricSemantics`,
+      );
+  if (
+    metricSemantics !== undefined
+    && (
+      spec.projectionKind !== "activity-days.v0"
+      || metricSemantics !== HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS
+    )
+  ) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} data metricSemantics is invalid.`,
+    );
+  }
+
   return {
     date,
     metricKey,
+    ...(metricSemantics === undefined ? {} : { metricSemantics }),
     unit,
     value: valueNumber,
   };
@@ -1197,7 +1223,27 @@ function parseHostedVaultShareWorkoutDayData(
     );
   }
 
-  return { date, workoutCount, workoutMinutes };
+  const metricSemantics = data.metricSemantics === undefined
+    ? undefined
+    : requireString(
+        data.metricSemantics,
+        "Vault share workout-days data metricSemantics",
+      );
+  if (
+    metricSemantics !== undefined
+    && metricSemantics !== HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS
+  ) {
+    throw new TypeError(
+      "Vault share workout-days data metricSemantics is invalid.",
+    );
+  }
+
+  return {
+    date,
+    ...(metricSemantics === undefined ? {} : { metricSemantics }),
+    workoutCount,
+    workoutMinutes,
+  };
 }
 
 function parseHostedVaultShareActivityMinutesDayData(

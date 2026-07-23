@@ -925,15 +925,26 @@ permanently dropped. Active members, explicit thread routes, own messages, group
 chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
-Hosted signup-welcome admission is a separate line-owned outbound guard. Under
-the existing transaction-scoped home-line pool advisory lock, web reads each
-healthy assignable `HostedLinqLine`'s UTC-day proactive-conversation counter,
-selects the preferred line or a lower-volume fallback, and conditionally claims
-one slot before appending activation work. The effective limit is the lower of
-the hard 50-conversation ceiling and the line's configured
-`maxNewConversationsPerDay`; the line row lazily rolls its counter to the new
-UTC day. If no line has welcome capacity, web still assigns a healthy home line
-but omits the participant-target welcome, preserving the member-initiated Text
+Hosted signup-welcome admission is a separate line-owned outbound guard. Web
+serializes only the affected member's durable row, reads each healthy assignable
+`HostedLinqLine`'s UTC-day proactive-conversation counter, selects the preferred
+line or a lower-volume fallback, and conditionally claims one slot before
+appending activation work. Linq route owners take that member row `FOR NO KEY
+UPDATE`: this still serializes them with activation and each other, while
+remaining compatible with the foreign-key `KEY SHARE` taken when Linq, Telegram,
+or another channel appends mailbox work after changing the shared routing row.
+This avoids a second lock namespace and avoids a routing-row/member-row
+cross-channel deadlock. Active-member targets guide selection but are
+advisory: when every line is at its target, the preferred or least-loaded
+daily-eligible line remains assignable and concurrent requests may create a
+small overshoot. The
+effective proactive limit is the lower of the hard 50-conversation ceiling and
+the line's configured `maxNewConversationsPerDay`; the line row lazily rolls
+its counter to the new UTC day. The conditional row update is the only atomic
+shared-pool capacity gate. If a claim loses, activation retries it once for a
+day-rollover race and then tries another eligible line inside the same request.
+If no line has welcome capacity, web still assigns a healthy home line but
+omits the participant-target welcome, preserving the member-initiated Text
 Murph path. Same-line inbound first binds and existing-thread replies do not
 consume this proactive budget. A degraded incoming line may fall back to a
 different line only after the final member route agrees with the selected line

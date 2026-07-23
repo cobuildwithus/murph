@@ -10,6 +10,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 ## Owns
 
 - Steps, NEAT, sedentary time, walking breaks, activity snacks, everyday movement targets, and daily movement trend interpretation.
+- Factual wearable day and workout reads, including every workout on a date,
+  activity types, workout count, and total workout duration.
 - Helping users add movement without turning it into formal training.
 - Explaining how small daily movement affects glucose, energy, mood, sleep pressure, and cardiovascular health.
 
@@ -22,6 +24,12 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
+- For date-specific facts, first run
+  `vault-cli wearables day <date> --format json`; for all workouts, types,
+  count, duration, or normalized detail, next run
+  `vault-cli wearables activity list --date <date> --format json`. Its canonical
+  workout-day rollup owns the answer; do not stop at one selected activity or
+  rebuild the rollup from provider records.
 - Check steps, sedentary time, active minutes, workout days, work schedule, commute, sleep, fatigue, and pain flags.
 - Use the user's baseline; a 2,000-step jump can be easy for one user and too much for another.
 - Look for long unbroken sitting blocks, not just daily step total.
@@ -42,6 +50,10 @@ Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movem
 - Step count misses cycling, lifting, swimming, carrying, and intensity; do not overvalue it alone.
 - Active minutes algorithms vary by device; use trends rather than cross-device comparisons.
 - Daily movement can improve health even when formal workouts stay unchanged.
+- Treat changeable current-local-day totals as provisional and say "so far."
+  A completed workout does not make the day's combined totals final.
+- A summary/workout mismatch is a read mismatch, not proof of failed provider
+  sync or import. State what each surface shows without inventing a cause.
 
 ## Safety Boundaries
 
@@ -50,6 +62,10 @@ Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movem
 
 ## Answer Shape
 
-- Give one baseline-relative target and one friction-reduction tactic.
-- Prefer movement the user can repeat daily over a heroic one-day goal.
-- Say how to reassess after 1-2 weeks.
+- For a factual day or workout request, answer the question directly from the
+  normalized result: give the canonical count and total, then list only the
+  activity types or session details that result actually exposes. Do not force
+  coaching or invent a session label that the normalized surface omits.
+- For a coaching request, give one baseline-relative target and one
+  friction-reduction tactic. Prefer movement the user can repeat daily over a
+  heroic one-day goal, and say how to reassess after 1-2 weeks.

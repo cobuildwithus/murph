@@ -18,6 +18,8 @@ vi.mock("@/src/lib/hosted-vault-share/projection-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({}));
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
+  HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   hostedVaultShareProjectionKindToScope,
 } from "@murphai/hosted-execution/vault-share";
 
@@ -49,7 +51,13 @@ function recentRecord(daysAgo: number): {
 }
 
 function recentActivityRecord(daysAgo: number): {
-  data: { date: string; metricKey: string; unit: string; value: number };
+  data: {
+    date: string;
+    metricKey: string;
+    metricSemantics: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
+    unit: string;
+    value: number;
+  };
   occurredAt: string;
   recordKey: string;
 } {
@@ -60,6 +68,7 @@ function recentActivityRecord(daysAgo: number): {
     data: {
       date,
       metricKey: "activity-minutes",
+      metricSemantics: HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
       unit: "minutes",
       value: 37,
     },
@@ -87,6 +96,8 @@ const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const SLEEP_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE);
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 const ACTIVITY_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(ACTIVITY_SCOPE);
+const WORKOUT_SCOPE = hostedVaultShareProjectionKindToScope("workout-days.v0");
+const WORKOUT_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(WORKOUT_SCOPE);
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const PROFILE_SCOPE_KEY = buildHostedVaultShareProjectionScopeKey(PROFILE_SCOPE);
 
@@ -145,7 +156,7 @@ describe("vault-share deliver route", () => {
 		});
   });
 
-  it("delivers recent activity-day records through the closed projection kind", async () => {
+  it("preserves activity semantics through the deliver route into snapshot storage", async () => {
     const activityShare = {
       ...ACTIVE_SHARE,
       projectionKind: "activity-days.v0",
@@ -169,6 +180,42 @@ describe("vault-share deliver route", () => {
     expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
       records: [record],
       share: activityShare,
+    });
+  });
+
+  it("preserves workout semantics through the deliver route into snapshot storage", async () => {
+    const workoutShare = {
+      ...ACTIVE_SHARE,
+      projectionKind: "workout-days.v0",
+      projectionScope: WORKOUT_SCOPE,
+      projectionScopeKey: WORKOUT_SCOPE_KEY,
+    };
+    const activityRecord = recentActivityRecord(1);
+    const record = {
+      ...activityRecord,
+      data: {
+        date: activityRecord.data.date,
+        metricSemantics: HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+        workoutCount: 2,
+        workoutMinutes: 77,
+      },
+    };
+    mocks.findActiveHostedVaultShares.mockResolvedValue([workoutShare]);
+
+    const response = await deliverRoute.POST(buildRequest({
+      projectionKind: "workout-days.v0",
+      records: [record],
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "delivered" });
+    expect(mocks.findActiveHostedVaultShares).toHaveBeenCalledWith({
+      grantorMemberId: "member_grantor",
+      projectionScope: WORKOUT_SCOPE,
+    });
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).toHaveBeenCalledWith({
+      records: [record],
+      share: workoutShare,
     });
   });
 

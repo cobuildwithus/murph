@@ -72,6 +72,9 @@ export type HostedLinqConversationHomeRedirectPayload = {
 
 export type HostedLinqDailyQuotaPayload = {
   chatId: string;
+  // Optional for payloads persisted before per-thread limits existed; render
+  // falls back to the direct-chat limit.
+  dailyTextLimit?: number;
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
@@ -209,6 +212,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      dailyTextLimit: number;
       memberId: string;
       occurredAt: string;
       replyToMessageId?: string | null;
@@ -988,6 +992,9 @@ async function buildHostedLinqSideEffectMessage(
       return effect.payload.message;
     case "daily_quota":
       return buildHostedDailyQuotaReply({
+        ...(effect.payload.dailyTextLimit === undefined
+          ? {}
+          : { dailyTextLimit: effect.payload.dailyTextLimit }),
         seed: effect.effectId,
       });
     case "family_invite_reply":
@@ -1115,6 +1122,7 @@ function buildHostedWebhookLinqMessagePayload(
     case "daily_quota":
       return {
         chatId: input.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,

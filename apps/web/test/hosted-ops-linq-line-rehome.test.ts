@@ -4,9 +4,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   getPrisma: vi.fn(),
   hostedMember: {
@@ -45,10 +43,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
     ...actual,
     acquireHostedMemberHomeLinqRouteLockTx:
       mocks.acquireHostedMemberHomeLinqRouteLockTx,
-    acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
-      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-    countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
-      mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
     countHostedMemberHomeLinqBindingsByRecipientPhone:
       mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
     readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
@@ -147,10 +141,8 @@ describe("hosted Linq line rehome ops", () => {
     }));
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([LINE_A, LINE_B]);
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
@@ -223,15 +215,10 @@ describe("hosted Linq line rehome ops", () => {
       toLineHint: "*** 0002",
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx)
-      .toHaveBeenCalledWith({ prisma: transactionClient });
     expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: transactionClient,
     });
-    expect(
-      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]);
     expect(
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]);
@@ -243,17 +230,7 @@ describe("hosted Linq line rehome ops", () => {
         phoneLookupKey: true,
       },
     });
-    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
-      excludedMemberId: MEMBER_ID,
-      now: NOW,
-      prisma: transactionClient,
-      recipientPhones: [LINE_B.phoneNumber],
-    });
-    expect(mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince).toHaveBeenCalledWith({
-      prisma: transactionClient,
-      recipientPhones: [LINE_B.phoneNumber],
-      since: new Date("2026-07-06T00:00:00.000Z"),
-    });
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
       homeLineAssignedAt: NOW,
@@ -277,7 +254,6 @@ describe("hosted Linq line rehome ops", () => {
       retryable: false,
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
@@ -299,7 +275,6 @@ describe("hosted Linq line rehome ops", () => {
       retryable: false,
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
@@ -445,48 +420,49 @@ describe("hosted Linq line rehome ops", () => {
     });
   }
 
-  it("rejects a target at active-member capacity", async () => {
+  it("treats the active-member target as advisory", async () => {
     const cappedLine = buildLine("+15550100003", {
       activeMemberLimit: 1,
     });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([cappedLine]);
-    mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(
-      new Map([[cappedLine.phoneNumber, 1]]),
-    );
 
     await expect(
       service.rehomeHostedMemberLinqHomeLine({
         memberId: MEMBER_ID,
         targetLineLookupKey: cappedLine.phoneNumberLookupKey,
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_LINQ_REHOME_TARGET_AT_CAPACITY",
-      httpStatus: 409,
+    ).resolves.toMatchObject({
+      toLineHint: "*** 0003",
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientPhone: cappedLine.phoneNumber,
+      }),
+    );
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
   });
 
-  it("rejects a target at daily new-conversation capacity", async () => {
+  it("does not apply the proactive daily limit to a non-sending manual rehome", async () => {
     const cappedLine = buildLine("+15550100004", {
       maxNewConversationsPerDay: 1,
     });
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([cappedLine]);
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(
-      new Map([[cappedLine.phoneNumber, 1]]),
-    );
 
     await expect(
       service.rehomeHostedMemberLinqHomeLine({
         memberId: MEMBER_ID,
         targetLineLookupKey: cappedLine.phoneNumberLookupKey,
       }),
-    ).rejects.toMatchObject({
-      code: "HOSTED_LINQ_REHOME_TARGET_AT_CAPACITY",
-      httpStatus: 409,
+    ).resolves.toMatchObject({
+      toLineHint: "*** 0004",
     });
 
-    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipientPhone: cappedLine.phoneNumber,
+      }),
+    );
   });
 
   it("rejects unknown and suspended members before route writes", async () => {

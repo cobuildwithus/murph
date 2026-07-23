@@ -14,7 +14,6 @@ import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-app
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import {
-  ConnectConsentDialog,
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
@@ -23,7 +22,6 @@ import {
 import {
   createConnectCallbackNotice,
   filterConnectSourcesForSearch,
-  isHostedConsentRequiredError,
   isHostedDeviceConnectIntentUnavailableError,
   isHostedWhoopDirectConnectCapReachedError,
   markCallbackConnectedSource,
@@ -42,7 +40,6 @@ import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
   ConnectCallbackNotice,
-  ConnectConsentRequest,
   ConnectIntentRecoveryRequest,
   ConnectPageInitialLoadError,
   ConnectSource,
@@ -97,7 +94,6 @@ export function ConnectSourcesGrid({
     message: string;
     sourceId: string;
   } | null>(null);
-  const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
   const [garminHistoricalDataRequest, setGarminHistoricalDataRequest] =
@@ -194,7 +190,6 @@ export function ConnectSourcesGrid({
     setInitialConnectIntentDismissed(true);
     setActionError(null);
     setNotice(null);
-    setConsentRequest(null);
     setConnectIntentRecovery(null);
     setShowWhoopAppleHealthSetupDialog(false);
 
@@ -219,18 +214,6 @@ export function ConnectSourcesGrid({
       });
       window.location.assign(authorizationUrl);
     } catch (error) {
-      if (isHostedConsentRequiredError(error)) {
-        setConsentRequest({
-          ...(options.garminHistoricalDataConfirmed
-            ? { garminHistoricalDataConfirmed: true }
-            : {}),
-          ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
-          source,
-        });
-        setPendingSourceId(null);
-        return;
-      }
-
       if (options.intentClaim && isHostedDeviceConnectIntentUnavailableError(error)) {
         setConnectIntentRecovery({
           message: error.message,
@@ -310,14 +293,6 @@ export function ConnectSourcesGrid({
 
         setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
-        if (isHostedConsentRequiredError(error)) {
-          setConsentRequest({
-            intentClaim: activeConnectIntent.claim,
-            source,
-          });
-          return;
-        }
-
         if (isHostedWhoopDirectConnectCapReachedError(error)) {
           setShowWhoopAppleHealthSetupDialog(true);
           return;
@@ -455,25 +430,6 @@ export function ConnectSourcesGrid({
         guide={buildWhoopAppleHealthSetupGuide(whoopSyncVoiceMemoSrc)}
         open={showWhoopAppleHealthSetupDialog}
         onOpenChange={setShowWhoopAppleHealthSetupDialog}
-      />
-
-      <ConnectConsentDialog
-        source={consentRequest?.source ?? null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setConsentRequest(null);
-          }
-        }}
-        onAccepted={async (source) => {
-          await startConnection(source, {
-            ...(consentRequest?.garminHistoricalDataConfirmed
-              ? { garminHistoricalDataConfirmed: true }
-              : {}),
-            ...(consentRequest?.intentClaim
-              ? { intentClaim: consentRequest.intentClaim }
-              : {}),
-          });
-        }}
       />
 
       <GarminHistoricalDataDialog

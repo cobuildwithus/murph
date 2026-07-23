@@ -18,10 +18,24 @@ import type {
 
 type HostedLegalConsentCardMode = "compact" | "panel";
 
+export interface HostedLegalConsentAcceptanceInput {
+  acceptedDocumentVersions: Record<string, string>;
+  currentStatus: HostedConsentStatus;
+  scope: HostedConsentScope;
+  source: string;
+}
+
+export type HostedLegalConsentAcceptScope = (
+  input: HostedLegalConsentAcceptanceInput,
+) => Promise<HostedConsentStatus>;
+
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
+  acceptScope?: HostedLegalConsentAcceptScope;
   className?: string;
   initialStatus?: HostedConsentStatus | null;
+  launchDescription?: string;
+  launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
   onRequirementChange?: (required: boolean) => void;
@@ -40,8 +54,11 @@ export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
 
 function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
+  acceptScope = requestHostedConsentAcceptance,
   className,
   initialStatus = null,
+  launchDescription = "Please review and agree to the following.",
+  launchTitle = "Before you start",
   mode = "panel",
   onAccepted,
   onRequirementChange,
@@ -56,7 +73,7 @@ function HostedLegalConsentCardState({
   const [legalAccepted, setLegalAccepted] = useState(false);
   const [healthDataAccepted, setHealthDataAccepted] = useState(false);
   const [featureAccepted, setFeatureAccepted] = useState(false);
-  const status = initialStatus ?? loadedStatus;
+  const status = loadedStatus ?? initialStatus;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -148,21 +165,18 @@ function HostedLegalConsentCardState({
     setAcceptedHandoffPending(false);
     setErrorMessage(null);
 
+    let latestStatus = status;
     try {
-      let latestStatus = status;
       for (const scope of pendingScopes) {
         const scopeStatus = findConsentScope(latestStatus, scope);
         if (scopeStatus && !scopeStatus.granted) {
-          latestStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-            method: "POST",
-            payload: {
-              acceptedDocumentVersions: Object.fromEntries(
-                scopeStatus.documents.map((document) => [document.id, document.version]),
-              ),
-              scope,
-              source,
-            },
-            url: "/api/legal/consent/accept",
+          latestStatus = await acceptScope({
+            acceptedDocumentVersions: Object.fromEntries(
+              scopeStatus.documents.map((document) => [document.id, document.version]),
+            ),
+            currentStatus: latestStatus,
+            scope,
+            source,
           });
         }
       }
@@ -171,6 +185,7 @@ function HostedLegalConsentCardState({
         await onAccepted(latestStatus);
       }
     } catch (error) {
+      setLoadedStatus(latestStatus);
       setAcceptedHandoffPending(false);
       setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
     } finally {
@@ -211,9 +226,9 @@ function HostedLegalConsentCardState({
     return null;
   }
 
-  const title = isLaunchFlow ? "Before you start" : "Connect health sources";
+  const title = isLaunchFlow ? launchTitle : "Connect health sources";
   const description = isLaunchFlow
-    ? "Please review and agree to the following."
+    ? launchDescription
     : "Review and accept the health source consent for this integration.";
 
   const checkboxes = isLaunchFlow ? (
@@ -239,7 +254,11 @@ function HostedLegalConsentCardState({
   const continueButton = (
     <Button
       aria-busy={actionPending}
-      className={mode === "compact" ? "w-full" : undefined}
+      className={
+        mode === "compact"
+          ? "w-full"
+          : "h-auto min-h-11 max-w-full whitespace-normal"
+      }
       type="button"
       onClick={handleAccept}
       disabled={!allChecked || actionPending}
@@ -266,15 +285,15 @@ function HostedLegalConsentCardState({
 
   return (
     <div className={joinClassNames(cardClassName(mode), className)}>
-      <div className="flex items-start gap-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
           <ShieldCheckIcon className="size-4" aria-hidden />
         </span>
-        <div className="min-w-0 flex-1 space-y-5">
-          <div className="space-y-1">
-            <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
-          </div>
+        <div className="min-w-0 space-y-1">
+          <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+        </div>
+        <div className="col-span-2 min-w-0 space-y-5">
           {checkboxes}
           {errorMessage ? (
             <Alert variant="destructive">
@@ -287,6 +306,20 @@ function HostedLegalConsentCardState({
       </div>
     </div>
   );
+}
+
+function requestHostedConsentAcceptance(
+  input: HostedLegalConsentAcceptanceInput,
+): Promise<HostedConsentStatus> {
+  return requestHostedOnboardingJson<HostedConsentStatus>({
+    method: "POST",
+    payload: {
+      acceptedDocumentVersions: input.acceptedDocumentVersions,
+      scope: input.scope,
+      source: input.source,
+    },
+    url: "/api/legal/consent/accept",
+  });
 }
 
 function LaunchConsentCheckboxes({
@@ -306,6 +339,11 @@ function LaunchConsentCheckboxes({
 }) {
   return (
     <div className="space-y-6">
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        Murph never sells health data or uses it for advertising or general-purpose AI model
+        training.
+      </p>
+
       {legalScope && !legalScope.granted ? (
         <ConsentCheckbox
           checked={legalAccepted}
@@ -336,8 +374,9 @@ function LaunchConsentCheckboxes({
           checked={healthDataAccepted}
           onChange={onHealthDataChange}
           label={
-            <>
-              I agree to the{" "}
+            <span className="block">
+              I authorize Murph to collect, use, and process the health data I choose to submit or
+              connect to provide the features I request, as described in the{" "}
               <a
                 href={healthDataScope.documents[0]?.href ?? "#"}
                 target="_blank"
@@ -346,8 +385,11 @@ function LaunchConsentCheckboxes({
               >
                 Consumer Health Data Notice
               </a>
-              , which explains what health data Murph collects and why
-            </>
+              .
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                Disconnect a source anytime to stop collection. Request deletion in Settings.
+              </span>
+            </span>
           }
         />
       ) : null}
@@ -366,12 +408,12 @@ function ConsentCheckbox({
 }) {
   const id = useId();
   return (
-    <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
+    <div className="flex items-start gap-3 text-sm leading-relaxed text-foreground">
       <Checkbox
         id={id}
         checked={checked}
         onCheckedChange={onChange}
-        className="size-7 shrink-0"
+        className="mt-0.5 size-5 shrink-0"
       />
       <label htmlFor={id} className="cursor-pointer">
         {label}

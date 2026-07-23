@@ -5,11 +5,9 @@ import {
 } from "./contact-privacy";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
-  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -258,11 +256,7 @@ export async function reserveHostedLinqHomeLineFromPoolTx(input: {
   preferredRecipientPhone: string | null;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLinePhoneReservationResult> {
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-    prisma: input.prisma,
-  });
-
-  return reserveHostedLinqHomeLineFromPoolAfterLockTx({
+  return reserveHostedLinqHomeLineFromAssignablePoolTx({
     preferredRecipientPhone: input.preferredRecipientPhone,
     prisma: input.prisma,
     reservationKind: "inbound",
@@ -287,57 +281,19 @@ export async function resolveHostedMemberLinqHomeLineRouteBindingTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedLinqHomeLineRouteBindingResult> {
-  // Most inbound messages resolve onto an existing route. Decide without the
-  // shared pool lock so they never wait behind unrelated line assignment.
-  const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
-  if (decision.kind === "reserve") {
-    await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-      prisma: input.prisma,
-    });
-    await acquireHostedMemberHomeLinqRouteLockTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-
-    // Routing and line eligibility may have changed while another transaction
-    // held a lock, so assignment must be re-resolved under both owners.
-    const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
-    if (lockedDecision.kind === "done") {
-      return lockedDecision.result;
-    }
-
-    return reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx({
-      decision: lockedDecision,
-      prisma: input.prisma,
-    });
-  }
-
+  // One member owns one home route. Serializing only that member keeps
+  // concurrent first binds stable without coupling unrelated members.
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.memberId,
     prisma: input.prisma,
   });
-  const lockedDecision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
-  if (lockedDecision.kind === "reserve") {
-    // The state changed from an existing-route decision to a new pool claim
-    // after the per-member lock was acquired. Retrying the webhook preserves
-    // the global pool -> member lock order instead of reversing it here.
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
-      httpStatus: 503,
-      message: "Hosted Linq home routing changed while the inbound route was resolving.",
-      retryable: true,
-    });
+  const decision = await resolveHostedMemberLinqHomeLineRouteBindingDecision(input);
+  if (decision.kind === "done") {
+    return decision.result;
   }
 
-  return lockedDecision.result;
-}
-
-async function reserveHostedMemberLinqHomeLineRouteBindingAfterLocksTx(input: {
-  decision: Extract<HostedLinqHomeLineRouteBindingDecision, { kind: "reserve" }>;
-  prisma: Prisma.TransactionClient;
-}): Promise<HostedLinqHomeLineRouteBindingResult> {
-  const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
-    preferredRecipientPhone: input.decision.preferredRecipientPhone,
+  const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({
+    preferredRecipientPhone: decision.preferredRecipientPhone,
     now: new Date(),
     prisma: input.prisma,
     reservationKind: "inbound",
@@ -438,9 +394,9 @@ async function resolveHostedMemberLinqHomeLineRouteBindingDecision(input: {
     };
   }
 
-  // New claim: defer to the shared pool reservation under the lock, preferring
-  // the contacted line. Whether the preferred line is assignable is decided
-  // there, so a degraded incoming line falls over instead of failing closed.
+  // New claim: prefer the contacted line. Whether it is assignable is decided
+  // from the current pool snapshot, so a degraded incoming line falls over
+  // instead of failing closed.
   return {
     kind: "reserve",
     preferredRecipientPhone: recipientPhone,
@@ -451,87 +407,20 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
-  const initialRouting = await readHostedMemberRoutingState({
-    memberId: input.member.core.id,
-    prisma: input.prisma,
-  }) ?? input.member.routing;
-  const initialAuthority = readHostedLinqHomeLineAuthority(initialRouting);
-  const initialLinqContactLookupKey =
-    resolveHostedMemberActivationLinqContactLookupKey({
-      member: input.member,
-      routing: initialRouting,
-    });
-  const canResolveWithoutPool =
-    initialAuthority.kind === "home"
-    || (
-      initialAuthority.kind === "pending"
-      && canPromoteHostedMemberActivationPendingLinqRoute({
-        authority: initialAuthority,
-        linqContactLookupKey: initialLinqContactLookupKey,
-        memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
-      })
-    );
-
-  if (canResolveWithoutPool) {
-    await acquireHostedMemberHomeLinqRouteLockTx({
-      memberId: input.member.core.id,
-      prisma: input.prisma,
-    });
-    const resolved = await resolveHostedMemberActivationLinqRouteAttempt({
-      claimNewHomeLine: false,
-      member: input.member,
-      prisma: input.prisma,
-    });
-    if (resolved) {
-      return resolved;
-    }
-
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
-      httpStatus: 503,
-      message: "Hosted Linq home routing changed while activation was resolving.",
-      retryable: true,
-    });
-  }
-
-  // A new assignment still preserves the global pool -> member lock order,
-  // but fails fast instead of holding this transaction connection in PgBouncer
-  // while another activation owns the shared pool.
-  if (!(await tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-    prisma: input.prisma,
-  }))) {
-    throw hostedOnboardingError({
-      code: "HOSTED_LINQ_HOME_LINE_POOL_BUSY",
-      httpStatus: 503,
-      message: "Murph is still finishing your setup. Try again.",
-      retryable: true,
-    });
-  }
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.member.core.id,
     prisma: input.prisma,
   });
-  const resolved = await resolveHostedMemberActivationLinqRouteAttempt({
-    claimNewHomeLine: true,
+  return resolveHostedMemberActivationLinqRouteAttempt({
     member: input.member,
     prisma: input.prisma,
   });
-  if (!resolved) {
-    throw hostedOnboardingError({
-      code: "LINQ_CONVERSATION_PHONE_REQUIRED",
-      message: "Configure an enabled hosted_linq_line row before activating members without an existing Linq conversation thread.",
-      httpStatus: 500,
-    });
-  }
-
-  return resolved;
 }
 
 async function resolveHostedMemberActivationLinqRouteAttempt(input: {
-  claimNewHomeLine: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
-}): Promise<HostedMemberActivationLinqRouteResolution | null> {
+}): Promise<HostedMemberActivationLinqRouteResolution> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.member.core.id,
     prisma: input.prisma,
@@ -602,14 +491,10 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   }
 
   const target = await resolveHostedMemberActivationTargetRecipientPhone({
-    claimNewHomeLine: input.claimNewHomeLine,
     member: input.member,
     prisma: input.prisma,
     routing,
   });
-  if (target === "needs_claim") {
-    return null;
-  }
   const targetRecipientPhone = normalizePhoneNumber(target.recipientPhone);
 
   if (!targetRecipientPhone) {
@@ -731,13 +616,13 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     };
   }
 
-  const proactiveLine = chooseHostedLinqSignupWelcomeLine({
-    activeMembersByRecipientPhone,
-    lines: input.lines,
-    newAssignmentsByRecipientPhone: proactiveConversationCounts,
-    preferredRecipientPhone: input.preferredRecipientPhone ?? null,
-  });
   if (input.reservationKind === "inbound") {
+    const proactiveLine = chooseHostedLinqSignupWelcomeLine({
+      activeMembersByRecipientPhone,
+      lines: input.lines,
+      newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+    });
     const selectedLine = proactiveLine ?? preferredOrFallbackLine;
     if (!selectedLine) {
       return null;
@@ -750,34 +635,56 @@ async function reserveHostedLinqHomeLineFromCandidatesTx(input: {
     };
   }
 
-  const proactiveConversationReserved = proactiveLine
-    ? await claimHostedLinqProactiveConversationCapacityTx({
-        dayUtc,
-        limit: resolveHostedLinqSignupWelcomeDailyLimit(proactiveLine),
-        phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
-        prisma: input.prisma,
-      })
-    : false;
+  for (let lineAttempt = 0; lineAttempt < input.lines.length; lineAttempt += 1) {
+    const proactiveLine = chooseHostedLinqSignupWelcomeLine({
+      activeMembersByRecipientPhone,
+      lines: input.lines,
+      newAssignmentsByRecipientPhone: proactiveConversationCounts,
+      preferredRecipientPhone: input.preferredRecipientPhone ?? null,
+    });
+    if (!proactiveLine) {
+      break;
+    }
 
-  if (proactiveLine && proactiveConversationReserved) {
-    return {
-      assignedAt: now,
-      line: proactiveLine,
-      proactiveConversationReserved: true,
-    };
+    const limit = resolveHostedLinqSignupWelcomeDailyLimit(proactiveLine);
+    let proactiveConversationReserved = false;
+    // A day rollover can make the first conditional update lose to another
+    // transaction even when capacity remains. Retry once inside this request,
+    // then move to the next line if the claim still loses.
+    for (let claimAttempt = 0; claimAttempt < 2; claimAttempt += 1) {
+      proactiveConversationReserved =
+        await claimHostedLinqProactiveConversationCapacityTx({
+          dayUtc,
+          limit,
+          phoneNumberLookupKey: proactiveLine.phoneNumberLookupKey,
+          prisma: input.prisma,
+        });
+      if (proactiveConversationReserved) {
+        break;
+      }
+    }
+
+    if (proactiveConversationReserved) {
+      return {
+        assignedAt: now,
+        line: proactiveLine,
+        proactiveConversationReserved: true,
+      };
+    }
+
+    proactiveConversationCounts.set(proactiveLine.phoneNumber, limit);
   }
 
   return preferredOrFallbackLine
     ? {
         assignedAt: now,
-        line: proactiveLine ?? preferredOrFallbackLine,
+        line: preferredOrFallbackLine,
         proactiveConversationReserved: false,
       }
     : null;
 }
 
 async function resolveHostedMemberActivationTargetRecipientPhone(input: {
-  claimNewHomeLine: boolean;
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
   routing: HostedMemberRoutingStateSnapshot | null;
@@ -785,15 +692,11 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   homeLineAssignedAt?: Date;
   proactiveConversationReserved?: boolean;
   recipientPhone: string | null;
-} | "needs_claim"> {
+}> {
   const routing = input.routing;
   const existingRecipientPhone = normalizePhoneNumber(routing?.linqRecipientPhone);
 
-  if (!input.claimNewHomeLine) {
-    return "needs_claim";
-  }
-
-  const reservationResult = await reserveHostedLinqHomeLineFromPoolAfterLockTx({
+  const reservationResult = await reserveHostedLinqHomeLineFromAssignablePoolTx({
     excludedActiveMemberId: existingRecipientPhone ? input.member.core.id : null,
     preferredRecipientPhone:
       existingRecipientPhone
@@ -817,7 +720,7 @@ async function resolveHostedMemberActivationTargetRecipientPhone(input: {
   };
 }
 
-async function reserveHostedLinqHomeLineFromPoolAfterLockTx(input: {
+async function reserveHostedLinqHomeLineFromAssignablePoolTx(input: {
   excludedActiveMemberId?: string | null;
   now?: Date;
   preferredRecipientPhone: string | null;

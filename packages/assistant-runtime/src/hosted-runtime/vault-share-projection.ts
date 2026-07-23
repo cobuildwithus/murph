@@ -16,6 +16,8 @@ import {
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareActivitySessionCountProjectionSpec,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
+  HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
@@ -457,7 +459,7 @@ export async function readProjectableWorkoutDays(
     {
       from: cutoffDate,
       limit: null,
-      metricKey: "activity-minutes",
+      metricKey: "workout-minutes",
     },
   ]);
   const countSeries = selectMetricSeries({
@@ -472,7 +474,7 @@ export async function readProjectableWorkoutDays(
     duplicatePolicy: "selection-policy",
     from: cutoffDate,
     grain: "day",
-    metricKey: "activity-minutes",
+    metricKey: "workout-minutes",
     points,
     statistic: "value",
   });
@@ -631,6 +633,12 @@ export function selectProjectableDailyMetricDays(
       data: {
         date: point.date,
         metricKey: spec.metricKey,
+        ...(spec.projectionKind === "activity-days.v0"
+          ? {
+              metricSemantics:
+                HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
+            }
+          : {}),
         unit: sanitizeProjectionUnit(point.unit),
         value,
       },
@@ -660,7 +668,7 @@ export function selectProjectableWorkoutDays(
   const minuteRowsByDate = new Map(
     input.minuteRows
       .filter((row) =>
-        row.metricKey === "activity-minutes"
+        row.metricKey === "workout-minutes"
         && row.grain === "day"
         && row.statistic === "value"
       )
@@ -704,6 +712,8 @@ export function selectProjectableWorkoutDays(
     records.push({
       data: {
         date: countRow.date,
+        metricSemantics:
+          HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
         workoutCount,
         workoutMinutes,
       },

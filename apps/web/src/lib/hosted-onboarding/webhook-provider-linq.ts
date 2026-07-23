@@ -28,6 +28,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -43,6 +44,7 @@ import {
 } from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
+  HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
@@ -292,7 +294,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
-  const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
+  let existingMemberEffectiveActive = existingMember && !existingMemberSuspended
     ? await readActiveHostedMemberAccess({
         memberId: existingMember.id,
         prisma: input.prisma,
@@ -539,6 +541,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (existingMember && !existingMemberEffectiveActive) {
+    // The member row is also the home-route owner. Reclassify only after any
+    // activation ahead of this request commits, and keep invite or mailbox
+    // writes inside that same single-owner boundary.
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    existingMemberEffectiveActive = await readActiveHostedMemberAccess({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+  }
+
   if (existingMember && existingMemberEffectiveActive) {
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
@@ -605,6 +621,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       event: input.event,
       logDetails: {
         existingMemberActive: true,
@@ -1255,9 +1272,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   // Subscription/AI usage and its limit notice are gated after mailbox append,
   // so pending user input survives upgrades and allowance resets.
+  // Group threads share one daily bucket across every participant, so they get
+  // a higher cap than a 1:1 direct chat.
   const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
     context: input.context,
     dailyState,
+    dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
     event: input.event,
     logDetails: {
       existingMemberActive: true,
@@ -1510,6 +1530,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dailyState: HostedLinqDailyState | null;
+  dailyTextLimit: number;
   event: HostedLinqWebhookEvent;
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
@@ -1524,7 +1545,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return null;
   }
 
-  if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+  if (dailyState.inboundCount > input.dailyTextLimit) {
     if (dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("daily-quota-reached"),
@@ -1540,6 +1561,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildQuotaReplyResponse({
         chatId: input.context.summary.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,

@@ -11,8 +11,10 @@ import {
   captureHostedGrowthDailySnapshot,
   findComparableSnapshot,
   readHostedGrowthDashboard,
+  readHostedMessageVolumeTotal,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
+import { HOSTED_MESSAGE_VOLUME_FLOOR } from "../src/lib/message-volume";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   hostedGrowthDailySnapshot: {
+    aggregate: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
@@ -377,6 +380,53 @@ describe("hosted ops growth metrics", () => {
       started: 2,
       stillTrialing: 0,
     });
+  });
+
+  it("sums snapshot message counts for the public message volume total", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(7_300);
+  });
+
+  it("applies the floor when snapshot sums are low, null, or unreadable", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 400,
+        outboundMessagesPriorDay: null,
+      },
+    });
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(
+      HOSTED_MESSAGE_VOLUME_FLOOR,
+    );
+
+    mocks.hostedGrowthDailySnapshot.aggregate.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(
+      HOSTED_MESSAGE_VOLUME_FLOOR,
+    );
+  });
+
+  it("serves the message volume total with a cacheable response", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+    const route = await import("../app/api/message-volume/route");
+
+    const response = await route.GET();
+
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=300, stale-while-revalidate=3600",
+    );
+    await expect(response.json()).resolves.toEqual({ total: 7_300 });
   });
 
   it("counts own-paid or family-paid members in the mature converted count query", async () => {

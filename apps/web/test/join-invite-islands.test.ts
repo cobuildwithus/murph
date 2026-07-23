@@ -737,7 +737,12 @@ function createConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes: [
       consentScope("launch.legal", "Terms, privacy, and AI disclosure", legalDocuments, launchLegalGranted),
-      consentScope("launch.health-data", "Health data collection consent", healthDataDocuments, launchHealthDataGranted),
+      consentScope(
+        "launch.health-data",
+        "Health data notice and processing authorization",
+        healthDataDocuments,
+        launchHealthDataGranted,
+      ),
     ],
   };
 }
@@ -748,7 +753,7 @@ function consentDocument(id: string, title: string, href: string) {
     id: id as HostedConsentStatus["documents"][number]["id"],
     pdfHref: `${href}.pdf`,
     title,
-    version: "2026-04-29",
+    version: "2026-07-23",
   };
 }
 

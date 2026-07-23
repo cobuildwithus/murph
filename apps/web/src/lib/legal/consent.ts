@@ -11,8 +11,8 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 
-export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-04-29";
-export const HOSTED_PRIVACY_POLICY_VERSION = "2026-06-24";
+export const HOSTED_LEGAL_DOCUMENT_VERSION = "2026-07-23";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-07-23";
 
 export const HOSTED_CONSENT_DOCUMENTS = [
   {
@@ -45,6 +45,9 @@ export const HOSTED_CONSENT_DOCUMENTS = [
   },
 ] as const;
 
+// Launch scopes preserve historical acceptance of the required documents.
+// They do not prevent members from disconnecting optional sources, withdrawing
+// optional permissions for future processing, or exercising deletion rights.
 export const HOSTED_CONSENT_SCOPES = [
   {
     scope: "launch.legal",
@@ -58,7 +61,7 @@ export const HOSTED_CONSENT_SCOPES = [
   },
   {
     scope: "launch.health-data",
-    label: "Health data collection consent",
+    label: "Health data notice and processing authorization",
     revocable: false,
     documentIds: [
       "consumer-health-data-notice",
@@ -460,6 +463,32 @@ export async function assertHostedLaunchRequiredConsentGranted(input: {
   }
 }
 
+export async function assertHostedHistoricalLaunchConsentGranted(input: {
+  memberId: string;
+  prisma: HostedConsentPrismaClient;
+}): Promise<void> {
+  const status = await readHostedConsentStatus({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  const missingScopes = getMissingHistoricalLaunchConsentScopes(status);
+
+  if (missingScopes.length > 0) {
+    throw hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      details: { missingScopes },
+      httpStatus: 403,
+      message: "Accept the Murph legal consent before connecting or syncing a device.",
+    });
+  }
+}
+
+export function hasHostedHistoricalLaunchConsent(
+  status: HostedConsentStatus,
+): boolean {
+  return getMissingHistoricalLaunchConsentScopes(status).length === 0;
+}
+
 export function buildHostedConsentStatus(input: {
   grants: HostedConsentGrantSnapshot[];
   now: Date;
@@ -504,6 +533,17 @@ export function buildHostedConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes,
   };
+}
+
+function getMissingHistoricalLaunchConsentScopes(
+  status: HostedConsentStatus,
+): HostedConsentLaunchScope[] {
+  return HOSTED_LAUNCH_SCOPES.filter((launchScope) => {
+    const scopeStatus = status.scopes.find((candidate) => (
+      candidate.scope === launchScope
+    ));
+    return scopeStatus?.grant?.status !== "granted";
+  });
 }
 
 function parseHostedConsentScope(value: unknown): HostedConsentScope {
