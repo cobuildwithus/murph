@@ -259,9 +259,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
     });
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -312,9 +309,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: null,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
     });
   });
 
@@ -351,9 +345,6 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
     });
   });
 

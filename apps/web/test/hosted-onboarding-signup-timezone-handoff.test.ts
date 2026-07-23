@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   ensureHostedMemberForPrivyIdentityResolutionTx: vi.fn(),
   issueHostedInvite: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
-  syncHostedPrivyMemberIdMetadata: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/logging", () => ({
@@ -58,17 +57,6 @@ vi.mock("@/src/lib/hosted-onboarding/invite-service", async (importOriginal) => 
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/src/lib/hosted-onboarding/privy")
-  >();
-
-  return {
-    ...actual,
-    syncHostedPrivyMemberIdMetadata: mocks.syncHostedPrivyMemberIdMetadata,
-  };
-});
-
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 
 const NOW = new Date("2026-06-21T12:00:00.000Z");
@@ -91,7 +79,6 @@ describe("hosted signup timezone handoff", () => {
       inviteCode: "invite_timezone_handoff",
     });
     mocks.readHostedMemberMessagingSetupState.mockResolvedValue(null);
-    mocks.syncHostedPrivyMemberIdMetadata.mockResolvedValue(undefined);
   });
 
   it("persists the signup timezone before activation can claim the member row", async () => {

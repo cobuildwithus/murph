@@ -495,7 +495,6 @@ test("SettingsPage reads the app session and persisted account settings into the
         type: "email",
       },
     ],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -727,7 +726,6 @@ test("SettingsPage rejects repeated or malformed usage top-up query state", asyn
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -763,7 +761,6 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1017,7 +1014,6 @@ test.each([
       suspendedAt,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1074,7 +1070,6 @@ test("SettingsPage passes a pending Murph text line to account settings", async 
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1128,7 +1123,6 @@ test("SettingsPage drops the voice-test chat link for an email-only member", asy
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1174,7 +1168,6 @@ test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscri
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1216,7 +1209,6 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1317,7 +1309,6 @@ test("SettingsPage awaits database-backed settings reads one at a time", async (
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1433,7 +1424,6 @@ test("SettingsPage falls back to empty offers, no purchase, and no Privy hints w
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
@@ -1538,7 +1528,6 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
       suspendedAt: null,
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       privyUserId: "did:privy:user_123",
     },
