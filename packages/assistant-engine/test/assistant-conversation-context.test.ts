@@ -10,6 +10,7 @@ import {
 } from '../src/assistant/conversation-context.js'
 import {
   appendAssistantConversationContextEntry,
+  isAssistantConversationContextUnavailableError,
   listAssistantTranscriptEntries,
   resolveAssistantSession,
   saveAssistantSession,
@@ -91,13 +92,18 @@ describe('assistant conversation context', () => {
     cleanupPaths.push(parentRoot)
     const context = 'Internal phone-call result context.'
 
-    await expect(recordAssistantConversationContextLocal({
-      context,
-      idempotencyKey: 'phone-call.resulted:call-route',
-      occurredAt: '2026-07-22T16:24:46.000Z',
-      sessionId: 'session_missing',
-      vault: vaultRoot,
-    })).rejects.toThrow(/not found/u)
+    try {
+      await recordAssistantConversationContextLocal({
+        context,
+        idempotencyKey: 'phone-call.resulted:call-route',
+        occurredAt: '2026-07-22T16:24:46.000Z',
+        sessionId: 'session_missing',
+        vault: vaultRoot,
+      })
+      throw new Error('Expected a missing origin session to fail closed.')
+    } catch (error) {
+      expect(isAssistantConversationContextUnavailableError(error)).toBe(true)
+    }
   })
 
   it('fails closed when the initiating session is not direct', async () => {
@@ -128,13 +134,24 @@ describe('assistant conversation context', () => {
       vault: vaultRoot,
     })
 
-    await expect(recordAssistantConversationContextLocal({
-      context: 'Internal phone-call result context.',
-      idempotencyKey: 'phone-call.resulted:group-call',
-      occurredAt: '2026-07-22T16:24:46.000Z',
-      sessionId: group.session.sessionId,
-      vault: vaultRoot,
-    })).rejects.toThrow(/existing direct session/u)
+    try {
+      await recordAssistantConversationContextLocal({
+        context: 'Internal phone-call result context.',
+        idempotencyKey: 'phone-call.resulted:group-call',
+        occurredAt: '2026-07-22T16:24:46.000Z',
+        sessionId: group.session.sessionId,
+        vault: vaultRoot,
+      })
+      throw new Error('Expected a non-direct origin session to fail closed.')
+    } catch (error) {
+      expect(isAssistantConversationContextUnavailableError(error)).toBe(true)
+    }
+  })
+
+  it('does not classify transient storage errors as unavailable origins', () => {
+    expect(isAssistantConversationContextUnavailableError(
+      new Error('temporary vault write failure'),
+    )).toBe(false)
   })
 
   it('bounds provider replay context by UTF-8 bytes', () => {

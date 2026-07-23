@@ -4,6 +4,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  listHostedAiUsageForTest,
   readHostedPhoneCallForTest,
   seedHostedPhoneCallForTest,
 } from "#hosted-web-testing";
@@ -32,6 +33,8 @@ const assistantModel = "gpt-5.6-terra";
 const resultSummary = "The pharmacy confirmed the prescription will be ready this afternoon.";
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
 const resultQuestion = "Did the pharmacy call return?";
+const setupQuestion = "Can you keep this conversation open while I wait for a pharmacy update?";
+const setupReply = "Yes, I’ll be here when you have an update.";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -90,6 +93,45 @@ describe("hosted local Retell result roundtrip e2e", () => {
       participantPhone: memberPhone,
       recipientPhone: memberPhone,
     });
+    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
+    const setupBaselineSends = requireLinqStub().countObservedSends(replyPath);
+    const setupTurnStartedAt = new Date().toISOString();
+    requireScenario().queueAssistantResponses([setupReply], {
+      matchInputContains: setupQuestion,
+    });
+    const setupResponse = await postSignedLinqWebhook(
+      buildHostedLinqInboundEvent(userId, chatId, {
+        eventId: `evt_retell_result_setup_${runId}`,
+        messageId: `msg_retell_result_setup_${runId}`,
+        text: setupQuestion,
+      }),
+    );
+    expect(setupResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const setupSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: setupBaselineSends,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(setupSend)).toBe(setupReply);
+    const setupStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(setupStatus.lastErrorCode ?? null).toBeNull();
+
+    const setupSessionIds = new Set(
+      (await listHostedAiUsageForTest({
+        environment: requireScenario().runtimeEnv,
+        memberId: userId,
+      }))
+        .filter((row) => row.occurredAt >= setupTurnStartedAt && row.surface === "linq")
+        .map((row) => row.sessionId),
+    );
+    expect(setupSessionIds.size).toBe(1);
+    const originSessionId = setupSessionIds.values().next().value;
+    if (!originSessionId) {
+      throw new Error("The setup Linq turn did not persist an assistant session.");
+    }
+
     await seedHostedPhoneCallForTest({
       brief: {
         goal: "Confirm when a prescription will be ready.",
@@ -103,11 +145,11 @@ describe("hosted local Retell result roundtrip e2e", () => {
       environment: requireScenario().runtimeEnv,
       id: phoneCallId,
       memberId: userId,
+      originSessionId,
       providerCallId,
       requestKey: `retell-result-e2e:${runId}`,
     });
 
-    const replyPath = `/chats/${encodeURIComponent(chatId)}/messages`;
     const baselineSends = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequests = countAssistantProviderRequests();
     const payload = buildRetellCallAnalyzedPayload();
@@ -156,6 +198,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     });
     expect(storedCall).toMatchObject({
       memberId: userId,
+      originSessionId,
       providerCallId,
       status: "completed",
     });

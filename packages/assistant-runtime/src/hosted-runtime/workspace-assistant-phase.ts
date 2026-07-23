@@ -258,8 +258,7 @@ const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-updat
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
-const HOSTED_CONVERSATION_PRE_PLANNING_ROUTE_ACTIONS = [
-  "apply-member-preferences",
+const HOSTED_PHONE_CALL_RESULT_PRE_PLANNING_ROUTE_ACTIONS = [
   "record-phone-call-result-context",
 ] as const;
 const HOSTED_FOREGROUND_PENDING_EFFECTS_ROUTE_ACTIONS = [
@@ -1517,12 +1516,10 @@ export async function runHostedWorkspaceAssistantPhase(
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
         ? await runPrePlanningSystemMailboxPhase({
-          allowedRouteActions: input.acceptedAssistantInputCausalSeq
-            ? HOSTED_CONVERSATION_PRE_PLANNING_ROUTE_ACTIONS
-            : HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+          allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
           executionContext,
           input,
-          maxCausalSeq: input.acceptedAssistantInputCausalSeq ?? null,
+          maxCausalSeq: null,
         })
         : {
             continueAssistantLane: true,
@@ -1539,6 +1536,29 @@ export async function runHostedWorkspaceAssistantPhase(
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         memberPreferencesPrePlanning.result,
+      );
+    }
+
+    const phoneCallResultPrePlanning =
+      hasFreshConversationInput && input.acceptedAssistantInputCausalSeq
+        ? await runPrePlanningSystemMailboxPhase({
+          allowedRouteActions: HOSTED_PHONE_CALL_RESULT_PRE_PLANNING_ROUTE_ACTIONS,
+          executionContext,
+          input,
+          maxCausalSeq: input.acceptedAssistantInputCausalSeq,
+        })
+        : {
+            continueAssistantLane: true,
+            result: null,
+          };
+    if (phoneCallResultPrePlanning.result) {
+      if (!phoneCallResultPrePlanning.continueAssistantLane) {
+        return mergeContinuingSystemMailboxResult(phoneCallResultPrePlanning.result);
+      }
+
+      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
+        continuingSystemMailboxResult,
+        phoneCallResultPrePlanning.result,
       );
     }
 

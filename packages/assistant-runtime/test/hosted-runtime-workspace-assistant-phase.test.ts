@@ -13046,7 +13046,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       async (input) => {
         callOrder.push("phone-call-result");
         expect(input.allowedRouteActions).toEqual([
-          "apply-member-preferences",
           "record-phone-call-result-context",
         ]);
         expect(input.maxCausalSeq).toBe("20");
@@ -13086,6 +13085,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
 
     expect(callOrder).toEqual(["phone-call-result", "assistant"]);
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: ["apply-member-preferences"],
+        maxCausalSeq: null,
+      }),
+    );
+    expect(mocks.resolveHostedSystemMailboxNextWakeCandidate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allowedRouteActions: ["record-phone-call-result-context"],
+        maxCausalSeq: "20",
+      }),
+    );
   });
 
   it("drains one bounded due preference page before rescheduling fresh conversation input", async () => {

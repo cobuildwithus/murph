@@ -954,11 +954,16 @@ one idempotent internal transcript entry without starting a provider turn,
 exposing tools, creating a session, rerouting context, or delivering a message.
 If result and conversation rows import together, the bounded pre-planning phase
 admits the result only when its causal sequence is at or before the accepted
-conversation frontier. The append clears native provider resume metadata so
-the next attended user turn rebuilds from committed transcript history and sees
-both the prior conversation and the call outcome. A repeated webhook or mailbox
-delivery may clear stale resume again, but it must not append the same context
-entry twice.
+conversation frontier. Phone results and preference mutations keep independent
+route selection: phone results use mailbox acceptance sequence, while a
+turn-origin preference retains its `preferenceCausalSeq` intent time and cannot
+be delayed by the preference row's later transport sequence or a blocked phone
+result. A missing or non-direct origin session is a terminal fail-closed no-op
+that releases later phone results; storage and lock failures remain retryable.
+The append clears native provider resume metadata so the next attended user turn
+rebuilds from committed transcript history and sees both the prior conversation
+and the call outcome. A repeated webhook or mailbox delivery may clear stale
+resume again, but it must not append the same context entry twice.
 
 `phone-call.resulted` is a hard-cut consumer-first mailbox rollout. An old
 runner quarantines the unknown system row and blocks system-lane progress. Apply

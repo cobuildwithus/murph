@@ -206,11 +206,16 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
-    causalSeq: input.item.item.causalSeq ?? (
-      input.wake.kind === "member.preferences.updated"
-        ? (input.wake.preferenceCausalSeq ?? null)
-        : null
-    ),
+    causalSeq: routeAction === "record-phone-call-result-context"
+      ? (input.item.item.causalSeq ?? null)
+      : null,
+    preferenceCausalSeq: routeAction === "apply-member-preferences"
+      ? (
+        input.wake.kind === "member.preferences.updated"
+          ? (input.wake.preferenceCausalSeq ?? input.item.item.causalSeq ?? null)
+          : (input.item.item.causalSeq ?? null)
+      )
+      : null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,
     status: "pending",
@@ -544,7 +549,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     forceQueueOnlyAssistantNotification: true,
     operatorHomeRoot: input.operatorHomeRoot ?? undefined,
     preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
-    preferenceCausalSeq: input.pendingItem.causalSeq ?? "0",
+    preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
@@ -610,6 +615,7 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
     && left.causalSeq === right.causalSeq
+    && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId

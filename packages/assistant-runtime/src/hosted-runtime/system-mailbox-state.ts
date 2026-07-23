@@ -70,6 +70,7 @@ export interface HostedSystemMailboxPendingItem {
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
+  preferenceCausalSeq?: string | null;
   requestId: string | null;
   routeAction: HostedSystemMailboxRouteAction;
   status: "pending" | "recording" | "sending";
@@ -248,6 +249,7 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     occurredAt,
     postCheckpointRecord: null,
     causalSeq: null,
+    preferenceCausalSeq: null,
     requestId: null,
     routeAction: "run-device-sync-wake",
     status: "pending",
@@ -478,8 +480,12 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       ? null
       : parseHostedSystemMailboxRecordRequest(record.postCheckpointRecord),
     causalSeq: readOptionalPositiveIntegerString(
-      record.causalSeq ?? record.preferenceCausalSeq,
+      record.causalSeq,
       "hosted system mailbox causalSeq",
+    ),
+    preferenceCausalSeq: readOptionalPositiveIntegerString(
+      record.preferenceCausalSeq,
+      "hosted system mailbox preferenceCausalSeq",
     ),
     requestId: record.requestId === null || record.requestId === undefined
       ? null
@@ -684,8 +690,11 @@ function systemMailboxItemIsCausallyEligible(
   if (!maxCausalSeq) {
     return true;
   }
+  if (item.routeAction !== "record-phone-call-result-context") {
+    return true;
+  }
   if (!item.causalSeq) {
-    return item.routeAction === "apply-member-preferences";
+    return false;
   }
   return comparePositiveDecimalStrings(item.causalSeq, maxCausalSeq) <= 0;
 }
@@ -757,6 +766,7 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
     && left.causalSeq === right.causalSeq
+    && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt
     && left.requestId === right.requestId

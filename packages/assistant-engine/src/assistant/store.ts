@@ -85,6 +85,8 @@ import type {
 } from './store/types.js'
 
 const ASSISTANT_STATE_SCHEMA = 'murph.assistant-conversation.v2'
+const ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT =
+  'ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -92,6 +94,20 @@ export function isAssistantSessionNotFoundError(error: unknown): boolean {
       typeof error === 'object' &&
       'code' in error &&
       (error as { code?: unknown }).code === 'ASSISTANT_SESSION_NOT_FOUND',
+  )
+}
+
+export function isAssistantConversationContextUnavailableError(
+  error: unknown,
+): boolean {
+  if (isAssistantSessionNotFoundError(error)) {
+    return true
+  }
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT,
   )
 }
 
@@ -627,7 +643,8 @@ export async function appendAssistantConversationContextEntry(input: {
       })
     }
     if (session.binding.threadIsDirect !== true) {
-      throw new TypeError(
+      throw new VaultCliError(
+        ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT,
         'Assistant conversation context requires an existing direct session.',
       )
     }

@@ -331,6 +331,50 @@ describe("hosted runtime system mailbox state", () => {
     })).toEqual(item);
   });
 
+  it("keeps preference progress independent from an ineligible phone-result head", () => {
+    const phoneResult = {
+      ...buildPendingSystemMailboxItem({
+        itemId: "phone-call-result",
+        mailboxLaneSeq: "21",
+      }),
+      causalSeq: "21",
+      preferenceCausalSeq: null,
+      routeAction: "record-phone-call-result-context" as const,
+      wake: {
+        eventId: "phone-call.resulted:call-1",
+        kind: "phone-call.resulted" as const,
+        occurredAt: "2026-04-27T00:00:00.000Z",
+        phoneCall: {
+          context: "Internal call result context.",
+          originSessionId: "session_origin",
+        },
+        userId: "member_123",
+      },
+    };
+    const preference = {
+      ...buildPendingSystemMailboxItem({
+        itemId: "member-preference",
+        mailboxLaneSeq: "12",
+      }),
+      causalSeq: null,
+      preferenceCausalSeq: "10",
+    };
+    const state = { pending: [phoneResult, preference] };
+
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["record-phone-call-result-context"],
+      maxCausalSeq: "20",
+      now: "2026-04-27T00:00:00.000Z",
+      state,
+    })).toBeNull();
+    expect(findNextHostedSystemMailboxQueueItem({
+      allowedRouteActions: ["apply-member-preferences"],
+      maxCausalSeq: "20",
+      now: "2026-04-27T00:00:00.000Z",
+      state,
+    })).toEqual(preference);
+  });
+
   it("acknowledges only the contiguous imported prefix before pending system work", () => {
     expect(resolveHostedSystemMailboxHandledThroughSeq({
       importedSeq: "9",
@@ -595,6 +639,7 @@ function buildPendingSystemMailboxItem(input: {
     occurredAt: "2026-04-27T00:00:00.000Z",
     postCheckpointRecord: null,
     causalSeq: input.mailboxLaneSeq,
+    preferenceCausalSeq: input.mailboxLaneSeq,
     requestId: null,
     routeAction: "apply-member-preferences",
     status: "pending",
