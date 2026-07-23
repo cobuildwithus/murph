@@ -163,6 +163,7 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toEqual([
       {
         orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "system_mailbox",
         userId: "member_test",
       },
     ]);
