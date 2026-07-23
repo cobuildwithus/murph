@@ -27,9 +27,9 @@ export function DesignPage() {
   return (
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
       {/* Tab nav */}
-      <div className="sticky top-0 z-30 border-b border-[#e5e1d8] bg-[#f5f0e8]/95 backdrop-blur-sm">
+      <div className="sticky top-0 z-30 overflow-x-auto border-b border-[#e5e1d8] bg-[#f5f0e8]/95 backdrop-blur-sm">
         <div
-          className={`mx-auto flex items-center gap-1 py-3 ${
+          className={`mx-auto flex min-w-max items-center gap-1 py-3 ${
             activeTab === "sections"
               ? "max-w-7xl px-5 sm:px-8 lg:px-12"
               : "max-w-5xl px-6 sm:px-10 lg:px-16"
