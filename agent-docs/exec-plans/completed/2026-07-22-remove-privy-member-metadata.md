@@ -1,8 +1,8 @@
 # Remove redundant Privy member metadata
 
-Status: active
+Status: completed
 Created: 2026-07-22
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 ## Goal
 
@@ -58,3 +58,4 @@ Updated: 2026-07-22
   database query.
 - The signup metadata update is best-effort but awaited before completion, so a
   slow provider-management request lengthens the user-visible signup path.
+Completed: 2026-07-23
