@@ -1,6 +1,6 @@
 # Text-Murph follow-up on usage top-up success
 
-Status: active
+Status: completed
 Created: 2026-07-23
 
 ## Goal
@@ -67,3 +67,5 @@ Created: 2026-07-23
 3. Update the `/design` catalog states; capture desktop/mobile screenshots.
 4. Add focused tests; run `pnpm test:diff` over touched paths.
 5. Complete required audits, finish-task commit, open the PR.
+Updated: 2026-07-23
+Completed: 2026-07-23
