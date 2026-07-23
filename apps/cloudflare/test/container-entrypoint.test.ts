@@ -437,6 +437,62 @@ describe("startHostedContainerEntrypoint", () => {
       .toBe(String(completedAtEpochMs));
   });
 
+  it("starts conversation warmth when the observed invocation settles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const observedAtEpochMs = Date.parse("2026-07-22T13:00:00.000Z");
+      const settledAtEpochMs = observedAtEpochMs + 300_000;
+      const activityObserved = createDeferred();
+      const releaseInvocation = createDeferred();
+      mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+        options.onConversationActivityObserved?.();
+        activityObserved.resolve();
+        await releaseInvocation.promise;
+        return buildWorkspaceRunnerResult();
+      });
+      vi.setSystemTime(observedAtEpochMs);
+      const server = await startHostedContainerEntrypoint({ port: 0 });
+      servers.push(server);
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+      }
+
+      const invocationPromise = sendHostedContainerJsonRequest({
+        body: JSON.stringify(buildWorkspaceJobBody()),
+        path: "/internal/workspace-invocation",
+        port: address.port,
+      });
+      await activityObserved.promise;
+
+      const healthWhileRunning = await sendHostedContainerGetRequest({
+        path: "/health",
+        port: address.port,
+      });
+      expect(healthWhileRunning.json).toMatchObject({
+        activeJobCount: 1,
+        conversationWarmActivityCompletedAtEpochMs: null,
+      });
+
+      vi.setSystemTime(settledAtEpochMs);
+      releaseInvocation.resolve();
+      const invocation = await invocationPromise;
+      expect(invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER])
+        .toBe(String(settledAtEpochMs));
+
+      const healthAfterSettlement = await sendHostedContainerGetRequest({
+        path: "/health",
+        port: address.port,
+      });
+      expect(healthAfterSettlement.json).toMatchObject({
+        activeJobCount: 0,
+        conversationWarmActivityCompletedAtEpochMs: settledAtEpochMs,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("settles conversation warmth when the invocation fails after observation", async () => {
     mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
       options.onConversationActivityObserved?.();

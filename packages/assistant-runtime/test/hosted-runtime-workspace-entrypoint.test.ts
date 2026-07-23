@@ -23774,8 +23774,9 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("binds a gap-free provider batch to its terminal stored input id", async () => {
+  test("binds provider batches to stored input ids and conversation activity", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const conversationActivity: string[] = [];
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
@@ -23793,6 +23794,9 @@ describe("hosted workspace runtime entrypoint", () => {
             workspace: createWorkspaceState(),
           }),
         }),
+        onConversationActivityObserved(observation) {
+          conversationActivity.push(observation);
+        },
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
           assert.equal(input.currentAssistantInputId?.(), null);
@@ -23824,6 +23828,7 @@ describe("hosted workspace runtime entrypoint", () => {
             ],
           });
           assert.equal(input.currentAssistantInputId?.(), null);
+          assert.deepEqual(conversationActivity, ["uncertain"]);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
@@ -23838,6 +23843,32 @@ describe("hosted workspace runtime entrypoint", () => {
           assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantInputId?.(), null);
+          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+
+          const systemInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "43",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_system",
+              lane: "system",
+              laneSeq: "43",
+              occurredAt: "2026-04-26T00:00:03.000Z",
+            }),
+            lane: "system",
+            vaultRoot,
+          });
+          const systemRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: systemInputId, source: "assistant-input" },
+            ],
+          });
+          await systemRelease?.();
+          const genericRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: "system_runtime_input", source: "system" },
+            ],
+          });
+          await genericRelease?.();
+          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
           return { progressed: false };
         },
         vaultRoot,
@@ -25751,6 +25782,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 async function stageAssistantInputEventForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
+  lane?: "conversation" | "system";
   threadId?: string;
   threadIsDirect?: boolean;
   vaultRoot: string;
@@ -25790,7 +25822,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         eventId: input.item.dedupeKey,
         itemId: input.item.id,
         kind: "hosted-mailbox" as const,
-        lane: "conversation" as const,
+        lane: input.lane ?? "conversation",
         laneSeq: input.item.laneSeq,
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         payloadSource: input.item.payloadInlineCiphertext ? "inline" as const : "sidecar" as const,

@@ -2778,7 +2778,8 @@ describe("RunnerContainer", () => {
       });
       const { container } = createContainerDouble({
         env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1000",
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "1000",
         },
         containerFetch: vi.fn(async (url: string) => {
           if (url.endsWith("/health")) {
@@ -2795,6 +2796,7 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify(createRunnerResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
+              [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: "none",
             },
             status: 200,
           });
@@ -5642,6 +5644,40 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("60s");
   });
 
+  it("cleans up maintenance-only work after the short lifecycle cadence", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const startedAtMs = Date.parse("2026-07-22T09:00:00.000Z");
+      vi.setSystemTime(startedAtMs);
+      const renewActivityTimeout = vi.fn();
+      const { container, destroy } = createContainerDouble({
+        env: {
+          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+        },
+      });
+      Object.assign(container, { renewActivityTimeout });
+
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_short_maintenance_cadence"),
+        },
+        timeoutMs: 60_000,
+        userId: "member_123",
+      });
+      renewActivityTimeout.mockClear();
+
+      vi.setSystemTime(startedAtMs + 60_001);
+      await container.onActivityExpired();
+
+      expect(renewActivityTimeout).not.toHaveBeenCalled();
+      expect(destroy).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects runner lifecycle env values with trailing junk", async () => {
     expect(() =>
       createContainerDouble({
@@ -5767,6 +5803,76 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("clamps a future child watermark to one conversation lease", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const nowMs = Date.parse("2026-07-22T11:30:00.000Z");
+      const conversationTtlMs = 1_200_000;
+      vi.setSystemTime(nowMs);
+      const { container, storage } = createContainerDouble({
+        env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(conversationTtlMs) },
+        containerFetch: vi.fn(async (url: string) => {
+          if (url.endsWith("/health")) {
+            return new Response(JSON.stringify(createRunnerHealthResult()), {
+              headers: { "content-type": "application/json; charset=utf-8" },
+              status: 200,
+            });
+          }
+          return new Response(JSON.stringify(createRunnerResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: String(
+                nowMs + (10 * conversationTtlMs),
+              ),
+            },
+            status: 200,
+          });
+        }),
+      });
+
+      await container.invoke({
+        job: {
+          kind: "workspace-invocation",
+          request: createRunnerRequest("evt_future_warmth"),
+        },
+        userId: "member_123",
+      });
+
+      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
+        .resolves.toBe(nowMs + conversationTtlMs);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clamps an oversized stored lease without destroying the warm shell", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const nowMs = Date.parse("2026-07-22T11:45:00.000Z");
+      const conversationTtlMs = 1_200_000;
+      vi.setSystemTime(nowMs);
+      const storage = createContainerStorageDouble();
+      await storage.put(
+        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
+        nowMs + (10 * conversationTtlMs),
+      );
+      const { container, containerFetch, destroy } = createContainerDouble({
+        env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(conversationTtlMs) },
+        initialStatus: "running",
+        storage,
+      });
+
+      await container.onActivityExpired();
+
+      expect(containerFetch).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
+        .resolves.toBe(nowMs + conversationTtlMs);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("recovers conversation warmth from health after Durable Object reconstruction", async () => {
     vi.useFakeTimers();
     try {
@@ -5821,6 +5927,23 @@ describe("RunnerContainer", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
+  it("does not destroy reconstructed state while the child reports active work", async () => {
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({
+        ...createRunnerHealthResult(),
+        activeJobCount: 1,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })),
+    });
+
+    await container.onActivityExpired();
+
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
   it("does not destroy when a runtime wake races the expiry health check", async () => {
     const healthStarted = createDeferred<void>();
     const releaseHealth = createDeferred<void>();
@@ -5859,6 +5982,58 @@ describe("RunnerContainer", () => {
     releaseHealth.resolve();
 
     await expect(wake).resolves.toMatchObject({ kind: "accepted" });
+    await expect(expiry).resolves.toBeUndefined();
+    expect(destroy).not.toHaveBeenCalled();
+  });
+
+  it("does not destroy when a runtime wake races the final status check", async () => {
+    const finalStatusStarted = createDeferred<void>();
+    const releaseFinalStatus = createDeferred<void>();
+    let statusReadCount = 0;
+    const getState = vi.fn(async () => {
+      statusReadCount += 1;
+      if (statusReadCount === 2) {
+        finalStatusStarted.resolve();
+        await releaseFinalStatus.promise;
+      }
+      return {
+        lastChange: Date.now(),
+        status: "running" as const,
+      };
+    });
+    const containerFetch = vi.fn(async (url: string) => {
+      if (url.endsWith("/health")) {
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/internal/runtime-wake")) {
+        return new Response(null, {
+          headers: {
+            "x-runtime-wake-accepted": "1",
+            "x-runtime-wake-identity-checked": "1",
+          },
+          status: 204,
+        });
+      }
+      throw new Error(`Unexpected runner request URL: ${url}`);
+    });
+    const { container, destroy } = createContainerDouble({
+      containerFetch,
+      getState,
+      initialStatus: "running",
+    });
+
+    const expiry = container.onActivityExpired();
+    await finalStatusStarted.promise;
+    await expect(container.wakeRuntime({
+      attemptId: "attempt_final_status_wake",
+      leaseGeneration: "1",
+      userId: "member_123",
+    })).resolves.toMatchObject({ kind: "accepted" });
+    releaseFinalStatus.resolve();
+
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
   });
