@@ -10,11 +10,11 @@ import {
   calculatePercentChange,
   captureHostedGrowthDailySnapshot,
   findComparableSnapshot,
-  HOSTED_MESSAGE_VOLUME_FLOOR,
   readHostedGrowthDashboard,
   readHostedMessageVolumeTotal,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
+import { HOSTED_MESSAGE_VOLUME_FLOOR } from "../src/lib/message-volume";
 
 vi.mock("server-only", () => ({}));
 
@@ -410,6 +410,23 @@ describe("hosted ops growth metrics", () => {
     await expect(readHostedMessageVolumeTotal()).resolves.toBe(
       HOSTED_MESSAGE_VOLUME_FLOOR,
     );
+  });
+
+  it("serves the message volume total with a cacheable response", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+    const route = await import("../app/api/message-volume/route");
+
+    const response = await route.GET();
+
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=300, stale-while-revalidate=3600",
+    );
+    await expect(response.json()).resolves.toEqual({ total: 7_300 });
   });
 
   it("counts own-paid or family-paid members in the mature converted count query", async () => {

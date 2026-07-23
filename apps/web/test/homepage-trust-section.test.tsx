@@ -4,15 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { test } from "vitest";
 
-import {
-  formatMessageVolume,
-  TrustSection,
-} from "@/src/components/homepage/trust-section";
+import { TrustSection } from "@/src/components/homepage/trust-section";
+import { formatMessageVolume } from "@/src/lib/message-volume";
 
 test("TrustSection renders the trust pillars and message volume line", () => {
-  const markup = renderToStaticMarkup(
-    createElement(TrustSection, { messageVolume: 5_000 }),
-  );
+  const markup = renderToStaticMarkup(createElement(TrustSection));
 
   assert.match(markup, /Why people trust Murph/);
   assert.match(markup, /5,000\+ messages and counting/);

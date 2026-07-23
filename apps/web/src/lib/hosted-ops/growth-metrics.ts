@@ -14,6 +14,7 @@ import {
   readHostedFamilyPlanCapacities,
   sumHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan-capacity";
+import { HOSTED_MESSAGE_VOLUME_FLOOR } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -831,8 +832,6 @@ export async function captureHostedGrowthDailySnapshot(
     },
   });
 }
-
-export const HOSTED_MESSAGE_VOLUME_FLOOR = 5_000;
 
 /**
  * Lifetime message total for public marketing surfaces. Snapshot message

@@ -31,7 +31,6 @@ import {
 import { resolveHostedInstallScriptUrl } from "@/src/lib/hosted-onboarding/landing";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getMurphGithubStarCount } from "@/src/lib/github-stars";
-import { readHostedMessageVolumeTotal } from "@/src/lib/hosted-ops/growth-metrics";
 import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
@@ -93,13 +92,11 @@ export default async function HomePage() {
     { authenticated },
     githubStarCount,
     heroContactInfo,
-    messageVolume,
     headerList,
   ] = await Promise.all([
     getHostedPageAuthSnapshot(),
     getMurphGithubStarCount(),
     fetchHeroContactInfo(),
-    readHostedMessageVolumeTotal(),
     headers(),
   ]);
   const country = headerList.get("x-vercel-ip-country") ?? "";
@@ -145,7 +142,7 @@ export default async function HomePage() {
         />
         <TogetherSection />
         <AsksGridSection />
-        <TrustSection messageVolume={messageVolume} />
+        <TrustSection />
         <MealPhotosSection />
         <NutritionSection />
         <PersonasSection murphHeadshotSrc={murphHeadshotSrc} />

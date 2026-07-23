@@ -1,3 +1,5 @@
+import { MessageVolumeLine } from "@/src/components/homepage/message-volume-line";
+
 const PILLARS = [
   {
     anchor: "5,972",
@@ -28,12 +30,7 @@ const COL_BORDER_CLASS = [
   "sm:border-l sm:border-[#c4a882]/40 sm:pl-8 lg:pl-10",
 ] as const;
 
-export function formatMessageVolume(total: number): string {
-  const rounded = Math.floor(total / 100) * 100;
-  return `${rounded.toLocaleString("en-US")}+`;
-}
-
-export function TrustSection({ messageVolume }: { messageVolume: number }) {
+export function TrustSection() {
   return (
     <section className="bg-[#f5f0e8] px-5 py-16 sm:px-10 lg:px-16 lg:py-24">
       <div className="mx-auto max-w-[1080px]">
@@ -48,7 +45,7 @@ export function TrustSection({ messageVolume }: { messageVolume: number }) {
             </span>
           </div>
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
-            {formatMessageVolume(messageVolume)} messages and counting
+            <MessageVolumeLine />
           </span>
         </div>
 
