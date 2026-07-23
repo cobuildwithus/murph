@@ -786,10 +786,11 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-      await runHostedWorkspaceUntilIdleOrBudget({
+      const result = await runHostedWorkspaceUntilIdleOrBudget({
         checkpointDirectAssistantSession: async (sessionId) => {
           boundarySessionIds.push(sessionId);
           runtimeWakeSignal.notify(Date.now());
+          return createWorkspaceState({ version: "1" });
         },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_new_direct_boundary",
@@ -829,6 +830,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(boundarySessionIds, ["session-new-direct-boundary"]);
+      assert.equal(result.latestWorkspace?.version, "1");
       assert.equal(runtimeWakeSignal.consumePending(), null);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -847,6 +849,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       await runHostedWorkspaceUntilIdleOrBudget({
         checkpointDirectAssistantSession: async () => {
           checkpointCalls += 1;
+          return createWorkspaceState({ version: "1" });
         },
         checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
           attemptId: "attempt_synthetic_runner_durable_direct_boundary",

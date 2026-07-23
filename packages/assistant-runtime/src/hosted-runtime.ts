@@ -2167,7 +2167,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       !durablyCheckpointedDirectAssistantSessionIds.has(sessionId);
     const checkpointDirectAssistantSession = async (sessionId: string) => {
       if (!shouldCheckpointDirectAssistantSession(sessionId)) {
-        return;
+        return null;
       }
       await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
       try {
@@ -2197,6 +2197,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // writes instead of treating the pre-provider snapshot as clean.
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
+        return checkpoint.workspace;
       } finally {
         resumeDetachedAssistantAskAfterWorkspaceBoundary();
       }

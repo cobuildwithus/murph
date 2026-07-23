@@ -195,6 +195,7 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
+  adoptCheckpointWorkspace(workspace: HostedWorkspaceState): void;
   assistantInputBatchFull(): boolean;
   assistantInputBatchRemaining(): number;
   conversationConsumedSeq(): string | null;
@@ -353,7 +354,9 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
-  checkpointDirectAssistantSession?: ((sessionId: string) => Promise<void>) | null;
+  checkpointDirectAssistantSession?: ((
+    sessionId: string,
+  ) => Promise<HostedWorkspaceState | null>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -1040,7 +1043,13 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
             }
             await stopForegroundMailboxImportLoop();
             try {
-              await input.checkpointDirectAssistantSession?.(sessionId);
+              const checkpointWorkspace =
+                await input.checkpointDirectAssistantSession?.(sessionId);
+              if (checkpointWorkspace) {
+                checkpointRequestSession.adoptCheckpointWorkspace(
+                  checkpointWorkspace,
+                );
+              }
             } finally {
               if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
                 await startForegroundMailboxImportLoop();
@@ -2820,6 +2829,10 @@ function createHostedWorkspaceCheckpointRequestSession(
     Math.max(0, assistantInputBatchLimit - initialAssistantInputCount);
 
   return {
+    adoptCheckpointWorkspace(workspace) {
+      expectedWorkspaceVersion = workspace.version;
+      latestWorkspace = workspace;
+    },
     assistantInputBatchFull() {
       return assistantInputBatchOccupancy() >= assistantInputBatchLimit;
     },

@@ -21,13 +21,16 @@ import {
   persistCanonicalInboxCapture,
 } from "@murphai/inboxd";
 import {
+  buildHostedExecutionPhoneCallResultedWake,
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  listAssistantTranscriptEntries,
   readAssistantContextSnapshotState,
+  readAssistantConversationContextTranscriptText,
   recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
   saveAssistantSession,
@@ -285,6 +288,9 @@ import {
 import {
   createHostedWorkspaceBridgeMailboxImporter,
 } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
+import {
+  executeHostedPhoneCallResultedWake,
+} from "../src/hosted-runtime/events/phone-call-result.ts";
 import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
@@ -20217,7 +20223,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("publishes a direct session absent from the restored snapshot before provider start", async () => {
+  test("keeps a direct-session snapshot authoritative through a canonical write and phone result restore", async () => {
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-new-direct-session-checkpoint-"),
     );
@@ -20232,10 +20238,13 @@ describe("hosted workspace runtime entrypoint", () => {
       "Synthetic crash after provider start.",
     );
     const originSessionId = "asst_new_direct_restart_stable";
+    const resultContext =
+      "The pharmacy confirmed the prescription will be ready this afternoon.";
     const snapshotId = "snapshot_new_direct_origin";
     const objectKey = `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
     let checkpointBundle: Uint8Array | null = null;
     let providerStarted = false;
+    let startedPhoneCallOriginSessionId: string | null = null;
 
     try {
       await mkdir(path.join(workspaceRoot, "durable", "home"), { recursive: true });
@@ -20306,8 +20315,25 @@ describe("hosted workspace runtime entrypoint", () => {
           events,
           items: [],
         }),
+        phoneCalls: {
+          async start(request) {
+            startedPhoneCallOriginSessionId = request.originSessionId;
+            events.push("phone:start");
+            return {
+              phoneCallId: "hpc_new_direct_restart_stable",
+              status: "calling",
+            };
+          },
+        },
         workspacePort: createWorkspacePort({
           checkpointRequests,
+          checkpointWorkspace(request) {
+            return createWorkspaceState({
+              redactedStatus: request.redactedStatus ?? null,
+              snapshotRef: request.snapshotRef,
+              version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+            });
+          },
           events,
           workspace: null,
         }),
@@ -20404,12 +20430,45 @@ describe("hosted workspace runtime entrypoint", () => {
           });
           providerStarted = true;
           events.push("provider:start");
+          await runCanonicalWrite({
+            vaultRoot: phaseInput.restored.vaultRoot,
+            operationType: "hosted_canonical_write_test",
+            summary: "Persist a write after publishing the direct origin session.",
+            occurredAt: TEST_NOW,
+            mutate: async ({ batch }) => {
+              await batch.stageTextWrite(
+                "journal/direct-session-canonical-write.md",
+                "canonical write after direct-session checkpoint\n",
+              );
+            },
+          });
+          events.push("canonical:committed");
+          const phoneCalls = phaseInput.runtime.platform.phoneCalls;
+          assert.ok(phoneCalls);
+          await phoneCalls.start({
+            brief: {
+              allowTransferToUser: false,
+              callerName: "Murph",
+              goal: "Confirm when the prescription will be ready.",
+              instructions: [],
+              shareableFacts: {},
+              successCriteria: "The pharmacy provides a pickup time.",
+              timeZone: "America/New_York",
+              to: {
+                label: "the pharmacy",
+                phoneNumber: "+15550102020",
+              },
+            },
+            originSessionId,
+            requestKey: "direct-session-canonical-write-crash",
+          });
           throw crashAfterProviderStart;
         },
       })).rejects.toBe(crashAfterProviderStart);
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "idle_shutdown",
+        "canonical_runtime_commit",
       ]);
       assert.ok(
         requireEventIndex(events, "origin:created")
@@ -20423,7 +20482,22 @@ describe("hosted workspace runtime entrypoint", () => {
         requireEventIndex(events, "snapshot:complete")
           < requireEventIndex(events, "provider:start"),
       );
+      assert.ok(
+        requireEventIndex(events, "provider:start")
+          < requireEventIndex(events, "canonical:committed"),
+      );
+      assert.ok(
+        requireEventIndex(events, "canonical:committed")
+          < requireEventIndex(events, "phone:start"),
+      );
+      assert.equal(startedPhoneCallOriginSessionId, originSessionId);
       assert.ok(checkpointBundle);
+      const canonicalCheckpointRequest = checkpointRequests[1];
+      assert.ok(canonicalCheckpointRequest);
+      assert.deepEqual(
+        canonicalCheckpointRequest.snapshotRef,
+        checkpointRequests[0]?.snapshotRef,
+      );
 
       const restored = await restoreHostedExecutionContext({
         bundle: checkpointBundle,
@@ -20436,6 +20510,34 @@ describe("hosted workspace runtime entrypoint", () => {
       });
       assert.equal(resolved.session.sessionId, originSessionId);
       assert.equal(resolved.session.binding.threadIsDirect, true);
+      const phoneResultOutcome = await executeHostedPhoneCallResultedWake({
+        executionContext: { hosted: null },
+        vaultRoot: restored.vaultRoot,
+        wake: buildHostedExecutionPhoneCallResultedWake({
+          eventId: "phone-call.resulted:hpc_new_direct_restart_stable",
+          memberId: TEST_USER_ID,
+          occurredAt: TEST_NOW,
+          phoneCall: {
+            context: resultContext,
+            originSessionId,
+          },
+        }),
+      });
+      assert.equal(
+        phoneResultOutcome.mailboxLane,
+        "phone-call-result-context",
+      );
+      const transcriptEntries = await listAssistantTranscriptEntries(
+        restored.vaultRoot,
+        originSessionId,
+      );
+      assert.equal(transcriptEntries.length, 1);
+      assert.equal(
+        readAssistantConversationContextTranscriptText(
+          transcriptEntries[0]?.text ?? "",
+        ),
+        resultContext,
+      );
     } finally {
       await removeTempRoot(workspaceRoot);
       await removeTempRoot(restoredWorkspaceRoot);
@@ -26442,6 +26544,7 @@ function createPlatform(input: {
   logRequests?: HostedRuntimeLogRequest[];
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
+  phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
@@ -26526,6 +26629,7 @@ function createPlatform(input: {
       : {}),
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
+    ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),
