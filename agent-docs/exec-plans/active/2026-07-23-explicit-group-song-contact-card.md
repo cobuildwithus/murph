@@ -42,5 +42,10 @@ Updated: 2026-07-23
 - Product-experience review: no findings. It confirmed the prompt change is the
   smallest complete behavior correction; direct live proof remains limited to
   the already observed independent contact-card and song successes.
-- Preliminary specialist review, final parent review, CI, and mergeability:
-  pending.
+- Preliminary specialist review: two medium findings, both accepted. The prompt
+  now prioritizes pending answers and first-reply card work over unsolicited
+  songs, and the real Codex app-server/scripted-provider lane proves compound
+  success plus truthful owner-failure propagation. No patch artifact returned.
+- Remediation proof: focused prompt and real app-server tests passed (19 tests);
+  assistant-engine typecheck passed.
+- Final canonical verification, parent review, CI, and mergeability: pending.

@@ -27,6 +27,9 @@ describe('assistant group-chat style guidance', () => {
       'If the group explicitly requests a song plus another supported action, complete both in the current turn.',
     )
     expect(normalized).toContain(
+      'If an answer or first-reply contact card is pending without that explicit song request, skip the song.',
+    )
+    expect(normalized).toContain(
       'never invent a provider limitation to justify an assistant choice',
     )
     expect(normalized).not.toContain(
