@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
-  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   ensureAutomaticMealCloseoutAutomation,
 } from "@murphai/assistant-engine";
 import {
@@ -12,7 +11,6 @@ import {
   addMeal,
   deterministicContractId,
   findEventByExternalRef,
-  showAutomation,
 } from "@murphai/core";
 import type {
   HostedExecutionMealPhotoCapturedWake,
@@ -151,19 +149,6 @@ async function automaticMealCloseoutIsReady(input: {
   vaultRoot: string;
 }): Promise<boolean> {
   try {
-    const existing = await showAutomation({
-      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-      vaultRoot: input.vaultRoot,
-    });
-    if (existing) {
-      await ensureAutomaticMealCloseoutAutomation({
-        defaultRoute: null,
-        routeValidationProfile: "hosted",
-        vaultRoot: input.vaultRoot,
-      });
-      return true;
-    }
-
     await ensureAutomaticMealCloseoutAutomation({
       defaultRoute: {
         channel: input.directRoute.channel,

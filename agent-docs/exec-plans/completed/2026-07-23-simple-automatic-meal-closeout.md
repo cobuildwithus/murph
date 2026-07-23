@@ -1,6 +1,6 @@
 # Simplify automatic meal closeout
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -88,4 +88,25 @@ Updated: 2026-07-23
   remaining inside both entry and static-closure budgets. A complete local
   runner assembly passed at 9,434,851 bytes; the total cap now preserves the
   documented 32KB reviewed-growth margin above that packaged measurement.
+- Fresh parent review of the full replacement diff removed a redundant
+  importer pre-read: the generic managed-automation owner already preserves
+  an existing route, so every import can pass the envelope route through the
+  same idempotent ensure call. The review also corrected route-authority
+  documentation while retaining only deprecated source-compatible names for
+  the generalized direct-route type. No other correctness, privacy, or
+  architectural findings remained.
+- Local `test:diff` reached and passed the full assistant-engine suite but
+  encountered three assistant-runtime diagnostics failures caused by an
+  unrelated stale `/tmp` fixture owned outside this task. A clean Crabbox
+  `test:diff` then passed all 2,605 assistant-engine and 1,805
+  assistant-runtime tests; its later CLI experiment and Linux hosted-harness
+  failures were outside this diff and caused by the broad reverse-dependent
+  environment lane.
+- The first final acceptance run exposed one stale runner-budget test
+  expectation after the reviewed cap ratchet. The expectation was aligned
+  with the production constant, and the focused 34-test bundle suite passed.
+- Final Crabbox acceptance passed in 5m18s on Testbox
+  `tbx_01ky6z297txse6sdjn2r49p3q8`, including every workspace guard and
+  typecheck, package coverage, the Web build, and all Cloudflare checks.
 - Staged diff validation and direct-identifier privacy scan passed.
+Completed: 2026-07-23

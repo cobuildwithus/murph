@@ -394,13 +394,15 @@ export interface HostedExecutionDirectRoute {
   threadId: string;
 }
 
+/** @deprecated Use HostedExecutionDirectRouteChannel. */
 export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
   HostedExecutionDirectRouteChannel;
+/** @deprecated Use HostedExecutionDirectRoute. */
 export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
   HostedExecutionDirectRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -665,7 +667,7 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
 }
 
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
