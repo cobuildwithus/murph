@@ -186,6 +186,7 @@ interface MetricDescriptor {
   unit: string;
   title: string;
   paths: readonly string[];
+  value?: (entry: PlainObject) => unknown;
   metersPaths?: readonly string[];
   percentRatioPaths?: readonly string[];
   secondsPaths?: readonly string[];
@@ -238,6 +239,13 @@ const RAW_SOURCE_CONTAINER_LINKAGE_KEY_PARTS = [
 ] as const;
 
 const ACTIVITY_METRICS: readonly MetricDescriptor[] = [
+  {
+    metric: "activity-minutes",
+    unit: "minutes",
+    title: "Junction daily active minutes",
+    paths: [],
+    value: resolveJunctionDailyActivityMinutes,
+  },
   { metric: "daily-steps", unit: "count", title: "Junction activity steps", paths: ["steps", "step_count", "daily_steps"] },
   { metric: "active-calories", unit: "kcal", title: "Junction active calories", paths: ["activeCalories", "active_calories", "calories_active"] },
   { metric: "total-calories", unit: "kcal", title: "Junction total calories", paths: ["calories", "totalCalories", "total_calories", "calories_total"] },
@@ -4423,6 +4431,11 @@ function resolveMetricDescriptorValue(
   entry: PlainObject,
   metric: MetricDescriptor,
 ): { value: number; unit: string } | null {
+  const computedValue = metric.value ? finiteNumber(metric.value(entry)) : undefined;
+  if (computedValue !== undefined) {
+    return { value: computedValue, unit: metric.unit };
+  }
+
   const directValue = firstNumberFromPaths(entry, metric.paths);
   if (directValue !== undefined) {
     return {
@@ -4447,6 +4460,33 @@ function resolveMetricDescriptorValue(
   }
 
   return null;
+}
+
+function resolveJunctionDailyActivityMinutes(entry: PlainObject): number | undefined {
+  // Get Summary reports these buckets in minutes and `daily_movement` as
+  // deprecated equivalent-walking meters. Sense's `*_second` query columns
+  // are a separate normalized representation, not summary payload aliases.
+  const lowActivityMinutes = firstNumberFromPaths(entry, ["low"]);
+  const mediumActivityMinutes = firstNumberFromPaths(entry, ["medium"]);
+  const highActivityMinutes = firstNumberFromPaths(entry, ["high"]);
+
+  if (
+    lowActivityMinutes === undefined
+    || mediumActivityMinutes === undefined
+    || highActivityMinutes === undefined
+    || lowActivityMinutes < 0
+    || mediumActivityMinutes < 0
+    || highActivityMinutes < 0
+  ) {
+    return undefined;
+  }
+
+  const totalActivityMinutes =
+    lowActivityMinutes + mediumActivityMinutes + highActivityMinutes;
+
+  return totalActivityMinutes <= 24 * 60
+    ? totalActivityMinutes
+    : undefined;
 }
 
 function buildResourceContext(input: {

@@ -89,7 +89,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
-      'Use for steps, NEAT, sedentary time, walking breaks, activity snacks, daily movement pattern interpretation, and practical movement targets outside formal training. Use running-cardio or strength-training for structured workouts.',
+      'Use for daily movement and wearable day facts: steps, NEAT, sedentary time, walking breaks, all workouts, or total workout time for a date. Use running-cardio or strength-training for workout programming.',
   },
   {
     slug: 'mobility-posture',

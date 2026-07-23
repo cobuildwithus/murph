@@ -15,42 +15,69 @@ export interface OverviewWeeklySampleSummary {
   unit: string | null;
 }
 
+export interface OverviewWeeklyStatDetails extends OverviewWeeklyStat {
+  currentWeekObservedDates: string[];
+}
+
+interface OverviewWeeklySampleAccumulator {
+  numericSampleCount: number;
+  observedDates: Set<string>;
+  stream: string;
+  sumValue: number;
+  unit: string | null;
+}
+
 export function buildOverviewWeeklyStatsFromDailySampleSummaries(
   summaries: readonly OverviewWeeklySampleSummary[],
   timeZone: string,
   referenceDate: Date | string = new Date(),
 ): OverviewWeeklyStat[] {
+  return buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
+    summaries,
+    timeZone,
+    referenceDate,
+  ).map((stat) => ({
+    currentWeekAvg: stat.currentWeekAvg,
+    deltaPercent: stat.deltaPercent,
+    previousWeekAvg: stat.previousWeekAvg,
+    stream: stat.stream,
+    unit: stat.unit,
+  }));
+}
+
+/**
+ * Package-internal detail used by group reporting. Keep this out of public
+ * barrels so overview consumers retain the existing stat shape.
+ */
+export function buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
+  summaries: readonly OverviewWeeklySampleSummary[],
+  timeZone: string,
+  referenceDate: Date | string = new Date(),
+  options: { includeCurrentDay?: boolean } = {},
+): OverviewWeeklyStatDetails[] {
   const today = formatOverviewDateTimeParts(resolveOverviewReferenceDate(referenceDate), timeZone);
   const mondayOffset = today.dayOfWeek === 0 ? 6 : today.dayOfWeek - 1;
   const thisWeekStart = addDaysToIsoDate(today.dayKey, -mondayOffset);
   const lastWeekStart = addDaysToIsoDate(thisWeekStart, -7);
 
-  const thisWeekSamples = new Map<string, {
-    numericSampleCount: number;
-    stream: string;
-    sumValue: number;
-    unit: string | null;
-  }>();
-  const lastWeekSamples = new Map<string, {
-    numericSampleCount: number;
-    stream: string;
-    sumValue: number;
-    unit: string | null;
-  }>();
+  const thisWeekSamples = new Map<string, OverviewWeeklySampleAccumulator>();
+  const lastWeekSamples = new Map<string, OverviewWeeklySampleAccumulator>();
 
   for (const summary of summaries) {
     if (summary.sumValue === null || summary.numericSampleCount <= 0) {
       continue;
     }
 
-    let bucket: Map<string, {
-      numericSampleCount: number;
-      stream: string;
-      sumValue: number;
-      unit: string | null;
-    }> | null = null;
+    let bucket: Map<string, OverviewWeeklySampleAccumulator> | null = null;
 
-    if (summary.date >= thisWeekStart && summary.date <= today.dayKey) {
+    if (
+      summary.date >= thisWeekStart
+      && (
+        options.includeCurrentDay === false
+          ? summary.date < today.dayKey
+          : summary.date <= today.dayKey
+      )
+    ) {
       bucket = thisWeekSamples;
     } else if (summary.date >= lastWeekStart && summary.date < thisWeekStart) {
       bucket = lastWeekSamples;
@@ -64,12 +91,14 @@ export function buildOverviewWeeklyStatsFromDailySampleSummaries(
     const existing = bucket.get(key);
     if (existing) {
       existing.numericSampleCount += summary.numericSampleCount;
+      existing.observedDates.add(summary.date);
       existing.sumValue += summary.sumValue;
       continue;
     }
 
     bucket.set(key, {
       numericSampleCount: summary.numericSampleCount,
+      observedDates: new Set([summary.date]),
       stream: summary.stream,
       sumValue: summary.sumValue,
       unit: summary.unit,
@@ -77,7 +106,7 @@ export function buildOverviewWeeklyStatsFromDailySampleSummaries(
   }
 
   const allKeys = new Set([...thisWeekSamples.keys(), ...lastWeekSamples.keys()]);
-  const stats: OverviewWeeklyStat[] = [];
+  const stats: OverviewWeeklyStatDetails[] = [];
 
   for (const key of allKeys) {
     const currentWeek = thisWeekSamples.get(key);
@@ -102,6 +131,8 @@ export function buildOverviewWeeklyStatsFromDailySampleSummaries(
 
     stats.push({
       currentWeekAvg,
+      currentWeekObservedDates: [...(currentWeek?.observedDates ?? [])]
+        .sort((left, right) => left.localeCompare(right)),
       deltaPercent,
       previousWeekAvg,
       stream,

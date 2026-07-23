@@ -979,9 +979,11 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("serves a generation-1 replica as stale and schedules the existing refresh path", async () => {
+  it("serves the immediately previous replica generation as stale and schedules refresh", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
-    const replicaRef = createReplicaRef({ generation: 1 });
+    const replicaRef = createReplicaRef({
+      generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
+    });
     const createBrowserVaultSession = vi.fn().mockResolvedValue({
       encryptedReplica: createReplicaEnvelope(),
       replicaAad: createReplicaAad(),
