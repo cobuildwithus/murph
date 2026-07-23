@@ -126,8 +126,8 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   const continueButton = findButtonByText(container, /^Consent$/);
   const declineButton = findButtonByText(container, /^Decline$/);
   expect(continueButton.disabled).toBe(false);
-  expect(continueButton.classList.contains("w-auto")).toBe(true);
-  expect(continueButton.classList.contains("w-full")).toBe(false);
+  expect(continueButton.classList.contains("flex-1")).toBe(true);
+  expect(continueButton.classList.contains("w-auto")).toBe(false);
   expect(declineButton.disabled).toBe(false);
   expect(
     [...container.querySelectorAll("button")].indexOf(declineButton),
@@ -246,8 +246,8 @@ test("a legal-only update uses concise legal copy and records only that scope", 
   expect(container.textContent).not.toContain("contracted AI providers");
   expect(container.textContent).not.toContain("Health Data Notice");
   const continueButton = findButtonByText(container, /^Agree$/);
-  expect(continueButton.classList.contains("w-auto")).toBe(true);
-  expect(continueButton.classList.contains("w-full")).toBe(false);
+  expect(continueButton.classList.contains("flex-1")).toBe(true);
+  expect(continueButton.classList.contains("w-auto")).toBe(false);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));

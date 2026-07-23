@@ -401,7 +401,7 @@ export function HostedLaunchConsentPrompt({
   const primaryButton = (
     <Button
       aria-busy={accepting}
-      className="w-auto px-6"
+      className="min-w-0 flex-1"
       disabled={actionPending}
       onClick={onContinue}
       size="lg"
