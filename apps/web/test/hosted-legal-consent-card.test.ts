@@ -8,12 +8,14 @@ import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  requestHostedOnboardingJson: vi.fn(),
   onAccepted: vi.fn(),
+  requestHostedOnboardingJson: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/src/components/hosted-onboarding/client-api")>();
+  const actual = await importOriginal<
+    typeof import("@/src/components/hosted-onboarding/client-api")
+  >();
 
   return {
     ...actual,
@@ -49,7 +51,6 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
 
   expect(panelMarkup).toContain("rounded-2xl border border-border bg-card p-6");
   expect(compactMarkup).toContain("w-full");
-  expect(compactMarkup).not.toContain("rounded-xl border border-border bg-card p-4");
   expect(panelMarkup).toContain('role="status"');
   expect(panelMarkup).toContain('aria-busy="true"');
   expect(panelMarkup).not.toContain("shadow-");
@@ -57,7 +58,7 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
   expect(panelMarkup).not.toContain("#fefdf8");
 });
 
-test("HostedLegalConsentCard can render server-provided launch consent status without refetching", async () => {
+test("launch consent renders one enabled affirmative action without checkboxes", async () => {
   const initialStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
@@ -74,92 +75,22 @@ test("HostedLegalConsentCard can render server-provided launch consent status wi
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Terms of Service");
-    expect(container.textContent).toContain("Consumer Health Data Notice");
+    expect(container.textContent).toContain("Use your health data with Murph");
+    expect(container.textContent).toContain("contracted AI providers");
   });
 
+  expect(container.textContent).toContain("Terms");
+  expect(container.textContent).toContain("Privacy");
+  expect(container.textContent).toContain("AI Safety");
+  expect(container.textContent).toContain("Health Data Notice");
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+
+  const continueButton = findButtonByText(container, /Agree, consent & continue/);
+  expect(continueButton.disabled).toBe(false);
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 });
 
-test("HostedLegalConsentCard gates acceptance on the checkbox and holds the UI during handoff", async () => {
-  const currentStatus = createConsentStatus({
-    connectedHealthGranted: false,
-    launchGranted: true,
-  });
-  const acceptedStatus = createConsentStatus({
-    connectedHealthGranted: true,
-    launchGranted: true,
-  });
-
-  mocks.requestHostedOnboardingJson
-    .mockResolvedValueOnce(currentStatus)
-    .mockResolvedValueOnce(acceptedStatus);
-
-  const { cleanup, container, window } = await renderClientComponent(
-    createElement(HostedLegalConsentCard, {
-      mode: "compact",
-      preferredScope: "feature.connected-health-source",
-      source: "test-device-sync",
-      onAccepted: mocks.onAccepted,
-    }),
-    { requireButton: false },
-  );
-  cleanupRender = cleanup;
-
-  await vi.waitFor(() => {
-    expect(container.textContent).toContain("Murph Privacy Policy");
-    expect(container.textContent).toContain("Murph Consumer Health Data Notice");
-  });
-
-  expect(container.textContent).not.toContain("Murph Terms of Service");
-
-  const checkbox = container.querySelector('input[type="checkbox"]');
-  expect(checkbox).toBeTruthy();
-  expect((checkbox as HTMLInputElement).checked).toBe(false);
-
-  const acceptButton = findButtonByText(container, /Continue/);
-  expect(acceptButton.disabled).toBe(true);
-
-  await act(async () => {
-    setCheckboxChecked(window, checkbox as HTMLInputElement, true);
-  });
-
-  expect((checkbox as HTMLInputElement).checked).toBe(true);
-  await vi.waitFor(() => {
-    expect(acceptButton.disabled).toBe(false);
-  });
-
-  await act(async () => {
-    acceptButton.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-
-  await vi.waitFor(() => {
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
-      url: "/api/legal/consent/status",
-    });
-    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
-      method: "POST",
-      payload: {
-        acceptedDocumentVersions: {
-          "consumer-health-data-notice": "2026-04-29",
-          "privacy-policy": "2026-06-24",
-        },
-        scope: "feature.connected-health-source",
-        source: "test-device-sync",
-      },
-      url: "/api/legal/consent/accept",
-    });
-    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
-  });
-
-  expect(container.textContent).toContain("Murph Privacy Policy");
-  expect(container.textContent).toContain("Murph Consumer Health Data Notice");
-  expect(container.textContent).toContain("Continuing...");
-  expect(acceptButton.getAttribute("aria-busy")).toBe("true");
-  expect(acceptButton.disabled).toBe(true);
-});
-
-test("HostedLegalConsentCard records launch consent only after both checkboxes and Continue", async () => {
+test("launch consent records both launch scopes from one click", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
@@ -181,50 +112,29 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
 
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedLegalConsentCard, {
-      source: "homepage-signup-dialog",
+      mode: "compact",
       onAccepted: mocks.onAccepted,
+      source: "homepage-signup-dialog",
     }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Before you start");
-    expect(container.textContent).toContain("Terms of Service");
-    expect(container.textContent).toContain("Consumer Health Data Notice");
+    expect(container.textContent).toContain("Use your health data with Murph");
   });
 
-  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(2);
-  const continueButton = findButtonByText(container, /Continue/);
-  expect(continueButton.disabled).toBe(true);
-
-  await act(async () => {
-    setCheckboxChecked(window, checkboxes[0]!, true);
-  });
-
-  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-  expect(checkboxes[0]?.checked).toBe(true);
-  expect(container.textContent).toContain("Terms of Service");
-  expect(continueButton.disabled).toBe(true);
-
-  await act(async () => {
-    setCheckboxChecked(window, checkboxes[1]!, true);
-  });
-
-  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
-  expect(checkboxes[0]?.checked).toBe(true);
-  expect(checkboxes[1]?.checked).toBe(true);
-  expect(container.textContent).toContain("Consumer Health Data Notice");
-  await vi.waitFor(() => {
-    expect(continueButton.disabled).toBe(false);
-  });
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  const continueButton = findButtonByText(container, /Agree, consent & continue/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
   await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+      url: "/api/legal/consent/status",
+    });
     expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
       method: "POST",
       payload: {
@@ -251,9 +161,69 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
     });
     expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
   });
+
+  expect(container.textContent).toContain("Continuing...");
+  expect(continueButton.getAttribute("aria-busy")).toBe("true");
+  expect(continueButton.disabled).toBe(true);
 });
 
-test("HostedLegalConsentCard marks the accept action busy while consent is recording", async () => {
+test("a legal-only update uses concise legal copy and records only that scope", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchHealthDataGranted: true,
+    launchLegalGranted: false,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(currentStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      mode: "compact",
+      onAccepted: mocks.onAccepted,
+      source: "legal-version-refresh",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Review Murph’s terms");
+  });
+
+  expect(container.textContent).not.toContain("contracted AI providers");
+  expect(container.textContent).not.toContain("Health Data Notice");
+  const continueButton = findButtonByText(container, /Agree & continue/);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: {
+        acceptedDocumentVersions: {
+          "health-ai-safety-disclosure": "2026-04-29",
+          "privacy-policy": "2026-06-24",
+          "terms-of-service": "2026-04-29",
+        },
+        scope: "launch.legal",
+        source: "legal-version-refresh",
+      },
+      url: "/api/legal/consent/accept",
+    });
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
+});
+
+test("optional feature consent keeps its just-in-time checkbox gate", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: true,
@@ -262,57 +232,62 @@ test("HostedLegalConsentCard marks the accept action busy while consent is recor
     connectedHealthGranted: true,
     launchGranted: true,
   });
-  const acceptRequest = createDeferred<HostedConsentStatus>();
 
   mocks.requestHostedOnboardingJson
     .mockResolvedValueOnce(currentStatus)
-    .mockReturnValueOnce(acceptRequest.promise);
+    .mockResolvedValueOnce(acceptedStatus);
 
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedLegalConsentCard, {
       mode: "compact",
+      onAccepted: mocks.onAccepted,
       preferredScope: "feature.connected-health-source",
       source: "test-device-sync",
-      onAccepted: mocks.onAccepted,
     }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("I agree to the above");
+    expect(container.textContent).toContain("Murph Privacy Policy");
+    expect(container.textContent).toContain("Murph Consumer Health Data Notice");
   });
 
   const checkbox = container.querySelector('input[type="checkbox"]');
   expect(checkbox).toBeTruthy();
+  const continueButton = findButtonByText(container, /Continue/);
+  expect(continueButton.disabled).toBe(true);
 
   await act(async () => {
     setCheckboxChecked(window, checkbox as HTMLInputElement, true);
   });
 
-  const acceptButton = findButtonByText(container, /Continue/);
-
-  await act(async () => {
-    acceptButton.dispatchEvent(new window.Event("click", { bubbles: true }));
-  });
-
   await vi.waitFor(() => {
-    expect(acceptButton.textContent).toContain("Saving...");
-    expect(acceptButton.getAttribute("aria-busy")).toBe("true");
-    expect(acceptButton.disabled).toBe(true);
+    expect(continueButton.disabled).toBe(false);
   });
 
   await act(async () => {
-    acceptRequest.resolve(acceptedStatus);
-    await acceptRequest.promise;
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
   await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+      method: "POST",
+      payload: {
+        acceptedDocumentVersions: {
+          "consumer-health-data-notice": "2026-04-29",
+          "privacy-policy": "2026-06-24",
+        },
+        scope: "feature.connected-health-source",
+        source: "test-device-sync",
+      },
+      url: "/api/legal/consent/accept",
+    });
     expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
   });
 });
 
-test("HostedLegalConsentCard keeps accepted consent visible during a route handoff", async () => {
+test("launch consent shows a busy state while the second scope is recording", async () => {
   const currentStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
@@ -326,58 +301,49 @@ test("HostedLegalConsentCard keeps accepted consent visible during a route hando
     connectedHealthGranted: false,
     launchGranted: true,
   });
+  const acceptRequest = createDeferred<HostedConsentStatus>();
 
   mocks.requestHostedOnboardingJson
     .mockResolvedValueOnce(legalAcceptedStatus)
-    .mockResolvedValueOnce(acceptedStatus);
+    .mockReturnValueOnce(acceptRequest.promise);
 
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedLegalConsentCard, {
-      acceptedPendingLabel: "Continuing...",
       initialStatus: currentStatus,
       mode: "compact",
-      source: "join-invite-phone-verify",
       onAccepted: mocks.onAccepted,
+      source: "join-invite-phone-verify",
     }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
 
-  await vi.waitFor(() => {
-    expect(container.textContent).toContain("Terms of Service");
-    expect(container.textContent).toContain("Consumer Health Data Notice");
-  });
-
-  const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(2);
-
-  for (const checkbox of checkboxes) {
-    await act(async () => {
-      setCheckboxChecked(window, checkbox, true);
-    });
-  }
-
-  const continueButton = findButtonByText(container, /Continue/);
+  const continueButton = findButtonByText(container, /Agree, consent & continue/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
 
   await vi.waitFor(() => {
-    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+    expect(continueButton.textContent).toContain("Saving...");
+    expect(continueButton.getAttribute("aria-busy")).toBe("true");
+    expect(continueButton.disabled).toBe(true);
   });
 
-  expect(container.textContent).toContain("Terms of Service");
-  expect(container.textContent).toContain("Consumer Health Data Notice");
-  expect(container.textContent).toContain("Continuing...");
-  expect(continueButton.getAttribute("aria-busy")).toBe("true");
-  expect(continueButton.disabled).toBe(true);
+  await act(async () => {
+    acceptRequest.resolve(acceptedStatus);
+    await acceptRequest.promise;
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
 });
 
-test("HostedLegalConsentCard keeps a retryable error visible when consent status fails to load", async () => {
+test("HostedLegalConsentCard keeps a retryable error visible when status loading fails", async () => {
   const recoveredStatus = createConsentStatus({
     connectedHealthGranted: false,
-    launchGranted: true,
+    launchGranted: false,
   });
 
   mocks.requestHostedOnboardingJson
@@ -387,9 +353,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedLegalConsentCard, {
       mode: "compact",
-      preferredScope: "feature.connected-health-source",
-      source: "test-device-sync",
-      onRequirementChange: () => {},
+      source: "homepage-signup-dialog",
     }),
     { requireButton: false },
   );
@@ -407,7 +371,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when consent status
   });
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("I agree to the above");
+    expect(container.textContent).toContain("Use your health data with Murph");
   });
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
@@ -441,7 +405,8 @@ function createConsentStatus(input: {
       document.id === "privacy-policy" || document.id === "consumer-health-data-notice",
   );
   const launchLegalGranted = input.launchLegalGranted ?? input.launchGranted ?? false;
-  const launchHealthDataGranted = input.launchHealthDataGranted ?? input.launchGranted ?? false;
+  const launchHealthDataGranted =
+    input.launchHealthDataGranted ?? input.launchGranted ?? false;
   const launchGranted = launchLegalGranted && launchHealthDataGranted;
 
   return {
@@ -449,14 +414,34 @@ function createConsentStatus(input: {
     generatedAt: "2026-04-30T00:00:00.000Z",
     launchGranted,
     launchScopes: [
-      { granted: launchLegalGranted, missingDocuments: launchLegalGranted ? [] : legalDocuments, scope: "launch.legal" as const },
-      { granted: launchHealthDataGranted, missingDocuments: launchHealthDataGranted ? [] : healthDataDocuments, scope: "launch.health-data" as const },
+      {
+        granted: launchLegalGranted,
+        missingDocuments: launchLegalGranted ? [] : legalDocuments,
+        scope: "launch.legal" as const,
+      },
+      {
+        granted: launchHealthDataGranted,
+        missingDocuments: launchHealthDataGranted ? [] : healthDataDocuments,
+        scope: "launch.health-data" as const,
+      },
     ],
     ok: true,
     schema: "murph.hosted-consent-status.v1",
     scopes: [
-      consentScope("launch.legal", "Terms, privacy, and AI disclosure", false, legalDocuments, launchLegalGranted),
-      consentScope("launch.health-data", "Health data collection consent", false, healthDataDocuments, launchHealthDataGranted),
+      consentScope(
+        "launch.legal",
+        "Terms, privacy, and AI disclosure",
+        false,
+        legalDocuments,
+        launchLegalGranted,
+      ),
+      consentScope(
+        "launch.health-data",
+        "Health data collection consent",
+        false,
+        healthDataDocuments,
+        launchHealthDataGranted,
+      ),
       consentScope(
         "feature.connected-health-source",
         "Connected health source consent",
