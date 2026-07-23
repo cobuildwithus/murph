@@ -559,13 +559,7 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   });
   const canonicalEnvelope = existing?.kind === "meal-photo.captured"
     && hasSameMealPhotoCapture(existing, input.envelope)
-    ? {
-        ...input.envelope,
-        mealPhoto: {
-          ...input.envelope.mealPhoto,
-          mealPhotoKey: existing.mealPhoto.mealPhotoKey,
-        },
-      }
+    ? existing
     : input.envelope;
   const appended = await appendHostedMailboxEnvelopeTx({
     envelope: canonicalEnvelope,

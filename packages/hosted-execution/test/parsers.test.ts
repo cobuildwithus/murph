@@ -10,6 +10,7 @@ import {
 } from "../src/runtime-control.ts";
 
 import {
+  parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
@@ -20,6 +21,23 @@ import {
   parseHostedRuntimeNewsletterToolRequest,
   parseHostedRuntimeNewsletterToolResponse,
 } from "../src/parsers.ts";
+
+describe("parseHostedExecutionDirectRoute", () => {
+  it("accepts only exact private route fields", () => {
+    expect(parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+    })).toEqual({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    expect(() => parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+      threadIsDirect: true,
+    })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
 
 describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {

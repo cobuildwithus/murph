@@ -385,14 +385,19 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+export type HostedExecutionDirectRouteChannel =
   | "linq"
   | "telegram";
 
-export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
-  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
+export interface HostedExecutionDirectRoute {
+  channel: HostedExecutionDirectRouteChannel;
   threadId: string;
 }
+
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  HostedExecutionDirectRouteChannel;
+export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
+  HostedExecutionDirectRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
   directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
@@ -677,6 +682,7 @@ export interface HostedExecutionMealPhotoCapturedPayload {
 }
 
 export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  directRoute: HostedExecutionDirectRoute;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }

@@ -69,6 +69,7 @@ import {
   addCaptureWithLookup as addCaptureWithLookupInternal,
   addMeasurement as addMeasurementInternal,
   deleteEvent as deleteEventInternal,
+  removeAutomaticMealPhoto as removeAutomaticMealPhotoInternal,
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
@@ -98,6 +99,7 @@ import type { DateInput, ValidationIssue } from "./types.ts";
 
 export {
   deleteEventInternal as deleteEvent,
+  removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
   upsertEventInternal as upsertEvent,
 };
 

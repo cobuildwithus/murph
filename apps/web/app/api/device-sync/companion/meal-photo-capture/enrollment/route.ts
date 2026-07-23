@@ -11,9 +11,15 @@ import {
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import {
+  hostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
+import {
   requireActivePrivyMemberAuthFromBearerToken,
   requirePrivyMemberAuthFromBearerToken,
 } from "@/src/lib/hosted-onboarding/request-auth";
+import {
+  readCurrentHostedMemberDirectRoute,
+} from "@/src/lib/hosted-routing/member-direct-route";
 import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
@@ -27,6 +33,18 @@ export const POST = withJsonError(async (request: Request) => {
   const enrollmentRequest = parseMealPhotoCaptureEnrollmentRequest(
     await readOptionalJsonObject(request),
   );
+  const directRoute = await readCurrentHostedMemberDirectRoute({
+    memberId: auth.member.id,
+    prisma,
+  });
+  if (!directRoute) {
+    throw hostedOnboardingError({
+      code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
+      httpStatus: 409,
+      message: "Message Murph first, then retry meal capture setup.",
+      retryable: false,
+    });
+  }
   const enrollment = await issueMealPhotoCaptureEnrollment({
     memberId: auth.member.id,
     prisma,

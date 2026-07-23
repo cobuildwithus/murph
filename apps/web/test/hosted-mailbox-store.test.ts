@@ -3087,6 +3087,10 @@ function buildHostedGroupEmailEnvelope(userId: string) {
 
 function buildHostedMealPhotoEnvelope(mealPhotoKey: string) {
   return {
+    directRoute: {
+      channel: "linq" as const,
+      threadId: "linq_home_thread",
+    },
     eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
     kind: "meal-photo.captured" as const,
     mealPhoto: {
