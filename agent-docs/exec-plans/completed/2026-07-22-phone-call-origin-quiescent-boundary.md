@@ -1,8 +1,8 @@
 # Move phone-call origin durability to the quiescent provider boundary
 
-Status: active
+Status: completed
 Created: 2026-07-22
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 ## Goal
 
@@ -71,6 +71,9 @@ persisted lifecycle.
    the phone tool; output-only notification turns add no snapshot boundary.
 7. Run focused and canonical verification, finish the plan commit, push, and
    complete the next ReviewGPT round with green CI.
+8. Close the preliminary coverage finding by proving an active detached ask is
+   absent during the new boundary and restarts after both snapshot completion
+   and rejection.
 
 ## Evidence
 
@@ -116,3 +119,17 @@ persisted lifecycle.
   narrowly typed; the test now documents its intentional legacy-wire type
   violation and still proves rejection before snapshot side effects. Cloudflare
   typecheck and all 37 focused bridge tests pass after that correction.
+- Preliminary completion specialists returned one accepted medium coverage
+  finding: the controller primitive was covered, but the new pre-provider call
+  site had no active detached-ask proof. The entrypoint integration now covers
+  both snapshot completion and rejection, asserts no ask runs during the
+  snapshot, and observes the retained ask restart afterward. Assistant Runtime
+  typecheck and both focused cases pass.
+- Final canonical `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` passed
+  on 16-vCPU Testbox `tbx_01ky6jwk212b9ev4nrbd5mgjc6`, including all workspace
+  typechecks, package coverage, Web verification/build, and Cloudflare
+  Node/Workers verification. Evidence:
+  `https://github.com/cobuildwithus/murph/actions/runs/29979039332`.
+- Parent final review found no remaining correctness, ownership, security,
+  reliability, or unnecessary-complexity issue in the remediation delta.
+Completed: 2026-07-23

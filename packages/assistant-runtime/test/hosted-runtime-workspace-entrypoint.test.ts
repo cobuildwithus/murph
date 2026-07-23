@@ -20496,6 +20496,173 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each([
+    {
+      checkpointFailure: null,
+      name: "snapshot completion",
+    },
+    {
+      checkpointFailure: new Error("Synthetic detached-ask checkpoint rejection."),
+      name: "snapshot rejection",
+    },
+  ])("resumes an active detached ask after new-direct $name", async ({
+    checkpointFailure,
+  }) => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-new-direct-detached-ask-resume-"),
+    );
+    const firstAskStarted = createDeferred<void>();
+    const secondAskStarted = createDeferred<void>();
+    const terminalError = checkpointFailure ?? new Error(
+      "Synthetic stop after detached ask resumed.",
+    );
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const askItem = createMailboxItem({
+      dedupeKey: `ask_event_new_direct_${checkpointFailure ? "failure" : "success"}`,
+      id: `mailbox_item_new_direct_${checkpointFailure ? "failure" : "success"}`,
+      kind: "assistant.ask.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let askRuns = 0;
+    let snapshotActive = false;
+
+    mocks.executeReadOnlyAssistantAsk.mockImplementation(async (askInput) => {
+      askRuns += 1;
+      const run = askRuns;
+      assert.equal(snapshotActive, false);
+      events.push(`ask.${run}.started`);
+      if (run === 1) {
+        firstAskStarted.resolve();
+      } else if (run === 2) {
+        secondAskStarted.resolve();
+      }
+      return await new Promise((_resolve, reject) => {
+        const abort = () => {
+          events.push(`ask.${run}.aborted`);
+          reject(askInput.abortSignal?.reason);
+        };
+        if (askInput.abortSignal?.aborted) {
+          abort();
+          return;
+        }
+        askInput.abortSignal?.addEventListener("abort", abort, { once: true });
+      });
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await expect(withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_new_direct_detached_${checkpointFailure ? "failure" : "success"}`,
+              idleCheckpointDelayMs: 180_000,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              assert.equal(askRuns, 1);
+              assert.ok(events.includes("ask.1.aborted"));
+              snapshotActive = true;
+              events.push("snapshot.started");
+              await Promise.resolve();
+              assert.equal(askRuns, 1);
+              snapshotActive = false;
+              if (checkpointFailure) {
+                events.push("snapshot.rejected");
+                throw checkpointFailure;
+              }
+              events.push("snapshot.completed");
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "8".repeat(64),
+                  key: "users/bundles/member-synthetic/new-direct-detached-resume.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              assert.equal(item.route.action, "run-assistant-ask");
+              return await enqueueHostedSystemMailboxItem({
+                item,
+                vaultRoot,
+                wake: createAssistantAskRequestedWake({
+                  eventId: askItem.dedupeKey,
+                }),
+              });
+            },
+            platform: createPlatform({
+              assistantAskPort: {
+                async request(request) {
+                  if (request.action === "complete") {
+                    return { action: "complete", status: "completed" };
+                  }
+                  return {
+                    action: "prepare",
+                    question: "What changed while the direct conversation started?",
+                    status: "ready",
+                    targetLabel: "100 Club",
+                  };
+                },
+              },
+              mailboxPort: createMailboxPort({ events, items: [askItem] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+            async runAssistantPhase(phaseInput) {
+              await firstAskStarted.promise;
+              let observedCheckpointFailure: unknown = null;
+              try {
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [],
+                  newDirectUserActionSession: {
+                    sessionId: "asst_new_direct_detached_resume",
+                  },
+                });
+              } catch (error) {
+                observedCheckpointFailure = error;
+              }
+              await withRealTimeout(
+                secondAskStarted.promise,
+                5_000,
+                () => events.join(","),
+              );
+              throw observedCheckpointFailure ?? terminalError;
+            },
+            vaultRoot,
+          },
+        ),
+        15_000,
+        () => events.join(","),
+      )).rejects.toBe(terminalError);
+
+      const snapshotResultEvent = checkpointFailure
+        ? "snapshot.rejected"
+        : "snapshot.completed";
+      assert.ok(
+        requireEventIndex(events, "ask.1.aborted")
+          < requireEventIndex(events, "snapshot.started"),
+      );
+      assert.ok(
+        requireEventIndex(events, snapshotResultEvent)
+          < requireEventIndex(events, "ask.2.started"),
+      );
+      assert.equal(askRuns, 2);
+      assert.equal(snapshotActive, false);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  }, 30_000);
+
   test("restores canonical write receipts and context dirtiness from a pre-idle checkpoint", async () => {
     const firstVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const restoredVaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
