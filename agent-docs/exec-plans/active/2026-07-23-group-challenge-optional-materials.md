@@ -33,4 +33,6 @@ Updated: 2026-07-23
 - `uv run --with pyyaml python <skill-validator> packages/assistant-engine/skills/group-challenge` — passed.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-group-challenge-buy-in-skill.test.ts --maxWorkers=1` — 3 tests passed.
 - `pnpm test:diff packages/assistant-engine/skills/group-challenge/SKILL.md packages/assistant-engine/test/assistant-group-challenge-buy-in-skill.test.ts` — dependency policy, architecture guards, affected typechecks, and the assistant-engine owner suite passed (2,603 tests); the downstream assistant-runtime lane stopped on three persisted-state schema failures reproduced unchanged on clean `main`.
-- Prompt specialist review, product-experience review, acceptance verification, and PR CI are pending.
+- GPT-5.6 Sol read-only forward tests covered immediate kickoff without materials, a skipped-invitation question, an unapproved proxy photo, later opt-in, and next-day silence; replies kept the invite optional, used no invented rationale, required depicted-person approval, and did not chase missing material.
+- Product-experience review found that a participant who opted in after kickoff could miss the invitation. The prompt and regression now give that participant the invitation once in the opt-in acknowledgement; review rerun is pending.
+- Prompt specialist review, acceptance verification, and PR CI are pending.

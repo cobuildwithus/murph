@@ -81,6 +81,10 @@ describe('assistant group challenge buy-in guidance', () => {
       'Say plainly that the challenge starts without either.',
     )
     expect(challenge).toContain(
+      'If someone confirms after kickoff, include the same invitation once in the acknowledgement of their opt-in.',
+    )
+    expect(challenge).toContain('Each person gets at most one invitation')
+    expect(challenge).toContain(
       'Do not follow up on silence or name who is "missing" optional material.',
     )
     expect(challenge).toContain(
