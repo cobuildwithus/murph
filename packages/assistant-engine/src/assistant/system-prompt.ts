@@ -320,7 +320,7 @@ function buildStableRouteCapabilityPrompt(
       ? buildAssistantNonBlockingDelegationText()
       : null,
     buildAssistantCapabilityOffersText(),
-    buildAssistantMessageReactionGuidanceText(conversationScope),
+    buildAssistantMessageReactionGuidanceText(),
     buildAssistantHealthCommonsGuidanceText(),
     conversationScope === "direct" && input.assistantHostedLabsAvailable === true
       ? buildAssistantLabsGuidanceText()
@@ -343,7 +343,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
-      progressUpdatesAvailable: conversationScope === "direct",
+      progressUpdateMode: conversationScope === "group" ? "group" : "direct",
     }),
     conversationScope === "direct" ? buildAssistantComputerUseGuidanceText() : null,
     conversationScope === "direct" ? buildAssistantPhoneCallGuidanceText() : null,
@@ -628,7 +628,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           conversationScope === "group" ? "group" : "direct",
         )
       : null,
-    buildAssistantEvidenceAndReplyStyleText(input.channel, conversationScope),
+    buildAssistantEvidenceAndReplyStyleText(input.channel),
     buildAssistantOnboardingGuidanceText({
       enabled: conversationScope === "direct" && input.onboardingGuidance,
     }),
@@ -1115,15 +1115,10 @@ function buildAssistantNonBlockingDelegationText(): string {
 - Keep internal machinery out of visible replies: no subagent, child-worker, or spawn jargon, no record ids, and no save/verification bookkeeping such as "user-reported" or "unconfirmed". If the user asks what happened, explain it in plain words.`;
 }
 
-function buildAssistantMessageReactionGuidanceText(
-  conversationScope: AssistantConversationScope,
-): string {
-  const replyTargetGuidance = conversationScope === "group"
-    ? "- When available, `murph.select_reply_target` annotates the eventual single response; it sends nothing."
-    : "- When available, `murph.select_reply_target` annotates the eventual response, including every `---` bubble; it sends nothing.";
+function buildAssistantMessageReactionGuidanceText(): string {
   return `Message reactions:
 - Message refs label accepted messages visible now. Use one exactly as shown only when helpful; never invent or force one.
-${replyTargetGuidance}
+- When available, \`murph.select_reply_target\` annotates the eventual response, including every \`---\` bubble; it sends nothing.
 - When available, \`murph.react_to_message\` reacts independently; it never selects a reply target. With a message ref you can react to that exact accepted message, not only the newest one.
 - A reaction is a public stance toward the exact message it lands on. Use reactions sparingly. Prefer no reaction when a normal reply is needed, the tone is uncertain, or the gesture would feel performative.
 - Before using \`laugh\`, mentally remove standalone laughter markers such as "haha", "lol", "lmao", "😂", and "🤣". If what remains is not independently funny—a joke, witty observation, absurdity, comic mishap, or callback—do not use \`laugh\`.
@@ -1322,8 +1317,7 @@ function buildAssistantScheduledOccurrenceContextText(input: {
 }
 
 function buildAssistantEvidenceAndReplyStyleText(
-  channel: string | null,
-  conversationScope: AssistantConversationScope,
+  channel: string | null
 ): string {
   const normalizedChannel = channel?.trim().toLowerCase() ?? null
 
@@ -1339,11 +1333,7 @@ Do not use styling as decoration or on whole paragraphs.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
-      ? conversationScope === "group"
-        ? `Group texting rhythm:
-- Return exactly one assistant-authored message. Do not write a standalone \`---\` delimiter or split the reply into multiple bubbles. A separate server-owned permission card is not part of this reply.
-- When the useful next action is a question, ask it directly. Do not prepend a standalone setup-status, progress, or transition sentence.`
-        : `Texting rhythm:
+      ? `Texting rhythm:
 - Keep a short reply with one natural section in one bubble. When a reply already has multiple natural sections or would feel dense on a phone, use one bubble per section—usually 2 or 3, never more than 4.
 - Write a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message. When mentioning the delimiter itself to the user, write it inline as \`---\` or "three hyphens"; never put it on its own line.
 - Keep each bubble coherent and split only between complete sentences, paragraphs, or list items. Lists and structured answers can span bubbles; group related items together. Never separate a safety caveat, dosage, or warning from the item it qualifies. If the user needs to respond, ask exactly one question in the final bubble and put no text or later bubble after it. An owning skill may still require attached response media to accompany that final bubble.`

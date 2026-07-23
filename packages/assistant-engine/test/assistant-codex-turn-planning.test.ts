@@ -1781,14 +1781,17 @@ describe('assistant Codex turn planning', () => {
     })
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
-    expect(attendedPlan.dynamicTools).not.toContainEqual(
+    expect(attendedPlan.dynamicTools).toContainEqual(
       expect.objectContaining({
         namespace: 'murph',
         name: 'send_progress_update',
       }),
     )
-    expect(attendedPlan.systemPrompt).not.toContain('murph.send_progress_update')
-    expect(attendedPlan.systemPrompt).not.toContain(
+    expect(attendedPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(attendedPlan.systemPrompt).toContain(
+      'use `murph.send_progress_update` much more sparingly than in a direct conversation',
+    )
+    expect(attendedPlan.systemPrompt).toContain(
       'including every `---` bubble',
     )
 
@@ -1835,6 +1838,9 @@ describe('assistant Codex turn planning', () => {
     expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
     expect(directPlan.systemPrompt).toContain(
       'including every `---` bubble',
+    )
+    expect(directPlan.systemPrompt).not.toContain(
+      'much more sparingly than in a direct conversation',
     )
   })
 

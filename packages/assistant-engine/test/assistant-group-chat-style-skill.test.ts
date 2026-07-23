@@ -40,14 +40,27 @@ describe('assistant group-chat style guidance', () => {
       'Keep ordinary replies flat. In a busy room, use `murph.select_reply_target`',
     )
     expect(normalized).toContain(
-      'The selection applies to the whole single response.',
+      'The selection applies to the whole response, including every `---` bubble.',
     )
-    expect(normalized).not.toContain('including every `---` bubble')
     expect(normalized).toContain(
       'Reactions and reply selection remain independent; neither action implies the other.',
     )
     expect(normalized).toContain(
       'Never invent a ref or target a message merely because a ref is available.',
+    )
+  })
+
+  it('lets a server-owned permission card stand alone', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'never send a companion confirmation that the card is available, posted, or ready',
+    )
+    expect(normalized).toContain(
+      'When the server-owned card is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`.',
+    )
+    expect(normalized).toContain(
+      'send only that content in the assistant response and do not mention the card',
     )
   })
 

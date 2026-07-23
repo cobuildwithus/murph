@@ -179,7 +179,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'During later standings, Murph may proactively open the existing server-authored permission offer',
     )
     expect(challenge).toContain(
-      'contains neither an explicit decline for that share nor a prior offer for it.',
+      'contains neither an explicit decline for that share nor a prior handled offer action for it.',
     )
     expect(challenge).toContain(
       'do not create a hosted group or post a permission offer as part of challenge setup.',
@@ -222,8 +222,12 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(challenge).not.toContain("Web's card is the visible confirmation")
     expect(challenge).toContain(
-      'If the returned group proves that every current member grants every requested scope, do not record those scopes as offered.',
+      'record that the offer action was handled for that exact participant and scope',
     )
+    expect(challenge).toContain(
+      'When the card is the only user-facing outcome, call `murph.finish_without_reply`',
+    )
+    expect(challenge).not.toContain('If the returned group proves')
     expect(challenge).toContain('active-offer/all-granted dedupe')
     expect(challenge).toContain(
       'Never offer the scoring scope merely because its grant exists but current data is missing.',

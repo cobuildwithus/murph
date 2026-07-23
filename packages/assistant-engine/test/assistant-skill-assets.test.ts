@@ -938,11 +938,15 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/call `murph\.group action="post_join_offer"` exactly once after the read with\s+only those `projectionScopes`/u)
     expect(raw).toMatch(/adds no scheduler-side message and no pre-model work/u)
     expect(raw).toContain('Never author generic permission copy or tell someone to Like the standings.')
-    expect(raw).toMatch(/explicitly says they do not want to share a scope, record that choice and do\s+not offer, repeat, or nag/u)
+    expect(raw).toMatch(/explicitly says they do not want to share a scope, record that\s+choice and do\s+not offer, repeat, or nag/u)
     expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
     expect(raw).toContain('Treat a `sent` result as an opaque handled result')
     expect(raw).toMatch(/Do not infer, announce,\s+or append a separate assistant message claiming that a card is visible or\s+newly posted\./u)
-    expect(raw).toMatch(/every current member grants\s+every requested scope, do not record those scopes as offered/u)
+    expect(raw).toMatch(/record that the offer action was handled for that exact participant and\s+scope/u)
+    expect(raw.replace(/\s+/gu, ' ')).toContain(
+      'When the card is the only user-facing outcome, call `murph.finish_without_reply`',
+    )
+    expect(raw).not.toContain('If the returned group proves')
     expect(raw).not.toContain("Web's card is\n   the visible confirmation.")
     expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
     expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)

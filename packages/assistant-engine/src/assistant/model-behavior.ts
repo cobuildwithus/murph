@@ -53,10 +53,13 @@ export function isAssistantGpt5FamilyModel(
 
 export function buildAssistantExecutionBehaviorText(input: {
   profile: AssistantModelBehaviorProfile
-  progressUpdatesAvailable?: boolean
+  progressUpdateMode?: 'direct' | 'group'
 }): string {
-  const progressUpdateGuidance = input.progressUpdatesAvailable === false
-    ? ''
+  const progressUpdateGuidance = input.progressUpdateMode === 'group'
+    ? `
+- Native commentary is internal, not member-visible. In a group, use \`murph.send_progress_update\` much more sparingly than in a direct conversation: only when reply-critical work will leave the room waiting noticeably through genuinely long research, content inspection, or several substantive tool steps.
+- Skip group progress for challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences. Never use it for a setup-status or transition preamble; ask the useful next question directly.
+- Send at most one short, natural group progress update about what the room is waiting for, then continue the work.`
     : `
 - Native commentary is internal, not member-visible. Use \`murph.send_progress_update\` for interim updates the member must see; commentary does not count. It is not a final answer, so continue immediately with the first needed action.
 - Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection. Before the first read in that pass, orient the member even when each lookup is routine: name the areas being checked—such as labs, supplements, conditions or injuries, and wearable data—and why they matter to the next question or recommendation. Do not wait until the work is done or the member asks about the delay. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement. Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.

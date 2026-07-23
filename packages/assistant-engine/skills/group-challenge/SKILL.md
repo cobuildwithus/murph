@@ -38,8 +38,8 @@ a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
 offer only after `read_shared` proves an exact required scope is `not_granted`
 and the challenge page contains neither an explicit decline for that share nor
-a prior offer for it. The device scope is diagnostic context, not scoring data:
-it shares only public
+a prior handled offer action for it. The device scope is diagnostic context,
+not scoring data: it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
 participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
@@ -123,8 +123,8 @@ The page carries these sections, kept current:
   `pending`, `declined`, or `withdrawn`), their intro or fun fact (verbatim),
   and the capture refs for their photos.
 - **Sharing choices** — per participant and exact scope, explicit sharing
-  declines and any permission offer already made available. Silence is not
-  consent or refusal, but an ignored offer is not a reason to repost it.
+  declines and any permission-offer action already handled. Silence is not
+  consent or refusal, but a handled offer action is not a reason to retry it.
 - **Baselines** — per-member starting values where shared data allows.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
@@ -167,8 +167,8 @@ loses a reminder; it must never lose the challenge.
 ## Kickoff
 
 When kickoff needs another decision, ask that next question directly in the
-group's one message. Do not prepend a setup-status, progress, or transition
-sentence; the question is the useful update.
+group response. Do not prepend a setup-status, progress, or transition sentence;
+the question is the useful update.
 
 1. **Negotiate the metric.** Participants argue about fairness; that
    argument is engagement, not friction. Take a real position, adjudicate
@@ -336,14 +336,16 @@ automation action rules with a `dailyLocal` schedule and
      Do not override current metric evidence with a device status.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
-     record an explicit decline or prior offer for that exact scope, include the
-     scope in the one proactive permission offer described below.
+     record an explicit decline or prior handled offer action for that exact
+     scope, include the scope in the one proactive permission offer described
+     below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
      the metric share exists, but Murph cannot verify the source problem because
      connection status was not shared. Unless their sharing choices record an
-     explicit decline or prior offer for that exact scope, include the diagnostic
-     scope in the one proactive permission offer described below.
+     explicit decline or prior handled offer action for that exact scope,
+     include the diagnostic scope in the one proactive permission offer
+     described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
      `device-sync-status.v0` record is `available`: use its literal source label,
@@ -393,7 +395,7 @@ automation action rules with a `dailyLocal` schedule and
    `device-sync-status.v0` only when the scoring scope is granted but has no
    current metric and the diagnostic scope is `not_granted`. Exclude a scope
    when every affected participant has explicitly declined it or the challenge
-   page records that an offer for it is already available. Deduplicate the list.
+   page records a handled offer action for it. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
    call `murph.group action="post_join_offer"` exactly once after the read with
@@ -407,15 +409,18 @@ automation action rules with a `dailyLocal` schedule and
    card, reused an active one, or found that no card was needed because every
    current member already grants the requested scopes. Do not infer, announce,
    or append a separate assistant message claiming that a card is visible or
-   newly posted. If the returned group proves that every current member grants
-   every requested scope, do not record those scopes as offered. Otherwise
-   record them as offered on the challenge page so future standings do not
-   repost or nag. If the turn also owes a substantive standings update, keep
-   that one assistant-authored message focused on the standings. If the tool is
-   absent or returns `unavailable`, do not claim a card exists. If a participant
-   explicitly says they do not want to share a scope, record that choice and do
-   not offer, repeat, or nag. A permission offer cannot connect a source, grant
-   Apple Health or operating-system Steps access, or fix missing or stale data.
+   newly posted. For each participant whose same read showed `not_granted`,
+   record that the offer action was handled for that exact participant and
+   scope so future standings do not retry or nag; do not record that a card was
+   visible. If the turn also owes a substantive standings update, keep that one
+   assistant response focused on the standings. When the card is the only
+   user-facing outcome, call `murph.finish_without_reply` instead of sending a
+   companion confirmation. If the tool is absent or returns
+   `unavailable`, do not claim a card exists or record the action as handled. If
+   a participant explicitly says they do not want to share a scope, record that
+   choice and do not offer, repeat, or nag. A permission offer cannot connect a
+   source, grant Apple Health or operating-system Steps access, or fix missing
+   or stale data.
    Never offer the scoring scope merely because its grant exists but current
    data is missing. Apart from the exact diagnostic `not_granted` case above,
    disconnected, `needs-reconnect`, and other sync/device cases get

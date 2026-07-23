@@ -150,8 +150,8 @@ to each `in` participant and stops at the first match:
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
 | Current challenge-metric data through the reporting cutoff | Include the participant in the ranked standings. | None. Device status cannot override current metric evidence. |
-| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior offer recorded. |
-| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior offer recorded. |
+| No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
+| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Live diagnostic result with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
 | Live diagnostic result with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
 | Live diagnostic result with `needs-attention` | The visible source needs attention; the result does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
@@ -236,7 +236,8 @@ post an additive permission offer. Once a challenge is running, a scheduled
 standings turn may ask Web to post the existing additive offer only as a model
 tool call after `read_shared` reports an exact required scope as `not_granted`.
 Each included scope must have at least one affected participant for whom the
-challenge page records neither an explicit sharing decline nor a prior offer.
+challenge page records neither an explicit sharing decline nor a prior handled
+offer action.
 
 The operation-local scheduled adapter accepts only scopes supported by that
 turn's missing-grant evidence and only one offer attempt. It rejects calls
@@ -249,16 +250,17 @@ disclosed snapshot. The standings message itself never grants permission.
 A `sent` result is an opaque handled result: Web may have posted a card, reused
 an active one, or found that no card was needed because every current member
 already grants the requested scopes. Murph does not infer or announce that a
-card is visible or newly posted. When the returned group proves every current
-member grants every requested scope, Murph does not record those scopes as
-offered. Otherwise it records the offered scopes on the challenge page so
-future standings do not repost or nag. If the turn also owes a substantive
-standings update, that one assistant-authored message stays focused on the
-standings. An explicit sharing decline is also recorded there and excludes that
-participant from the scope decision. The scoring scope is never offered merely
-because its grant exists but current data is missing. Apart from the exact
-missing diagnostic grant above, stale, disconnected, reconnect, and other
-sync/device cases never enter the permission path.
+card is visible or newly posted. For each participant whose same read showed
+`not_granted`, Murph records only that the offer action was handled for that
+exact participant and scope, without claiming a card was visible. If the turn
+also owes a substantive standings update, the assistant response stays focused
+on the standings. When the card is the only user-facing outcome, Murph finishes
+without an assistant reply. An explicit sharing decline is also
+recorded and excludes that participant from the scope decision. The scoring
+scope is never offered merely because its grant exists but current data is
+missing. Apart from the exact missing diagnostic grant above, stale,
+disconnected, reconnect, and other sync/device cases never enter the permission
+path.
 This extra member-facing card is limited to this explicitly approved challenge
 case under the automatic-message invariant.
 
@@ -324,12 +326,11 @@ drain, or foreground reconciliation step in either deployment or rollback.
 - Challenge kickoff never calls `post_join_offer` as a side effect.
 - A scheduled occurrence may call `post_join_offer` once after `read_shared`,
   only for exact `not_granted` scopes with at least one affected participant who
-  has neither a recorded decline nor a prior offer.
+  has neither a recorded decline nor a prior handled offer action.
 - Missing or stale synced data, a disconnected source, or `needs-reconnect`
   produces ordinary-language recovery guidance and no permission card.
 - A `sent` result does not prove a card is visible or newly posted. Murph sends
-  no separate announcement and uses the returned current-grant matrix to avoid
-  recording an offer when every current member already grants the requested
-  scopes.
+  no separate announcement and records only that the participant-and-scope
+  offer action was handled so it is not retried.
 - No output exposes provider keys, account/device identifiers, raw errors,
   health values, or private 1:1 context.
