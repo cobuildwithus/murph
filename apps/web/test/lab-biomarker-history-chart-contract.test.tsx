@@ -5,6 +5,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const captured = vi.hoisted(() => ({
   chartAriaLabel: null as string | null,
   chartConfig: null as Record<string, unknown> | null,
+  chartInitialDimension: null as { height: number; width: number } | null,
   gridRendered: false,
   lineChartProps: null as Record<string, unknown> | null,
   referenceLines: [] as Record<string, unknown>[],
@@ -64,9 +65,11 @@ vi.mock("@/src/components/ui/chart", async () => {
       "aria-label"?: string;
       children?: ReactNode;
       config?: Record<string, unknown>;
+      initialDimension?: { height: number; width: number };
     }) {
       captured.chartAriaLabel = props["aria-label"] ?? null;
       captured.chartConfig = props.config ?? null;
+      captured.chartInitialDimension = props.initialDimension ?? null;
       return passthrough(props);
     },
     ChartTooltip({ content }: { content?: ReactNode }) {
@@ -90,6 +93,7 @@ import { LabBiomarkerHistoryChart } from "@/src/components/biomarkers/lab-biomar
 beforeEach(() => {
   captured.chartAriaLabel = null;
   captured.chartConfig = null;
+  captured.chartInitialDimension = null;
   captured.gridRendered = false;
   captured.lineChartProps = null;
   captured.referenceLines = [];
@@ -116,6 +120,7 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
   expect(captured.chartConfig).toMatchObject({
     value: { color: "var(--chart-1)" },
   });
+  expect(captured.chartInitialDimension).toEqual({ height: 320, width: 1 });
 
   const tooltip = captured.tooltipFormatter?.(0.0015);
   expect(tooltip).toBeTruthy();

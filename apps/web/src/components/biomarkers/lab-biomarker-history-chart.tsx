@@ -46,6 +46,11 @@ const RANGE_LINE_STYLE = {
   strokeOpacity: 0.5,
 } as const;
 
+// Recharts needs a positive seed before ResizeObserver reports the container.
+// Keep the real chart height, but use a non-constraining width so the initial
+// render cannot widen a narrow page before the responsive measurement lands.
+const RESPONSIVE_INITIAL_DIMENSION = { height: 320, width: 1 };
+
 export function LabBiomarkerHistoryChart({
   ariaDescribedBy,
   displayName,
@@ -115,7 +120,7 @@ export function LabBiomarkerHistoryChart({
         aria-label={`${displayName} results over time${rangeLabel ? `; ${referenceRangeTitle.toLowerCase()} ${rangeLabel}${rangeSourceLabel ? ` from ${rangeSourceLabel}` : ""}` : ""}`}
         className="h-72 w-full sm:h-80"
         config={chartConfig}
-        initialDimension={{ height: 320, width: 760 }}
+        initialDimension={RESPONSIVE_INITIAL_DIMENSION}
         role="img"
       >
         <LineChart
