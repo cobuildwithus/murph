@@ -122,3 +122,9 @@ Updated: 2026-07-22
   `PRODUCT.md`. The packager now always supplies the complete frontend context
   trio required by the repository: `agent-docs/FRONTEND.md`, `PRODUCT.md`, and
   `DESIGN.md`.
+- The valid preliminary specialist pass returned one medium coverage finding:
+  the existing CLI owner test still asserted the superseded ignored evidence
+  path and did not prove the three required guidance files. The test-only patch
+  was inspected, accepted, applied manually after `git apply --check`, and the
+  CLI owner suite passed (114 files, 1,080 tests, one existing skip). The prompt
+  and frontend lenses reported no findings.
