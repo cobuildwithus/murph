@@ -83,7 +83,7 @@ If the answer is unknown, do not assume the path is safe. Add the missing guard,
 
 ## Murph Hosted Automation Engagement
 
-Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the conversation source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it. Deterministic system-mailbox work is imported and checkpointed in import-only mode before the pause is evaluated for a preserved or newly scheduled model wake; the following ordinary reconciliation still applies the pause to model work. Thus an accepted meal capture can establish its ordinary 9pm closeout without becoming a second engagement source.
+Murph pauses model-capable automation wakes for Linq members with no inbound day in the last 28 days, using `hosted_linq_daily_state` as the conversation source of truth. Conversational replies are never gated by this pause because fresh conversation mailbox lag bypasses it. An accepted meal capture is also qualifying engagement for the ordinary 9pm closeout it creates, so that automatic follow-up needs no second opt-in. This engagement evidence does not bypass AI-usage authorization. Deterministic system-mailbox work can still run in import-only mode when model work is blocked.
 
 Linq egress should stay small and obvious:
 

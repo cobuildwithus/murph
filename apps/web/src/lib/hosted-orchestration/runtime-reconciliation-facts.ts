@@ -27,6 +27,7 @@ import {
 } from "../hosted-mailbox/lag";
 import {
   decodeHostedMailboxStoredPayload,
+  hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
@@ -45,7 +46,10 @@ import {
 import {
   hasHostedMemberEstablishedLinqHomeRoute,
 } from "../hosted-onboarding/hosted-member-routing-store";
-import { hasHostedLinqInboundWithinDays } from "../hosted-onboarding/linq-daily-state";
+import {
+  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
+  hasHostedLinqInboundWithinDays,
+} from "../hosted-onboarding/linq-daily-state";
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
@@ -194,8 +198,6 @@ export async function readHostedRuntimeReconciliationFacts(
   });
 
   if (
-    !hasHostedMailboxLag(mailboxLag, "system")
-    &&
     hostedRuntimeReconciliationNeedsAutomationEngagement({
       freshConversationMailboxLag,
       now,
@@ -209,6 +211,14 @@ export async function readHostedRuntimeReconciliationFacts(
       memberId: input.userId,
       now,
       prisma,
+    }))
+    && !(await hasHostedMailboxMealPhotoCaptureSince({
+      prisma,
+      since: new Date(
+        now.getTime()
+          - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+      ),
+      userId: input.userId,
     }))
   ) {
     const facts = buildHostedRuntimeBlockedFacts({
@@ -230,7 +240,6 @@ export async function readHostedRuntimeReconciliationFacts(
 
   const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
     freshConversationMailboxLag,
-    mailboxLag,
     now,
     workspace: projectedWorkspace,
   });
@@ -319,14 +328,9 @@ function buildHostedRuntimeBlockedFacts(input: {
 
 function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   freshConversationMailboxLag: boolean;
-  mailboxLag: readonly HostedMailboxLaneLag[];
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): boolean {
-  if (hasHostedMailboxLag(input.mailboxLag, "system")) {
-    return false;
-  }
-
   if (input.freshConversationMailboxLag) {
     return true;
   }

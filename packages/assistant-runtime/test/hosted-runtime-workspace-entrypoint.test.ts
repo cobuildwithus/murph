@@ -16,6 +16,7 @@ import {
   buildIntegrationIngestRecord,
   initializeVault,
   runCanonicalWrite,
+  showAutomation,
 } from "@murphai/core";
 import {
   persistCanonicalInboxCapture,
@@ -27,6 +28,9 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  ensureAutomaticMealCloseoutAutomation,
+  getAssistantCronStatus,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
   type RunAssistantAutomationPassInput,
@@ -6892,13 +6896,19 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("system mailbox mode checkpoints deterministic imports before model work", async () => {
+  test("system mailbox mode checkpoints the imported meal automation before cleaning staging", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const imported: string[] = [];
-    const dueWakeAt = "2026-04-10T00:00:00.000Z";
+    const mealPhotoItem = createMailboxItem({
+      dedupeKey: "meal-photo:system-mailbox-only",
+      id: "mailbox_item_system_mailbox_only_meal",
+      kind: "meal-photo.captured",
+      lane: "system",
+      laneSeq: "1",
+    });
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -6921,19 +6931,40 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           async importItem(item) {
             imported.push(`${item.item.lane}:${item.item.kind}`);
-            return { status: "imported" };
+            await ensureAutomaticMealCloseoutAutomation({
+              defaultRoute: {
+                channel: "linq",
+                deliverySource: null,
+                deliveryTarget: null,
+                identityId: null,
+                participantId: null,
+                threadId: "linq_home_thread",
+                threadIsDirect: true,
+              },
+              routeValidationProfile: "hosted",
+              vaultRoot,
+            });
+            return {
+              afterCheckpoint: async () => {
+                events.push("meal-photo.delete");
+                return {
+                  attachmentEvidenceUpdated: null,
+                  kind: "meal_photo_cleanup" as const,
+                  projectionUpdated: null,
+                  reasonCode: "meal_photo.deleted",
+                  status: "succeeded" as const,
+                };
+              },
+              reasonCode: "meal_photo.imported",
+              status: "imported",
+            };
           },
           platform: createPlatform({
             mailboxPort: createMailboxPort({
               events,
               fetchRequests,
               items: [
-                createMailboxItem({
-                  id: "mailbox_item_system_mailbox_only_meal",
-                  kind: "meal-photo.captured",
-                  lane: "system",
-                  laneSeq: "1",
-                }),
+                mealPhotoItem,
                 createMailboxItem({
                   id: "mailbox_item_system_mailbox_only_conversation",
                   kind: "conversation.message",
@@ -6945,10 +6976,7 @@ describe("hosted workspace runtime entrypoint", () => {
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
-              workspace: createWorkspaceState({
-                nextWakeAt: dueWakeAt,
-                nextWakeReason: "assistant_due",
-              }),
+              workspace: createWorkspaceState(),
             }),
           }),
           async runAssistantPhase() {
@@ -6963,19 +6991,48 @@ describe("hosted workspace runtime entrypoint", () => {
         [["system"]],
       );
       assert.deepEqual(imported, ["system:meal-photo.captured"]);
+      const importCheckpoint = checkpointRequests
+        .slice()
+        .reverse()
+        .find((request) =>
+          request.redactedStatus?.hostedMailboxSystemImportedSeq === "1"
+        );
       assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        importCheckpoint?.redactedStatus?.hostedMailboxSystemImportedSeq,
         "1",
       );
       assert.equal(
-        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        importCheckpoint?.redactedStatus?.hostedMailboxConversationImportedSeq,
         "0",
       );
-      assert.equal(checkpointRequests[0]?.nextWakeAt, dueWakeAt);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant_due");
-      assert.equal(result.nextWakeAt, dueWakeAt);
-      assert.equal(result.nextWakeReason, "assistant_due");
+      const cronStatus = await getAssistantCronStatus(vaultRoot, {
+        turnEnvironment: {
+          currentWorkingDirectory: null,
+          env: {
+            MURPH_HOSTED_RUNTIME_PROCESS: "1",
+            VAULT: vaultRoot,
+          },
+        },
+      });
+      assert.ok(cronStatus.nextRunAt);
+      assert.ok(importCheckpoint?.nextWakeAt);
+      assert.equal(importCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, importCheckpoint?.nextWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
       assert.equal(result.status, "scheduled");
+      assert.ok(
+        events.lastIndexOf("workspace.checkpoint") < events.indexOf("meal-photo.delete"),
+      );
+      await expect(showAutomation({
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+        },
+        status: "active",
+      });
     } finally {
       await removeTempRoot(vaultRoot);
     }

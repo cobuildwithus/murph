@@ -22,6 +22,7 @@ import {
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
+  hasHostedMailboxMealPhotoCaptureSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -100,6 +101,35 @@ describe("readHostedMailboxLiveItemById", () => {
           { expiresAt: null },
           { expiresAt: { gt: FIXED_NOW } },
         ],
+      },
+    });
+  });
+});
+
+describe("hasHostedMailboxMealPhotoCaptureSince", () => {
+  it("derives recent capture engagement from the accepted mailbox row", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "mailbox-meal-photo" });
+    const since = new Date("2026-03-29T00:00:00.000Z");
+
+    await expect(hasHostedMailboxMealPhotoCaptureSince({
+      prisma: {
+        hostedMailboxItem: { findFirst },
+      } as never,
+      since,
+      userId: "member-meal-photo",
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        createdAt: {
+          gte: since,
+        },
+        kind: "meal-photo.captured",
+        lane: "system",
+        userId: "member-meal-photo",
       },
     });
   });

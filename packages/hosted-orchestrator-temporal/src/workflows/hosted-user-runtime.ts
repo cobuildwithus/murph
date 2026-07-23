@@ -347,6 +347,13 @@ export function createHostedUserRuntimeWorkflowMachine(
           });
           continue;
         }
+        if (hasMailboxLag(facts, "system")) {
+          await executeRuntimeProcessing({
+            clearMailboxPointerOnAccepted: true,
+            processingMode: "system_mailbox",
+          });
+          continue;
+        }
         if (shouldContinueAsNewBeforePostReconciliationWait({ options, runtime })) {
           await continueAsNewWithCurrentState();
         }
@@ -360,14 +367,20 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      // Priority on the unblocked branch: user-visible work (mailbox lag or
-      // a due default wake) always wins over retention. Retention runs in
-      // bounded per-pass batches and re-arms inboxMediaRetentionWakeAt while
-      // hasMoreEligibleAttachments is true, so dispatching it ahead of live
-      // work would starve mailbox/assistant turns for minutes per batch
-      // immediately after the migration backfills CURRENT_TIMESTAMP.
-      // Inactive/AI-denied users still purge media via the blocked branch
-      // above where retention is the only admissible mode.
+      // Runnable conversation/default work owns the foreground pass. That pass
+      // imports system items before the assistant phase but deliberately keeps
+      // fresh conversation moving if a system item is retryable.
+      const defaultNextWakeAt = facts.workspace?.nextWakeAt ?? null;
+      if (
+        hasMailboxLag(facts, "conversation")
+        || isDueTimestamp(defaultNextWakeAt, runtime.nowMs())
+      ) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: hasAnyMailboxLag(facts),
+        });
+        continue;
+      }
+
       if (hasMailboxLag(facts, "system")) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
@@ -376,22 +389,7 @@ export function createHostedUserRuntimeWorkflowMachine(
         continue;
       }
 
-      if (hasAnyMailboxLag(facts)) {
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: true,
-        });
-        continue;
-      }
-
       clearMailboxPointer(state);
-
-      const defaultNextWakeAt = facts.workspace?.nextWakeAt ?? null;
-      if (isDueTimestamp(defaultNextWakeAt, runtime.nowMs())) {
-        await executeRuntimeProcessing({
-          clearMailboxPointerOnAccepted: false,
-        });
-        continue;
-      }
 
       if (isDueTimestamp(inboxMediaRetentionWakeAt, runtime.nowMs())) {
         await executeRuntimeProcessing({

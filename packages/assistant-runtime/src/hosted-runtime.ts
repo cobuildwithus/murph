@@ -44,8 +44,10 @@ import {
 import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
+  getAssistantCronStatus,
 } from "@murphai/assistant-engine";
 import {
+  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
@@ -1513,6 +1515,14 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport.importResult,
         restored.vaultRoot,
       );
+      const assistantCronWake =
+        input.request.processingMode === "system_mailbox"
+          ? await resolveHostedAssistantCronWakeAfterInitialImport({
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+              vaultRoot: restored.vaultRoot,
+            })
+          : null;
       const nextWake = input.request.processingMode === "system_mailbox"
         ? selectEarliestHostedRuntimeWake([
             {
@@ -1540,6 +1550,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         {
           at: systemMailboxWake.at,
           reason: systemMailboxWake.reason,
+        },
+        {
+          at: assistantCronWake?.at ?? null,
+          reason: assistantCronWake?.reason ?? null,
         },
         {
           at: stagedAssistantInput ? new Date().toISOString() : null,
@@ -1601,6 +1615,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requestId,
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
+        });
+        await finishHostedMailboxImportPostCheckpointEffects({
+          importResult: initialMailboxImport,
+          runnerInput: baseRunnerInput,
+          signal: runtimeAbortController.signal,
         });
         const checkpointReturnedNextWake = selectEarliestHostedRuntimeWake([
           {
@@ -5212,6 +5231,23 @@ function selectEarliestHostedRuntimeWake(
   return {
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
+  };
+}
+
+async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
+  operatorHomeRoot: string;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}): Promise<{ at: string | null; reason: string | null }> {
+  const status = await getAssistantCronStatus(input.vaultRoot, {
+    turnEnvironment: createHostedAssistantTurnEnvironment(input),
+  });
+  const at = status.dueJobs > 0
+    ? new Date().toISOString()
+    : status.nextRunAt;
+  return {
+    at,
+    reason: at ? HOSTED_ASSISTANT_WAKE_REASON : null,
   };
 }
 
