@@ -232,10 +232,10 @@ function ExperimentArtifact() {
       <div className="mt-4">
         <div className="flex h-1.5 overflow-hidden rounded-full bg-[#2d3436]/8">
           <div className="w-[50%] rounded-full bg-[#5a6e32]" />
-          <div className="ml-px w-[14%] bg-[#5a6e32]/40" />
+          <div className="ml-px w-[32%] bg-[#5a6e32]/40" />
         </div>
         <div className="mt-1.5 flex justify-between font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58] tabular-nums">
-          <span>Baseline · 7d</span>
+          <span>Baseline · 14d</span>
           <span>Active · 9/14</span>
           <span>Readout</span>
         </div>
@@ -516,7 +516,7 @@ export function AsksGridSection() {
             artifactSide="right"
             eyebrow="Self-experiments"
             headline="I run experiments so you know what actually works for you."
-            body="Pick a protocol. Murph baselines you for a week, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
+            body="Pick a protocol. Murph baselines you for two weeks, runs the active phase, then texts the before-and-after. No more guessing whether anything moved."
             bubble="Did the magnesium actually work?"
             artifact={<ExperimentArtifact />}
           />

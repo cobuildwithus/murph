@@ -202,6 +202,17 @@ landing; record the chosen posture here so the decision is reviewable.
   months. Snapshot/restore cost remains negligible at the projected steady
   state, so no rotation or compaction seam is planned.
 
+- `ledger/integration-ingests/YYYY/YYYY-MM.jsonl` is canonical monthly-sharded
+  provider/import evidence and is included in hosted snapshots. On a true idle
+  shutdown, each valid closed raw month is replaced by one `.jsonl.gz` file;
+  the current and future UTC months remain appendable JSONL. The transition
+  does not add a sidecar, manifest, queue, or compaction-state file, so steady
+  state remains exactly one physical file per elapsed month while reducing the
+  bytes walked, archived, uploaded, restored, and stored. Exact raw-plus-gzip
+  crash residue is reconciled before foreground work; a non-identical pair is
+  retained and fails closed rather than increasing the accepted steady-state
+  file count.
+
 - `derived/captures/generated-image-lookups.json`
   (`murph.capture-lookup.v1`) is a compact derived index for generated-image
   retry identity. It is included in hosted workspace snapshots because replay

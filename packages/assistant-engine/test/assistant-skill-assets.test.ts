@@ -1528,14 +1528,9 @@ describe('assistant skill assets', () => {
       'do not attach exercise-catalog images, cards, or carousels',
     )
     expect(compact).toContain(
-      'one original 15–20 second standalone launch song',
+      'The onboarding launch close is text-only.',
     )
-    expect(compact).toContain(
-      'This is reply-time media, never a scheduled onboarding automation.',
-    )
-    expect(compact).toContain(
-      'Delight marks real value; it never substitutes for the launch offer, working support, or mandatory text close.',
-    )
+    expect(compact).not.toContain('automatic launch-song eligibility')
     expect(compact).toContain(
       'When `murph-onboarding` returns to a parked desired outcome after the health foundation, follow that owner\'s exact bounded behavioral-fit sequence, question budget, early-stop rule, and persistence policy.',
     )
@@ -1900,7 +1895,7 @@ describe('assistant skill assets', () => {
       'Immediately call `murph.send_progress_update` once',
     )
     expect(compact).toContain(
-      'This final response is voice-only',
+      'Only when they answered that invitation with a voice memo',
     )
     expect(compact).toContain(
       'Do not repeat this acknowledgement in the final reply',
@@ -1974,11 +1969,36 @@ How old are you and what's your gender?
       'The broad anchor question does not consume the clarification budget. After it, ask up to three short clarifiers total, one per message.',
     )
     expect(compact).toContain(
-      'If the user says they do not know, gives no reason, or declines, accept that answer without pressure or repetition and park the thread with motivation explicitly unknown.',
+      "The user's own wording may supply more than one field or cover several named threads when it clearly does.",
     )
-    expect(compact).toContain('A list of desired outcomes is not a reason')
-    expect(raw).toContain('1. What would success look or feel like?')
+    expect(compact).toContain(
+      'A list of desired outcomes supplies neither a progress signal nor a reason, and Murph must not infer either one.',
+    )
+    expect(compact).toContain('Ask each missing clarifier once.')
+    expect(compact).toContain(
+      'Park only when the outcome is known and both clarifier fields are known or explicitly unknown.',
+    )
+    expect(compact).toContain(
+      '“I want to get stronger because it would build confidence” still lacks a progress signal; “I want to deadlift 315 pounds because it would build confidence” supplies all three fields, so do not re-ask either clarifier.',
+    )
+    expect(compact).toContain(
+      'Ask only the missing field, one per message, and never repeat what the user already supplied.',
+    )
+    expect(compact).not.toContain(
+      'Stop as soon as the missing outcome and motivation fields are answered or explicitly unknown.',
+    )
+    expect(raw).toContain('1. What would tell you this is getting better?')
+    expect(raw).not.toContain('1. What would success look or feel like?')
     expect(raw).toContain('2. Why do you want that?')
+    expect(compact).toContain(
+      'Name the actual thread or threads and offer two to four brief, concrete examples spanning them, then leave room for a different answer.',
+    )
+    expect(compact).toContain(
+      'when you say stronger and sleeping better, what would actually be different day to day—for example, lifting more, carrying things more easily, falling asleep faster, waking up rested, or something else?',
+    )
+    expect(compact).toContain(
+      'This asks how the user would recognize progress, not how to design a plan.',
+    )
     expect(raw).not.toContain('Is this the main priority or one of several?')
     expect(compact).toContain(
       'When several threads are named, keep them all without asking the user to rank them.',
@@ -2000,6 +2020,18 @@ How old are you and what's your gender?
       "got it — stronger and sleeping better, mainly for more confidence and energy. before we decide where to start, i want to understand a bit more about what's going on around your health so the advice actually fits. do you use a wearable or health app?",
     )
     expect(compact).toContain(
+      'The current prompt\'s “Hosted wearable connection links are available for …” line is the sole source of provider examples.',
+    )
+    expect(compact).toContain(
+      'If the line is absent, omit provider examples rather than inventing or recalling names.',
+    )
+    expect(compact).toContain(
+      'Keep Apple Health out of this provider-example clause; it is offered only through the separate native-app relay after a clear “none,” never as a `murph.device` provider.',
+    )
+    expect(compact).toContain(
+      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule below',
+    )
+    expect(compact).toContain(
       'When the reason is known, keep it clearly subordinate to the threads rather than turning it into another thread.',
     )
     expect(compact).toContain(
@@ -2017,6 +2049,30 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('### 5. Resolve the foundation checkpoints')
     expect(raw).toContain('1. **Data sources and wearables.**')
+    expect(compact).toContain(
+      'Build its example clause only from labels on the current prompt\'s hosted wearable connection line: one label when only one exists and a few when several do.',
+    )
+    expect(compact).toContain(
+      'If that line is absent, omit provider examples; never supply remembered names.',
+    )
+    expect(compact).toContain(
+      'After a real link is returned, send one short handoff by itself in Murph\'s own words, inviting the user to connect there and let Murph know afterward.',
+    )
+    expect(compact).toContain(
+      'Do not call it setup, prescribe or quote an exact response, or advance to another checkpoint until the user returns or the connection is visible.',
+    )
+    expect(compact).toContain(
+      'no wearable is totally fine. if you use an iPhone, you can connect Apple Health in the Murph app so i can start using the daily steps your phone sends. want the app link?',
+    )
+    expect(compact).toContain(
+      'Do not infer that an iMessage user owns an iPhone.',
+    )
+    expect(compact).toContain(
+      'Do not call `murph.device` to connect Apple Health, claim permission was granted, or say steps are syncing until live evidence proves it.',
+    )
+    expect(compact).toContain(
+      'Declining this optional offer leaves the checkpoint resolved.',
+    )
     expect(raw).toContain('2. **Movement and training.**')
     expect(raw).toContain('3. **Current protocols or experiments.**')
     expect(compact).toContain(
@@ -2026,9 +2082,17 @@ How old are you and what's your gender?
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
-    expect(compact).toContain('Feel free to send me a voice memo.')
     expect(compact).toContain(
-      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and the explicit voice-memo ask',
+      'You can type it out instead — either works just as well.',
+    )
+    expect(compact).toContain(
+      'I can walk you through sending a voice memo.',
+    )
+    expect(compact).toContain(
+      'Do not offer it based on guessed age, and do not make unknown age block or delay the invitation.',
+    )
+    expect(compact).toContain(
+      'Send one message in this shape, adapting the lead-in wording but keeping the bulleted list and both input options',
     )
     expect(compact).toContain('Can you send me a voice memo covering a few things?')
     expect(compact).toContain(
@@ -2044,13 +2108,22 @@ How old are you and what's your gender?
       'murph.generate_voice_memo',
     )
     expect(compact).toContain(
-      'This specific closer is voice-welcome and privacy-safe.',
+      'Only when they answered that invitation with a voice memo',
+    )
+    expect(compact).toContain(
+      'have not since declined voice, and `murph.generate_voice_memo` is available',
+    )
+    expect(compact).toContain(
+      'That response is voice-only: do not duplicate the question or the already-sent delegation acknowledgement in text.',
     )
     expect(compact).toContain(
       "Okay, one last question and then I'll leave you alone, promise: have you had any blood tests or lab panels in the past year or two?",
     )
     expect(compact).toContain(
-      'This final response is voice-only: do not duplicate that question',
+      'When the user typed their foundation answer, used another input mode, skipped it, or has no visible voice-memo evidence, ask the same question in text.',
+    )
+    expect(compact).toContain(
+      'Also use text when voice generation is unavailable, fails, or the user prefers text.',
     )
     expect(compact).not.toContain(
       'This is the default delight moment for one generated onboarding voice memo.',
@@ -2089,6 +2162,15 @@ How old are you and what's your gender?
     expect(compact).not.toContain(
       'Do not spawn a child for this bounded persistence work.',
     )
+    expect(compact).toContain(
+      'When more than one onboarding progress trigger applies in the same turn, coalesce them.',
+    )
+    expect(compact).toContain(
+      'Accept any immediate child spawns, then send one combined update before slower preservation, extraction, or evidence reads.',
+    )
+    expect(compact).toContain(
+      'treat the later onboarding triggers as satisfied',
+    )
     expect(raw).toContain('https://my.functionhealth.com/documents')
     expect(compact).toContain(
       'download the Lab Results of Record PDFs, and send those files to Murph. Do not wait for them to ask how.',
@@ -2097,7 +2179,19 @@ How old are you and what's your gender?
       'Naming the provider without supplying results does not start a parse child; wait for an actual PDF, paste, or other durable evidence.',
     )
     expect(compact).toContain(
-      'the root must first verify that the raw source already has a durable attachment, document, or import ref, or import it through an existing canonical surface before replying.',
+      'immediately call `murph.send_progress_update` once, before slower import, inspection, or extraction work.',
+    )
+    expect(compact).toContain(
+      'This lab-receipt acknowledgement is an explicit skill exception to the global rule that optional background work alone does not need a progress update.',
+    )
+    expect(compact).toContain(
+      'acknowledge that the report arrived and name only work that is genuinely starting',
+    )
+    expect(compact).toContain(
+      'do not claim the report is already saved, parsed, analyzed, or added to the health record.',
+    )
+    expect(compact).toContain(
+      'The root must still verify that the raw source has a durable attachment, document, or import ref, or import it through an existing canonical surface before the substantive reply.',
     )
     expect(compact).toContain(
       'If the three memo children still occupy the session capacity, keep the durable source and leave optional extraction for a later need',
@@ -2119,6 +2213,18 @@ How old are you and what's your gender?
     )
     expect(raw).toContain(
       'Route useful answers to their existing canonical owner in the same turn',
+    )
+    expect(compact).toContain(
+      'Save those confirmed answers in the same turn as one concise Context memory associated with the named goal or goals.',
+    )
+    expect(compact).toContain(
+      'Update the matching Context memory when it exists; otherwise create one.',
+    )
+    expect(compact).toContain(
+      'Name the goal or goals inside that memory, then read back both the goal records and Context memory before saying the threads are saved.',
+    )
+    expect(compact).toContain(
+      'Do not duplicate it, invent missing meaning, turn the reason into another goal, or store an intervention plan during aspiration capture.',
     )
     expect(compact).toContain(
       'Save a durable request not to discuss a category as a Preferences memory in the user\'s words.',
@@ -2176,10 +2282,10 @@ How old are you and what's your gender?
       'the compact launch offer contains the proposed schedule, actionable reminder package, and early review.',
     )
     expect(compact).toContain(
-      "always follow `behavior-followthrough`'s first-launch delight rule",
+      "always follow `behavior-followthrough`'s first-launch close",
     )
     expect(compact).toContain(
-      'This is reply-time delight, not an onboarding automation',
+      'Do not add automatic launch media or make media an onboarding completion requirement.',
     )
     const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
     const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
@@ -2195,6 +2301,12 @@ How old are you and what's your gender?
     expect(replyRulesIndex).toBeGreaterThan(completionIndex)
 
     const aspirationSection = raw.slice(aspirationIndex, parkIndex)
+    const workedReplyStart = raw.indexOf('a\ncomplete reply can be:')
+    expect(workedReplyStart).toBeGreaterThan(parkIndex)
+    const workedReplySection = raw.slice(
+      workedReplyStart,
+      raw.indexOf('Treat this as a worked example, not fixed copy.'),
+    )
     const returnSection = raw.slice(returnIndex, completionIndex)
     const capabilityTourSection = raw.slice(
       raw.indexOf('If they pick the\ntour'),
@@ -2206,9 +2318,12 @@ How old are you and what's your gender?
       [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
         .map((match) => match[1]),
     ).toEqual([
-      'What would success look or feel like?',
+      'What would tell you this is getting better?',
       'Why do you want that?',
     ])
+    expect(workedReplySection).not.toMatch(
+      /Apple Health|Apple Watch|WHOOP|Oura|Garmin|Fitbit/u,
+    )
 
     const behavioralFitQuestionList = returnSection
       .slice(
@@ -2286,6 +2401,15 @@ How old are you and what's your gender?
       'First make one bounded evidence pass across the foundation, relevant canonical records, connected data, and any confirmed enrichment that could materially change the choice.',
     )
     expect(compact).toContain(
+      'When that pass spans more than one source or owner, immediately call `murph.send_progress_update` once before the first read.',
+    )
+    expect(compact).toContain(
+      'name the few user-facing areas you are checking and why they matter to the chosen next step',
+    )
+    expect(compact).toContain(
+      'This update is required even when each individual read is routine, and it is not needed for one targeted read.',
+    )
+    expect(compact).toContain(
       'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',
     )
     expect(compact).toContain(
@@ -2307,6 +2431,9 @@ How old are you and what's your gender?
       'If the visible conversation shows a foundation question or answer after an aspiration, treat the reflect-and-park transition as already done.',
     )
     expect(compact).toContain(
+      'These bounded post-park recovery clarifiers satisfy aspiration readiness for that already-open flow',
+    )
+    expect(compact).not.toContain(
       'This one post-park legacy-recovery question satisfies aspiration readiness for that already-open flow',
     )
     expect(compact).toContain(
@@ -2329,7 +2456,13 @@ How old are you and what's your gender?
       'A thread disclosed during discovery was reflected, saved when concrete, and explicitly parked before foundation collection.',
     )
     expect(compact).toContain(
-      'Murph asked once for a missing reason a desired change matters; that reason is known from the user\'s own words or is explicitly unknown or declined.',
+      'For each change thread, Murph asked once for each missing progress signal and reason; both are known from the user\'s own words or explicitly unknown or declined.',
+    )
+    expect(compact).toContain(
+      'Before claiming the thread is saved, Murph durably associated both fields with the named goal or goals and read back the Goal and Context owners under the persistence rule above.',
+    )
+    expect(compact).not.toContain(
+      'Murph asked once for a missing reason a desired change matters',
     )
     expect(compact).toContain(
       'Murph returned to an open thread with the relevant new context',

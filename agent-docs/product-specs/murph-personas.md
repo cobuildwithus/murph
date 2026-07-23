@@ -1,6 +1,6 @@
 # Murph Personas
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 Status: Implemented contract
 
 ## Product decision
@@ -60,9 +60,10 @@ The onboarding picker preserves the current four-step design:
 `/home?initialVisit=true` consumes the query marker as a one-shot browser
 handoff. Members with a resolved text contact see the contact-card picker first;
 adding the card, skipping, or dismissing it advances to the personality picker.
-Members without a text contact start directly at the personality picker. There
-is no trailing welcome dialog on this route. Skipping or dismissing the
-personality picker closes it without writing preferences.
+Members without a text contact start directly at the personality picker. A
+successful final save advances to the Welcome to Murph dialog with the current
+messaging action. Skipping or dismissing the personality picker closes it
+without writing preferences or showing that final dialog.
 
 ## Existing members and legacy reads
 

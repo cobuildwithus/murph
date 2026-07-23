@@ -151,7 +151,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 - **Headline** (Fraunces, 600, 2rem, leading 1.15, tracking -0.02em): section titles inside a surface (Protocol, Your Results, Conclusions).
 - **Stat** (Fraunces, 600, 2rem+, leading 1, tracking -0.02em): the large numbers on signal cards — HRV up 12%, sleep +38min. Data as poetry.
 - **Body** (DM Sans, 400, 14–16px, leading 1.55): running prose. Cap body columns at 65–75ch.
-- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 7d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
+- **Label** (DM Mono, 500, 9–11px, letter-spacing 0.10–0.12em, uppercase): phase names (BASELINE · 14d), units (MS, BPM, %), card-header kickers ("CURRENT PHASE"), timeline event types.
 
 ### Named Rules
 
@@ -177,7 +177,7 @@ Every component lives on cream paper, wears warm hairline borders, and speaks in
 
 ### Buttons
 - **Shape:** rounded-2xl (20px) for primary CTA; rounded-lg (12px) for secondary.
-- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("7-day baseline · 14-day protocol").
+- **Primary:** sage dark (`#5a6e32`) background, white text, 14px 24px padding, body-sans 500 weight. Used for "Start Experiment" and equivalent forward actions. Optional subtitle below in DM Mono ("14-day baseline · 14-day protocol").
 - **Secondary:** slate (`#2d3436`) background, white text, 10px 18px padding. Used for header actions and neutral affordances.
 - **Ghost / text:** slate text, no background, underline on hover. For low-priority links.
 - **Hover / Focus:** primary shifts from sage-dark to sage. Focus ring uses `--ring` (`#7a8c6e`) at 2px offset 2px.
@@ -223,12 +223,12 @@ Keep the complete result ledger below the chart, including the date, exact
 reported value, source reference range, and lab/source label. Comparator,
 qualitative, and incompatible-unit context stays explicit near the chart or in
 the ledger. When the latest comparable result has an unqualified normalized lab
-range, place one quiet `Latest lab range` legend above its shaded two-sided band
-or dashed one-sided limit. Clip that overlay to the data-focused vertical scale
-rather than flattening the historical trend to fit a wide range, and label it as
-latest so it does not imply that older labs shared the same range. Qualified
-ranges remain ledger-only. Simplifying the hierarchy must not imply that
-excluded values were plotted. The loading skeleton mirrors the same
+range, place one quiet `Latest lab range` legend above dashed boundary rules for
+its two-sided band or one-sided limit. Clip those rules to the data-focused
+vertical scale rather than flattening the historical trend to fit a wide range,
+and label it as latest so it does not imply that older labs shared the same
+range. Qualified ranges remain ledger-only. Simplifying the hierarchy must not
+imply that excluded values were plotted. The loading skeleton mirrors the same
 latest-result, chart, and ledger structure rather than substituting a generic
 card grid.
 
@@ -257,7 +257,7 @@ For long lists of recommendations (e.g. experiments-that-may-move-this-biomarker
 The shape compresses gracefully: before `md:` only title + fit label stay; at `md:` the full grid expands. This is the standard answer to "we have 14+ items to show on one page" — an identical card grid is the lazy alternative and is banned.
 
 ### Progress Bar (Experiment Phases)
-Three phases: **Baseline · 7d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
+Three phases: **Baseline · 14d ✓ → Active · Day X of Y → Analysis**. DM Mono labels, sage-green fill over sand track, active phase bold. One row, full width of the surface.
 
 ### Next Step Card (Active State)
 Sage-green 3px left accent bar + session title (Headline) + when/context (Body) + "Next session: Friday" right-aligned (DM Mono). Only visible while experiment is active.
@@ -325,13 +325,29 @@ phrase, and an optional mono metadata line. Product-specific inline artwork can
 sit behind the content when one quiet, familiar visual cue replaces explanatory
 copy; keep it flat, `aria-hidden`, and subordinate to the text. Selected cards
 normally use the sage selection tint and warm border, but a quiet accent drawn
-from product-specific artwork can carry through the border, tint, and radio.
+from product-specific artwork can carry through the border, tint, and selection
+check. Keep the semantic radio visually hidden and place the visible check at
+the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
+
+### Group Usage Funding
+Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
+credit. Lead with the group name, one concise sentence explaining that the
+credit belongs to the group, and one primary action. Do not add a decorative
+status badge; retain `Open Murph` as the quiet secondary action.
+
+Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
+large choice cards, then one primary `Continue to checkout` action and a plain
+cancel action. The title and one short support sentence carry the explanation;
+do not repeat plan mechanics or payment detail across multiple paragraphs.
+Stack amount cards and actions on narrow screens, preserve visible focus and
+selection states, and render the production components on both the Components
+and Sections tabs of `/design` for review.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
@@ -402,7 +418,7 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 
 ### Don't:
 - **Don't** use ring charts, gamification, or "great job!" messages — these are the generic-health-app tell Murph explicitly rejects.
-- **Don't** use gray boxes, corporate tables, or hero-metric templates — these are the SaaS-dashboard cliché.
+- **Don't** use gray boxes, gray-gridded corporate data tables, or hero-metric templates — these are the SaaS-dashboard cliché. A warm, purposeful comparison IS allowed when it genuinely clarifies a choice (e.g. Murph vs a general chatbot): keep it on cream/sand paper surfaces, use serif + mono type with hairline `#c4a882` dividers instead of a gray grid, and let one side carry the sage affirmative treatment.
 - **Don't** use blue, teal, purple, or neon as UI accent color. Sage is the only affirmative accent.
 - **Don't** use `#000`, `#fff`, or untinted gray. Every neutral is tinted warm.
 - **Don't** cast drop shadows on cards. Flat-paper rule.

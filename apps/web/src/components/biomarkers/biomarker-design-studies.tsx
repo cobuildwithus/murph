@@ -9,6 +9,7 @@ import {
   type LabBiomarkerChartPoint,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { BiomarkerIcon } from "@/src/components/biomarkers/biomarker-icon";
+import { BiomarkerIndexPlaceholder } from "@/src/components/biomarkers/biomarker-index-placeholder";
 import { Input } from "@/src/components/ui/input";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -37,6 +38,32 @@ const HEMOGLOBIN_HISTORY: readonly LabBiomarkerChartPoint[] = [
   { date: "2025-02-19", displayValue: "17.2", id: "synthetic-hgb-2025", value: 17.2 },
   { date: "2026-02-17", displayValue: "18.0", id: "synthetic-hgb-2026", value: 18 },
 ] as const;
+
+export function BiomarkerPreparingStateStudy() {
+  return (
+    <article
+      aria-labelledby="biomarker-preparing-study-heading"
+      className="min-w-0"
+      data-design-study="biomarker-preparing"
+    >
+      <header className="border-y border-border/70 px-5 py-8 sm:px-8 sm:py-10">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Synthetic interface study / Updating
+        </p>
+        <h3
+          className="mt-3 font-serif text-4xl font-semibold tracking-tight text-foreground sm:text-5xl"
+          id="biomarker-preparing-study-heading"
+        >
+          Biomarkers
+        </h3>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
+          An in-between state for a member who has already added health data and is waiting for their biomarkers to finish updating.
+        </p>
+      </header>
+      <BiomarkerIndexPlaceholder headingAs="h4" variant="preparing" />
+    </article>
+  );
+}
 
 export function BiomarkerIndexStudy() {
   const [filter, setFilter] = useState<BiomarkerStudyFilter>("all");
@@ -108,7 +135,7 @@ export function BiomarkerIndexStudy() {
       </header>
 
       <section aria-labelledby="device-study-heading" className="border-y border-border/70">
-        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 px-5 py-4 sm:px-8">
+        <div className="flex items-baseline justify-between gap-4 border-b border-border/70 py-4">
           <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground" id="device-study-heading">
             From your devices
           </h4>
@@ -365,21 +392,6 @@ export function BiomarkerDetailStudy() {
           <time className="mt-4 block text-sm text-muted-foreground" dateTime="2026-02-17">
             Feb 17, 2026
           </time>
-
-          <dl className="mt-8 border-t border-border/70 pt-5 text-sm">
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Lab range</dt>
-              <dd className="font-medium text-foreground">13.0 to 17.0 g/dL</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">Source</dt>
-              <dd className="font-medium text-foreground">Example laboratory</dd>
-            </div>
-            <div className="grid grid-cols-[7rem_1fr] gap-3 py-1.5">
-              <dt className="text-muted-foreground">History</dt>
-              <dd className="font-medium text-foreground">4 comparable results</dd>
-            </div>
-          </dl>
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
@@ -392,6 +404,7 @@ export function BiomarkerDetailStudy() {
               points={HEMOGLOBIN_HISTORY}
               referenceRange={{ high: 17, low: 13 }}
               referenceRangeLabel="13.0 to 17.0 g/dL"
+              referenceRangeSourceLabel="Example laboratory"
               unit="g/dL"
             />
           </div>

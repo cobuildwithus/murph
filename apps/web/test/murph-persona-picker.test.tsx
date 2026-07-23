@@ -227,7 +227,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
         ?? [],
     );
     assert.equal(mainRadios.length, 6);
-    assertCardFocusRingsStayInside(mainRadios);
+    assertCardFocusUsesSingleBorder(mainRadios);
     assert.equal(mainRadios.filter((radio) => radio.checked).length, 1);
     assert.equal(new Set(mainRadios.map((radio) => radio.name)).size, 1);
     assert.match(rendered.container.textContent ?? "", /Classic/u);
@@ -260,7 +260,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
         ?? [],
     );
     assert.equal(supportRadios.length, 6);
-    assertCardFocusRingsStayInside(supportRadios);
+    assertCardFocusUsesSingleBorder(supportRadios);
     assert.equal(supportRadios.filter((radio) => radio.checked).length, 1);
     assert.equal(new Set(supportRadios.map((radio) => radio.name)).size, 1);
     assert.notEqual(mainRadios[0]?.name, supportRadios[0]?.name);
@@ -301,7 +301,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
       voiceFieldset?.querySelectorAll<HTMLInputElement>("input[type='radio']") ?? [],
     );
     assert.equal(voiceRadios.length, 22);
-    assertCardFocusRingsStayInside(voiceRadios);
+    assertCardFocusUsesSingleBorder(voiceRadios);
     assert.equal(voiceRadios.filter((radio) => radio.checked).length, 1);
     assert.equal(
       voiceRadios.find((radio) => radio.checked)?.value,
@@ -330,7 +330,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
         ?? [],
     );
     assert.equal(toneRadios.length, 2);
-    assertCardFocusRingsStayInside(toneRadios);
+    assertCardFocusUsesSingleBorder(toneRadios);
     assert.equal(
       toneRadios.find((radio) => radio.checked)?.value,
       "formal",
@@ -343,7 +343,7 @@ test("MurphPersonaPicker chooses a main personality and an optional supporting p
   }
 });
 
-test("MurphPersonaPicker constrains its desktop dialog before interaction", async () => {
+test("MurphPersonaPicker constrains its desktop dialog and left-aligns the subtitle", async () => {
   const { MurphPersonaPicker } = await import(
     "@/src/components/murph/murph-persona-picker"
   );
@@ -362,13 +362,19 @@ test("MurphPersonaPicker constrains its desktop dialog before interaction", asyn
     const step = rendered.container.querySelector<HTMLElement>(
       "[data-persona-picker-step='main']",
     );
+    const stepTitle = rendered.container.querySelector<HTMLElement>(
+      "[data-persona-picker-step-title]",
+    );
+    const description = stepTitle?.parentElement?.querySelector("p");
     assert.ok(dialog);
     assert.ok(step);
+    assert.ok(description);
     assert.equal(dialog.style.width, "52rem");
     assert.equal(dialog.style.maxWidth, "calc(100vw - 2rem)");
     assert.match(dialog.className, /min-w-0/u);
     assert.match(step.className, /min-w-0/u);
     assert.match(step.className, /overflow-x-hidden/u);
+    assert.match(description.className, /text-left/u);
   } finally {
     await rendered.cleanup();
   }
@@ -536,17 +542,19 @@ test("MurphPersonaPicker retains choices after an error and retries them", async
   }
 });
 
-function assertCardFocusRingsStayInside(
+function assertCardFocusUsesSingleBorder(
   radios: readonly HTMLInputElement[],
 ): void {
   for (const radio of radios) {
+    const card = radio.parentElement;
     const label = radio.ownerDocument.querySelector(
       `label[for='${radio.id}']`,
     );
-    assert.match(label?.className ?? "", /peer-focus-visible:ring-inset/u);
+    assert.match(card?.className ?? "", /has-\[:focus-visible\]:border-primary/u);
+    assert.match(card?.className ?? "", /has-\[:focus-visible\]:border-2/u);
     assert.doesNotMatch(
       label?.className ?? "",
-      /peer-focus-visible:ring-offset/u,
+      /peer-focus-visible:(?:outline|ring)/u,
     );
   }
 }

@@ -103,6 +103,7 @@ test("keeps a completed run and its context visible instead of applying the acti
     statusLabel: "Completed",
     startedOn: "2026-06-01",
     tags: [],
+    timingKnown: true,
     title: protocol.title,
     signals: [],
     trends: [],

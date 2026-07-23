@@ -2,16 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import {
   HostedUsageTopUpDialog,
   type HostedUsageTopUpOffer,
   type HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
-import { Badge } from "@/src/components/ui/badge";
 import { Button } from "@/src/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
@@ -86,7 +85,11 @@ export default async function GroupFundingPage({
       }),
       member
         ? readHostedActiveUsageCreditPurchaseForPayer({
-            beneficiaryMemberId: target.runtimeMemberId,
+            serverApprovedPayableTargets: [{
+              beneficiaryMemberId: target.runtimeMemberId,
+              groupJoinCode: target.joinCode,
+              kind: "group",
+            }],
             payerMemberId: member.id,
             prisma,
           }).catch(() => null)
@@ -103,7 +106,21 @@ export default async function GroupFundingPage({
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
   }
-  const offers = member && !member.suspendedAt
+  const activePurchaseMatchesTarget =
+    activePurchase?.target.kind === "group" &&
+    activePurchase.target.beneficiaryMemberId === target.runtimeMemberId &&
+    activePurchase.target.groupJoinCode === target.joinCode;
+  const visibleActivePurchase = activePurchase
+    ? activePurchaseMatchesTarget
+      ? activePurchase
+      : {
+          ...activePurchase,
+          retryAllowed: false,
+          targetConflict: true as const,
+          url: undefined,
+        }
+    : null;
+  const offers = member && !member.suspendedAt && !activePurchase
     ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodes())
     : [];
   const purchaseReturn = purchaseReturnMatchesTarget
@@ -111,29 +128,13 @@ export default async function GroupFundingPage({
     : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center px-6 py-16">
-      <Card>
-        <CardHeader>
-          <Badge variant="secondary" className="w-fit">
-            {readCapacityLabel(usageStatus.capacityState)}
-          </Badge>
-          <h1 className="font-serif text-3xl font-medium leading-snug">
-            Add usage to {groupName}
-          </h1>
-          <CardDescription className="text-pretty leading-relaxed">
-            Choose a one-time usage-credit amount for this group. Stripe confirms the payment before Murph adds it.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm leading-6 text-muted-foreground">
-            The credit belongs to the group and is used only after its included usage. It does not change anyone&apos;s personal plan.
-          </p>
-        </CardContent>
-        <CardFooter className="flex-col items-stretch gap-2">
-          {member ? (
-            offers.length > 0 || activePurchase ? (
+    <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col justify-center px-5 py-12 sm:px-6 sm:py-16">
+      <GroupUsageFundingCard
+        action={
+          member ? (
+            offers.length > 0 || visibleActivePurchase ? (
               <HostedUsageTopUpDialog
-                activePurchase={activePurchase}
+                activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 offers={offers}
                 purchaseReturn={purchaseReturn}
@@ -146,12 +147,10 @@ export default async function GroupFundingPage({
             )
           ) : (
             <GroupFundingSignInButton />
-          )}
-          <Button render={<Link href="/home" />} nativeButton={false} variant="ghost">
-            Open Murph
-          </Button>
-        </CardFooter>
-      </Card>
+          )
+        }
+        groupName={groupName}
+      />
     </main>
   );
 }
@@ -176,21 +175,6 @@ function GroupFundingUnavailable() {
       </Card>
     </main>
   );
-}
-
-function readCapacityLabel(
-  capacityState: "exhausted" | "healthy" | "low" | null,
-): string {
-  switch (capacityState) {
-    case "healthy":
-      return "Usage available";
-    case "low":
-      return "Usage running low";
-    case "exhausted":
-      return "Usage paused";
-    default:
-      return "Group usage";
-  }
 }
 
 function readUsageTopUpPurchaseReturn(

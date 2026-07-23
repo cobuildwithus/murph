@@ -71,7 +71,7 @@ attribution:
   ownerType: murph
   note: Drafted from the High Protein Intake research package and canonical source ledger.
 protocol:
-  doseSignature: daily · 1.5–2.0 g/kg/day protein floor · food-first, supplement-assisted only as needed · 7–14 day baseline + 8-week intervention
+  doseSignature: daily · 1.5–2.0 g/kg/day protein floor · food-first, supplement-assisted only as needed · 14-day baseline + 8-week intervention
   target: Reach a declared 1.5–2.0 g/kg/day target using a declared denominator. Default to 1.5–1.6; use 1.8–2.0 only with a negative screen, suitable denominator, fiber/diet plan, and documented or clinician-guided rationale. Do not exceed 2.0.
   frequency:
     sessionsPerWeek: 7
@@ -83,7 +83,7 @@ protocol:
     - "Use adjusted/goal/clinician weight when actual body weight creates an unrealistic target."
     - "Choose 1.5–1.6 g/kg/day by default; reserve 1.8–2.0 for negative safety screen and documented rationale."
     - "Calculate daily grams: chosen body weight in kg × selected g/kg/day target."
-    - "Baseline 7–14 days: log usual protein, weight, satiety, GI comfort, fiber, training, and goal."
+    - "Baseline 14 days: log usual protein, weight, satiety, GI comfort, fiber, training, and goal."
     - "Build a food-first meal plan; use powders, bars, or shakes only to fill logged gaps, never above 2.0 g/kg/day."
     - "Log protein grams, g/kg, energy if available, fiber, saturated fat, source mix, satiety, GI comfort, and training changes."
     - "Review first 2 weeks; lower or pause if target crowds out fiber, worsens GI symptoms, or feels unsustainable."

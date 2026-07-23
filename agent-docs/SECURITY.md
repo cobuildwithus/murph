@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Non-Negotiable Rules
 
@@ -42,20 +42,37 @@ Last verified: 2026-07-21
 - Group newsletter setup is valid only from a verified non-direct iMessage or Telegram group route. The structured setup action owns the stable slug, canonical configuration, and exactly one system delivery tag; ordinary model-authored automation writes cannot claim those tags. The ordinary dynamic-tool planner exposes the newsletter email port only when the trusted runtime supplies scheduled email occurrence authority, so a current-chat newsletter receives no email capability. For group-email preparation, the signed callback member resolves the unique hosted group; any legacy request `groupId` is compatibility-only, ignored, and never authority.
 - A scheduled non-direct Telegram target is routing data, not authority. Before group tools, shared-data reads, or model work, the runner must ask the signed Web route owner to bind the exact Telegram thread to the callback-authenticated synthetic container member. Persist that exact typed authority on the ordinary outbox, then reassert it immediately before Telegram text, image, reaction, or voice provider entry. A missing owner/effect is retryable, a changed or mismatched owner fails closed, and neither a stored automation target nor a runner-injected provider credential may substitute for the live route assertion. Ordinary current-inbound group replies remain authorized by their admitted route and do not require manufactured scheduled authority.
 - Before adding a new external API, auth surface, wallet surface, storage authority, webhook, or runtime ingress path, document the trust boundary in `ARCHITECTURE.md` and the concrete rules here.
-- Personal usage-credit Checkout is an authenticated Settings payment boundary,
-  not an assistant or browser-selected billing primitive. The route must enforce
-  the normal app-session and same-origin/CSRF protections, derive payer and
-  beneficiary as the same direct personal member, recheck active paid Pulse or
-  Edge access, and resolve the fixed $5/$10/$25 offer and reusable Price from
-  server configuration. Before Checkout creation, the service must re-fetch
+- Usage-credit Checkout is an authenticated payment boundary, not an assistant
+  or browser-selected billing primitive. Settings routes must enforce the
+  normal app-session and same-origin/CSRF protections. Personal checkout binds
+  payer and beneficiary to the same active direct paid Pulse or Edge member.
+  Family checkout binds payer to the active Family owner, rechecks the selected
+  active unsuspended direct member in that owner's active group, and resolves
+  the Customer only from the group's active billing reference. The fixed
+  $5/$10/$25 offer and reusable Price come from server configuration. Before
+  Checkout creation, the service must re-fetch
   that Price and fail closed unless its mode, active state, one-time per-unit
   shape, single currency, and exact amount match the frozen purchase; Adaptive
   Pricing stays disabled. The browser may submit only the offer code and a
   single-use request key; it must never choose an amount, Price, Customer,
-  payer, beneficiary, grant, or Checkout URL. Trial, Family-sponsored,
-  suspended, thread-container, missing-billing, and malformed states fail
-  closed. The schema separates payer from beneficiary for later composition,
-  but group funding and group checkout authorization are not implemented.
+  payer, beneficiary, group, Customer, grant, or Checkout URL. Trial,
+  unauthorized Family-sponsored, suspended, thread-container, missing-billing,
+  and malformed states fail closed. Personal, hosted-group, and Family targets
+  remain distinct even when payer and beneficiary ids coincide. Mutable Family
+  membership gates every payable request. Exact request-key replay identifies
+  the immutable purchase, but a Family replay rechecks current authority before
+  releasing payment capability. Family creation rechecks that same exact target
+  after Stripe returns and before decrypting a Checkout URL or projecting retry
+  permission, so membership removal during provider I/O degrades to
+  status/cancel-only recovery; fulfillment remains bound to the frozen purchase.
+  Family admission first binds the
+  opaque selector to the owner's roster before locking the beneficiary. A
+  payer-wide conflict with another frozen target may be inspected or canceled
+  but must never return a payable URL or retry permission, regardless of the
+  requested or frozen target kind. Active-purchase projection releases a
+  payable URL or retry permission only for an exact server-approved target.
+  Former Family beneficiaries are always status/cancel-only; historical labels
+  and contact hints are display data, not payment authority.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session state must never grant credit. The verified Stripe
   receipt owner must re-fetch and bind the live one-time Session, line item,
@@ -254,8 +271,10 @@ Last verified: 2026-07-21
 - Hosted generated voice memos are Worker-mediated ElevenLabs plus channel-native delivery effects. Store only bounded transcript/config metadata plus Linq attachment references or Telegram delivery-time generation references in assistant runtime/outbox records; never write generated audio bytes, ElevenLabs request text beyond the intended transcript field, provider secrets, presigned upload headers, or Telegram multipart audio bodies into logs, docs, fixtures, or user-facing output.
 - Hosted snapshot path diagnostics may use a Worker-derived HMAC key from `HOSTED_LOG_FINGERPRINT_SECRET`, passed only through the runner job diagnostics object for metadata-only path hashes. The container CPU watchdog may log Linux `comm` process names after the shared structured-log text redactor. It must not log command lines, argv, file paths, prompts, request bodies, transcripts, vault contents, or a Worker fingerprint secret. Do not put the raw Worker fingerprint secret or raw `HOSTED_LOG_FINGERPRINT_SECRET` env key in forwarded env, platform env, user env, hosted runtime env, logs, container env, or persisted artifacts.
 - The container fatal-report sink (`runner-control.worker/v1/container-fatal`, handled in `apps/cloudflare/src/runner-egress-intercept.ts`) is deliberately reachable without a bound user or write fence: the unattributable container deaths it exists to record happen outside any invocation, when neither exists. Its only effect is a sanitized, size-capped, per-isolate rate-limited worker log line; it must never forward to the Durable Object, never inject credentials, and never persist beyond worker logs. Any code running in a hosted container can post to it, so treat its log lines as container-asserted diagnostics (correlate with DO lifecycle stop events), not authenticated facts.
+- Crabbox verification on Blacksmith is a secret-free trust boundary, not a deployment lane. Its workflow must retain read-only repository contents permission, no GitHub Environment, no OIDC permission, no Actions-secret references, and pinned actions. The local dispatcher must rebuild the Crabbox CLI environment from non-secret host/config paths instead of passing through the parent environment, use that exact scrubbed environment for every Git sync-guard subprocess, and pin the Blacksmith organization, default-branch ref, workflow, and job before each fresh canonical Testbox is created instead of trusting mutable local profile/config values or an arbitrary reusable lease. Before candidate sync can execute repository code, the default-branch workflow must install the trusted verification shell as a root-owned file outside the workspace; canonical delegation invokes that absolute path, which validates the two allowed commands and directly `exec`s the candidate verifier through `env -i` with an isolated temporary home and a one-bit trusted-entry marker. The candidate verifier must fail closed without that marker and then rebuild its own deterministic test-only environment. A change to the workflow or trusted entrypoint cannot use the not-yet-landed trust root for proof: verify it locally, land it through the protected workflow-change path, then run a post-landing remote proof. Never treat these controls as a sandbox for a compromised local account; any process that can already read a production secret and make arbitrary network calls can exfiltrate it without Crabbox.
+- GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
-- The Render Temporal worker deploy hook must stay in GitHub Actions as the `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` secret, never in repo files or logs. The post-CI deploy workflow may call that hook only for the current `main` commit after required push CI workflows pass, and it must append the exact commit `ref` instead of relying on ambient latest-branch state.
+- The Render Temporal worker deploy hook must stay in the protected GitHub production environment as the `RENDER_TEMPORAL_WORKER_DEPLOY_HOOK` secret, never at repository scope or in repo files/logs. The post-CI deploy job must attach that environment and may call the hook only for the current `main` commit after required push CI workflows pass; it must append the exact commit `ref` instead of relying on ambient latest-branch state.
 - Resend-backed hosted signup welcome email must keep `RESEND_API_KEY` and sender identity in environment variables only, send a plain-text-only body, claim the durable per-member welcome-attempt marker before the provider call, keep the stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata such as status/code. The optional internal signup notification must also keep recipients in environment variables only, use a plain-text-only body, claim its own durable per-member attempt marker before the provider call, keep a separate stable per-member Resend idempotency key as provider replay defense only, and log only sanitized provider metadata. Resend-backed subscription cancellation feedback email must use the same env-only API key/sender configuration, send plain text only, rely on the existing Stripe event receipt for retry ownership until completion, store a receipt-local sent marker only after provider success so later receipt retries do not resend, use a subscription-scoped Resend idempotency key as provider replay defense, and log only sanitized provider metadata. A Stripe-collected checkout email may be stored only as an encrypted unverified email hint plus transactional welcome and cancellation-feedback recipient; do not use it for hosted account lookup, direct-public sender authorization, direct-public start instructions, or email-linked channel state until Privy verifies it. Later successful Stripe payments must not re-run activation welcome side effects.
 - Assistant runtime state is high-sensitivity local runtime data: directories under `vault/.runtime/operations/assistant/**` must be `0700`, files under that tree must be `0600`, secret-bearing provider headers must never remain inline in persisted session JSON, and operator-facing repair flows should use `assistant doctor --repair` to tighten assistant runtime permissions in place. Inline secret findings indicate stale local session data that should be rebuilt or repaired manually rather than a supported migration lane.
 - Vault-file refs remain normalized and non-hidden except for one flat assistant-owned shape: `.runtime/operations/assistant/generated-deliveries/<filename>`. Initial preparation may accept that exact ref only after the reader-compatible runner has converged, and both initial and retry paths must adopt/revalidate its regular bounded file before revalidating filename, media type, byte size, and SHA-256. Adoption tightens assistant-runtime parents to `0700` and the exact file to `0600`; ordinary vault refs are not chmodded. Prefix siblings, nested paths, hidden filenames, control characters, snapshot-excluded temp/lock names, symlinks, special files, and every other hidden ref fail closed. Never infer ownership or deletion authority from `exports/assistant-deliveries/**` or another generic vault path.

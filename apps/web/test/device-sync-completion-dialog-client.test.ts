@@ -30,6 +30,7 @@ vi.mock("next/link", () => ({
 vi.mock("@/src/components/ui/button", () => ({
   Button: ({
     children,
+    className,
     size,
     variant,
     ...props
@@ -39,10 +40,20 @@ vi.mock("@/src/components/ui/button", () => ({
     variant?: string;
   }) => {
     void size;
-    void variant;
-    return createElement("button", props, children);
+    return createElement("button", {
+      ...props,
+      className: [className, variant ? `variant-${variant}` : null]
+        .filter(Boolean)
+        .join(" "),
+    }, children);
   },
-  buttonVariants: ({ className }: { className?: string } = {}) => className ?? "",
+  buttonVariants: ({
+    className,
+    variant,
+  }: {
+    className?: string;
+    variant?: string;
+  } = {}) => [className, variant ? `variant-${variant}` : null].filter(Boolean).join(" "),
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
@@ -113,6 +124,14 @@ test("DeviceSyncCompletionDialog refreshes an unverified completion once before 
 
 test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary view", async () => {
   const model = buildCompletionDialogModel({
+    contactAction: {
+      ariaLabel: "Text Murph in Telegram",
+      href: "https://t.me/example_bot?text=whoop",
+      kind: "telegram",
+      label: "Text Murph",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
     detail:
       "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
     setupGuide: {
@@ -120,9 +139,9 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
       actionLabel: "Get full sync",
       detail: "Two quick steps and Murph sees everything WHOOP tracks.",
       downloadAction: {
-        ariaLabel: "Download Murph to sync WHOOP through Apple Health",
+        ariaLabel: "Download App to sync WHOOP through Apple Health",
         href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
-        label: "Download Murph",
+        label: "Download App",
         rel: "noopener noreferrer",
         target: "_blank",
       },
@@ -164,7 +183,24 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.innerHTML).toContain(
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
-  expect(render.container.innerHTML).toContain("Continue exploring");
+  const downloadLink = render.container.querySelector(
+    'a[href="https://apps.apple.com/us/app/murph-ai/id6786145859"]',
+  );
+  expect(downloadLink?.textContent).toContain("Download App");
+  expect(downloadLink?.getAttribute("aria-label")?.startsWith("Download App")).toBe(true);
+  expect(render.container.textContent).toContain("Download App");
+  const continueLink = render.container.querySelector(
+    'a[aria-label="Continue with Murph in Telegram (opens in a new tab)"]',
+  );
+  expect(continueLink).not.toBeNull();
+  expect(continueLink?.classList.contains("variant-outline")).toBe(true);
+  expect(continueLink?.getAttribute("href")).toBe(
+    "https://t.me/example_bot?text=whoop",
+  );
+  expect(continueLink?.getAttribute("rel")).toBe("noopener noreferrer");
+  expect(continueLink?.getAttribute("target")).toBe("_blank");
+  expect(continueLink?.textContent).toContain("Continue with Murph");
+  expect(render.container.innerHTML).not.toContain("Continue exploring");
   expect(
     render.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
   ).not.toBeNull();
@@ -172,7 +208,82 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
     render.container.querySelector("button[aria-label='Play voice memo']"),
   ).not.toBeNull();
 
+  continueLink?.addEventListener("click", (event) => event.preventDefault());
+  await act(async () => {
+    continueLink?.dispatchEvent(new render.window.Event("click", {
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  expect(render.container.querySelector('[data-dialog="open"]')).toBeNull();
+
   await render.cleanup();
+
+  const messagesRender = await renderDeviceSyncCompletionDialog({
+    ...model,
+    contactAction: {
+      href: "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
+      kind: "imessage",
+      label: "Text Murph",
+    },
+  });
+  await act(async () => {});
+  const messagesGuideButton = messagesRender.container.querySelector(
+    'button[aria-label="See how to sync all of your WHOOP data"]',
+  );
+  await act(async () => {
+    messagesGuideButton?.dispatchEvent(
+      new messagesRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  const messagesLink = messagesRender.container.querySelector(
+    'a[aria-label="Continue with Murph in Messages"]',
+  );
+  expect(messagesLink).not.toBeNull();
+  expect(messagesLink?.classList.contains("variant-outline")).toBe(true);
+  expect(messagesLink?.getAttribute("href")).toBe(
+    "sms:+15550100002?body=I%20just%20connected%20my%20WHOOP",
+  );
+  expect(messagesLink?.getAttribute("rel")).toBeNull();
+  expect(messagesLink?.getAttribute("target")).toBeNull();
+  messagesLink?.addEventListener("click", (event) => event.preventDefault());
+  await act(async () => {
+    messagesLink?.dispatchEvent(new messagesRender.window.Event("click", {
+      bubbles: true,
+      cancelable: true,
+    }));
+  });
+  expect(messagesRender.container.querySelector('[data-dialog="open"]')).toBeNull();
+  await messagesRender.cleanup();
+
+  const noContactRender = await renderDeviceSyncCompletionDialog({
+    ...model,
+    contactAction: null,
+  });
+  await act(async () => {});
+  const noContactGuideButton = noContactRender.container.querySelector(
+    'button[aria-label="See how to sync all of your WHOOP data"]',
+  );
+  await act(async () => {
+    noContactGuideButton?.dispatchEvent(
+      new noContactRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  const noContactButton = noContactRender.container.querySelector(
+    "button.variant-outline",
+  );
+  expect(noContactButton).not.toBeNull();
+  expect(noContactButton?.textContent).toContain("Continue with Murph");
+  expect(
+    noContactRender.container.querySelector('a[aria-label^="Continue with Murph in"]'),
+  ).toBeNull();
+  await act(async () => {
+    noContactButton?.dispatchEvent(
+      new noContactRender.window.Event("click", { bubbles: true }),
+    );
+  });
+  expect(noContactRender.container.querySelector('[data-dialog="open"]')).toBeNull();
+  await noContactRender.cleanup();
 });
 
 function buildCompletionDialogModel(

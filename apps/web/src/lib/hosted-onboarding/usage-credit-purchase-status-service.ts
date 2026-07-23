@@ -7,6 +7,7 @@ import {
 
 import { hostedLookupKeyMatchesValue } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
+import { resolveHostedFamilyUsageCreditCheckoutTargetTx } from "./family-plan";
 import { requireHostedStripeApiMode } from "./runtime";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -25,6 +26,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
+import { normalizeHostedGroupUsageJoinCode } from "../hosted-groups/group-usage-funding";
 import { getPrisma } from "../prisma";
 
 const HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS = 30 * 60 * 1_000;
@@ -62,8 +64,33 @@ export interface HostedActiveUsageCreditPurchaseProjection
   extends HostedUsageCreditPurchaseStatusResult {
   offerCode: HostedUsageCreditOfferCode;
   retryAllowed: boolean;
+  target: HostedUsageCreditPurchaseTargetProjection;
   url?: string;
 }
+
+export interface HostedUsageCreditCheckoutCapabilityProjection {
+  checkout: HostedUsageCreditCheckoutResult;
+  payerAuthorized: boolean;
+  retryAllowed: boolean;
+  target: HostedUsageCreditPurchaseTargetProjection;
+  targetAuthorized: boolean;
+}
+
+export type HostedUsageCreditPurchaseTargetProjection =
+  | {
+      beneficiaryMemberId: string;
+      kind: "personal";
+    }
+  | {
+      beneficiaryMemberId: string;
+      groupJoinCode: string;
+      kind: "group";
+    }
+  | {
+      beneficiaryMemberId: string;
+      familyGroupId: string;
+      kind: "family";
+    };
 
 export async function readHostedUsageCreditPurchaseStatus(input: {
   beneficiaryMemberId?: string;
@@ -94,14 +121,16 @@ export async function readHostedUsageCreditPurchaseStatus(input: {
     throw buildHostedUsageCreditPurchaseNotFoundError();
   }
 
-  return buildHostedUsageCreditPurchaseStatusResult(purchase);
+  return projectHostedUsageCreditPurchaseStatusResult(purchase);
 }
 
 export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   beneficiaryMemberId?: string;
   now?: Date;
+  // Omit this list to receive status/cancel data without a URL or retry action.
+  serverApprovedPayableTargets?: readonly HostedUsageCreditPurchaseTargetProjection[];
   payerMemberId: string;
-  prisma?: HostedOnboardingReadClient;
+  prisma?: PrismaClient;
 }): Promise<HostedActiveUsageCreditPurchaseProjection | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
@@ -144,20 +173,142 @@ export async function readHostedActiveUsageCreditPurchaseForPayer(input: {
   if (!purchase.payer) {
     throw buildHostedUsageCreditInvariantError("purchase_payer_missing");
   }
-  const checkout = purchase.payer.suspendedAt
-    ? buildHostedUsageCreditPurchaseStatusResult(purchase)
-    : await projectHostedUsageCreditCheckoutResult({
-        prisma,
-        purchase,
-      });
+  const targetApprovedByCaller =
+    input.serverApprovedPayableTargets?.some((payableTarget) =>
+      hostedUsageCreditPurchaseTargetsMatch(
+        projectHostedUsageCreditPurchaseTarget(purchase),
+        payableTarget,
+      )
+    ) === true;
+  const capability = await projectHostedUsageCreditCheckoutCapability({
+    now,
+    payerMemberId: input.payerMemberId,
+    prisma,
+    purchase,
+    targetApprovedByCaller,
+  });
 
   return {
-    ...checkout,
+    ...capability.checkout,
     offerCode,
-    retryAllowed:
-      purchase.payer.suspendedAt === null &&
-      canRetryHostedUsageCreditCheckoutCreate({ now, purchase }),
+    retryAllowed: capability.retryAllowed,
+    target: capability.target,
   };
+}
+
+export async function projectHostedUsageCreditCheckoutCapability(input: {
+  now: Date;
+  payerMemberId: string;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+  targetApprovedByCaller: boolean;
+}): Promise<HostedUsageCreditCheckoutCapabilityProjection> {
+  const target = projectHostedUsageCreditPurchaseTarget(input.purchase);
+  const authority = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.payerMemberId);
+    const payer = await tx.hostedMember.findUnique({
+      select: { suspendedAt: true },
+      where: { id: input.payerMemberId },
+    });
+    if (!payer || payer.suspendedAt) {
+      return { payerAuthorized: false, targetAuthorized: false };
+    }
+    if (target.kind !== "family") {
+      return { payerAuthorized: true, targetAuthorized: true };
+    }
+    const currentTarget = await resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: target.beneficiaryMemberId,
+      ownerMemberId: input.payerMemberId,
+      tx,
+    });
+    return {
+      payerAuthorized: true,
+      targetAuthorized: currentTarget?.groupId === target.familyGroupId,
+    };
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const mayExposePayableCapability =
+    input.targetApprovedByCaller &&
+    authority.payerAuthorized &&
+    authority.targetAuthorized;
+  const checkout = mayExposePayableCapability
+    ? await projectHostedUsageCreditCheckoutResult({
+        prisma: input.prisma,
+        purchase: input.purchase,
+      })
+    : projectHostedUsageCreditPurchaseStatusResult(input.purchase);
+
+  return {
+    checkout,
+    payerAuthorized: authority.payerAuthorized,
+    retryAllowed:
+      mayExposePayableCapability &&
+      canRetryHostedUsageCreditCheckoutCreate({
+        now: input.now,
+        purchase: input.purchase,
+      }),
+    target,
+    targetAuthorized:
+      input.targetApprovedByCaller && authority.targetAuthorized,
+  };
+}
+
+export async function readHostedUsageCreditPurchaseTargetForPayer(input: {
+  payerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+  purchaseId: string;
+}): Promise<HostedUsageCreditPurchaseTargetProjection> {
+  if (!HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN.test(input.purchaseId)) {
+    throw buildHostedUsageCreditPurchaseNotFoundError();
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const purchase = await prisma.hostedUsageCreditPurchase.findFirst({
+    select: {
+      beneficiaryMemberId: true,
+      checkoutSuccessUrl: true,
+      id: true,
+      payerMemberId: true,
+    },
+    where: {
+      id: input.purchaseId,
+      payerMemberId: input.payerMemberId,
+    },
+  });
+  if (!purchase) {
+    throw buildHostedUsageCreditPurchaseNotFoundError();
+  }
+  return projectHostedUsageCreditPurchaseTarget(purchase);
+}
+
+export function projectHostedUsageCreditPurchaseTarget(input: Pick<
+  HostedUsageCreditPurchase,
+  "beneficiaryMemberId" | "checkoutSuccessUrl" | "id" | "payerMemberId"
+>): HostedUsageCreditPurchaseTargetProjection {
+  const target = readHostedUsageCreditPurchaseTarget(input);
+  if (!target) {
+    throw buildHostedUsageCreditInvariantError("purchase_target_invalid");
+  }
+  return target;
+}
+
+function hostedUsageCreditPurchaseTargetsMatch(
+  left: HostedUsageCreditPurchaseTargetProjection,
+  right: HostedUsageCreditPurchaseTargetProjection,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    left.beneficiaryMemberId !== right.beneficiaryMemberId
+  ) {
+    return false;
+  }
+  if (left.kind === "personal" && right.kind === "personal") {
+    return true;
+  }
+  if (left.kind === "group" && right.kind === "group") {
+    return left.groupJoinCode === right.groupJoinCode;
+  }
+  return left.kind === "family" && right.kind === "family" &&
+    left.familyGroupId === right.familyGroupId;
 }
 
 export async function expireHostedUsageCreditCheckout(input: {
@@ -196,7 +347,7 @@ export async function expireHostedUsageCreditCheckout(input: {
     purchase.status === HostedUsageCreditPurchaseStatus.payment_failed ||
     purchase.status === HostedUsageCreditPurchaseStatus.created
   ) {
-    return buildHostedUsageCreditPurchaseStatusResult(purchase);
+    return projectHostedUsageCreditPurchaseStatusResult(purchase);
   }
 
   const sessionId = await decryptHostedUsageCreditPurchaseStripeField({
@@ -244,7 +395,7 @@ export async function expireHostedUsageCreditCheckout(input: {
       current.status === HostedUsageCreditPurchaseStatus.expired ||
       current.status === HostedUsageCreditPurchaseStatus.payment_failed
     ) {
-      return buildHostedUsageCreditPurchaseStatusResult(current);
+      return projectHostedUsageCreditPurchaseStatusResult(current);
     }
 
     const currentSessionId = await decryptHostedUsageCreditPurchaseStripeField({
@@ -294,7 +445,7 @@ export async function expireHostedUsageCreditCheckout(input: {
     if (!reconciled) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
-    return buildHostedUsageCreditPurchaseStatusResult(reconciled);
+    return projectHostedUsageCreditPurchaseStatusResult(reconciled);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
@@ -317,7 +468,7 @@ export async function projectHostedUsageCreditCheckoutResult(input: {
     status !== "checkout_open" ||
     !input.purchase.stripeCheckoutUrlEncrypted
   ) {
-    return buildHostedUsageCreditPurchaseStatusResult(input.purchase);
+    return projectHostedUsageCreditPurchaseStatusResult(input.purchase);
   }
 
   const url = await decryptHostedUsageCreditPurchaseStripeField({
@@ -353,7 +504,7 @@ function projectHostedUsageCreditPublicPurchaseStatus(input: Pick<
   }
 }
 
-function buildHostedUsageCreditPurchaseStatusResult(input: Pick<
+export function projectHostedUsageCreditPurchaseStatusResult(input: Pick<
   HostedUsageCreditPurchase,
   "checkoutExpiresAt" | "id" | "status"
 >): HostedUsageCreditPurchaseStatusResult {
@@ -395,4 +546,109 @@ export function buildHostedUsageCreditPurchaseNotFoundError() {
     httpStatus: 404,
     message: "That usage-credit purchase was not found.",
   });
+}
+
+function readHostedUsageCreditPurchaseTarget(input: Pick<
+  HostedUsageCreditPurchase,
+  "beneficiaryMemberId" | "checkoutSuccessUrl" | "id" | "payerMemberId"
+>): HostedUsageCreditPurchaseTargetProjection | null {
+  if (!input.payerMemberId) {
+    return null;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(input.checkoutSuccessUrl);
+  } catch {
+    return null;
+  }
+  if (
+    url.searchParams.get("usageCheckout") !== "success"
+    || url.searchParams.get("usagePurchase") !== input.id
+  ) {
+    return null;
+  }
+
+  const searchKeys = [...url.searchParams.keys()].sort();
+  if (
+    url.pathname === "/settings"
+    && url.hash === "#subscription"
+    && stringArraysEqual(searchKeys, ["usageCheckout", "usagePurchase"])
+    && input.beneficiaryMemberId === input.payerMemberId
+  ) {
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      kind: "personal",
+    };
+  }
+
+  const familyGroupId = url.searchParams.get("usageFamily");
+  const familyMemberId = url.searchParams.get("usageMember");
+  if (
+    url.pathname === "/settings"
+    && url.hash === "#family"
+    && stringArraysEqual(searchKeys, [
+      "usageCheckout",
+      "usageFamily",
+      "usageMember",
+      "usagePurchase",
+    ])
+    && isHostedOpaqueSelector(familyGroupId, "hbag_")
+    && familyMemberId === input.beneficiaryMemberId
+  ) {
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      familyGroupId,
+      kind: "family",
+    };
+  }
+
+  const groupPathPrefix = "/groups/fund/";
+  if (
+    url.pathname.startsWith(groupPathPrefix)
+    && url.hash === ""
+    && stringArraysEqual(searchKeys, ["usageCheckout", "usagePurchase"])
+  ) {
+    const encodedJoinCode = url.pathname.slice(groupPathPrefix.length);
+    if (!encodedJoinCode || encodedJoinCode.includes("/")) {
+      return null;
+    }
+    let decodedJoinCode: string;
+    try {
+      decodedJoinCode = decodeURIComponent(encodedJoinCode);
+    } catch {
+      return null;
+    }
+    const groupJoinCode = normalizeHostedGroupUsageJoinCode(decodedJoinCode);
+    if (!groupJoinCode) {
+      return null;
+    }
+    return {
+      beneficiaryMemberId: input.beneficiaryMemberId,
+      groupJoinCode,
+      kind: "group",
+    };
+  }
+
+  return null;
+}
+
+function isHostedOpaqueSelector(
+  value: string | null,
+  prefix: string,
+): value is string {
+  return Boolean(
+    value
+    && value.startsWith(prefix)
+    && value.length <= 200
+    && /^[A-Za-z0-9_-]+$/u.test(value),
+  );
+}
+
+function stringArraysEqual(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }

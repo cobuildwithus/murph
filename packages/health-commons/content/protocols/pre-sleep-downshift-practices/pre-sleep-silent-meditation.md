@@ -57,7 +57,7 @@ attribution:
   ownerType: murph
   note: Canonical Health Commons implementation synthesized from the pre-sleep silent meditation research package; not an external named protocol.
 protocol:
-  doseSignature: Nightly · 10 min · silent unguided breath/body awareness · last 30 min before intended bedtime · 14-night intervention after 7-day baseline
+  doseSignature: Nightly · 10 min · silent unguided breath/body awareness · last 30 min before intended bedtime · 14-night intervention after 14-day baseline
   target: pre-sleep cognitive arousal and perceived sleep-onset latency
   frequency:
     sessionsPerWeek: 7
@@ -96,7 +96,7 @@ protocol:
     - "Guided apps, CBT-I, sleep hygiene, breathwork, progressive muscle relaxation, yoga nidra, mindfulness courses, and commercial sleep programs are adjacent variants and should not be merged into this protocol’s efficacy claim."
     - "The cleanest read is repeated manual sleep-onset latency plus pre-bed wiredness or rumination; wearable sleep efficiency, HRV, resting heart rate, and sleep stages are supportive or exploratory."
     - "Persistent insomnia, suspected untreated sleep apnea, severe psychiatric symptoms, trauma activation, dissociation, mania/psychosis vulnerability, suicidal thoughts, or major functional impairment require clinician guidance rather than unsupervised experimentation."
-    - "The 10-minute dose, last-30-minute timing window, 7-night baseline, 14-night intervention, and 10-of-14 minimum adherence target are pragmatic self-experiment defaults, not an extracted optimal dose, timing, or minimum effective exposure."
+    - "The 10-minute dose, last-30-minute timing window, 14-night baseline, 14-night intervention, and 10-of-14 minimum adherence target are pragmatic self-experiment defaults, not an extracted optimal dose, timing, or minimum effective exposure."
   logFields:
     - meditation start time
     - meditation minutes
@@ -157,8 +157,8 @@ testPlans:
 
   -
     planId: sol-arousal-21d
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: biomarker:sleep-onset-latency
     secondaryBiomarkerKeys:
@@ -169,7 +169,7 @@ testPlans:
     minimumAdherenceSessions: 10
     targetAdherenceSessions: 12
     notes:
-      - Compare the 14-night intervention average with the 7-night baseline for manual perceived sleep-onset latency and pre-bed wiredness.
+      - Compare the 14-night intervention average with the 14-night baseline for manual perceived sleep-onset latency and pre-bed wiredness.
       - "Treat wearable sleep-onset latency, sleep efficiency, deep sleep, HRV, and resting heart rate as repeated-night context, not one-night proof."
       - "Keep other sleep interventions and major evening routines stable; flag caffeine, alcohol, late exercise, illness, travel, stress, and medication or supplement changes."
 expectedSignalDescriptions:
@@ -1118,7 +1118,7 @@ Silent Meditation Before Bed is a **brief, unguided, no-audio pre-sleep downshif
 
 ## How to run it
 
-Do a 7-night baseline first, then use 10 minutes of silent breath or body awareness on up to 14 intervention nights. Keep the practice simple: no guided audio, app lesson, breath pacing, music, supplement, CBT-I module, or added relaxation technique. Stop when the timer ends, log the key fields, and proceed with the normal bedtime routine.
+Do a 14-night baseline first, then use 10 minutes of silent breath or body awareness on up to 14 intervention nights. Keep the practice simple: no guided audio, app lesson, breath pacing, music, supplement, CBT-I module, or added relaxation technique. Stop when the timer ends, log the key fields, and proceed with the normal bedtime routine.
 
 ## What to measure
 

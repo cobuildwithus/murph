@@ -40,14 +40,14 @@ export function SourceCard({
   const unavailableMessage = !source.requiresReconnect && !requiresConnectionReset && !isAvailable
     ? source.unavailableMessage
     : undefined;
-  // Any of these branches renders a wide (max-w-[22rem]) message beside the
-  // source details. That message is too wide to share the base-breakpoint row,
-  // so the card stacks vertically on phone widths to keep the text from
-  // overlapping the description.
+  // These branches add message content beside the source details. Stack the
+  // card on phone widths so the message and action never squeeze the
+  // description into a narrow column.
   const showsSideMessage = requiresConnectionReset
     || source.requiresReconnect
     || historicalResetIncomplete
-    || Boolean(unavailableMessage);
+    || Boolean(unavailableMessage)
+    || Boolean(errorMessage);
 
   return (
     <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
@@ -69,7 +69,7 @@ export function SourceCard({
         className={
           showsSideMessage
             ? "flex flex-1 flex-col items-stretch gap-3 sm:gap-0"
-            : "flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"
+            : "flex flex-1 items-end gap-4 sm:flex-col sm:items-stretch sm:gap-0"
         }
       >
         <div className="min-w-0 flex-1 sm:mb-5 sm:flex-none">
@@ -82,26 +82,32 @@ export function SourceCard({
         </div>
 
         {source.connected && !source.requiresReconnect ? (
-          <div className="flex shrink-0 flex-col gap-2 sm:mt-auto sm:shrink">
+          <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
             {canDisconnect ? (
               <button
                 type="button"
                 aria-label={disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
-                className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+                className="relative self-end text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
                 {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
             ) : null}
-            {errorMessage ? (
-              <p role="alert" className="text-xs leading-snug text-destructive">
-                {errorMessage}
-              </p>
-            ) : null}
           </div>
         ) : (
-          <div className="flex shrink-0 flex-col items-start gap-2 sm:mt-auto sm:shrink">
+          <div
+            className={
+              showsSideMessage
+                ? "flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"
+                : "ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"
+            }
+          >
             {requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">
                 {connectionOfferEnabled
@@ -126,8 +132,14 @@ export function SourceCard({
                 {unavailableMessage}
               </p>
             ) : null}
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
             {source.unavailableActionUrl && source.unavailableActionLabel ? (
               <Button
+                className="self-end"
                 render={(
                   <a
                     href={source.unavailableActionUrl}
@@ -141,7 +153,10 @@ export function SourceCard({
                 {source.unavailableActionLabel}
               </Button>
             ) : !authenticated ? (
-              <AuthButton aria-label={`Sign in to connect ${source.name}`}>
+              <AuthButton
+                aria-label={`Sign in to connect ${source.name}`}
+                className="self-end"
+              >
                 Sign in
               </AuthButton>
             ) : unavailableMessage && source.unavailableActionLabel ? (
@@ -149,6 +164,7 @@ export function SourceCard({
                 type="button"
                 disabled
                 aria-label={`${source.name} web setup is not available yet`}
+                className="self-end"
               >
                 {source.unavailableActionLabel}
               </Button>
@@ -163,6 +179,7 @@ export function SourceCard({
                   ? `${actionLabel} ${source.name}`
                   : `${source.name} connection is not available yet`}
                 onClick={() => void onStartConnection(source)}
+                className="self-end"
               >
                 {pending ? "Opening..." : isAvailable ? actionLabel : "Not available"}
               </Button>
@@ -173,15 +190,10 @@ export function SourceCard({
                 aria-label={disconnectAriaLabel}
                 disabled={pendingDisconnect}
                 onClick={() => onDisconnectTargetChange(source)}
-                className="relative self-start text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+                className="relative self-end text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
               >
                 {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
               </button>
-            ) : null}
-            {errorMessage ? (
-              <p role="alert" className="text-xs leading-snug text-destructive">
-                {errorMessage}
-              </p>
             ) : null}
           </div>
         )}
