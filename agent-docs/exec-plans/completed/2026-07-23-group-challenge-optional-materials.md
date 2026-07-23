@@ -1,6 +1,6 @@
 # Group challenge optional materials
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -39,4 +39,6 @@ Updated: 2026-07-23
 - The preliminary prompt specialist found ambiguous "every time"/"once" wording and two missing assertions. The trigger wording now names kickoff and later opt-in without inventing an exactly-once durability contract, and the existing durable-material and close-out fallback contracts are asserted.
 - The final `pnpm test:diff ...` rerun again passed all affected typechecks and 2,603 assistant-engine tests before the same three clean-`main` assistant-runtime schema failures.
 - `pnpm verify:acceptance` passed repository guards, workspace typechecks, the assistant-engine coverage suite, and the other completed package/app lanes; it failed only when the same three clean-`main` assistant-runtime schema tests ran under coverage.
-- PR CI and mergeability are pending.
+- PR #888 CI passed on the behavioral head, including release coverage and the hosted E2E required gates.
+- GitHub reports the PR mergeable; the branch is behind `main`, with no merge conflict or task-caused blocker.
+Completed: 2026-07-23
