@@ -29,7 +29,7 @@ Updated: 2026-07-22
   builder.
 - Connect-page and completion-dialog tests plus the live design catalog.
 - The canonical audit-bundle allowlist needed to include the frontend guidance
-  required by the review prompt.
+  and its root product/design sources required by the review prompt.
 
 ## Constraints
 
@@ -69,4 +69,8 @@ Updated: 2026-07-22
   exhaustion, so no Claude fallback was attempted.
 - Preliminary ReviewGPT packaging exposed that the canonical bundle omitted
   `agent-docs/FRONTEND.md` even though the reviewer prompt requires it. The
-  bundle allowlist now includes the guide with a focused regression assertion.
+  bundle allowlist now includes the guide and its required root `PRODUCT.md`
+  and `DESIGN.md` sources, with focused regression assertions.
+- Fresh desktop and mobile evidence was captured from this branch by opening
+  `/design?tab=components#whoop-completion-dialog` and activating its direct
+  `Preview capacity fallback` control.

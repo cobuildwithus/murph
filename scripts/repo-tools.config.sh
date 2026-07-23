@@ -106,6 +106,8 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "ARCHITECTURE.md" \
   "Dockerfile.cloudflare-hosted-runner" \
   "README.md" \
+  "PRODUCT.md" \
+  "DESIGN.md" \
   "docs/architecture.md" \
   "docs/contracts/00-invariants.md" \
   "agent-docs/FRONTEND.md" \
