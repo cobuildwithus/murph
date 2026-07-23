@@ -59,6 +59,23 @@ describe('assistant group-chat comedy skill', () => {
     expect(comedy).not.toContain('eat 74 hot dogs')
   })
 
+  it('keeps the AI-voice self-parody format occasional, not the house voice', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'AI-voice self-parody: because Murph is an AI, this is the teller taking the hit first.',
+    )
+    expect(normalized).toContain(
+      'needless transparency framing, load-bearing caveats',
+    )
+    expect(normalized).toContain(
+      'for this one message the register overrides the usual brevity',
+    )
+    expect(normalized).toContain('never the house voice or default register')
+    expect(normalized).toContain('the parody collapses into the thing it mocks')
+  })
+
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {
     const challenge = await readSkill('group-challenge')
     const normalized = challenge.replace(/\s+/gu, ' ')
