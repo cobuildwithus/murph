@@ -642,10 +642,12 @@ extension. Deploy the Cloudflare worker and runner bundle first with immediate
 container rollout, verify the managed runner fingerprint, and only then deploy
 Web. The old Web parser tolerates and ignores the new field, while the new
 runner retains terminal local ids until `consumedSeqByLane` confirms them, so
-that producer-first window is replay-safe. Do not deploy Web first: an old
-runner can still remove terminal ids under the retired v1/prefix behavior while
-new Web intentionally refuses to trust that prefix. Roll back in the opposite
-order—Web first, then the runner producer. There is no hard rollback floor:
+that producer-first window is replay-safe. If Web lands first, an old runner
+sends no exact ids; Web stamps none and therefore cannot repair Telegram
+progress until the runner converges, but it does not infer acknowledgement from
+the old local index. Roll back in the opposite order—Web first, then the runner
+producer—so the newer producer keeps retaining exact evidence while the
+consumer is absent. There is no hard rollback floor:
 already-advanced floors were derived from exact row stamps in an accepted
 snapshot transaction, and old runtimes already honor both `consumedAt` and the
 existing `consumedSeqByLane` response. After rollout, verify that conversation
