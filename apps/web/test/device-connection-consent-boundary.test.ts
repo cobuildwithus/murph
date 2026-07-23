@@ -66,7 +66,7 @@ test("stale launch-document versions do not stop chat-adjacent companion actions
   );
   assert.match(
     groupStoreSource,
-    /assertHostedLaunchRequiredConsentGranted/u,
+    /\} else \{\s*await assertHostedLaunchRequiredConsentGranted\(\{ memberId: input\.memberId/u,
     "web joins must keep requiring current launch consent",
   );
 });
