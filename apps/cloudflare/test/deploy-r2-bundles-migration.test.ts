@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildAwsMigrationChildEnvironment,
-  buildR2SyncArgs,
   buildWranglerMigrationChildEnvironment,
   compareR2ObjectInventories,
   createR2MigrationMarkerKey,
@@ -19,7 +18,6 @@ import {
 } from "../scripts/r2-bundles-migration.js";
 
 const ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
-const ENDPOINT = `https://${ACCOUNT_ID}.r2.cloudflarestorage.com`;
 const SOURCE_BUCKET = "bundles-source-oc";
 const DESTINATION_BUCKET = "bundles-destination-enam";
 const MARKER_KEY = createR2MigrationMarkerKey(SOURCE_BUCKET, DESTINATION_BUCKET);
@@ -71,7 +69,6 @@ function markerEntry(
 function options(overrides: Partial<R2BundlesMigrationOptions> = {}): R2BundlesMigrationOptions {
   return {
     apply: false,
-    confirmDeleteSet: null,
     confirmDestination: null,
     destination: DESTINATION_BUCKET,
     phase: "seed",
@@ -94,8 +91,15 @@ function migrationEnvironment(extra: Record<string, string> = {}): Record<string
 interface MockRunnerOptions {
   copyObjectFailure?: Error;
   destinationInventory?: R2ObjectInventoryEntry[];
+  destinationInventoryReadHook?: (input: {
+    inventory: R2ObjectInventoryEntry[];
+    readCount: number;
+  }) => R2ObjectInventoryEntry[];
   destinationLifecycleEmpty?: boolean;
-  seedSyncLeavesKeys?: readonly string[];
+  sourceInventoryReadHook?: (input: {
+    inventory: R2ObjectInventoryEntry[];
+    readCount: number;
+  }) => R2ObjectInventoryEntry[];
   sourceInventory?: R2ObjectInventoryEntry[];
 }
 
@@ -105,21 +109,11 @@ function createMockRunner(input: MockRunnerOptions = {}): {
 } {
   const calls: Array<{ args: readonly string[]; command: string; env: NodeJS.ProcessEnv }> = [];
   let lifecycleApplied = !input.destinationLifecycleEmpty;
-  const sourceInventory = input.sourceInventory ?? [inventoryEntry()];
+  let sourceInventory = input.sourceInventory ?? [inventoryEntry()];
   let destinationInventory = input.destinationInventory
     ?? (input.destinationLifecycleEmpty ? [] : sourceInventory.map((entry) => ({ ...entry })));
-  const seedSyncLeavesKeys = new Set(input.seedSyncLeavesKeys ?? []);
-
-  const excludedBy = (args: readonly string[], key: string): boolean => {
-    for (let index = 0; index < args.length; index += 1) {
-      if (args[index] !== "--exclude") continue;
-      const pattern = args[index + 1];
-      if (pattern === key || (pattern?.endsWith("*") && key.startsWith(pattern.slice(0, -1)))) {
-        return true;
-      }
-    }
-    return false;
-  };
+  let destinationInventoryReadCount = 0;
+  let sourceInventoryReadCount = 0;
   const replaceDestinationEntry = (entry: R2ObjectInventoryEntry): void => {
     destinationInventory = [
       ...destinationInventory.filter((candidate) => candidate.key !== entry.key),
@@ -161,20 +155,6 @@ function createMockRunner(input: MockRunnerOptions = {}): {
               : lifecycleOutput(String(bucket)),
           };
         }
-        if (call.command === "aws" && call.args[0] === "s3") {
-          const deleteDestinationOnly = call.args.includes("--delete");
-          for (const entry of sourceInventory) {
-            if (excludedBy(call.args, entry.key)) continue;
-            if (!deleteDestinationOnly && seedSyncLeavesKeys.has(entry.key)) continue;
-            replaceDestinationEntry(entry);
-          }
-          if (deleteDestinationOnly) {
-            destinationInventory = destinationInventory.filter((entry) =>
-              sourceInventory.some((source) => source.key === entry.key)
-              || excludedBy(call.args, entry.key));
-          }
-          return { stderr: "", stdout: "" };
-        }
         if (call.command === "aws" && call.args[0] === "s3api" && call.args[1] === "put-object") {
           replaceDestinationEntry(markerEntry());
           return { stderr: "", stdout: "" };
@@ -190,6 +170,20 @@ function createMockRunner(input: MockRunnerOptions = {}): {
         if (call.command === "aws" && call.args[0] === "s3api"
           && call.args[1] === "list-objects-v2") {
           const bucket = call.args[call.args.indexOf("--bucket") + 1];
+          if (bucket === SOURCE_BUCKET) {
+            sourceInventoryReadCount += 1;
+            sourceInventory = input.sourceInventoryReadHook?.({
+              inventory: sourceInventory.map((entry) => ({ ...entry })),
+              readCount: sourceInventoryReadCount,
+            }) ?? sourceInventory;
+          }
+          if (bucket === DESTINATION_BUCKET) {
+            destinationInventoryReadCount += 1;
+            destinationInventory = input.destinationInventoryReadHook?.({
+              inventory: destinationInventory.map((entry) => ({ ...entry })),
+              readCount: destinationInventoryReadCount,
+            }) ?? destinationInventory;
+          }
           return {
             stderr: "",
             stdout: inventoryJson(
@@ -213,23 +207,19 @@ describe("R2 bundles migration arguments", () => {
     ])).toEqual(options());
   });
 
-  it("requires a frozen source and exact deletion token for final apply", () => {
+  it("keeps final read-only and requires the frozen-source assertion", () => {
     expect(() => parseR2BundlesMigrationArgs([
       "--phase", "final",
       "--source", SOURCE_BUCKET,
       "--destination", DESTINATION_BUCKET,
-      "--confirm-destination", DESTINATION_BUCKET,
       "--apply",
-    ])).toThrow("--source-frozen and --confirm-delete-set");
-  });
-
-  it("keeps verify strictly read-only", () => {
-    expect(() => parseR2BundlesMigrationArgs([
-      "--phase", "verify",
+    ])).toThrow("Final is read-only");
+    expect(parseR2BundlesMigrationArgs([
+      "--phase", "final",
       "--source", SOURCE_BUCKET,
       "--destination", DESTINATION_BUCKET,
       "--source-frozen",
-    ])).toThrow("verify phase is read-only");
+    ])).toEqual(options({ phase: "final", sourceFrozen: true }));
   });
 });
 
@@ -285,45 +275,17 @@ describe("R2 inventory verification", () => {
     expect(JSON.stringify(result)).not.toContain(PRIVATE_KEY);
   });
 
-  it("binds destructive confirmation to the exact destination-only set", () => {
+  it("counts destination-only objects without exposing their keys", () => {
     const first = compareR2ObjectInventories(
       [inventoryEntry()],
       [inventoryEntry(), inventoryEntry({ key: "extra-a" })],
     );
-    const second = compareR2ObjectInventories(
-      [inventoryEntry()],
-      [inventoryEntry(), inventoryEntry({ key: "extra-b" })],
-    );
     expect(first.destinationOnlyCount).toBe(1);
-    expect(first.deleteSetConfirmation).not.toBe(second.deleteSetConfirmation);
-    expect(first.deleteSetConfirmation).toMatch(/^1:[a-f0-9]{64}$/u);
+    expect(JSON.stringify(first)).not.toContain("extra-a");
   });
 });
 
 describe("R2 copy command and credential boundaries", () => {
-  it("uses one sync, canonical exclusions, metadata copy, and optional deletion", () => {
-    const seed = buildR2SyncArgs({
-      deleteDestinationOnly: false,
-      destination: DESTINATION_BUCKET,
-      endpoint: ENDPOINT,
-      excludedPatterns: ["hosted-email/messages/*"],
-      source: SOURCE_BUCKET,
-    });
-    const final = buildR2SyncArgs({
-      deleteDestinationOnly: true,
-      destination: DESTINATION_BUCKET,
-      endpoint: ENDPOINT,
-      excludedPatterns: [],
-      source: SOURCE_BUCKET,
-    });
-    expect(seed.slice(0, 2)).toEqual(["s3", "sync"]);
-    expect(seed).toContain("hosted-email/messages/*");
-    expect(seed).toContain("metadata-directive");
-    expect(seed).not.toContain("--delete");
-    expect(final).toContain("--delete");
-    expect(final).not.toContain("cp");
-  });
-
   it("passes only explicitly allowlisted variables to each child", () => {
     const base = {
       AWS_PROFILE: "must-not-survive",
@@ -357,7 +319,7 @@ describe("R2 migration orchestration", () => {
       DATABASE_URL: "must-not-reach-a-child",
     }), { log: () => undefined, runner });
     expect(calls.some((call) => call.args.includes("set"))).toBe(false);
-    expect(calls.some((call) => call.args[0] === "s3")).toBe(false);
+    expect(mutationCalls(calls)).toHaveLength(0);
     for (const call of calls) {
       expect(call.args.join(" ")).not.toContain(MIGRATION_ACCESS_KEY);
       expect(call.args.join(" ")).not.toContain(MIGRATION_SECRET_KEY);
@@ -392,14 +354,16 @@ describe("R2 migration orchestration", () => {
     }), migrationEnvironment(), { log: () => undefined, runner });
     const lifecycleSet = calls.findIndex((call) => call.args.includes("set"));
     const markerPut = calls.findIndex((call) => call.args[1] === "put-object");
-    const seed = calls.findIndex((call) => call.args[0] === "s3");
+    const seed = calls.findIndex((call) => call.args[1] === "copy-object");
     expect(lifecycleSet).toBeGreaterThan(-1);
     expect(markerPut).toBeGreaterThan(lifecycleSet);
     expect(seed).toBeGreaterThan(markerPut);
-    expect(calls[seed]?.args).not.toContain("--delete");
+    expect(calls[markerPut]?.args).toContain("--if-none-match");
+    expect(calls[markerPut]?.args).toContain("*");
+    expect(calls.every((call) => !call.args.includes("--delete"))).toBe(true);
   });
 
-  it("repairs seed objects that ordinary sync leaves missing or changed", async () => {
+  it("copies every missing or changed object with R2-compatible source conditions", async () => {
     const missing = inventoryEntry({
       etag: '"11111111111111111111111111111111"',
       key: `${PRIVATE_KEY}-missing #1`,
@@ -408,7 +372,6 @@ describe("R2 migration orchestration", () => {
     const logs: string[] = [];
     const { calls, runner } = createMockRunner({
       destinationInventory: [changed, markerEntry()],
-      seedSyncLeavesKeys: [PRIVATE_KEY, missing.key],
       sourceInventory: [inventoryEntry(), missing],
     });
     await runR2BundlesMigration(options({
@@ -419,28 +382,33 @@ describe("R2 migration orchestration", () => {
       runner,
     });
 
-    const repairs = calls.filter((call) =>
+    const copies = calls.filter((call) =>
       call.command === "aws" && call.args[1] === "copy-object");
-    expect(repairs).toHaveLength(2);
-    for (const repair of repairs) {
-      expect(repair.args).toContain("--copy-source");
-      expect(repair.args).toContain("--key");
-      expect(repair.args.slice(
-        repair.args.indexOf("--metadata-directive"),
-        repair.args.indexOf("--metadata-directive") + 2,
+    expect(copies).toHaveLength(2);
+    for (const copy of copies) {
+      expect(copy.args).toContain("--copy-source");
+      expect(copy.args).toContain("--copy-source-if-match");
+      expect(copy.args).toContain("--key");
+      expect(copy.args.slice(
+        copy.args.indexOf("--metadata-directive"),
+        copy.args.indexOf("--metadata-directive") + 2,
       )).toEqual(["--metadata-directive", "COPY"]);
-      expect(repair.args.slice(
-        repair.args.indexOf("--storage-class"),
-        repair.args.indexOf("--storage-class") + 2,
+      expect(copy.args.slice(
+        copy.args.indexOf("--storage-class"),
+        copy.args.indexOf("--storage-class") + 2,
       )).toEqual(["--storage-class", "STANDARD"]);
     }
-    const specialKeyRepair = repairs.find((repair) => repair.args.includes(missing.key));
-    if (!specialKeyRepair) throw new Error("Special-key repair call was not observed.");
-    expect(specialKeyRepair.args.slice(
-      specialKeyRepair.args.indexOf("--copy-source"),
-      specialKeyRepair.args.indexOf("--copy-source") + 2,
-    )).toEqual(["--copy-source", `${SOURCE_BUCKET}/${missing.key}`]);
-    expect(logs).toContain("Deterministically repaired 2 object(s).");
+    const specialKeyCopy = copies.find((copy) => copy.args.includes(missing.key));
+    if (!specialKeyCopy) throw new Error("Special-key copy call was not observed.");
+    expect(specialKeyCopy.args.slice(
+      specialKeyCopy.args.indexOf("--copy-source"),
+      specialKeyCopy.args.indexOf("--copy-source") + 2,
+    )).toEqual(["--copy-source", `/${SOURCE_BUCKET}/${missing.key}`]);
+    expect(specialKeyCopy.args.slice(
+      specialKeyCopy.args.indexOf("--copy-source-if-match"),
+      specialKeyCopy.args.indexOf("--copy-source-if-match") + 2,
+    )).toEqual(["--copy-source-if-match", missing.etag]);
+    expect(logs).toContain("Copied 2 object(s).");
   });
 
   it("sanitizes a targeted copy failure", async () => {
@@ -454,7 +422,6 @@ describe("R2 migration orchestration", () => {
         inventoryEntry({ etag: '"ffffffffffffffffffffffffffffffff"' }),
         markerEntry(),
       ],
-      seedSyncLeavesKeys: [PRIVATE_KEY],
     });
     let message = "";
     try {
@@ -466,7 +433,7 @@ describe("R2 migration orchestration", () => {
       message = error instanceof Error ? error.message : String(error);
     }
 
-    expect(message).toBe("R2 deterministic copy repair failed.");
+    expect(message).toBe("R2 deterministic object copy failed.");
     expect(message).not.toContain(PRIVATE_KEY);
     expect(message).not.toContain("copy-object --key");
     expect(message).not.toContain(MIGRATION_ACCESS_KEY);
@@ -500,14 +467,27 @@ describe("R2 migration orchestration", () => {
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it.each([
-    ["without a marker", []],
-    ["with the exact pair marker", [markerEntry()]],
-  ])("verifies an exact mirror %s", async (_label, markers) => {
+  it("rejects a marked destination extra before copying", async () => {
     const { calls, runner } = createMockRunner({
-      destinationInventory: [inventoryEntry(), ...markers],
+      destinationInventory: [inventoryEntry({ key: "unexpected-seed-object" }), markerEntry()],
     });
-    await runR2BundlesMigration(options({ phase: "verify" }), migrationEnvironment(), {
+    await expect(runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "unexpected object",
+    );
+    expect(mutationCalls(calls)).toHaveLength(0);
+  });
+
+  it("final verifies an exact marked mirror without mutating it", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), markerEntry()],
+    });
+    await runR2BundlesMigration(options({
+      phase: "final",
+      sourceFrozen: true,
+    }), migrationEnvironment(), {
       log: () => undefined,
       runner,
     });
@@ -515,6 +495,7 @@ describe("R2 migration orchestration", () => {
   });
 
   it.each([
+    ["missing", []],
     [
       "wrong",
       [markerEntry(createR2MigrationMarkerKey(SOURCE_BUCKET, "other-destination-enam"))],
@@ -527,12 +508,12 @@ describe("R2 migration orchestration", () => {
       ],
     ],
     ["malformed", [markerEntry(MARKER_KEY, { size: 1 })]],
-  ])("rejects a %s destination marker during verify", async (_label, markers) => {
+  ])("rejects a %s destination marker during final", async (_label, markers) => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [inventoryEntry(), ...markers],
     });
     await expect(runR2BundlesMigration(
-      options({ phase: "verify" }),
+      options({ phase: "final", sourceFrozen: true }),
       migrationEnvironment(),
       { log: () => undefined, runner },
     )).rejects.toThrow("provenance marker does not match");
@@ -542,14 +523,11 @@ describe("R2 migration orchestration", () => {
   it.each([
     ["missing", []],
     ["changed", [inventoryEntry({ etag: '"ffffffffffffffffffffffffffffffff"' })]],
-  ])("refuses %s frozen-source coverage before final mutation", async (_label, objects) => {
+  ])("refuses %s frozen-source coverage during final", async (_label, objects) => {
     const { calls, runner } = createMockRunner({
       destinationInventory: [...objects, markerEntry()],
     });
     await expect(runR2BundlesMigration(options({
-      apply: true,
-      confirmDeleteSet: `0:${"0".repeat(64)}`,
-      confirmDestination: DESTINATION_BUCKET,
       phase: "final",
       sourceFrozen: true,
     }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
@@ -558,51 +536,117 @@ describe("R2 migration orchestration", () => {
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("hashes only application extras, then performs one marker-preserving final sync", async () => {
-    const extra = inventoryEntry({ key: "obsolete-object" });
-    const destination = [inventoryEntry(), extra, markerEntry()];
-    const dryRun = createMockRunner({ destinationInventory: destination });
-    const logs: string[] = [];
-    await runR2BundlesMigration(options({ phase: "final" }), migrationEnvironment(), {
-      log: (message) => logs.push(message),
-      runner: dryRun.runner,
+  it("refuses a source that changes between final inventory reads", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), markerEntry()],
+      sourceInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+        ? inventory.map((entry) => ({ ...entry, lastModified: "2026-07-22T20:01:00Z" }))
+        : inventory,
     });
-    const token = /Delete-set confirmation: (\d+:[a-f0-9]{64})/u.exec(logs.join("\n"))?.[1];
-    const expectedToken = compareR2ObjectInventories(
-      [inventoryEntry()],
-      [inventoryEntry(), extra],
-    ).deleteSetConfirmation;
-    expect(token).toBe(expectedToken);
-    expect(token).toMatch(/^1:/u);
-
-    const rejected = createMockRunner({ destinationInventory: destination });
     await expect(runR2BundlesMigration(options({
-      apply: true,
-      confirmDeleteSet: `1:${"0".repeat(64)}`,
-      confirmDestination: DESTINATION_BUCKET,
+      phase: "final",
+      sourceFrozen: true,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "Source inventory is not frozen",
+    );
+    expect(mutationCalls(calls)).toHaveLength(0);
+  });
+
+  it("refuses a destination that changes between final inventory reads", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), markerEntry()],
+      destinationInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+        ? [...inventory, inventoryEntry({ key: "unexpected-final-object" })]
+        : inventory,
+    });
+    await expect(runR2BundlesMigration(options({
+      phase: "final",
+      sourceFrozen: true,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "Destination inventory is not stable",
+    );
+    expect(mutationCalls(calls)).toHaveLength(0);
+  });
+
+  it("refuses destination extras during final without deleting anything", async () => {
+    const extra = inventoryEntry({ key: "obsolete-object" });
+    const rejected = createMockRunner({
+      destinationInventory: [inventoryEntry(), extra, markerEntry()],
+    });
+    await expect(runR2BundlesMigration(options({
       phase: "final",
       sourceFrozen: true,
     }), migrationEnvironment(), { log: () => undefined, runner: rejected.runner })).rejects.toThrow(
-      "does not match",
+      "unexpected object",
     );
-    expect(rejected.calls.some((call) => call.args[0] === "s3")).toBe(false);
+    expect(mutationCalls(rejected.calls)).toHaveLength(0);
+    expect(rejected.calls.some((call) => call.args.includes("delete-object"))).toBe(false);
+  });
 
-    const applied = createMockRunner({ destinationInventory: destination });
-    if (token === undefined) throw new Error("Final dry run did not report a deletion token.");
+  it("refuses an object inserted alongside marker bootstrap before copying", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventoryReadHook: ({ inventory, readCount }) => readCount === 3
+        ? [...inventory, inventoryEntry({ key: "unexpected-bootstrap-object" })]
+        : inventory,
+      destinationLifecycleEmpty: true,
+    });
+    await expect(runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "changed while the migration marker was created",
+    );
+    expect(calls.some((call) => call.args[1] === "copy-object")).toBe(false);
+    expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
+  });
+
+  it("fails closed when the destination gains an extra during seed", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [markerEntry()],
+      destinationInventoryReadHook: ({ inventory, readCount }) => readCount === 3
+        ? [...inventory, inventoryEntry({ key: "unexpected-late-object" })]
+        : inventory,
+    });
+    await expect(runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "unexpected object",
+    );
+    expect(calls.some((call) => call.args[1] === "copy-object")).toBe(true);
+    expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
+  });
+
+  it("omits both lifecycle-managed prefixes from seed copies", async () => {
+    const email = inventoryEntry({ key: "hosted-email/messages/transient-email" });
+    const meal = inventoryEntry({ key: "hosted-meal-photos/images/transient-photo" });
+    const { calls, runner } = createMockRunner({
+      destinationLifecycleEmpty: true,
+      sourceInventory: [inventoryEntry(), email, meal],
+    });
     await runR2BundlesMigration(options({
       apply: true,
-      confirmDeleteSet: token,
       confirmDestination: DESTINATION_BUCKET,
+    }), migrationEnvironment(), { log: () => undefined, runner });
+    const copiedKeys = calls
+      .filter((call) => call.args[1] === "copy-object")
+      .map((call) => call.args[call.args.indexOf("--key") + 1]);
+    expect(copiedKeys).toEqual([PRIVATE_KEY]);
+  });
+
+  it("blocks final while a lifecycle-managed source object remains", async () => {
+    const transient = inventoryEntry({ key: "hosted-email/messages/transient-email" });
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), transient, markerEntry()],
+      sourceInventory: [inventoryEntry(), transient],
+    });
+    await expect(runR2BundlesMigration(options({
       phase: "final",
       sourceFrozen: true,
-    }), migrationEnvironment(), { log: () => undefined, runner: applied.runner });
-    const mutations = applied.calls.filter((call) => call.args[0] === "s3");
-    expect(mutations).toHaveLength(1);
-    expect(mutations[0]?.args).toContain("--delete");
-    expect(mutations[0]?.args).not.toContain("cp");
-    expect(mutations[0]?.args).toContain("--exclude");
-    expect(mutations[0]?.args).toContain(MARKER_KEY);
-    expect(applied.calls.some((call) => call.args[1] === "delete-object")).toBe(false);
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "retention age reset",
+    );
+    expect(mutationCalls(calls)).toHaveLength(0);
   });
 
   it("keeps credentials out of arguments and limits each child environment", async () => {
@@ -611,7 +655,6 @@ describe("R2 migration orchestration", () => {
         inventoryEntry({ etag: '"ffffffffffffffffffffffffffffffff"' }),
         markerEntry(),
       ],
-      seedSyncLeavesKeys: [PRIVATE_KEY],
     });
     await runR2BundlesMigration(options({
       apply: true,
@@ -643,14 +686,6 @@ describe("R2 migration orchestration", () => {
     }
   });
 
-  it("pins AWS copy to classic single-CopyObject behavior", async () => {
-    const config = await readFile(
-      new URL("../scripts/r2-bundles-migration.aws-config", import.meta.url),
-      "utf8",
-    );
-    expect(config).toContain("preferred_transfer_client = classic");
-    expect(config).toContain("multipart_threshold = 5TB");
-  });
 });
 
 function mutationCalls(
@@ -658,8 +693,7 @@ function mutationCalls(
 ): Array<{ args: readonly string[]; command: string }> {
   return calls.filter((call) =>
     (call.command === "aws" && (
-      call.args[0] === "s3"
-      || (call.args[0] === "s3api" && call.args[1] !== "list-objects-v2")
+      call.args[0] === "s3api" && call.args[1] !== "list-objects-v2"
     ))
     || (call.command === "pnpm"
       && call.args.includes("lifecycle")

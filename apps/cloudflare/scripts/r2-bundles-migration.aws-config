@@ -1,6 +1,0 @@
-[default]
-region = auto
-s3 =
-    preferred_transfer_client = classic
-    multipart_threshold = 5TB
-    max_concurrent_requests = 32

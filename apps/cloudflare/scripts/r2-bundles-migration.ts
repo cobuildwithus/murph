@@ -8,9 +8,9 @@ import { parseArgs } from "node:util";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const appDir = path.resolve(scriptDir, "..");
 const lifecycleConfigPath = path.join(appDir, "r2-bundles-lifecycle.json");
-const awsConfigPath = path.join(scriptDir, "r2-bundles-migration.aws-config");
 
 const COPY_OBJECT_MAX_BYTES_EXCLUSIVE = 5_000_000_000;
+const COPY_CONCURRENCY = 16;
 const MIGRATION_ACCESS_KEY_ENV = "R2_MIGRATION_ACCESS_KEY_ID";
 const MIGRATION_SECRET_KEY_ENV = "R2_MIGRATION_SECRET_ACCESS_KEY";
 const MIGRATION_MARKER_PREFIX = "_murph/r2-bundles-migration/";
@@ -37,15 +37,13 @@ const commonChildEnvironmentNames = [
 ] as const;
 
 export const R2_BUNDLES_MIGRATION_USAGE = `Usage:
-  pnpm r2:bundles:migrate -- --phase <seed|final|verify> \\
+  pnpm r2:bundles:migrate -- --phase <seed|final> \\
     --source <oc-bucket> --destination <enam-bucket> [options]
 
 Options:
-  --apply                       Execute seed/final mutations. Both phases are
-                                read-only without this flag.
-  --confirm-destination <name>  Repeat the destination name for every apply.
-  --confirm-delete-set <token>  Confirm the exact hashed deletion set reported
-                                by a final dry run. Required for final apply.
+  --apply                       Execute seed mutations. Final is always
+                                read-only.
+  --confirm-destination <name>  Repeat the destination name for seed apply.
   --source-frozen               Assert every producer is paused and issued
                                 upload URLs have expired. Required for final.
   --help                        Show this help.
@@ -59,11 +57,10 @@ The R2 migration credential must be a temporary Object Read & Write key scoped
 to the source and destination buckets. Credentials remain in child-process
 environment only; they are never placed in command arguments or output.`;
 
-export type R2BundlesMigrationPhase = "final" | "seed" | "verify";
+export type R2BundlesMigrationPhase = "final" | "seed";
 
 export interface R2BundlesMigrationOptions {
   apply: boolean;
-  confirmDeleteSet: string | null;
   confirmDestination: string | null;
   destination: string;
   phase: R2BundlesMigrationPhase;
@@ -93,7 +90,6 @@ export interface R2ObjectInventoryEntry {
 }
 
 export interface R2InventoryComparison {
-  deleteSetConfirmation: string;
   destinationOnlyCount: number;
   failures: string[];
 }
@@ -150,7 +146,6 @@ export function parseR2BundlesMigrationArgs(
     args: argv.filter((argument) => argument !== "--"),
     options: {
       apply: { type: "boolean" },
-      "confirm-delete-set": { type: "string" },
       "confirm-destination": { type: "string" },
       destination: { type: "string" },
       help: { short: "h", type: "boolean" },
@@ -171,9 +166,6 @@ export function parseR2BundlesMigrationArgs(
   );
   const options: R2BundlesMigrationOptions = {
     apply: values.apply ?? false,
-    confirmDeleteSet: values["confirm-delete-set"] === undefined
-      ? null
-      : normalizeDeleteSetConfirmation(values["confirm-delete-set"]),
     confirmDestination: values["confirm-destination"] === undefined
       ? null
       : normalizeBucketName(values["confirm-destination"], "confirmed destination"),
@@ -323,36 +315,9 @@ export function compareR2ObjectInventories(
     }
   }
   return {
-    deleteSetConfirmation: createDeleteSetConfirmation(destinationOnlyKeys),
     destinationOnlyCount: destinationOnlyKeys.length,
     failures,
   };
-}
-
-export function buildR2SyncArgs(input: {
-  deleteDestinationOnly: boolean;
-  destination: string;
-  endpoint: string;
-  excludedPatterns: readonly string[];
-  source: string;
-}): string[] {
-  return [
-    "s3",
-    "sync",
-    `s3://${input.source}`,
-    `s3://${input.destination}`,
-    ...input.excludedPatterns.flatMap((pattern) => ["--exclude", pattern]),
-    ...(input.deleteDestinationOnly ? ["--delete"] : []),
-    "--endpoint-url",
-    input.endpoint,
-    "--region",
-    "auto",
-    "--copy-props",
-    "metadata-directive",
-    "--only-show-errors",
-    "--no-progress",
-    "--no-cli-pager",
-  ];
 }
 
 export function buildAwsMigrationChildEnvironment(input: {
@@ -364,7 +329,6 @@ export function buildAwsMigrationChildEnvironment(input: {
     ...pickEnvironment(input.base, [...commonChildEnvironmentNames, "AWS_CA_BUNDLE"]),
     AWS_ACCESS_KEY_ID: input.accessKeyId,
     AWS_CLI_AUTO_PROMPT: "off",
-    AWS_CONFIG_FILE: awsConfigPath,
     AWS_DEFAULT_REGION: "auto",
     AWS_EC2_METADATA_DISABLED: "true",
     AWS_PAGER: "",
@@ -446,7 +410,7 @@ export async function runR2BundlesMigration(
     });
     return;
   }
-  await runFinalOrVerify({ before, context, excludedPrefixes, log, markerKey });
+  await runFinal({ before, context, excludedPrefixes, log, markerKey });
 }
 
 async function runSeed(input: {
@@ -480,28 +444,35 @@ async function runSeed(input: {
         "destination",
       );
     }
+    if ((await readInventory(context, context.options.destination)).length !== 0) {
+      throw new Error("Destination changed before migration marker creation.");
+    }
     await putMarker(context, markerKey);
-    assertExpectedMarker(await readInventory(context, context.options.destination), markerKey);
+    assertOnlyExpectedMarker(await readInventory(context, context.options.destination), markerKey);
   } else if (destinationLifecycle.length === 0) {
     throw new Error("Refusing to apply lifecycle rules to a non-empty destination bucket.");
   }
 
-  await runSync(context, false, excludedPrefixes.map((prefix) => `${prefix}*`));
-  const verified = await convergeAfterSync({
-    allowRepair: true,
+  const destination = withoutExpectedMarker(
+    await readInventory(context, context.options.destination),
+    markerKey,
+  );
+  assertNoDestinationOnly(compareR2ObjectInventories(source, destination));
+  const copyEntries = findSourceEntriesNeedingCopy(source, destination);
+  await copySourceEntries(context, copyEntries);
+  const verified = await convergeAfterCopy({
     context,
-    exactDestination: false,
     excludedPrefixes,
     markerKey,
     sourceBefore: source,
   });
-  if (verified.repairCount > 0) {
-    log(`Deterministically repaired ${verified.repairCount.toLocaleString("en-US")} object(s).`);
+  if (copyEntries.length > 0) {
+    log(`Copied ${copyEntries.length.toLocaleString("en-US")} object(s).`);
   }
   log(`Verified ${verified.sourceCount.toLocaleString("en-US")} seeded objects; final is still required.`);
 }
 
-async function runFinalOrVerify(input: {
+async function runFinal(input: {
   before: InventoryPair;
   context: MigrationContext;
   excludedPrefixes: readonly string[];
@@ -512,7 +483,7 @@ async function runFinalOrVerify(input: {
   assertEligiblePair(before);
   assertNoLifecycleObjects(before.source, excludedPrefixes);
   if (before.source.length === 0) {
-    throw new Error("Refusing a final migration or verification with an empty source bucket.");
+    throw new Error("Refusing a final migration with an empty source bucket.");
   }
   const stable = await readInventoryPair(context);
   assertEligiblePair(stable);
@@ -520,120 +491,58 @@ async function runFinalOrVerify(input: {
   assertStableInventory(before.source, stable.source, "Source inventory is not frozen");
   assertStableInventory(before.destination, stable.destination, "Destination inventory is not stable");
 
-  const destination = context.options.phase === "final"
-    ? withoutExpectedMarker(stable.destination, markerKey)
-    : withoutOptionalExpectedMarker(stable.destination, markerKey);
+  const destination = withoutExpectedMarker(stable.destination, markerKey);
   const comparison = compareR2ObjectInventories(stable.source, destination);
   assertNoFailures(
     comparison.failures,
     "Destination is not fully seeded from the frozen source; rerun seed under the write fence",
   );
 
-  if (context.options.phase === "verify") {
-    assertNoDestinationOnly(comparison);
-    log(`Verified an exact stable mirror of ${stable.source.length.toLocaleString("en-US")} objects.`);
-    return;
-  }
+  assertNoDestinationOnly(comparison);
   log(
-    `Final preflight found ${comparison.destinationOnlyCount.toLocaleString("en-US")} `
-    + `destination-only object(s). Delete-set confirmation: ${comparison.deleteSetConfirmation}`,
-  );
-  if (!context.options.apply) {
-    log("Final dry run complete; no lifecycle rules, objects, bindings, or variables changed.");
-    return;
-  }
-  if (context.options.confirmDeleteSet !== comparison.deleteSetConfirmation) {
-    throw new Error("--confirm-delete-set does not match the current destination-only object set.");
-  }
-
-  await runSync(context, true, [markerKey]);
-  const verified = await convergeAfterSync({
-    allowRepair: false,
-    context,
-    exactDestination: true,
-    excludedPrefixes: [],
-    markerKey,
-    sourceBefore: stable.source,
-  });
-  log(
-    `Verified the final stable mirror of ${verified.sourceCount.toLocaleString("en-US")} `
-    + "objects; the pair marker remains through cutover and rollback.",
+    `Verified the final stable mirror of ${stable.source.length.toLocaleString("en-US")} `
+    + "objects; no object was changed or deleted.",
   );
 }
 
-async function convergeAfterSync(input: {
-  allowRepair: boolean;
+async function convergeAfterCopy(input: {
   context: MigrationContext;
-  exactDestination: boolean;
   excludedPrefixes: readonly string[];
   markerKey: string;
   sourceBefore: readonly R2ObjectInventoryEntry[];
-}): Promise<{ repairCount: number; sourceCount: number }> {
+}): Promise<{ sourceCount: number }> {
   const normalize = (pair: InventoryPair): InventoryPair => ({
     destination: withoutExpectedMarker(pair.destination, input.markerKey),
     source: excludePrefixes(pair.source, input.excludedPrefixes),
   });
-  let first = normalize(await readInventoryPair(input.context));
-  let second = normalize(await readInventoryPair(input.context));
+  const first = normalize(await readInventoryPair(input.context));
+  const second = normalize(await readInventoryPair(input.context));
   assertEligiblePair(first);
   assertEligiblePair(second);
-  assertStableInventory(input.sourceBefore, first.source, "Source changed during sync");
+  assertStableInventory(input.sourceBefore, first.source, "Source changed during copy");
   assertStableInventory(first.source, second.source, "Source changed during verification");
   assertStableInventory(first.destination, second.destination, "Destination changed during verification");
 
-  const repairEntries = input.allowRepair
-    ? findSourceEntriesNeedingCopy(second.source, second.destination)
-    : [];
-  for (const entry of repairEntries) await copySourceEntry(input.context, entry);
-  if (repairEntries.length > 0) {
-    const sourceBeforeRepair = second.source;
-    first = normalize(await readInventoryPair(input.context));
-    second = normalize(await readInventoryPair(input.context));
-    assertEligiblePair(first);
-    assertEligiblePair(second);
-    assertStableInventory(
-      sourceBeforeRepair,
-      first.source,
-      "Source changed during deterministic copy repair",
-    );
-    assertStableInventory(
-      first.source,
-      second.source,
-      "Source changed while verifying deterministic copy repair",
-    );
-    assertStableInventory(
-      first.destination,
-      second.destination,
-      "Destination changed while verifying deterministic copy repair",
-    );
-  }
   const comparison = compareR2ObjectInventories(second.source, second.destination);
-  assertNoFailures(comparison.failures, "Destination mirror is incomplete after sync");
-  if (input.exactDestination) assertNoDestinationOnly(comparison);
-  return { repairCount: repairEntries.length, sourceCount: second.source.length };
+  assertNoFailures(comparison.failures, "Destination mirror is incomplete after copy");
+  assertNoDestinationOnly(comparison);
+  return { sourceCount: second.source.length };
 }
 
 function assertOptionAcknowledgements(options: R2BundlesMigrationOptions): void {
   if (options.source === options.destination) {
     throw new TypeError("R2 migration source and destination buckets must be different.");
   }
-  if (options.phase === "verify"
-    && (options.apply || options.sourceFrozen
-      || options.confirmDestination !== null || options.confirmDeleteSet !== null)) {
-    throw new TypeError("The verify phase is read-only and does not accept apply acknowledgements.");
-  }
-  if (options.phase === "seed" && (options.sourceFrozen || options.confirmDeleteSet !== null)) {
+  if (options.phase === "seed" && options.sourceFrozen) {
     throw new TypeError("The seed phase does not accept final-cutover acknowledgements.");
+  }
+  if (options.phase === "final"
+    && (options.apply || !options.sourceFrozen || options.confirmDestination !== null)) {
+    throw new TypeError("Final is read-only and requires only --source-frozen.");
   }
   if (options.apply && options.confirmDestination !== options.destination) {
     throw new TypeError(
       "--apply requires --confirm-destination to exactly match the destination bucket.",
-    );
-  }
-  if (options.phase === "final" && options.apply
-    && (!options.sourceFrozen || options.confirmDeleteSet === null)) {
-    throw new TypeError(
-      "Final apply requires --source-frozen and --confirm-delete-set from a final dry run.",
     );
   }
 }
@@ -737,20 +646,20 @@ function assertExpectedMarker(
   }
 }
 
+function assertOnlyExpectedMarker(
+  entries: readonly R2ObjectInventoryEntry[],
+  markerKey: string,
+): void {
+  assertExpectedMarker(entries, markerKey);
+  if (entries.length !== 1) {
+    throw new Error("Destination changed while the migration marker was created.");
+  }
+}
+
 function withoutExpectedMarker(
   entries: readonly R2ObjectInventoryEntry[],
   markerKey: string,
 ): R2ObjectInventoryEntry[] {
-  assertExpectedMarker(entries, markerKey);
-  return entries.filter((entry) => entry.key !== markerKey);
-}
-
-function withoutOptionalExpectedMarker(
-  entries: readonly R2ObjectInventoryEntry[],
-  markerKey: string,
-): R2ObjectInventoryEntry[] {
-  const markers = entries.filter((entry) => entry.key.startsWith(MIGRATION_MARKER_PREFIX));
-  if (markers.length === 0) return [...entries];
   assertExpectedMarker(entries, markerKey);
   return entries.filter((entry) => entry.key !== markerKey);
 }
@@ -821,11 +730,6 @@ function normalizeLifecycleRules(
   return normalized;
 }
 
-function createDeleteSetConfirmation(keys: readonly string[]): string {
-  const digest = createHash("sha256").update(JSON.stringify(keys)).digest("hex");
-  return `${keys.length}:${digest}`;
-}
-
 function fingerprintKey(key: string): string {
   return createHash("sha256").update(key).digest("hex").slice(0, 12);
 }
@@ -866,22 +770,14 @@ function requireFlag(value: string | undefined, flag: string): string {
 }
 
 function parsePhase(value: string): R2BundlesMigrationPhase {
-  if (value === "seed" || value === "final" || value === "verify") return value;
-  throw new TypeError("--phase must be seed, final, or verify.");
+  if (value === "seed" || value === "final") return value;
+  throw new TypeError("--phase must be seed or final.");
 }
 
 function normalizeBucketName(value: string, label: string): string {
   const normalized = value.trim();
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(normalized)) {
     throw new TypeError(`R2 migration ${label} bucket name is invalid.`);
-  }
-  return normalized;
-}
-
-function normalizeDeleteSetConfirmation(value: string): string {
-  const normalized = value.trim().toLowerCase();
-  if (!/^\d+:[a-f0-9]{64}$/u.test(normalized)) {
-    throw new TypeError("--confirm-delete-set must be the exact token from a final dry run.");
   }
   return normalized;
 }
@@ -985,24 +881,29 @@ async function readInventory(
   return parseR2ObjectInventoryJson(result.stdout);
 }
 
-async function runSync(
+async function copySourceEntries(
   context: MigrationContext,
-  deleteDestinationOnly: boolean,
-  excludedPatterns: readonly string[],
+  entries: readonly R2ObjectInventoryEntry[],
 ): Promise<void> {
-  await runChild(
-    context,
-    deleteDestinationOnly ? "R2 final sync" : "R2 seed sync",
-    "aws",
-    buildR2SyncArgs({
-      deleteDestinationOnly,
-      destination: context.options.destination,
-      endpoint: context.environment.endpoint,
-      excludedPatterns,
-      source: context.options.source,
-    }),
-    true,
+  let nextIndex = 0;
+  let firstFailure: unknown = null;
+  const worker = async (): Promise<void> => {
+    while (firstFailure === null) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const entry = entries[index];
+      if (!entry) return;
+      try {
+        await copySourceEntry(context, entry);
+      } catch (error) {
+        firstFailure = error;
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(COPY_CONCURRENCY, entries.length) }, worker),
   );
+  if (firstFailure !== null) throw firstFailure;
 }
 
 async function copySourceEntry(
@@ -1010,9 +911,10 @@ async function copySourceEntry(
   entry: R2ObjectInventoryEntry,
 ): Promise<void> {
   try {
-    await runChild(context, "R2 deterministic copy repair", "aws", [
+    await runChild(context, "R2 deterministic object copy", "aws", [
       "s3api", "copy-object",
-      "--copy-source", `${context.options.source}/${entry.key}`,
+      "--copy-source", `/${context.options.source}/${entry.key}`,
+      "--copy-source-if-match", entry.etag,
       "--bucket", context.options.destination,
       "--key", entry.key,
       "--metadata-directive", "COPY",
@@ -1022,7 +924,7 @@ async function copySourceEntry(
       "--no-cli-pager",
     ], true);
   } catch {
-    throw new Error("R2 deterministic copy repair failed.");
+    throw new Error("R2 deterministic object copy failed.");
   }
 }
 
@@ -1032,6 +934,7 @@ async function putMarker(
 ): Promise<void> {
   await runChild(context, "R2 migration marker create", "aws", [
     "s3api", "put-object", "--bucket", context.options.destination, "--key", markerKey,
+    "--if-none-match", "*",
     "--content-type", "application/vnd.murph.r2-bundles-migration-marker",
     "--endpoint-url", context.environment.endpoint, "--region", "auto", "--no-cli-pager",
   ], true);
