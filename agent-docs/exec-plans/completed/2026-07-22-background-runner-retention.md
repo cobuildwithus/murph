@@ -1,6 +1,6 @@
 # Reduce background-only runner warm retention
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -95,9 +95,25 @@ Updated: 2026-07-22
 - Focused in-process coverage proves fresh, recovered, replayed, maintenance,
   uncertainty, compatibility, persistence, expiry, and wake-versus-destroy
   paths, including the real container entrypoint HTTP boundary.
-- Canonical `pnpm test:diff` passed through the configured Blacksmith Testbox:
-  1,794 assistant-runtime tests passed with 2 skipped, and 1,867 Cloudflare
-  tests passed.
+- Final canonical `pnpm test:diff` passed in a fresh configured Blacksmith
+  Testbox: 1,794 assistant-runtime tests passed with 2 skipped, and 1,873
+  Cloudflare tests passed. The preceding local run's only three failures also
+  reproduced standalone against another active lane's incompatible shared
+  `/tmp` fixture state; the isolated canonical run proved the branch itself
+  clean without altering that unrelated state.
 - Managed Cloudflare timing remains a rollout proof: canary maintenance-only
   shutdown near 60 seconds, conversational warmth for 20 minutes, fast
   follow-up reuse, and Durable Object reconstruction without lease loss.
+- Preliminary `completion-specialists` ReviewGPT inspected PR #876 at
+  `c786961565` with the `gpt-5-6-pro` response model. It returned five coverage
+  findings and no prompt, frontend, architecture, or product finding; no patch
+  artifact was returned.
+- The five specialist findings were resolved with direct proof for active-child
+  and final-status wake races, unequal lifecycle/warmth clocks, recovered input
+  provenance, settlement-time watermarking, and both bounded-lease clamps.
+  Focused remediation verification passed: 212 Cloudflare tests, 233
+  assistant-runtime entrypoint tests, and both package typechecks.
+- Parent final review walked the complete observation, response/health,
+  persistence, lifecycle-cadence, compatibility, and destruction-race paths
+  after specialist remediation and found no remaining actionable issue.
+Completed: 2026-07-22
