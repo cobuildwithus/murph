@@ -349,7 +349,7 @@ Hosted generated-image uploads additionally need optional Worker-owned Cloudflar
 Core execution tuning:
 
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
-- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
 - `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
   both runner Container `authorized_keys` entries for Wrangler SSH debugging.
@@ -466,7 +466,7 @@ Device-sync provider runtime overrides:
 
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
-- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.

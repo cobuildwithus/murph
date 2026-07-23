@@ -280,6 +280,80 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("prioritizes only Ask completions strictly older than pending personal input", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-",
+    );
+    const wake = buildHostedExecutionAssistantAskCompletedWake({
+      ask: {
+        expiresAt: "2026-04-27T00:10:00.000Z",
+        origin: {
+          automationId: "automation_call_circle",
+          kind: "automation_occurrence",
+          occurrenceAt: FIXED_NOW,
+        },
+        question: "Which coarse call windows work over the next week?",
+        requestId: "aask_req_causal_order",
+        result: {
+          answer: "Tuesday evening.",
+          outcome: "answered",
+        },
+        targetLabel: null,
+      },
+      eventId: "aask_done_causal_order",
+      memberId: "member_group_runtime",
+      occurredAt: FIXED_NOW,
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedAssistantAskCompletionItem({
+          dedupeKey: wake.eventId,
+          id: wake.eventId,
+          occurredAt: wake.occurredAt,
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      for (const cutoff of [
+        "2026-04-26T23:59:59.000Z",
+        FIXED_NOW,
+        "not-a-timestamp",
+        null,
+      ]) {
+        const blocked = await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["continue-assistant-ask"],
+          allowedWakeKinds: ["assistant.ask.completed"],
+          assistantAskCompletionOccurredBefore: cutoff,
+          now: () => "2026-04-27T00:01:00.000Z",
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+
+        assert.equal(blocked, null);
+      }
+      assert.equal(mocks.executeHostedMailboxEvent.mock.calls.length, 0);
+      assert.equal((await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0]?.attemptCount, 0);
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["continue-assistant-ask"],
+        allowedWakeKinds: ["assistant.ask.completed"],
+        assistantAskCompletionOccurredBefore: "2026-04-27T00:00:01.000Z",
+        now: () => "2026-04-27T00:01:00.000Z",
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("rollback discards only failed imported system items and preserves concurrent enqueues", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
@@ -1860,6 +1934,84 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("selects an imported channel update around queued Assistant Ask work", async () => {
+    for (const [askLaneSeq, channelLaneSeq] of [["1", "2"], ["2", "1"]] as const) {
+      const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+      const askWake = buildHostedExecutionAssistantAskCompletedWake({
+        ask: {
+          expiresAt: "2026-04-27T00:10:00.000Z",
+          origin: {
+            assistantInputId: `ain_${"a".repeat(32)}`,
+            kind: "accepted_input",
+            sessionId: "asst_session_channel_authority",
+          },
+          question: "What did the group decide?",
+          requestId: `aask_req_channel_authority_${askLaneSeq}`,
+          result: {
+            answer: "The group answered.",
+            outcome: "answered",
+          },
+          targetLabel: null,
+        },
+        eventId: `aask_done_channel_authority_${askLaneSeq}`,
+        memberId: "member_123",
+        occurredAt: FIXED_NOW,
+      });
+      const channelWake = buildHostedExecutionMemberChannelsUpdatedWake({
+        eventId: `member.channels.updated:authority:${channelLaneSeq}`,
+        memberId: "member_123",
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
+        occurredAt: FIXED_NOW,
+      });
+
+      try {
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedAssistantAskCompletionItem({
+            dedupeKey: askWake.eventId,
+            id: askWake.eventId,
+            laneSeq: askLaneSeq,
+          }),
+          vaultRoot: workspace.vaultRoot,
+          wake: askWake,
+        });
+        await enqueueHostedSystemMailboxItem({
+          item: createResolvedMemberChannelsItem({
+            id: `mailbox_item_system_member_channels_authority_${channelLaneSeq}`,
+            laneSeq: channelLaneSeq,
+          }),
+          vaultRoot: workspace.vaultRoot,
+          wake: channelWake,
+        });
+
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["apply-member-channels-update"],
+          executionContext: null,
+          now: () => FIXED_NOW,
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+
+        assert.equal(
+          prepared?.itemId,
+          `mailbox_item_system_member_channels_authority_${channelLaneSeq}`,
+        );
+        assert.equal(prepared.status, "processed");
+        assert.equal(
+          (await readHostedSystemMailboxState(workspace.vaultRoot)).pending[0]
+            ?.routeAction,
+          "continue-assistant-ask",
+        );
+      } finally {
+        await workspace.cleanup();
+      }
+    }
+  });
+
   it("applies sparse member preference deltas in mailbox order", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const olderWake = buildHostedExecutionMemberPreferencesUpdatedWake({
@@ -2495,16 +2647,22 @@ function createResolvedNotificationItem(overrides: Partial<{
   };
 }
 
-function createResolvedAssistantAskCompletionItem(): HostedMailboxResolvedImportItem {
+function createResolvedAssistantAskCompletionItem(overrides: Partial<{
+  dedupeKey: string;
+  id: string;
+  laneSeq: string;
+  occurredAt: string;
+  requestId: string;
+}> = {}): HostedMailboxResolvedImportItem {
   const item: HostedMailboxItem = {
     createdAt: FIXED_NOW,
-    dedupeKey: "aask_done_system_internal",
+    dedupeKey: overrides.dedupeKey ?? "aask_done_system_internal",
     expiresAt: null,
-    id: "mailbox_item_system_assistant_ask_completed",
+    id: overrides.id ?? "mailbox_item_system_assistant_ask_completed",
     kind: "assistant.ask.completed",
     lane: "system",
-    laneSeq: "1",
-    occurredAt: FIXED_NOW,
+    laneSeq: overrides.laneSeq ?? "1",
+    occurredAt: overrides.occurredAt ?? FIXED_NOW,
     payloadBytes: 64,
     payloadInlineCiphertext: "ciphertext",
     payloadRef: null,
@@ -2518,7 +2676,7 @@ function createResolvedAssistantAskCompletionItem(): HostedMailboxResolvedImport
     payload: {
       payloadCiphertext: "ciphertext",
       payloadSchema: "murph.hosted-mailbox-payload.v1",
-      requestId: "aask_req_system_internal",
+      requestId: overrides.requestId ?? "aask_req_system_internal",
       source: "inline",
       status: "resolved",
     },

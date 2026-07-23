@@ -502,14 +502,17 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
-async function hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+async function hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<boolean> {
   const response = await prefetch.response;
   return response.items.length > 0
     && response.items.every((item) =>
       item.lane === "system"
-      && item.kind === "runtime.pending-effects-reconcile-requested"
+      && (
+        item.kind === "runtime.pending-effects-reconcile-requested"
+        || item.kind === "assistant.ask.requested"
+      )
     );
 }
 
@@ -549,6 +552,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 }
 
 export interface HostedWorkspaceRuntimeJobImportContext {
+  assistantAskRequestTargetKind?: "joined_group";
   onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
@@ -1018,6 +1022,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const createMailboxImportContext = (
       context: HostedWorkspaceRunnerMailboxImportContext | undefined,
     ): HostedWorkspaceRuntimeJobImportContext => ({
+      ...(context?.assistantAskRequestTargetKind
+        ? { assistantAskRequestTargetKind: context.assistantAskRequestTargetKind }
+        : {}),
       recordMessagingReturnTarget: (target) => {
         deviceSyncMessagingReturnTarget = target;
       },
@@ -1689,7 +1696,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
-      causalPendingEffectsOnly?: boolean;
+      foregroundCausalOnly?: boolean;
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
       initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -1761,8 +1768,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
-                causalPendingEffectsOnly:
-                  passInput.causalPendingEffectsOnly === true,
+                foregroundCausalOnly:
+                  passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
                 deviceSyncMessagingReturnTarget,
                 deviceSyncWorkspaceWakeHandled: deviceSyncWorkspaceWakeHandledUntilCheckpoint,
@@ -2547,7 +2554,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
-        causalPendingEffectsOnly?: boolean;
+        foregroundCausalOnly?: boolean;
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
         initialMailboxImportContext?: HostedWorkspaceRunnerMailboxImportContext | null;
@@ -2585,8 +2592,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             presentedInvocationLocalProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
-            causalPendingEffectsOnly:
-              singleWakeInput.causalPendingEffectsOnly === true,
+            foregroundCausalOnly:
+              singleWakeInput.foregroundCausalOnly === true,
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
             initialMailboxImport: singleWakeInput.initialMailboxImport ?? null,
             initialMailboxImportContext: singleWakeInput.initialMailboxImportContext
@@ -2613,7 +2620,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           passResult = await runSingleForegroundPass({
             initialAssistantInputBatch: rerunAssistantInputBatch,
             initialMailboxImport: passResult.latestMailboxImport,
-            initialMailboxImportContext: null,
+            initialMailboxImportContext:
+              wakeInput.initialMailboxImportContext?.assistantAskRequestTargetKind
+                ? {
+                    assistantAskRequestTargetKind:
+                      wakeInput.initialMailboxImportContext.assistantAskRequestTargetKind,
+                  }
+                : null,
             latencySeed: wakeInput.latencySeed ?? null,
             requestIdKind: "checkpoint-interrupt",
             signal: wakeInput.signal,
@@ -2628,7 +2641,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runAssistantWithoutMailboxWork?: boolean;
         shouldContinue?: () => boolean;
         signal?: AbortSignal;
-        systemMailboxAdmission: "all" | "causal_pending_effects";
+        systemMailboxAdmission: "all" | "pre_checkpoint_safe";
       }): Promise<boolean> => {
         const shouldContinue = input.shouldContinue ?? (() => true);
         const runtimeStateDirtyBeforeMailboxImport = runtimeStateDirty;
@@ -2690,9 +2703,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         // A retained wake that has started importing finishes before shutdown
         // checkpointing; shutdown only suppresses the follow-up assistant pass.
         const importSignal = runtimeAbortController.signal;
-        const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
-          input.latencySeed,
-        );
+        const wakeInitialMailboxImportContext =
+          createHostedRuntimeWakeInitialImportContext(input.latencySeed);
+        const initialMailboxImportContext =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+            ? {
+                ...(wakeInitialMailboxImportContext ?? {}),
+                assistantAskRequestTargetKind: "joined_group" as const,
+              }
+            : wakeInitialMailboxImportContext;
         const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId:
@@ -2781,7 +2800,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           input.systemMailboxAdmission === "all"
           || (
             runtimeStateDirtyBeforeMailboxImport
-            && await hostedMailboxPrefetchContainsOnlyCausalPendingEffectsWakes(
+            && await hostedMailboxPrefetchContainsOnlyPreCheckpointSafeSystemWakes(
               initialMailboxPrefetch,
             )
           );
@@ -2792,7 +2811,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
 
         await finishMailboxImportWithoutAssistant(conversationImport);
 
-        const systemImport = await importMailboxLanes(["system"], importMailboxItem);
+        const systemImport = await importMailboxLanes(
+          ["system"],
+          importMailboxItem,
+        );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(systemImport);
           return false;
@@ -2806,8 +2828,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         try {
           await runForegroundPassAfterMailboxImport({
-            causalPendingEffectsOnly:
-              input.systemMailboxAdmission === "causal_pending_effects",
+            foregroundCausalOnly:
+              input.systemMailboxAdmission === "pre_checkpoint_safe",
             initialMailboxImport: systemImport,
             initialMailboxImportContext,
             latencySeed: input.latencySeed,
@@ -2842,7 +2864,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             ),
           shouldContinue: options.shouldContinue,
           signal: options.signal,
-          systemMailboxAdmission: "causal_pending_effects",
+          systemMailboxAdmission: "pre_checkpoint_safe",
         });
       const runPostCheckpointMailboxWake = async (input: {
         latencySeed: HostedRuntimeWakeLatencySeed | null;
