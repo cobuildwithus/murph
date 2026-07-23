@@ -142,10 +142,8 @@ export function EnvironmentVoiceCapture({
       startedAtRef.current = Date.now();
       setElapsedMs(0);
       setState("recording");
-    } catch {
-      setNotice(
-        "Murph could not access the microphone. Allow microphone access or send a voice memo in your usual chat.",
-      );
+    } catch (error) {
+      setNotice(microphoneAccessNotice(error));
     }
   };
 
@@ -440,6 +438,27 @@ function preferredMimeType(): string | undefined {
     }
   }
   return undefined;
+}
+
+export function microphoneAccessNotice(error: unknown): string {
+  const errorName =
+    error !== null &&
+    typeof error === "object" &&
+    "name" in error &&
+    typeof error.name === "string"
+      ? error.name
+      : null;
+
+  if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+    return "Microphone access is blocked for this site. Allow it in your browser's site settings, then try again — or send Murph a voice memo in your usual chat.";
+  }
+  if (errorName === "NotFoundError") {
+    return "No microphone was found. Connect one, then try again — or send Murph a voice memo in your usual chat.";
+  }
+  if (errorName === "NotReadableError" || errorName === "AbortError") {
+    return "The microphone is unavailable, possibly because another app is using it. Close the other app and try again — or send Murph a voice memo in your usual chat.";
+  }
+  return "Murph could not access the microphone. Try again or send a voice memo in your usual chat.";
 }
 
 function formatElapsed(milliseconds: number): string {

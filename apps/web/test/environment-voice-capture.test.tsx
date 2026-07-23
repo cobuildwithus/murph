@@ -16,8 +16,18 @@ vi.mock("@/src/components/ui/dialog", () => ({
     createElement("h2", null, children),
 }));
 
-import { EnvironmentVoiceCapture } from "../app/(dashboard)/environment/environment-voice-capture";
+import {
+  EnvironmentVoiceCapture,
+  microphoneAccessNotice,
+} from "../app/(dashboard)/environment/environment-voice-capture";
 import { renderClientComponent } from "./render-client-component";
+
+test("explains when the browser has blocked microphone permission", () => {
+  assert.match(
+    microphoneAccessNotice({ name: "NotAllowedError" }),
+    /Microphone access is blocked for this site/,
+  );
+});
 
 test.each([
   {
