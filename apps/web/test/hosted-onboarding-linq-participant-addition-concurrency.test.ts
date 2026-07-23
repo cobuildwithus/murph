@@ -424,6 +424,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         releaseUsageAuthorityCheck.resolve();
         await expect(usageTransaction).resolves.toEqual({
           idempotencyKey: usageIdempotencyKey,
+          providerIdempotencyKey: expect.stringMatching(
+            /^ai-usage-attempt:hld_[A-Za-z0-9_-]{16}$/u,
+          ),
           status: "claimed",
         });
         await expect(consumerTransaction).resolves.toBe(true);
@@ -605,6 +608,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           usageCreditLedgerVersion: 0n,
         })).resolves.toEqual({
           idempotencyKey: usageIdempotencyKey,
+          providerIdempotencyKey: expect.stringMatching(
+            /^ai-usage-attempt:hld_[A-Za-z0-9_-]{16}$/u,
+          ),
           status: "claimed",
         });
         await expect(markHostedAiUsageLimitNoticeDeliveryRetryableTx({
@@ -655,6 +661,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           usageCreditLedgerVersion: 2n,
         })).resolves.toEqual({
           idempotencyKey: reexhaustionIdempotencyKey,
+          providerIdempotencyKey: expect.stringMatching(
+            /^ai-usage-attempt:hld_[A-Za-z0-9_-]{16}$/u,
+          ),
           status: "claimed",
         });
         expect(reexhaustionIdempotencyKey).not.toBe(usageIdempotencyKey);

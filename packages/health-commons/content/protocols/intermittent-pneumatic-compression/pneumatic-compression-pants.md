@@ -178,7 +178,7 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: 3x/week target · 8–12 sessions over 21 days · 20–30 min · lowest comfortable pressure/intensity · after exercise or leg-comfort trigger · 7-day baseline first
+  doseSignature: 3x/week target · 8–12 sessions over 21 days · 20–30 min · lowest comfortable pressure/intensity · after exercise or leg-comfort trigger · 14-day baseline first
   target: consumer lower-limb pneumatic compression pants, boots, or leg sleeves
   frequency:
     sessionsPerWeek: 3
@@ -287,8 +287,8 @@ protocol:
   - Symptoms recur or worsen across repeated sessions, delayed symptoms appear later the same day, or safety concerns outweigh any comfort benefit.
 testPlans:
 - planId: soreness-comfort-28d
-  durationDays: 28
-  baselineDays: 7
+  durationDays: 35
+  baselineDays: 14
   interventionDays: 21
   primaryBiomarkerKey: biomarker:muscle-soreness-score
   secondaryBiomarkerKeys:

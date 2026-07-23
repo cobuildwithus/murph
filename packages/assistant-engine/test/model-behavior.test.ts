@@ -695,13 +695,19 @@ describe('assistant execution prompt contract', () => {
       'Use `murph.send_progress_update` for interim updates the member must see; commentary does not count',
     )
     expect(prompt).toContain(
-      'For reply-critical long research, multiple substantive tool calls, long parsing/scans, or content inspection, send an update before slow work.',
+      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection.',
+    )
+    expect(prompt).toContain(
+      'Before the first read in that pass, orient the member even when each lookup is routine',
+    )
+    expect(prompt).toContain(
+      'Do not wait until the work is done or the member asks about the delay.',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning.',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns.',
+      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement.',
     )
     expect(prompt).toContain(
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.',
@@ -719,7 +725,7 @@ describe('assistant execution prompt contract', () => {
       'Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics.',
     )
     expect(prompt).toContain(
-      '3. Follow the progress-update rules in the execution behavior guidance before genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
+      '3. Follow the progress-update rules in the execution behavior guidance before multi-source context checks or genuinely long work, but never let progress updates outrank immediate safe action or create extra tool/status churn.',
     )
     expect(
       prompt.match(
@@ -974,6 +980,10 @@ describe('assistant local PDF evidence guidance', () => {
       onboardingGuidance: true,
     }))
 
+    expect(readHostedWearableProviderList(prompt)).toBe(
+      'Oura (`oura`) and WHOOP (`whoop`)',
+    )
+    expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
@@ -992,6 +1002,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain(
       'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
     )
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain('WHOOP limits third-party access')
     expect(prompt).toContain(
       'WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow',
@@ -1070,7 +1081,9 @@ describe('assistant local PDF evidence guidance', () => {
       onboardingGuidance: false,
     }))
 
+    expect(readHostedWearableProviderList(prompt)).toBeNull()
     expect(prompt).not.toContain('Hosted wearable connection links are available')
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
       'Apple Watch/iPhone/Apple Health: send https://apps.apple.com/us/app/murph-ai/id6786145859; download/open Murph',
     )
@@ -2154,6 +2167,9 @@ describe('assistant Murph onboarding guidance', () => {
     )
     expect(prompt).not.toContain('Natural first-run flow')
     expect(prompt).not.toContain('vault-cli device account list --format json')
+    expect(readHostedWearableProviderList(prompt)).toBe('WHOOP (`whoop`)')
+    expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
+    expect(prompt).toContain('Apple Health relay:')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )
@@ -2298,6 +2314,10 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       "route those through `murph.plan_usage`'s private management handoff",
     )
+    expect(prompt).toContain(`${MURPH_PRODUCT_ORIGIN}/settings#family`)
+    expect(prompt).toContain('`owner: true`, `billingActive: true`')
+    expect(prompt).toContain('matches exactly one active member row')
+    expect(prompt).toContain('This is navigation only')
     expect(prompt).toContain('GOOGLECALENDAR_CREATE_EVENT')
     expect(prompt).toContain('OUTLOOK_CALENDAR_CREATE_EVENT')
     expect(prompt).toContain('User-provided content and vault writes:')
@@ -2454,4 +2474,10 @@ function createCommonNotificationPromptInput(
 
 function firstNChars(value: string, length: number): string {
   return value.slice(0, length)
+}
+
+function readHostedWearableProviderList(prompt: string): string | null {
+  return prompt.match(
+    /^- Hosted wearable connection links are available for (.+)\. When offering examples/mu,
+  )?.[1] ?? null
 }

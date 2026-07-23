@@ -6,8 +6,9 @@ repository, create a patch, or take external actions.
 
 Decide whether the PR is safe to merge against its stated outcome and current
 repository invariants. Find only PR-caused serious reachable failures,
-material purpose drift, and material opportunities to preserve the same
-behavior with less complexity.
+material product-experience failures, material purpose drift, and material
+opportunities to preserve the same behavior with less complexity or user
+friction.
 
 # Success criteria
 
@@ -19,6 +20,12 @@ behavior with less complexity.
   exposure, and the boundary affected—not merely technical reachability.
 - Simplification findings produce net deletion or remove meaningful concepts,
   branches, state, or ownership paths without replacement machinery.
+- User-facing changes complete the intended journey within a truthful timing
+  class, reach the right person or surface without unrelated new input, and
+  fail or recover legibly.
+- Frontend-facing changes express the feature's irreducible purpose with the
+  fewest necessary words, actions, choices, and screens while preserving
+  accessibility, consent, trust, and control.
 - Every material behavior or ownership change is necessary for the stated PR
   outcome. Every non-obvious affected surface is also disclosed under
   `Non-obvious affected surfaces` with a concrete reason and regression proof.
@@ -92,10 +99,49 @@ If the converged implementation still prevents the stated outcome from
 shipping, report the reachable correctness failure; do not infer that the
 intended behavior should be deleted.
 
-When the PR is user-facing, use its UX outline to trace the entry point, main
-interaction and feedback states, failure or recovery behavior, and next step.
-Report a reachable gap between that flow and the implementation; do not treat
-the prose itself as proof that a state works.
+## Product experience audit
+
+When the PR is user-facing, first state its irreducible user purpose and the
+smallest complete experience that fulfills it. Then trace the actual production
+journey rather than reviewing isolated components or internal completion:
+
+- the initiating person, entry point, intent, immediate acknowledgement, and
+  whether that acknowledgement makes a truthful promise;
+- every queue, runtime, provider, workflow, permission, or asynchronous handoff,
+  including the existing owner that starts or wakes the next step;
+- the expected timing class and longest normal wait through cold, busy, dirty,
+  backlogged, retry, restart, and concurrent-input states;
+- progress, completion, and the exact place and audience that receive the
+  result without requiring an unrelated new inbound action; and
+- denial, timeout, cancellation, revocation, failure, recovery, and what the
+  person experiences next.
+
+`Asynchronous` is not a complete experience or latency contract. Durable
+acceptance or internal completion is not success when work waits behind
+unrelated idle or maintenance activity, receives misleading or absent feedback,
+arrives too late to be useful, reaches the wrong context, or never closes the
+loop with its initiator. Require production-faithful evidence for cross-runtime
+wakeups, timing, and final delivery; unit mocks and internal state alone do not
+prove them. Calibrate latency to the interaction and the PR's stated timing
+class instead of inventing a universal budget.
+
+For frontend-facing changes, audit the interaction economy from the changed
+source and PR flow. Inspect rendered states only when readable visual artifacts
+are present inside `codebase.zip`; otherwise state the exact rendered-evidence
+gap and do not infer visual quality. Make every word, click, field, choice,
+confirmation, setting, screen, and visual element earn its place. Prefer one
+clear primary action, strong defaults, inference, direct manipulation, and
+progressive disclosure. Delete copy that repeats labels, narrates an avoidable
+interaction, or compensates for weak hierarchy; preserve words and controls
+needed for safety, consent, accessibility, trust, undo, revocation, or recovery.
+Judge loading, empty, success, partial, delayed, error, and recovery states as
+carefully as the happy path. When rendered evidence is available, the result
+should feel coherent, calm, intentional, and finished—not like generic
+dashboard furniture or ornamental polish competing with the feature's purpose.
+
+Report only reachable, material gaps between that experience and the
+implementation. Treat the PR's UX outline as an intent contract, never as proof
+that the journey, timing, delivery, or rendered quality works.
 
 Use the PR description's change-shape breakdown only to orient the review. Verify
 its classifications and implications against the changed-file list and diff; raw
@@ -210,6 +256,18 @@ Report only:
   smallest disposition: delete or split unnecessary scope; for necessary but
   undisclosed scope, require the intent contract to add the reason and
   regression proof.
+- **Material UX Failure**: a PR-caused ordinary journey has materially wrong
+  latency, ordering, feedback, permission behavior, destination, completion,
+  or recovery, even when it does not meet the High bar. Trace the affected
+  actor's production path, state why the experience no longer fulfills the
+  stated outcome, and name the smallest correction and end-to-end proof. Do not
+  report minor friction, subjective taste, or a missing optional enhancement.
+- **Experience Collapse**: the same user outcome can be delivered with
+  materially fewer words, actions, fields, choices, confirmations, screens,
+  concepts, or avoidable waits. Name exactly what can be removed or defaulted
+  and prove that the smaller journey preserves comprehension, accessibility,
+  consent, safety, trust, and user control. Do not use this category for pixel
+  polish or personal style preference.
 
 Invariant drift is qualifying only when it produces a PR-caused Critical or
 High failure that independently meets the material-impact bar. Cite the exact
@@ -271,6 +329,17 @@ For each finding provide:
 
 For a Complexity Collapse, also state the expected net deletion, concepts or
 owners removed, and invariants the smaller shape preserves.
+
+For an Experience Collapse, also state the removed words, actions, screens,
+choices, concepts, or waits and the clarity, accessibility, consent, trust, and
+control that the smaller experience preserves.
+
+When a user-facing frontend change has no readable rendered artifacts inside
+`codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and
+before the outcome. The gap is not independently a qualifying finding and does
+not prevent `PASS` because the completed preliminary specialist ReviewGPT pass
+and any routed local product-experience review own rendered proof. Never claim
+that this final gate independently proved rendered craft.
 
 For `RETROSPECTIVE_REQUIRED`, do not invent tactical fixes. State the trigger,
 the original-versus-current scope evidence, the repeated mechanism when

@@ -216,14 +216,9 @@ export function MealPhotosSection() {
     <section className="bg-[linear-gradient(170deg,#f8f0dd_0%,#efe1c2_100%)] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8a6428]">
-              Calorie counting
-            </p>
-            <span className="rounded-full border border-[#8a6428]/30 px-2.5 py-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8a6428]">
-              Coming next week
-            </span>
-          </div>
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#8a6428]">
+            Calorie counting
+          </p>
           <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
             The calorie tracker you never open.
           </h2>

@@ -1,6 +1,6 @@
 # Product Sense
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Current Posture
 
@@ -40,7 +40,10 @@ Last verified: 2026-07-21
   Murph. Signup-oriented accessible-stage landing auth routes to
   `/home?initialVisit=true`, where members with a resolved text contact first see
   the contact-card picker and then the one-shot four-step Murph personality
-  picker. Members without a text contact start at the personality picker.
+  picker. Members without a text contact start at the personality picker. A
+  successful personality save ends in the Welcome to Murph dialog and its
+  current messaging action; skipping or dismissing the picker ends the handoff
+  without that dialog.
   Login-oriented landing CTAs continue to route to ordinary `/home`.
 - The public changelog opens on a bounded seven-day window of dated editions.
   Every edition remains a stable cursor, and API or digest links to an older

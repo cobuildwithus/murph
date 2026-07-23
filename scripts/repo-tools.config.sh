@@ -42,6 +42,7 @@ required_files=(
   "agent-docs/operations/completion-workflow.md"
   "agent-docs/prompts/coverage-write.md"
   "agent-docs/prompts/prompt-review.md"
+  "agent-docs/prompts/product-experience-review.md"
   "agent-docs/generated/README.md"
   "agent-docs/generated/doc-gardening-report.md"
   "agent-docs/exec-plans/active/README.md"

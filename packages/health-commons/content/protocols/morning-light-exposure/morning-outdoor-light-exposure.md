@@ -247,7 +247,7 @@ lineage:
 attribution:
   ownerType: murph
 protocol:
-  doseSignature: daily · outdoor ambient natural light soon after waking · 10-30 min target · 7-day baseline + 21-day intervention
+  doseSignature: daily · outdoor ambient natural light soon after waking · 10-30 min target · 14-day baseline + 21-day intervention
   target: Ambient outdoor daylight within about 30-60 minutes after waking when feasible, preferably before 10 AM, without staring at the sun.
   frequency:
     sessionsPerWeek: 7
@@ -331,8 +331,8 @@ testPlans:
 
   -
     planId: sleep-quality-timing-28d
-    durationDays: 28
-    baselineDays: 7
+    durationDays: 35
+    baselineDays: 14
     interventionDays: 21
     primaryBiomarkerKey: biomarker:sleep-quality
     secondaryBiomarkerKeys:
@@ -341,7 +341,7 @@ testPlans:
     minimumAdherenceSessions: 14
     targetAdherenceSessions: 21
     notes:
-      - Use a 7-day baseline with no deliberate morning-light change, then compare against the 21-day intervention window.
+      - Use a 14-day baseline with no deliberate morning-light change, then compare against the 21-day intervention window.
       - Primary interpretation should focus on same-scale sleep quality and sleep-onset latency, with sleep efficiency, bedtime/final wake time, and morning alertness as supporting context; use exposure adherence to explain whether the protocol was actually tested.
       - Keep the daily subjective sleep-quality question on 0-10, with 0 as worst possible and 10 as best possible, throughout baseline and intervention.
       - Use a wearable or sleep diary for sleep-onset latency and sleep efficiency, but do not treat consumer sleep stages as promised endpoints.
@@ -932,7 +932,7 @@ expectedSignal:
   primary:
     biomarkerKey: biomarker:sleep-quality
     direction: improve_or_no_clear_change
-    latency: 1-3 weeks, interpreted against a 7-day baseline
+    latency: 1-3 weeks, interpreted against a 14-day baseline
     confidence: low_to_moderate
     sourceKeys:
       - source_artifact:pmid-28786887
@@ -962,7 +962,7 @@ The closest direct evidence is short and population-bounded: older nursing-home 
 
 ## Simple version
 
-For 7 days, keep your routine stable and only measure. Then, for 21 days, go outside soon after waking and spend about 10-30 minutes in ambient daylight. Do not stare at the sun. Log wake time, session timing, duration, weather, perceived brightness, sleep quality, sleep timing, morning alertness, evening light, caffeine, alcohol, travel, illness, and any symptoms.
+For 14 days, keep your routine stable and only measure. Then, for 21 days, go outside soon after waking and spend about 10-30 minutes in ambient daylight. Do not stare at the sun. Log wake time, session timing, duration, weather, perceived brightness, sleep quality, sleep timing, morning alertness, evening light, caffeine, alcohol, travel, illness, and any symptoms.
 
 ## What counts
 

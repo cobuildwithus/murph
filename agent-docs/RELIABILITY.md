@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Current Guardrails
 
@@ -18,6 +18,7 @@ Last verified: 2026-07-21
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
+- Closed integration-ingest months compact only in the abortable hosted idle-shutdown lane. Core publishes a verified deterministic gzip before deleting raw bytes, normal readers and amendments stream bounded gzip output, and startup repairs only an independently valid, newline-terminated, byte-identical raw/gzip pair. A wake preserves foreground priority; a 30-second pass budget or ordinary compaction failure leaves any unfinished source intact and does not block checkpointing. Remaining raw months are the next pass's durable worklist, while a non-identical representation pair fails closed without a repair queue or marker.
 - The single group newsletter automation reuses canonical cron occurrence state for both delivery modes. Current-chat editions finish through the ordinary conversation outbox and its route retry policy. A scheduled non-direct Telegram occurrence resolves its exact Web-owned route before group tools or model work, persists that authority with the outbox intent, and rechecks it before provider entry. Missing route authority remains retryable; a locally mismatched target fails stale, while live ownership revocation fails permanently without sending. Email editions alone use the existing newsletter parent/recipient outbox lifecycle. The runtime appends the current execution contract on every occurrence so legacy saved instructions cannot retain a retired workflow; no migration queue, repair state, or second scheduler exists.
 - A usage-credit purchase persists one reconstructible `created` purchase before
   Stripe I/O; that row and the single purchase-status lifecycle are the durable
@@ -26,6 +27,23 @@ Last verified: 2026-07-21
   the frozen Session expiry. An ambiguous response must
   not mint a replacement purchase or create a second payable Session. The
   member may begin another purchase only after the existing one is terminal.
+- Family usage-credit creation rechecks owner, group billing, active membership,
+  and beneficiary status inside the purchase transaction. Exact request-key
+  replay keeps the already-frozen purchase identity but rechecks mutable Family
+  authority before releasing any payable capability; every fresh key also
+  reauthorizes current state. The same server-owned capability projection runs
+  again after Stripe Session creation, and on ambiguous provider recovery,
+  before returning a Checkout URL or retry permission. Personal,
+  hosted-group, and Family return scopes are frozen distinctly so payer-wide
+  active-purchase recovery cannot confuse an owner self top-up across targets.
+  Every conflicting request may expose status and cancellation only: it must
+  not continue Stripe creation, return a Checkout URL, or offer retry in any
+  ordered combination of personal, hosted-group, and Family targets. Settings
+  and hosted-group funding suppress every new amount picker while the payer has
+  an active purchase and map a different target to status/cancel-only recovery.
+  The server projects a departed Family beneficiary as status/cancel-only and
+  does not decrypt or serialize its Checkout URL, including when membership
+  changes while a Stripe request is in flight.
 - Usage-credit fulfillment reuses the Stripe event receipt as its retry owner.
   It verifies live one-time payment state, then appends the unique grant and
   updates the beneficiary balance/version projection in one locked

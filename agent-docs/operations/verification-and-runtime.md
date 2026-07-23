@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 
 ## Verification Execution Location
 
@@ -11,8 +11,8 @@ through `scripts/verification-dispatch.mjs`:
 
 - CI and already-remote runs execute `scripts/workspace-verify.sh` directly.
 - A local Codex parent in `auto` mode uses Crabbox's direct
-  `blacksmith-testbox` provider only when both CLIs are available and either
-  `MURPH_CRABBOX_BLACKSMITH=1` or `MURPH_CRABBOX_LEASE_ID` is set.
+  `blacksmith-testbox` provider only when both CLIs are available and
+  `MURPH_CRABBOX_BLACKSMITH=1` is set.
 - Other callers and unconfigured or unavailable CLIs retain local shared-host
   admission. Canonical acceptance intentionally selects its bounded composed
   profile there when at least 12 logical CPUs are available; ordinary commands
@@ -26,21 +26,50 @@ through `scripts/verification-dispatch.mjs`:
 - The Testbox hydration workflow must exist on the repository default branch
   before GitHub accepts a delegated `workflow_dispatch`. The change that first
   introduces `.github/workflows/crabbox.yml` therefore uses local verification
-  and PR gates; after that bootstrap lands, canonical commands can create or
-  reuse Testboxes from feature branches normally.
+  and PR gates; after that bootstrap lands, canonical commands can create fresh
+  one-shot Testboxes from feature branches normally. Canonical verification
+  rejects reusable lease IDs because current provider metadata does not prove
+  the Blacksmith organization that installed the root-owned entrypoint.
 
 Remote execution preserves the exact underlying `workspace-verify.sh` command,
 including diff scope, reverse dependents, coverage thresholds, app verification,
 and acceptance semantics. The remote bootstrap reconciles the synced lockfile
 with `pnpm install --frozen-lockfile --prefer-offline` before verification.
 
+### Ten-minute local admission fallback
+
+Measure time spent waiting for the exclusive local shared-host slot separately
+from active verification time. If a required canonical command has waited 10
+continuous minutes without acquiring that slot, stop only the exact waiting
+process tree owned by the current task and rerun the same command through
+Crabbox:
+
+```bash
+MURPH_VERIFY_EXECUTOR=crabbox pnpm test:diff <path ...>
+MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
+```
+
+The forced executor creates a fresh one-shot Testbox through the fully pinned
+route. Do not leave the local waiter running concurrently, forward local
+environment values, bypass the canonical command, warm a lease separately, or
+return automatically to another unbounded local wait.
+Before delegation, satisfy the Git-state admission boundary, including fully
+staging any new non-ignored source or documentation file. If Crabbox cannot run
+because its CLIs, authentication, or capacity are unavailable, fail closed and
+report that concrete blocker with the completed local evidence. Preserve the
+Testbox ID, timing summary, and linked Actions run when delegation starts.
+
 ### Environment and Vercel boundary
 
 The default Crabbox/Blacksmith lane is synthetic and secret-free:
 
-- Blacksmith Testbox rejects Crabbox environment forwarding, and the dispatcher
-  removes any inherited `CRABBOX_ENV_ALLOW` before invoking the direct provider.
-  Do not add `--allow-env`, `--env-from-profile`, or workflow secrets to this lane.
+- Blacksmith Testbox rejects Crabbox environment forwarding. Before invoking
+  either the Crabbox or Blacksmith CLI, the dispatcher replaces its inherited
+  local environment with a small allowlist of host path, account, terminal, and
+  XDG config locations. Provider, model, production, GitHub, billing, messaging,
+  and application credentials never enter the Crabbox CLI process, so neither
+  user-level allowlists nor command flags have a credential value to forward. Do not add
+  `--allow-env`, `--env-from-profile`, or credential variables to this lane.
 - Blacksmith owns sync and can transfer Git-tracked plus untracked non-ignored
   paths. Before delegation, the dispatcher derives authorization from one
   `git status --porcelain=v1 -z --untracked-files=all` boundary. It permits
@@ -52,11 +81,29 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   paths. Authorized staged and modified tracked working-tree content must leave
   the host so the Testbox verifies the exact candidate change rather than only
   the pushed commit. `.gitignore` carries the matching normal exclusions,
-  including local Crabbox run artifacts.
-- `scripts/crabbox/run-verification.mjs` discards the received process environment,
-  preserves only basic host paths, and supplies deterministic CI-style placeholder
-  values required by hosted-web build and smoke checks. Blacksmith authentication
-  remains in the local Blacksmith CLI and never enters the test process.
+  including local Crabbox run artifacts. Every Git subprocess in this guard
+  receives the same scrubbed environment as Crabbox, so ambient `GIT_*`
+  overrides cannot make the guard inspect a different index or worktree from
+  the upload path.
+- The default-branch hydration workflow has read-only repository contents
+  permission, attaches no GitHub Environment, requests no OIDC authority, and
+  references no Actions secrets. It copies
+  `scripts/crabbox/trusted-verification-entrypoint.sh` into a root-owned path
+  outside the synced workspace before opening the delegated Testbox session.
+  Canonical commands invoke only that installed shell. It validates the two
+  allowed verification commands, resolves the candidate verifier from the real
+  current directory, and directly `exec`s it through `env -i` with an isolated
+  temporary home, fixed basic host paths, and a one-bit trusted-entry marker.
+- Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
+  and hydration job on the command line before the one-shot Testbox is created.
+  Local `CRABBOX_CONFIG`, profile, ref, workflow, job, or arbitrary existing
+  lease IDs are not trusted routing inputs.
+- `scripts/crabbox/run-verification.mjs` fails closed without that marker, then
+  independently rebuilds the process environment with deterministic CI-style
+  placeholder values required by hosted-web build and smoke checks. Candidate
+  changes can still be verified, but they never receive the Testbox orchestration
+  environment first. Blacksmith authentication remains in the local Blacksmith
+  CLI and never enters the test process.
 - The lane never runs `vercel env pull`, `vercel env run`, or copies `.env*`,
   `.vercel`, provider, model, billing, messaging, or production credentials.
 - Canonical completion tests are expected to pass under this synthetic contract.
@@ -64,7 +111,19 @@ The default Crabbox/Blacksmith lane is synthetic and secret-free:
   must set `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1`, remain local on an authorized
   host, and be reported separately. Do not weaken the default Crabbox boundary;
   a future remote live-env lane requires its own reviewed Testbox workflow with
-  repository-managed, step-scoped secrets.
+  repository-managed, step-scoped secrets. This secret-free workflow bootstrap
+  is itself a trust root: a change to it or the installed entrypoint must use
+  local verification until that exact trusted version exists on the default
+  branch, followed by a post-landing remote proof.
+
+This boundary prevents ambient credential inheritance in the canonical Murph
+verification path. It is not an operating-system sandbox: a process that can
+already read a production secret and make arbitrary network requests can
+exfiltrate that secret without Crabbox. Keep production credentials out of
+ordinary local process environments and never use ad-hoc Crabbox or Blacksmith
+commands to carry secret values. GitHub production secrets must live only in a
+protected-branch environment, never as repository-scoped duplicates that an
+alternate workflow ref could request.
 
 When Crabbox runs, record the command, result, Testbox ID, timing summary, and
 linked GitHub Actions run in the completion evidence.
@@ -104,10 +163,19 @@ hosted-execution contract, hosted-web provider/API/UI, Cloudflare port,
 assistant-runtime bridge, and assistant-engine tool/prompt tests; then run
 `pnpm test:diff` for every touched owner and `pnpm test:scenario-integrity`.
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
-putting a real query or ZIP in a durable artifact. Complete `frontend-review`,
-`coverage-write`, the review-only Fable UI pass, and ReviewGPT before handoff.
+putting a real query or ZIP in a durable artifact. Complete the local
+`product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
+pass, the review-only Fable UI pass, and the separate final ReviewGPT gate
+before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
+
+For every user-facing `apps/web` UI diff, verification also includes
+`pnpm test:frontend-design-proof`, a production-component update on
+`/design?tab=components` or a composed-section update on
+`/design?tab=sections`, and desktop and mobile screenshots from that catalog
+surface in the pull request. The pull-request workflow repeats the policy check
+against the final base-to-head diff and PR body.
 
 ## Scoped Verification Mode
 

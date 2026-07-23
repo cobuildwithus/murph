@@ -463,6 +463,7 @@ async function sendHostedLinqSideEffect(
         startedAtMs,
       });
   let deliveryEffect = effect;
+  let providerIdempotencyKey = effect.effectId;
   let usageLimitDispatchClaimed = false;
 
   try {
@@ -534,6 +535,7 @@ async function sendHostedLinqSideEffect(
             };
       }
       usageLimitDispatchClaimed = true;
+      providerIdempotencyKey = dispatch.providerIdempotencyKey;
       deliveryEffect = dispatch.idempotencyKey === effect.effectId
         ? effect
         : { ...effect, effectId: dispatch.idempotencyKey };
@@ -541,7 +543,7 @@ async function sendHostedLinqSideEffect(
 
     const result = await sendHostedLinqChatMessage({
       chatId: effect.payload.chatId,
-      idempotencyKey: deliveryEffect.effectId,
+      idempotencyKey: providerIdempotencyKey,
       message,
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,

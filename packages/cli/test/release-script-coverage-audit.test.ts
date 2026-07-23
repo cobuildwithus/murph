@@ -1268,6 +1268,11 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('app_connector="current"')
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
+    expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
+    expect(reviewGptConfig).toContain(
+      'review_gpt_browser_lanes=(eragon phlebas hercules mountain)',
+    )
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
@@ -1278,6 +1283,15 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).not.toContain('repomix_ignore_patterns=')
     const prDeepReviewPrompt = readFileSync(
       path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
+      'utf8',
+    )
+    const completionSpecialistsPrompt = readFileSync(
+      path.join(
+        repoRoot,
+        'scripts',
+        'chatgpt-review-presets',
+        'completion-specialists.md',
+      ),
       'utf8',
     )
     expect(prDeepReviewPrompt).toContain(
@@ -1356,6 +1370,20 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain(
       'require the intent contract to add the reason',
     )
+    expect(reviewGptConfig).toContain(
+      'review_gpt_register_dir_preset "completion-specialists"',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      '`review-gpt-pr-context/review-phase.json`',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      '`review-gpt-pr-context/rendered-evidence.txt`',
+    )
+    expect(completionSpecialistsPrompt).toContain('`reviewgpt-coverage.patch`')
+    expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: PASS`')
+    expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: FINDINGS`')
+    expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: INVALID`')
+    expect(completionSpecialistsPrompt).toContain('SPECIALIST_REVIEW_COMPLETE')
     const genericReviewGptPrompts = [
       'security-audit.md',
       'privacy.md',
@@ -1389,6 +1417,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(allPresetGroup).toContain('review_gpt_register_preset_group "all"')
     expect(allPresetGroup).not.toMatch(/^\s*"pr-review"\s*\\?$/mu)
+    expect(allPresetGroup).not.toMatch(/^\s*"completion-specialists"\s*\\?$/mu)
     const prReviewGptLoop = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'pr-reviewgpt-loop.md'),
       'utf8',
@@ -1398,12 +1427,20 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
       'utf8',
     )
-    expect(prReviewGptLoop).toContain('Required post-completion ReviewGPT loop')
+    expect(prReviewGptLoop).toContain('PR ReviewGPT Completion Loops')
+    expect(prReviewGptLoop).toContain('pnpm review:gpt completion-specialists')
     expect(prReviewGptLoop).toContain('pnpm review:gpt pr-review')
-    expect(prReviewGptLoop).toContain('repo-local `pr-review` preset')
-    expect(prReviewGptLoop).toContain('`pnpm review:gpt`')
-    expect(prReviewGptLoop).toContain('managed ReviewGPT browser lanes')
-    expect(prReviewGptLoop).toContain('randomly among usable')
+    expect(prReviewGptLoop).toContain(
+      'The `pr-review` prompt lives at',
+    )
+    expect(prReviewGptLoop).toContain(
+      'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
+    )
+    expect(prReviewGptLoop).toContain('default randomized usable managed')
+    expect(prReviewGptLoop).toContain('`Hercules.app` on `9444`')
+    expect(prReviewGptLoop).toContain(
+      '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
+    )
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('non-obvious affected surfaces')
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
@@ -1430,7 +1467,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'A marked concrete-model response that completes in under 7.5 minutes',
+      'its minimum trustworthy duration is 4 minutes',
+    )
+    expect(prReviewGptLoop).toContain(
+      'Treat 7.5 minutes as the default final-gate trust floor',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A marked concrete-model response below 6.5 minutes is too',
     )
     expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
@@ -1441,35 +1484,55 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).not.toContain('likely needs structural rework')
     expect(prReviewGptLoop).toContain('current member/event volume')
     expect(prReviewGptLoop).toContain('First try deleting the rollout seam')
-    expect(prReviewGptLoop).toContain('It does **not** run the local Codex')
+    expect(prReviewGptLoop).toContain(
+      'Do not substitute Codex subagents, pasted text, connector context',
+    )
     expect(prReviewGptLoop).toContain('scripts/review-gpt-pr-head-preflight.sh')
     expect(prReviewGptLoop).toContain('REVIEW_COMPLETE')
     expect(prReviewGptLoop).toContain('Hard cap: 5 rounds per PR')
     expect(prReviewGptLoop).not.toContain('Hard cap: 15 rounds per PR')
-    expect(prReviewGptLoop).toContain('Prompt-primary PRs use the local')
-    expect(agentsGuide).toContain('Prompt-primary PRs do not run ReviewGPT')
+    expect(prReviewGptLoop).toContain(
+      'Prompt-primary PRs still run the preliminary specialist prompt',
+    )
+    expect(agentsGuide).toContain(
+      'One preliminary `completion-specialists` ReviewGPT pass replaces',
+    )
     expect(agentWorkflowRouting).toContain(
-      "For prompt-primary changes, run the completion workflow's `prompt-review` pass",
+      'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
     )
     expect(agentsGuide).toContain('isolated regression test or explanatory doc')
     expect(agentsGuide).toContain('later rounds verify only remediation deltas')
-    expect(agentWorkflowRouting).toContain('proportional low-risk exemptions')
+    expect(agentWorkflowRouting).toContain('final-ReviewGPT-eligible PR-lane work')
     expect(agentWorkflowRouting).toContain('scope-anomaly signal')
-    expect(prReviewGptLoop).toContain('does **not** run the local Codex')
-    expect(prReviewGptLoop).toContain('sole cross-cutting audit')
-    expect(prReviewGptLoop).toContain('Never run both for the same completed')
-    expect(prReviewGptLoop).toMatch(
-      /specialist `prompt-review`,\s+`frontend-review`, or write-capable `coverage-write`/u,
+    expect(prReviewGptLoop).toContain('final cross-cutting gate for eligible work')
+    expect(prReviewGptLoop).toContain(
+      'Never combine local `deep-review` with the final ReviewGPT gate',
+    )
+    expect(prReviewGptLoop).toContain(
+      'One preliminary `completion-specialists` pass combines',
     )
     const completionWorkflow = readFileSync(
       path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
       'utf8',
     )
+    const verificationAndRuntime = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'verification-and-runtime.md'),
+      'utf8',
+    )
+    expect(completionWorkflow).toContain('10 continuous minutes waiting only')
+    expect(completionWorkflow).toContain('`MURPH_VERIFY_EXECUTOR=crabbox`')
+    expect(verificationAndRuntime).toContain('### Ten-minute local admission fallback')
+    expect(verificationAndRuntime).toContain(
+      'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
+    )
+    expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
     expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
     expect(completionWorkflow).toContain('fetch the latest `main`')
-    expect(completionWorkflow).toContain('still runs every specialist pass triggered')
     expect(completionWorkflow).toContain(
-      'local `deep-review` or PR-lane ReviewGPT, never both',
+      'pass replaces the three former local `prompt-review`, `frontend-review`, and',
+    )
+    expect(completionWorkflow).toContain(
+      'never combine this final gate with local `deep-review`',
     )
     expect(completionWorkflow).not.toContain(
       'Run local `deep-review` too only when the user explicitly asks',
@@ -1478,8 +1541,6 @@ describe('monorepo release flow coverage audit', () => {
       'may skip the individual required local audit subagent passes',
     )
     expect(completionWorkflow).toContain('gpt-5.6-sol')
-    expect(completionWorkflow).toContain('prompt-guidance-gpt-5p6.md')
-    expect(completionWorkflow).not.toContain('prompt-guidance?model=gpt-5.6-terra')
     expect(completionWorkflow).toContain('Change-shape breakdown')
     expect(completionWorkflow).toContain('scope-anomaly signal')
     expect(completionWorkflow).toContain('not a quality target or an automatic merge')
@@ -1488,13 +1549,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('User experience (when applicable)')
     expect(completionWorkflow).toContain('Non-obvious affected surfaces')
     expect(completionWorkflow).toContain('If none exist,')
-    expect(completionWorkflow).toContain(
-      'Prompt-primary PRs use `prompt-review` and do not run ReviewGPT',
-    )
+    expect(completionWorkflow).toContain('## Preliminary Specialist Applicability')
+    expect(completionWorkflow).toContain('`reviewgpt-coverage.patch`')
 
     const completionAuditPrompts = [
       'prompt-review.md',
       'frontend-review.md',
+      'product-experience-review.md',
       'coverage-write.md',
     ].map((fileName) =>
       readFileSync(
@@ -1511,7 +1572,8 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionAuditPrompts[0]).toContain('upgrading-to-gpt-5p6-sol.md')
     expect(completionAuditPrompts[1]).toContain('render and inspect')
     expect(completionAuditPrompts[1]).toContain('desktop and mobile viewports')
-    expect(completionAuditPrompts[2]).toContain('completion-workflow.md` § Audit Worker Rules')
+    expect(completionAuditPrompts[3]).toContain('Optional patch artifact:')
+    expect(completionAuditPrompts[3]).toContain('`reviewgpt-coverage.patch`')
     expect(
       existsSync(
         path.join(
@@ -1526,6 +1588,142 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.data.config.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-run.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
+  })
+
+  it('keeps product-experience decisions separate from rendered frontend review', () => {
+    const prDeepReview = readFileSync(
+      path.join(repoRoot, 'scripts', 'chatgpt-review-presets', 'pr-deep-review.md'),
+      'utf8',
+    )
+    const completionSpecialists = readFileSync(
+      path.join(
+        repoRoot,
+        'scripts',
+        'chatgpt-review-presets',
+        'completion-specialists.md',
+      ),
+      'utf8',
+    )
+    const productExperienceReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'product-experience-review.md'),
+      'utf8',
+    )
+    const frontendReview = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'prompts', 'frontend-review.md'),
+      'utf8',
+    )
+    const completionWorkflow = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'completion-workflow.md'),
+      'utf8',
+    )
+    const agentWorkflowRouting = readFileSync(
+      path.join(repoRoot, 'agent-docs', 'operations', 'agent-workflow-routing.md'),
+      'utf8',
+    )
+
+    expect(prDeepReview).toContain('## Product experience audit')
+    expect(prDeepReview).toMatch(
+      /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
+    )
+    expect(prDeepReview).toMatch(
+      /work waits behind\s+unrelated idle or maintenance activity/u,
+    )
+    expect(prDeepReview).toContain(
+      'result without requiring an unrelated new inbound action',
+    )
+    expect(prDeepReview).toContain(
+      'Make every word, click, field, choice,',
+    )
+    expect(completionSpecialists).toContain(
+      "repository's meaning-preserving tiny static-copy fast path",
+    )
+    expect(completionSpecialists).toContain(
+      'rendered fidelity to the declared',
+    )
+    expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
+    expect(productExperienceReview).toContain('irreducible user purpose')
+    expect(productExperienceReview).toContain(
+      'audit for changed user-facing product decisions',
+    )
+    expect(productExperienceReview).not.toContain(
+      'audit for materially changed user-facing behavior',
+    )
+    expect(productExperienceReview).toMatch(
+      /extra concept, screen, click, field, choice, setting,\s+confirmation, interruption, and block of explanatory text/u,
+    )
+    expect(productExperienceReview).toMatch(
+      /waits behind unrelated idle or\s+maintenance work/u,
+    )
+    expect(productExperienceReview).toContain(
+      'Defer component and token implementation',
+    )
+    expect(frontendReview).toMatch(
+      /do not\s+duplicate subjective product-taste findings or decide the copy, state selection,\s+action count, or whether an element exists/u,
+    )
+    expect(frontendReview).toContain(
+      'visual treatment that obscures or conflicts with the declared hierarchy',
+    )
+    expect(frontendReview).not.toContain('unrelated rendered elements')
+    expect(completionWorkflow).toContain(
+      'rendered fidelity to the declared states and hierarchy, responsive behavior, accessibility, and design-system execution',
+    )
+    expect(completionWorkflow).not.toContain(
+      'hierarchy, clarity, interaction, responsive behavior, accessibility, state and error handling',
+    )
+    expect(completionWorkflow).toContain('## Product and Rendered Review Admission')
+    expect(completionWorkflow).toContain(
+      'user-visible action purpose, count, or priority; required interaction steps;',
+    )
+    expect(completionWorkflow).toContain(
+      'asynchronous continuation or wake ownership;',
+    )
+    expect(completionWorkflow).toContain(
+      '| Any product-owned dimension, including one changed through a prompt | Run local `product-experience-review` |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Prompt-primary change with no product-owned dimension | No product-decision review | Run the preliminary prompt lens only |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Meaning-preserving tiny static-copy correction | No product-decision review |',
+    )
+    expect(completionWorkflow).toContain(
+      '| Implementation-only presentation with no product-owned dimension | No product-decision review |',
+    )
+    expect(completionWorkflow).toContain(
+      'An\nexemption never waives an applicable preliminary lens or local specialist.',
+    )
+    expect(completionWorkflow).not.toContain('explicit credit exhaustion uses `frontend-review`')
+    expect(completionWorkflow).toContain(
+      'Semantic copy—including CTA, helper, onboarding,',
+    )
+    expect(completionWorkflow).toMatch(
+      /a prompt that changes a product-owned dimension also runs local\s+`product-experience-review`/u,
+    )
+    expect(agentWorkflowRouting).toContain(
+      'Any change to semantic user-facing copy; user-visible action purpose, count, or priority;',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'asynchronous continuation or wake ownership;',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'only for a meaning-preserving typo, punctuation, grammar, or equivalent localization correction',
+    )
+    expect(agentWorkflowRouting).toContain(
+      '`agent-docs/operations/completion-workflow.md` § Product and Rendered Review Admission',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      'trivial copy-only `apps/web` edits that change static text only',
+    )
+    expect(agentWorkflowRouting).not.toContain(
+      '`product-experience-review` for materially changed user-facing behavior',
+    )
+    expect(agentWorkflowRouting).not.toContain('trivial static copy')
+    expect(completionWorkflow).toContain(
+      'repo code/test/config changes whose verification lane includes owner-level coverage',
+    )
+    expect(frontendReview).toContain(
+      'Meaning-preserving tiny static-copy corrections',
+    )
   })
 
   it('keeps delayed targets alive until discovery and closes only failed discoveries', async () => {
@@ -2621,6 +2819,10 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_ROUND_NUMBER')
     expect(fullPackageScript).toContain('REVIEW_GPT_FIRST_REVIEWED_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_PREVIOUS_REVIEWED_HEAD')
+    expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
+    expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
+    expect(fullPackageScript).toContain('review-phase.json')
+    expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
     expect(fullPackageScript).toContain('since-first-reviewed-head.diff')
     expect(fullPackageScript).toContain('since-previous-reviewed-head.diff')
@@ -2634,7 +2836,7 @@ Updated: 2026-04-24
     )
   })
 
-  it('packages exact ReviewGPT round metadata and remediation deltas', () => {
+  it('packages separate preliminary and final ReviewGPT metadata', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-round-harness-'))
     const fakeBin = path.join(harnessRoot, '.fake-tools')
     const packageScript = path.join(harnessRoot, 'scripts', 'package-audit-context-full.sh')
@@ -2723,6 +2925,26 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         cwd: harnessRoot,
       })
       writeHarnessFile(harnessRoot, 'apps/demo/source.ts', 'export const value = 0\n')
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/prompts/prompt-review.md',
+        'prompt lens\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/prompts/frontend-review.md',
+        'frontend lens\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'agent-docs/prompts/coverage-write.md',
+        'coverage lens\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.crabbox.yaml',
+        'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
+      )
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
       execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: harnessRoot })
       const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -2757,6 +2979,11 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         encoding: 'utf8',
       }).trim()
       execFileSync('git', ['checkout', '-q', '--detach', currentHead], { cwd: harnessRoot })
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/desktop.png',
+        'redacted rendered evidence\n',
+      )
 
       const invokePackager = (
         name: string,
@@ -2790,6 +3017,84 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           zipPath: path.join(outDir, `${name}.zip`),
         }
       }
+
+      const preliminary = invokePackager('preliminary', firstHead, {
+        REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+        REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+        REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+        REVIEW_GPT_ROUND_NUMBER: '',
+        REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
+      })
+      expect(preliminary.result.status, preliminary.result.stderr).toBe(0)
+      const preliminaryMetadata = JSON.parse(
+        execFileSync(
+          'unzip',
+          ['-p', preliminary.zipPath, 'review-gpt-pr-context/review-phase.json'],
+          { encoding: 'utf8' },
+        ),
+      ) as Record<string, unknown>
+      expect(preliminaryMetadata).toEqual({
+        schemaVersion: 1,
+        phase: 'preliminary_specialists',
+        currentBaseHead: baseHead,
+        currentReviewedHead: firstHead,
+      })
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', preliminary.zipPath, 'review-gpt-pr-context/rendered-evidence.txt'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('audit-packages/desktop.png\n')
+      const preliminaryEntries = listZipEntries(preliminary.zipPath)
+      expect(preliminaryEntries).toEqual(
+        expect.arrayContaining([
+          'agent-docs/prompts/prompt-review.md',
+          'agent-docs/prompts/frontend-review.md',
+          '.crabbox.yaml',
+          'agent-docs/prompts/coverage-write.md',
+          'audit-packages/desktop.png',
+          'review-gpt-pr-context/review-phase.json',
+          'review-gpt-pr-context/rendered-evidence.txt',
+        ]),
+      )
+      expect(preliminaryEntries).not.toContain(
+        'review-gpt-pr-context/review-round.json',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const preliminaryWithFinalRound = invokePackager(
+        'preliminary-with-final-round',
+        firstHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '1',
+        },
+      )
+      expect(preliminaryWithFinalRound.result.status).not.toBe(0)
+      expect(preliminaryWithFinalRound.result.stderr).toContain(
+        'preliminary specialist review must not set final ReviewGPT round metadata',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const preliminaryWithTraversal = invokePackager(
+        'preliminary-with-traversal',
+        firstHead,
+        {
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          REVIEW_GPT_RENDERED_EVIDENCE_PATHS: '../desktop.png',
+        },
+      )
+      expect(preliminaryWithTraversal.result.status).not.toBe(0)
+      expect(preliminaryWithTraversal.result.stderr).toContain(
+        'rendered evidence paths must be repo-relative and boundary-safe',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundOne = invokePackager('round-one', firstHead, {
         REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
@@ -2833,6 +3138,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe('')
+      expect(listZipEntries(roundOne.zipPath)).toContain('.crabbox.yaml')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {
@@ -2882,6 +3188,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe(expectedDelta)
+      expect(listZipEntries(roundTwo.zipPath)).toContain('.crabbox.yaml')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const missingPrevious = invokePackager('missing-previous', currentHead, {
@@ -2955,6 +3262,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
+      expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
@@ -2970,6 +3278,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).not.toContain('apps/web/public/legal/privacy.pdf')
       expect(leanEntries).not.toContain('docs/assets/readme-hero.jpg')
 
+      expect(fullEntries).toContain('.crabbox.yaml')
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')
@@ -3247,14 +3556,11 @@ exit 1
       'Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap.',
     )
     expect(completionWorkflow).toContain('stop making Claude requests')
-    expect(completionWorkflow).toContain(
-      'An already-completed task-scoped `frontend-review` satisfies the substitute',
-    )
-    expect(completionWorkflow).toContain(
+    expect(completionWorkflow).not.toContain(
       'run the required `frontend-review` pass now',
     )
     expect(completionWorkflow).toContain(
-      'without claiming that the Claude Code double-check passed',
+      'do not add a local frontend-review substitute',
     )
     expect(completionWorkflow).toContain(
       'neither model route can return a usable review for a non-credit reason',
@@ -3262,7 +3568,9 @@ exit 1
     expect(completionWorkflow).toContain(
       'do not claim this double-check passed',
     )
-    expect(completionWorkflow).toContain('does not replace `frontend-review`')
+    expect(completionWorkflow).toContain(
+      'does not replace the preliminary frontend',
+    )
     expect(completionWorkflow).toContain(
       'agent-docs/prompts/frontend-review.md',
     )

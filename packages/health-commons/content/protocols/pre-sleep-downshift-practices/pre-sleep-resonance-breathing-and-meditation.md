@@ -147,8 +147,8 @@ testPlans:
 
   -
     planId: chooser-sol-proxy-21d
-    durationDays: 21
-    baselineDays: 7
+    durationDays: 28
+    baselineDays: 14
     interventionDays: 14
     primaryBiomarkerKey: biomarker:sleep-onset-latency
     secondaryBiomarkerKeys:
@@ -161,7 +161,7 @@ testPlans:
     minimumAdherenceSessions: 10
     targetAdherenceSessions: 12
     notes:
-      - The baseline is seven nights without adding either practice. The intervention is fourteen nights using the chosen child practice.
+      - The baseline is fourteen nights without adding either practice. The intervention is fourteen nights using the chosen child practice.
       - The primary personal question is whether sleep onset and pre-sleep arousal improve enough to justify keeping the routine.
       - Use a wearable sleep-onset estimate when available, but pair it with a brief subjective estimate because quiet wakefulness can be misclassified.
       - Treat HRV, resting heart rate, total sleep time, and sleep stages as exploratory context unless repeated changes align with logs and are not obviously confounded.
@@ -393,7 +393,7 @@ claims:
 researchLandscape:
   bottomLine: "The research base supports a cautious pre-sleep downshift chooser, not a proven combined breathing-plus-silent-meditation stack. Breathing has the closest direct but mixed evidence; silent bedtime meditation is plausible but mostly adjacent; safety and measurement boundaries should be stronger than efficacy language."
   confidenceLabel: limited
-  primaryClaim: "Use the page to route users toward a single child practice and a conservative 21-night self-test, while preserving the evidence gap for the exact combined stack."
+  primaryClaim: "Use the page to route users toward a single child practice and a conservative 28-night self-test, while preserving the evidence gap for the exact combined stack."
   mainCaveat: "No extracted completed trial directly tested resonance breathing before bed followed by silent meditation before bed. Several useful sources are adjacent, bundled, guided, clinical, protocol-only, or measurement/safety context."
   groups:
 
@@ -1080,9 +1080,9 @@ This page is intentionally a chooser and research umbrella. For a clean Murph ex
 
 ## Default self-test
 
-Only run this default self-test if the sleep issue is mild, non-urgent, and not explained by red flags. Do not use the 21-night self-test to delay care for chronic or impairing insomnia, suspected or diagnosed sleep apnea, PAP/CPAP questions, severe daytime sleepiness, sleep attacks, drowsy driving, restless legs or limb movements, parasomnia behaviors, circadian rhythm problems, pregnancy/postpartum/lactation sleep disruption, medication changes, severe mood symptoms, panic/respiratory symptoms, trauma/dissociation, psychosis, mania, or pediatric/adolescent sleep concerns.
+Only run this default self-test if the sleep issue is mild, non-urgent, and not explained by red flags. Do not use the 28-night self-test to delay care for chronic or impairing insomnia, suspected or diagnosed sleep apnea, PAP/CPAP questions, severe daytime sleepiness, sleep attacks, drowsy driving, restless legs or limb movements, parasomnia behaviors, circadian rhythm problems, pregnancy/postpartum/lactation sleep disruption, medication changes, severe mood symptoms, panic/respiratory symptoms, trauma/dissociation, psychosis, mania, or pediatric/adolescent sleep concerns.
 
-Use seven baseline nights, then fourteen intervention nights. During intervention, keep the chosen practice short, gentle, and repeatable. The minimum useful adherence target is ten completed practice nights, with twelve or more as the preferred target.
+Use fourteen baseline nights, then fourteen intervention nights. During intervention, keep the chosen practice short, gentle, and repeatable. The minimum useful adherence target is ten completed practice nights, with twelve or more as the preferred target.
 
 The primary practical outcome is whether you fall asleep more easily or feel less keyed-up before sleep. Use wearable sleep onset, sleep efficiency, HRV, and resting heart rate as context rather than proof. Consumer sleep devices and actigraphy can misclassify quiet wakefulness, so pair device trends with a brief log.
 

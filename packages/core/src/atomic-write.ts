@@ -14,6 +14,8 @@ const EXCLUSIVE_CREATE_LINK_FALLBACK_CODES = new Set<string>([
 
 type AtomicTempFileStep = (tempAbsolutePath: string) => Promise<void>;
 
+export type PrepareAtomicFile = (tempAbsolutePath: string) => Promise<void>;
+
 function buildAtomicTempPath(targetAbsolutePath: string): string {
   return path.join(
     path.dirname(targetAbsolutePath),
@@ -94,8 +96,8 @@ async function linkPreparedTempFileExclusively(input: {
       throw error;
     }
 
-    await cleanupAtomicTempFileBestEffort(input.tempAbsolutePath);
     await input.fallbackCreateTarget();
+    await cleanupAtomicTempFileBestEffort(input.tempAbsolutePath);
     return;
   }
 
@@ -127,6 +129,41 @@ export async function writeFileAtomic(targetAbsolutePath: string, content: Uint8
     },
     async (tempAbsolutePath) => {
       await replaceTargetWithPreparedTempFile(targetAbsolutePath, tempAbsolutePath);
+    },
+  );
+}
+
+export async function prepareFileAtomic(
+  targetAbsolutePath: string,
+  prepareTempFile: PrepareAtomicFile,
+): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    prepareTempFile,
+    async (tempAbsolutePath) => {
+      await replaceTargetWithPreparedTempFile(targetAbsolutePath, tempAbsolutePath);
+    },
+  );
+}
+
+export async function prepareFileAtomicExclusive(
+  targetAbsolutePath: string,
+  prepareTempFile: PrepareAtomicFile,
+): Promise<void> {
+  await withPreparedAtomicTempFile(
+    targetAbsolutePath,
+    prepareTempFile,
+    async (tempAbsolutePath) => {
+      await linkPreparedTempFileExclusively({
+        targetAbsolutePath,
+        tempAbsolutePath,
+        fallbackCreateTarget: () =>
+          fs.copyFile(
+            tempAbsolutePath,
+            targetAbsolutePath,
+            fsConstants.COPYFILE_EXCL,
+          ),
+      });
     },
   );
 }

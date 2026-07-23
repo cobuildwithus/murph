@@ -32,7 +32,6 @@ describe("verification dispatcher", () => {
     }, true)).toMatchObject({
       executor: "crabbox",
       reason: "codex-auto",
-      target: null,
     });
   });
 
@@ -93,7 +92,6 @@ describe("verification dispatcher", () => {
     }, true)).toMatchObject({
       executor: "crabbox",
       reason: "explicit",
-      target: null,
     });
 
     expect(resolveExecutorFailure({
@@ -101,25 +99,67 @@ describe("verification dispatcher", () => {
     }, false)).toContain("Crabbox and Blacksmith CLIs are unavailable");
   });
 
+  it("rebuilds the local Crabbox CLI environment from non-secret host paths", () => {
+    expect(callDispatcherExport(
+      "buildCrabboxCliEnvironment",
+      {
+        ACTIONS_RUNTIME_TOKEN: "actions-secret",
+        CI: "1",
+        CRABBOX_ENV_ALLOW: "OPENAI_API_KEY",
+        CUSTOM_PROVIDER_TOKEN: "provider-secret",
+        GITHUB_TOKEN: "github-secret",
+        HOME: "/safe/home",
+        NODE_OPTIONS: "--require=malicious-bootstrap",
+        OPENAI_API_KEY: "model-secret",
+        PATH: "/safe/bin:/usr/bin:/bin",
+        STRIPE_SECRET_KEY: "billing-secret",
+        TERM: "xterm-256color",
+        USER: "crabbox-user",
+        XDG_CONFIG_HOME: "/safe/config",
+      },
+    )).toEqual({
+      HOME: "/safe/home",
+      PATH: "/safe/bin:/usr/bin:/bin",
+      TERM: "xterm-256color",
+      USER: "crabbox-user",
+      XDG_CONFIG_HOME: "/safe/config",
+    });
+  });
+
   it("uses the direct Blacksmith provider without environment forwarding", () => {
     const tempRoot = makeTempRoot();
     const binDir = path.join(tempRoot, "bin");
     const capturePath = path.join(tempRoot, "args.txt");
+    const crabboxProbeCapturePath = path.join(tempRoot, "crabbox-probe-env.txt");
+    const blacksmithProbeCapturePath = path.join(tempRoot, "blacksmith-probe-env.txt");
     const envCapturePath = path.join(tempRoot, "env-allow.txt");
+    const secretCapturePath = path.join(tempRoot, "secret-env.txt");
     const sentinelCapturePath = path.join(tempRoot, "sentinel.txt");
+    const expectedSanitizedProbeEnvironment = "unset\n".repeat(10);
     const fakeCrabboxPath = path.join(binDir, "crabbox");
     const fakeBlacksmithPath = path.join(binDir, "blacksmith");
     writeExecutable(
       fakeCrabboxPath,
       [
         "#!/bin/sh",
-        'if [ "${1:-}" = "--version" ]; then exit 0; fi',
-        'printf "%s\\n" "$@" > "$MURPH_TEST_CRABBOX_CAPTURE"',
-        'printf "%s" "${CRABBOX_ENV_ALLOW-unset}" > "$MURPH_TEST_CRABBOX_ENV_CAPTURE"',
-        'printf "%s" "${MURPH_CRABBOX_NO_FORWARD-unset}" > "$MURPH_TEST_CRABBOX_SENTINEL_CAPTURE"',
+        'if [ "${1:-}" = "--version" ]; then',
+        `  printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(crabboxProbeCapturePath)}`,
+        "  exit 0",
+        "fi",
+        `printf "%s\\n" "$@" > ${shellQuote(capturePath)}`,
+        `printf "%s" "\${CRABBOX_ENV_ALLOW-unset}" > ${shellQuote(envCapturePath)}`,
+        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" > ${shellQuote(secretCapturePath)}`,
+        `printf "%s" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(sentinelCapturePath)}`,
       ].join("\n"),
     );
-    writeExecutable(fakeBlacksmithPath, "#!/bin/sh\nexit 0");
+    writeExecutable(
+      fakeBlacksmithPath,
+      [
+        "#!/bin/sh",
+        `printf "%s\\n" "\${OPENAI_API_KEY-unset}" "\${STRIPE_SECRET_KEY-unset}" "\${GITHUB_TOKEN-unset}" "\${CUSTOM_PROVIDER_TOKEN-unset}" "\${CI-unset}" "\${NODE_OPTIONS-unset}" "\${CRABBOX_ENV_ALLOW-unset}" "\${CRABBOX_CONFIG-unset}" "\${MURPH_CRABBOX_PROFILE-unset}" "\${MURPH_CRABBOX_NO_FORWARD-unset}" > ${shellQuote(blacksmithProbeCapturePath)}`,
+        "exit 0",
+      ].join("\n"),
+    );
     writeExecutable(path.join(binDir, "git"), "#!/bin/sh\nexit 0");
 
     const result = spawnSync(
@@ -131,32 +171,52 @@ describe("verification dispatcher", () => {
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
           CODEX_THREAD_ID: "thread-1",
+          CI: "",
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
+          CRABBOX_CONFIG: "/tmp/attacker-controlled-crabbox.yaml",
+          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
+          GITHUB_TOKEN: "must-not-reach-crabbox",
           MURPH_CRABBOX_BLACKSMITH: "1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_TEST_CRABBOX_CAPTURE: capturePath,
-          MURPH_TEST_CRABBOX_ENV_CAPTURE: envCapturePath,
-          MURPH_TEST_CRABBOX_SENTINEL_CAPTURE: sentinelCapturePath,
+          MURPH_CRABBOX_PROFILE: "attacker-controlled-profile",
+          NODE_OPTIONS: "--trace-warnings",
+          OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
         },
       },
     );
 
     expect(result.status, result.stderr).toBe(0);
     const args = readFileSync(capturePath, "utf8").trim().split("\n");
+    expect(readFileSync(crabboxProbeCapturePath, "utf8")).toBe(
+      expectedSanitizedProbeEnvironment,
+    );
+    expect(readFileSync(blacksmithProbeCapturePath, "utf8")).toBe(
+      expectedSanitizedProbeEnvironment,
+    );
     expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
+    expect(readFileSync(secretCapturePath, "utf8")).toBe(
+      "unset\nunset\nunset\nunset\nunset\nunset\n",
+    );
     expect(readFileSync(sentinelCapturePath, "utf8")).toBe("unset");
     const providerIndex = args.indexOf("--provider");
     expect(providerIndex).toBeGreaterThan(-1);
     expect(args[providerIndex + 1]).toBe("blacksmith-testbox");
+    expect(flagValue(args, "--profile")).toBe("murph-verification");
+    expect(flagValue(args, "--blacksmith-org")).toBe("cobuildwithus");
+    expect(flagValue(args, "--blacksmith-ref")).toBe("main");
+    expect(flagValue(args, "--blacksmith-workflow")).toBe(
+      ".github/workflows/crabbox.yml",
+    );
+    expect(flagValue(args, "--blacksmith-job")).toBe("hydrate");
     expect(args).not.toContain("--id");
     expect(args).not.toContain("--pool");
     expect(args).not.toContain("--pool-return");
     expect(args).not.toContain("--allow-env");
     expect(args).not.toContain("--env-from-profile");
-    expect(args.slice(-4)).toEqual([
-      "node",
-      "scripts/crabbox/run-verification.mjs",
+    expect(args.slice(-3)).toEqual([
+      "/usr/local/bin/murph-crabbox-verify",
       "test:diff",
       "packages/assistant-engine",
     ]);
@@ -171,29 +231,22 @@ describe("verification dispatcher", () => {
           ...withoutVerificationRoutingEnvironment(process.env),
           CODEX_THREAD_ID: "thread-1",
           CRABBOX_ENV_ALLOW: "OPENAI_API_KEY,VERCEL_OIDC_TOKEN",
+          CUSTOM_PROVIDER_TOKEN: "must-not-reach-crabbox",
+          GITHUB_TOKEN: "must-not-reach-crabbox",
           MURPH_CRABBOX_LEASE_ID: "lease-1",
           MURPH_CRABBOX_NO_FORWARD: "must-not-reach-crabbox",
-          MURPH_TEST_CRABBOX_CAPTURE: capturePath,
-          MURPH_TEST_CRABBOX_ENV_CAPTURE: envCapturePath,
-          MURPH_TEST_CRABBOX_SENTINEL_CAPTURE: sentinelCapturePath,
+          NODE_OPTIONS: "--trace-warnings",
+          OPENAI_API_KEY: "must-not-reach-crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          STRIPE_SECRET_KEY: "must-not-reach-crabbox",
         },
       },
     );
 
-    expect(leaseResult.status, leaseResult.stderr).toBe(0);
-    const leaseArgs = readFileSync(capturePath, "utf8").trim().split("\n");
-    const leaseIdIndex = leaseArgs.indexOf("--id");
-    expect(leaseIdIndex).toBeGreaterThan(-1);
-    expect(leaseArgs[leaseIdIndex + 1]).toBe("lease-1");
-    expect(leaseArgs).not.toContain("--pool");
-    expect(leaseArgs.slice(-3)).toEqual([
-      "node",
-      "scripts/crabbox/run-verification.mjs",
-      "verify:acceptance",
-    ]);
-    expect(readFileSync(envCapturePath, "utf8")).toBe("unset");
-    expect(readFileSync(sentinelCapturePath, "utf8")).toBe("unset");
+    expect(leaseResult.status).toBe(1);
+    expect(leaseResult.stderr).toContain(
+      "an arbitrary existing lease cannot prove the organization",
+    );
   });
 
   it("identifies sensitive files before Blacksmith delegates its Git-managed sync", () => {
@@ -271,16 +324,7 @@ describe("verification dispatcher", () => {
       ].join("\n"),
     );
     writeExecutable(path.join(binDir, "blacksmith"), "#!/bin/sh\nexit 0");
-    writeExecutable(
-      path.join(binDir, "git"),
-      [
-        "#!/bin/sh",
-        "case \"${1:-}\" in",
-        "  status) printf '%b' \"$MURPH_TEST_GIT_STATUS\" ;;",
-        "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
-        "esac",
-      ].join("\n"),
-    );
+    const fakeGitPath = path.join(binDir, "git");
 
     for (const [status, reason] of [
       ["?? notes.txt\\000", "untracked"],
@@ -300,6 +344,16 @@ describe("verification dispatcher", () => {
       [" Z unsupported.txt\\000", "unsupported"],
     ] as const) {
       rmSync(delegationMarkerPath, { force: true });
+      writeExecutable(
+        fakeGitPath,
+        [
+          "#!/bin/sh",
+          "case \"${1:-}\" in",
+          `  status) printf '%b' ${shellQuote(status)} ;;`,
+          "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
+          "esac",
+        ].join("\n"),
+      );
       const result = spawnSync(
         process.execPath,
         [dispatcherPath, "verify:acceptance"],
@@ -308,7 +362,6 @@ describe("verification dispatcher", () => {
           encoding: "utf8",
           env: {
             ...withoutVerificationRoutingEnvironment(process.env),
-            MURPH_TEST_GIT_STATUS: status,
             MURPH_VERIFY_EXECUTOR: "crabbox",
             PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           },
@@ -322,6 +375,16 @@ describe("verification dispatcher", () => {
     }
 
     rmSync(delegationMarkerPath, { force: true });
+    writeExecutable(
+      fakeGitPath,
+      [
+        "#!/bin/sh",
+        "case \"${1:-}\" in",
+        "  status) printf '%b' 'R  renamed-without-original.ts\\000' ;;",
+        "  ls-files) printf '%b' 'scripts/verification-dispatch.mjs\\000' ;;",
+        "esac",
+      ].join("\n"),
+    );
     const malformedRenameResult = spawnSync(
       process.execPath,
       [dispatcherPath, "verify:acceptance"],
@@ -330,7 +393,6 @@ describe("verification dispatcher", () => {
         encoding: "utf8",
         env: {
           ...withoutVerificationRoutingEnvironment(process.env),
-          MURPH_TEST_GIT_STATUS: "R  renamed-without-original.ts\\000",
           MURPH_VERIFY_EXECUTOR: "crabbox",
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
         },
@@ -464,6 +526,44 @@ describe("verification dispatcher", () => {
       .toContain("sync refused sensitive managed paths");
   });
 
+  it("inspects the same default Git index that the scrubbed Crabbox child will sync", () => {
+    const tempRoot = makeTempRoot();
+    const repoDir = path.join(tempRoot, "repo");
+    const alternateIndex = path.join(tempRoot, "alternate-index");
+    mkdirSync(repoDir, { recursive: true });
+    runGit(repoDir, ["init", "--quiet"]);
+    writeFileSync(path.join(repoDir, "tracked.ts"), "export const value = 1;\n", "utf8");
+    runGit(repoDir, ["add", "tracked.ts"]);
+    runGit(repoDir, [
+      "-c",
+      "user.name=Crabbox Test",
+      "-c",
+      "user.email=crabbox-test@users.noreply.github.com",
+      "commit",
+      "--quiet",
+      "-m",
+      "initial",
+    ]);
+    runGit(repoDir, ["read-tree", "HEAD"], { GIT_INDEX_FILE: alternateIndex });
+
+    writeFileSync(path.join(repoDir, ".env.production"), "synthetic-test-value\n", "utf8");
+    runGit(repoDir, ["add", "--force", ".env.production"]);
+    expect(runSyncGuardWithParentEnvironment(repoDir, {
+      ...process.env,
+      GIT_INDEX_FILE: alternateIndex,
+    })).toContain("sync refused sensitive managed paths");
+
+    runGit(repoDir, ["reset", "--quiet", "--", ".env.production"]);
+    rmSync(path.join(repoDir, ".env.production"));
+    writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = 1;\n", "utf8");
+    runGit(repoDir, ["add", "staged.ts"]);
+    writeFileSync(path.join(repoDir, "staged.ts"), "export const staged = 2;\n", "utf8");
+    expect(runSyncGuardWithParentEnvironment(repoDir, {
+      ...process.env,
+      GIT_INDEX_FILE: alternateIndex,
+    })).toContain("unauthorized Git state (staged-addition-changed=1)");
+  });
+
   it("refuses copy-detected additions changed or deleted after staging", () => {
     const tempRoot = makeTempRoot();
     const repoDir = path.join(tempRoot, "repo");
@@ -519,6 +619,11 @@ function callDispatcherExport<T>(exportName: string, argument: unknown): T {
   });
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as T;
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const index = args.indexOf(flag);
+  return index === -1 ? undefined : args[index + 1];
 }
 
 function callDispatcherVoidExport(exportName: string, argument: unknown): string {
@@ -638,9 +743,49 @@ function withoutVerificationRoutingEnvironment(
   return sanitized;
 }
 
-function runGit(repoDir: string, args: string[]): void {
-  const result = spawnSync("git", args, { cwd: repoDir, encoding: "utf8" });
+function runGit(
+  repoDir: string,
+  args: string[],
+  environmentOverrides: NodeJS.ProcessEnv = {},
+): void {
+  const result = spawnSync("git", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+    env: { ...process.env, ...environmentOverrides },
+  });
   expect(result.status, result.stderr).toBe(0);
+}
+
+function runSyncGuardWithParentEnvironment(
+  repoDir: string,
+  parentEnvironment: NodeJS.ProcessEnv,
+): string {
+  const moduleUrl = pathToFileURL(dispatcherPath).href;
+  const source = `
+    const module = await import(${JSON.stringify(moduleUrl)});
+    try {
+      const parentEnvironment = JSON.parse(process.env.MURPH_TEST_PARENT_ENV_JSON);
+      const childEnvironment = module.buildCrabboxCliEnvironment(parentEnvironment);
+      module.assertSafeBlacksmithSync(
+        process.env.MURPH_TEST_REPO_DIR,
+        childEnvironment,
+      );
+      process.stdout.write("ok");
+    } catch (error) {
+      process.stderr.write(error instanceof Error ? error.message : String(error));
+      process.exitCode = 2;
+    }
+  `;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      MURPH_TEST_PARENT_ENV_JSON: JSON.stringify(parentEnvironment),
+      MURPH_TEST_REPO_DIR: repoDir,
+    },
+  });
+  expect(result.status).toBe(2);
+  return result.stderr;
 }
 
 function readGitStatus(repoDir: string): string {

@@ -105,15 +105,15 @@ testPlans:
 
   -
     planId: 25ohd-lab-feedback-91d
-    durationDays: 91
-    baselineDays: 7
+    durationDays: 98
+    baselineDays: 14
     interventionDays: 84
     primaryBiomarkerKey: biomarker:serum-25-hydroxyvitamin-d
     minimumAdherenceSessions: 56
     targetAdherenceSessions: 84
     notes:
       - Primary endpoint is baseline-to-follow-up 25(OH)D, preferably same lab and same unit.
-      - The baseline week is for context capture; the dose-change signal usually needs weeks rather than days.
+      - The two-week baseline is for context capture; the dose-change signal usually needs weeks rather than days.
       - Secondary notes should capture adverse symptoms, supplement stacking, calcium intake changes, sun exposure, travel, and diet changes.
 expectedSignalDescriptions:
 

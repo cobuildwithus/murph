@@ -20,6 +20,7 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  recoverInterruptedClosedIntegrationIngestArchives,
   CURRENT_VAULT_FORMAT_VERSION,
   runIntegrationIngestMigration,
   VaultError,
@@ -348,7 +349,7 @@ interface HostedInitialMailboxImportResult {
   workspace: HostedWorkspaceState | null;
 }
 
-interface HostedVaultFormatMigrationRuntimeResult {
+interface HostedVaultStartupPreparationResult {
   mutated: boolean;
 }
 
@@ -372,21 +373,18 @@ function hasHostedVaultMetadata(vaultRoot: string): boolean {
   return existsSync(path.join(vaultRoot, VAULT_LAYOUT.metadata));
 }
 
-async function ensureHostedVaultFormatCurrentForRuntime(input: {
+async function prepareHostedVaultForRuntime(input: {
   assertRuntimeNotAborted: () => void;
+  runtimeAbortSignal: AbortSignal;
   vaultRoot: string;
-}): Promise<HostedVaultFormatMigrationRuntimeResult> {
-  const { assertRuntimeNotAborted, vaultRoot } = input;
+}): Promise<HostedVaultStartupPreparationResult> {
+  const { assertRuntimeNotAborted, runtimeAbortSignal, vaultRoot } = input;
   if (!hasHostedVaultMetadata(vaultRoot)) {
     return { mutated: false };
   }
 
-  if (await readHostedVaultStoredFormatVersion(vaultRoot) === CURRENT_VAULT_FORMAT_VERSION) {
-    return { mutated: false };
-  }
-
   let mutated = false;
-  while (true) {
+  while (await readHostedVaultStoredFormatVersion(vaultRoot) !== CURRENT_VAULT_FORMAT_VERSION) {
     assertRuntimeNotAborted();
     const result = await runIntegrationIngestMigration({
       vaultRoot,
@@ -396,7 +394,7 @@ async function ensureHostedVaultFormatCurrentForRuntime(input: {
     assertRuntimeNotAborted();
     mutated ||= result.mutated;
     if (result.storedFormatVersion === CURRENT_VAULT_FORMAT_VERSION) {
-      return { mutated };
+      break;
     }
     if (result.blockerCount > 0) {
       throw new VaultError(
@@ -413,6 +411,22 @@ async function ensureHostedVaultFormatCurrentForRuntime(input: {
       );
     }
   }
+
+  assertRuntimeNotAborted();
+  const archiveRecovery = await recoverInterruptedClosedIntegrationIngestArchives({
+    signal: runtimeAbortSignal,
+    vaultRoot,
+  });
+  assertRuntimeNotAborted();
+  if (archiveRecovery.blockedConflictCount > 0) {
+    throw new VaultError(
+      "INTEGRATION_INGEST_SHARD_REPRESENTATION_CONFLICT",
+      "Hosted vault startup found conflicting integration ingest shard representations that could not be repaired safely.",
+      { blockedConflictCount: archiveRecovery.blockedConflictCount },
+    );
+  }
+  mutated ||= archiveRecovery.repairedShardCount > 0;
+  return { mutated };
 }
 
 async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<number> {
@@ -1103,8 +1117,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       status: "done",
     });
     assertRuntimeNotAborted();
-    const hostedVaultFormatMigration = await ensureHostedVaultFormatCurrentForRuntime({
+    const hostedVaultStartupPreparation = await prepareHostedVaultForRuntime({
       assertRuntimeNotAborted,
+      runtimeAbortSignal: runtimeAbortController.signal,
       vaultRoot: restored.vaultRoot,
     });
     assertRuntimeNotAborted();
@@ -1407,11 +1422,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
-        invocationOrchestrationLatencySeed,
         consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
         ),
+        invocationOrchestrationLatencySeed,
       ),
     );
     emitPhaseLog({
@@ -1501,9 +1516,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ]);
       const initialMailboxImportRequiresCheckpoint = initialMailboxImport.checkpointDeferred
         && initialMailboxImport.stateChanged;
-      const hostedVaultFormatMigrationRequiresCheckpoint = hostedVaultFormatMigration.mutated;
+      const hostedVaultStartupPreparationRequiresCheckpoint =
+        hostedVaultStartupPreparation.mutated;
 
-      if (initialMailboxImportRequiresCheckpoint || hostedVaultFormatMigrationRequiresCheckpoint) {
+      if (
+        initialMailboxImportRequiresCheckpoint
+        || hostedVaultStartupPreparationRequiresCheckpoint
+      ) {
         emitPhaseLog({
           details: {
             nextWakeAtPresent: checkpointNextWake.nextWakeAt !== null,
@@ -2871,7 +2890,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         workspace: committedWorkspace,
       });
       const runtimeDirtyAfterForeground = result.runtimeStateDirty
-        || hostedVaultFormatMigration.mutated;
+        || hostedVaultStartupPreparation.mutated;
       runtimeStateDirty ||= runtimeDirtyAfterForeground || committedInboxMediaRetentionWakeDue;
       if (runtimeDirtyAfterForeground) {
         markIdleCheckpointTimerAfterDirtyWork();

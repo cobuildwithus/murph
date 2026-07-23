@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls
 
 ## Product Contract
@@ -24,7 +24,7 @@ The first-visit sequence is the four-step Murph personality picker:
 3. Choose a voice.
 4. Choose a tone and save.
 
-`/home?initialVisit=true` opens this picker directly without a preceding contact-card step or trailing welcome dialog. Skip or dismiss closes without writing a style preference. Continue on the final step writes persona, tone, and voice in one preference update. Personality dials do not add onboarding steps or separate signup writes.
+`/home?initialVisit=true` opens the contact-card picker first when a text contact is ready, then opens this picker; members without a text contact start here. Skip or dismiss closes without writing a style preference or showing the final dialog. Continue on the final step writes persona, tone, and voice in one preference update, then opens the Welcome to Murph dialog with the current messaging action. Personality dials do not add onboarding steps or separate signup writes.
 
 ## Canonical Preferences
 

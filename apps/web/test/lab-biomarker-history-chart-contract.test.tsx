@@ -3,10 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
 
 const captured = vi.hoisted(() => ({
+  chartAriaLabel: null as string | null,
   chartConfig: null as Record<string, unknown> | null,
   gridRendered: false,
   lineChartProps: null as Record<string, unknown> | null,
-  referenceAreas: [] as Record<string, unknown>[],
   referenceLines: [] as Record<string, unknown>[],
   tooltipFormatter: null as ((
     value: unknown,
@@ -34,10 +34,6 @@ vi.mock("recharts", async () => {
       captured.lineChartProps = props;
       return passthrough(props);
     },
-    ReferenceArea(props: Record<string, unknown>) {
-      captured.referenceAreas.push(props);
-      return null;
-    },
     ReferenceLine(props: Record<string, unknown>) {
       captured.referenceLines.push(props);
       return null;
@@ -64,7 +60,12 @@ vi.mock("@/src/components/ui/chart", async () => {
     React.createElement(React.Fragment, null, children);
 
   return {
-    ChartContainer(props: { children?: ReactNode; config?: Record<string, unknown> }) {
+    ChartContainer(props: {
+      "aria-label"?: string;
+      children?: ReactNode;
+      config?: Record<string, unknown>;
+    }) {
+      captured.chartAriaLabel = props["aria-label"] ?? null;
       captured.chartConfig = props.config ?? null;
       return passthrough(props);
     },
@@ -87,10 +88,10 @@ vi.mock("@/src/components/ui/chart", async () => {
 import { LabBiomarkerHistoryChart } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 
 beforeEach(() => {
+  captured.chartAriaLabel = null;
   captured.chartConfig = null;
   captured.gridRendered = false;
   captured.lineChartProps = null;
-  captured.referenceAreas = [];
   captured.referenceLines = [];
   captured.tooltipFormatter = null;
   captured.yAxisDomain = null;
@@ -121,29 +122,36 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
   expect(renderToStaticMarkup(createElement("div", null, tooltip))).toContain("0.0015 mg/L");
 });
 
-test("a shared reference range renders a band, dashed bounds, and a data-safe domain", () => {
-  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+test("the latest reference range renders quiet boundary context without flattening the trend", () => {
+  const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "HbA1c",
     points: [
       { date: "2025-06-03", id: "p1", value: 5.6 },
       { date: "2026-06-14", id: "p2", value: 5.8 },
     ],
     referenceRange: { high: 5.6, low: 4 },
+    referenceRangeLabel: "4 to 5.6%",
+    referenceRangeSourceLabel: "Example Lab",
     unit: "percent",
   }));
 
-  expect(captured.referenceAreas).toHaveLength(1);
-  expect(captured.referenceAreas[0]).toMatchObject({ y1: 4, y2: 5.6 });
+  expect(markup).toContain("Latest lab range");
+  expect(markup).toContain("4 to 5.6%");
+  expect(markup).toContain("Example Lab");
+  expect(captured.chartAriaLabel).toBe(
+    "HbA1c results over time; latest lab range 4 to 5.6% from Example Lab",
+  );
+  expect(markup).toContain("border-y");
+  expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([4, 5.6]);
-  expect(captured.gridRendered).toBe(false);
+  expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisPadding).toMatchObject({ bottom: 16, top: 16 });
 
-  // The axis keeps its automatic domain; reference elements extend it when a
-  // bound sits outside the data so neither data nor band is ever clipped.
+  // Keep the automatic, data-focused domain and clip a wider current lab
+  // range rather than compressing the historical trend into a flat line.
   expect(captured.yAxisDomain).toEqual(["auto", "auto"]);
-  expect(captured.referenceAreas[0]).toMatchObject({ ifOverflow: "extendDomain" });
   for (const line of captured.referenceLines) {
-    expect(line).toMatchObject({ ifOverflow: "extendDomain" });
+    expect(line).toMatchObject({ ifOverflow: "hidden" });
   }
 
   const tooltip = captured.tooltipFormatter?.(5.8);
@@ -151,17 +159,20 @@ test("a shared reference range renders a band, dashed bounds, and a data-safe do
 });
 
 test("a single reference bound renders one dashed line and no band", () => {
-  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+  const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
     displayName: "LDL cholesterol",
     points: [
       { date: "2025-06-03", id: "p1", value: 118 },
       { date: "2026-06-14", id: "p2", value: 96 },
     ],
     referenceRange: { high: 99, low: null },
+    referenceRangeLabel: "Up to 99 mg/dL",
     unit: "mg/dL",
   }));
 
-  expect(captured.referenceAreas).toHaveLength(0);
+  expect(markup).toContain("Latest lab range");
+  expect(markup).toContain("Up to 99 mg/dL");
+  expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
 });
 
@@ -192,7 +203,6 @@ test("no reference range keeps the grid and default domain", () => {
     unit: "mIU/L",
   }));
 
-  expect(captured.referenceAreas).toHaveLength(0);
   expect(captured.referenceLines).toHaveLength(0);
   expect(captured.gridRendered).toBe(true);
   expect(captured.yAxisDomain).toEqual(["auto", "auto"]);

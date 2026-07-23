@@ -502,7 +502,7 @@ attribution:
   ownerType: murph
   note: Canonical Murph starter protocol synthesized from the static-stretching research package and intended for lightweight self-experiment planning.
 protocol:
-  doseSignature: 5 days/week · 1 primary target area · 2–3 × 30-second self-applied static holds per target · mild tension/slight discomfort, not pain · 6-week intervention after 7-day baseline
+  doseSignature: 5 days/week · 1 primary target area · 2–3 × 30-second self-applied static holds per target · mild tension/slight discomfort, not pain · 6-week intervention after 14-day baseline
   target: one primary flexibility target area, optionally one secondary target area
   frequency:
     sessionsPerWeek: 5
@@ -530,7 +530,7 @@ protocol:
   interventionSessionsTarget: 30
   steps:
     - "Choose 1 primary target: hamstrings/posterior chain, calves/ankles, hip flexors, or shoulder reach."
-    - "Choose 1 matched ROM measure; record 7 baseline days without changing usual stretching."
+    - "Choose 1 matched ROM measure; record 14 baseline days without changing usual stretching."
     - "Use stable support—floor, wall, chair, doorway, or countertop—so balance is not the test."
     - "Move slowly to mild tension; avoid pain, forced range, partner pushing, weights, straps, or aggressive leverage."
     - "Hold ~30 sec, breathe normally, exit slowly; repeat 2–3 holds for the target area."
@@ -603,8 +603,8 @@ protocol:
 testPlans:
 -
   planId: target-rom-49d
-  durationDays: 49
-  baselineDays: 7
+  durationDays: 56
+  baselineDays: 14
   interventionDays: 42
   primaryBiomarkerKey: biomarker:toe-touch-distance
   secondaryBiomarkerKeys:
@@ -626,8 +626,8 @@ testPlans:
   - Do not treat worsening pain, neurologic symptoms, pregnancy/postpartum warning signs, severe post-exertion symptoms, or post-surgical/rehab restrictions as adherence problems; they are stop or routing conditions.
 -
   planId: ankle-knee-to-wall-49d
-  durationDays: 49
-  baselineDays: 7
+  durationDays: 56
+  baselineDays: 14
   interventionDays: 42
   primaryBiomarkerKey: biomarker:ankle-knee-to-wall-distance
   secondaryBiomarkerKeys:
@@ -642,8 +642,8 @@ testPlans:
   - Do not treat worsening pain, neurologic symptoms, pregnancy/postpartum warning signs, severe post-exertion symptoms, or post-surgical/rehab restrictions as adherence problems; they are stop or routing conditions.
 -
   planId: shoulder-reach-49d
-  durationDays: 49
-  baselineDays: 7
+  durationDays: 56
+  baselineDays: 14
   interventionDays: 42
   primaryBiomarkerKey: biomarker:shoulder-reach-distance
   secondaryBiomarkerKeys:

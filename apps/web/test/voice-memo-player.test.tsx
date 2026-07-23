@@ -79,6 +79,23 @@ test("VoiceMemoPlayer gives both controls a voice-specific accessible name", asy
   }
 });
 
+test("VoiceMemoPlayer can omit time metadata without removing playback controls", async () => {
+  const rendered = await renderClientComponent(
+    createElement(VoiceMemoPlayer, {
+      showDuration: false,
+      src: "/audio/compact.mp3",
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.equal(rendered.container.querySelectorAll("button").length, 2);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /0:00/u);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("VoiceMemoPlayer pauses sibling players in the same exclusive group", async () => {
   const rendered = await renderClientComponent(
     createElement(
@@ -154,6 +171,7 @@ test("VoiceMemoPlayer starts playback when the waveform is clicked", async () =>
 test("VoiceMemoPlayer disables playback and shows the unavailable label after an audio error", async () => {
   const rendered = await renderClientComponent(
     createElement(VoiceMemoPlayer, {
+      showDuration: false,
       src: "/audio/missing.mp3",
       unavailableLabel: "Pending",
     }),

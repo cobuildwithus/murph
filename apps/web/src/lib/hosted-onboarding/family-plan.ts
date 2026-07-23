@@ -372,6 +372,12 @@ export interface HostedFamilyOwnerSnapshot {
   suspendedAt: Date | null;
 }
 
+export interface HostedFamilyUsageCreditCheckoutTarget {
+  beneficiaryMemberId: string;
+  groupId: string;
+  stripeCustomerId: string;
+}
+
 export interface HostedFamilyOwnerPlanStatus {
   active: number;
   billed: number;
@@ -855,6 +861,91 @@ export async function readHostedAccountGroupStripeBillingRef(input: {
   });
 
   return billingRef ? projectHostedAccountGroupBillingRefSnapshot(billingRef, prisma) : null;
+}
+
+/**
+ * Resolves one exact Family beneficiary after the caller has locked and
+ * validated the owner. Bind the opaque selector to the owner's active roster
+ * before locking the beneficiary so a foreign selector cannot contend on an
+ * unrelated member row, then re-read membership under that lock.
+ */
+export async function resolveHostedFamilyUsageCreditCheckoutTargetTx(input: {
+  beneficiaryMemberId: string;
+  ownerMemberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedFamilyUsageCreditCheckoutTarget | null> {
+  const group = await input.tx.hostedAccountGroup.findUnique({
+    select: hostedAccountGroupAccessSelect,
+    where: { ownerMemberId: input.ownerMemberId },
+  });
+  if (!group || !hasHostedAccountGroupAccess(group)) {
+    return null;
+  }
+
+  const boundMembership = await input.tx.hostedAccountGroupMembership.findUnique({
+    select: {
+      memberId: true,
+      status: true,
+    },
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.beneficiaryMemberId,
+      },
+    },
+  });
+  if (
+    !boundMembership
+    || boundMembership.memberId !== input.beneficiaryMemberId
+    || boundMembership.status !== "active"
+  ) {
+    return null;
+  }
+
+  if (input.beneficiaryMemberId !== input.ownerMemberId) {
+    await lockHostedMemberRow(input.tx, input.beneficiaryMemberId);
+  }
+  const membership = await input.tx.hostedAccountGroupMembership.findUnique({
+    select: {
+      member: {
+        select: {
+          suspendedAt: true,
+          threadContainer: { select: { memberId: true } },
+        },
+      },
+      memberId: true,
+      status: true,
+    },
+    where: {
+      groupId_memberId: {
+        groupId: group.id,
+        memberId: input.beneficiaryMemberId,
+      },
+    },
+  });
+  if (
+    !membership
+    || membership.memberId !== input.beneficiaryMemberId
+    || membership.status !== "active"
+    || membership.member.suspendedAt
+    || membership.member.threadContainer
+  ) {
+    return null;
+  }
+
+  const billingRef = await readHostedAccountGroupStripeBillingRef({
+    groupId: group.id,
+    prisma: input.tx,
+  });
+  if (!billingRef?.stripeCustomerId || !billingRef.stripeSubscriptionId) {
+    return null;
+  }
+
+  return {
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    groupId: group.id,
+    stripeCustomerId: billingRef.stripeCustomerId,
+  };
 }
 
 export async function lookupHostedAccountGroupStripeBillingRefByStripeCustomerId(input: {

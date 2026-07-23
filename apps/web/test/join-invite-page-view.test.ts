@@ -481,6 +481,8 @@ test("JoinInvitePageView renders active and activating account states", () => {
   );
 
   assert.match(activeMarkup, /Welcome to Murph/);
+  assert.match(activeMarkup, /Murph is ready whenever you are\./);
+  assert.doesNotMatch(activeMarkup, /Murph will text you shortly/);
   assert.match(activeMarkup, /Text Murph/);
   assert.match(activeMarkup, /Add Murph to Contacts/);
   assert.match(activatingMarkup, /Finishing your setup/);

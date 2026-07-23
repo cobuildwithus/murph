@@ -8,7 +8,7 @@ import {
 } from '../src/assistant-codex/dynamic-tools.ts'
 
 describe('assistant progress prompt contract', () => {
-  it('keeps progress preambles scarce for longer or user-content-inspection work', () => {
+  it('orients the member before noticeable multi-source or long work', () => {
     const prompt = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
     })
@@ -23,13 +23,19 @@ describe('assistant progress prompt contract', () => {
       'It is not a final answer, so continue immediately with the first needed action',
     )
     expect(prompt).toContain(
-      'For reply-critical long research, multiple substantive tool calls, long parsing/scans, or content inspection, send an update before slow work',
+      'Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection',
+    )
+    expect(prompt).toContain(
+      'Before the first read in that pass, orient the member even when each lookup is routine',
+    )
+    expect(prompt).toContain(
+      'Do not wait until the work is done or the member asks about the delay',
     )
     expect(prompt).toContain(
       'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
     )
     expect(prompt).toContain(
-      'Background work does not trigger progress by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns',
+      'Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement',
     )
     expect(prompt).toContain(
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
@@ -59,7 +65,7 @@ describe('assistant progress prompt contract', () => {
   it('keeps the dynamic tool description aligned with the progress prompt rule', () => {
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.name).toBe('send_progress_update')
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'when genuinely reply-critical work would otherwise leave the user waiting',
+      'when reply-critical work would otherwise leave the user waiting without knowing why',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'For work likely to finish in about a minute or less, send at most one update',
@@ -71,13 +77,16 @@ describe('assistant progress prompt contract', () => {
       'Linq/iMessage quota is not a reason to withhold a useful update',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Use it before long tasks',
+      'Use it before a multi-source or cross-owner evidence pass',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
+      'gets one update before the first read in that pass even when each lookup is routine',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'Background work does not trigger an update by itself unless an active skill explicitly requires a start acknowledgement after accepted child spawns',
+      'If the answer depends on a child and the wait may exceed ordinary latency, send it after spawning',
+    )
+    expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
+      'Optional background work does not trigger an update unless an active skill requires a receipt or start acknowledgement',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Do not use for individual tool loops, searches, reads, page checks, clicks, status churn',
@@ -89,10 +98,10 @@ describe('assistant progress prompt contract', () => {
       'audio/video, large pasted text',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'large pasted text, meal/product/supplement labels',
+      'pasted text, meal/product/supplement labels',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
-      'workout exports, wearable exports, or health documents',
+      'workout or wearable exports, or health documents',
     )
     expect(MURPH_SEND_PROGRESS_UPDATE_TOOL.description).toContain(
       'Skip automatically transcribed voice memo or audio content',
@@ -137,6 +146,12 @@ describe('assistant progress prompt contract', () => {
     )
     expect(textProperty.description).toContain(
       'a shorter "I\'ll..." or "Taking a look..." works',
+    )
+    expect(textProperty.description).toContain(
+      'Got your labs — I\'m making sure the original is kept safely now',
+    )
+    expect(textProperty.description).not.toContain(
+      'Got your labs, pulling the numbers in now',
     )
     expect(textProperty.description).toContain('No markdown links')
     expect(textProperty.description).toContain('final answers')

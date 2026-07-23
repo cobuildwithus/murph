@@ -477,7 +477,7 @@ export function MurphPersonaPicker({
               </DrawerTitle>
             </div>
             <DrawerDescription
-              className={cn("text-sm leading-6", !description && "sr-only")}
+              className={cn("text-left text-sm leading-6", !description && "sr-only")}
             >
               {accessibleDescription}
             </DrawerDescription>
@@ -522,7 +522,7 @@ export function MurphPersonaPicker({
             </DialogTitle>
           </div>
           <DialogDescription
-            className={cn("text-sm leading-6", !description && "sr-only")}
+            className={cn("text-left text-sm leading-6", !description && "sr-only")}
           >
             {accessibleDescription}
           </DialogDescription>
@@ -553,7 +553,7 @@ function PersonaMatchCard({
     <div
       style={{ position: "relative" }}
       className={cn(
-        "relative flex min-h-28 items-center gap-4 rounded-xl border p-4 transition-[border-color,background-color]",
+        "relative flex min-h-28 items-center gap-4 rounded-xl border p-4 transition-[border-color,background-color] has-[:focus-visible]:border-2 has-[:focus-visible]:border-primary",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-background hover:border-primary/45",
@@ -574,7 +574,7 @@ function PersonaMatchCard({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {option.label}</span>
       </label>
@@ -629,7 +629,7 @@ function SupportingPersonaChoice({
   return (
     <div
       className={cn(
-        "relative grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_1.25rem] items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-[border-color,background-color]",
+        "relative grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_1.25rem] items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-[border-color,background-color] has-[:focus-visible]:border-2 has-[:focus-visible]:border-primary",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-background hover:border-primary/45",
@@ -650,7 +650,7 @@ function SupportingPersonaChoice({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {label}</span>
       </label>
@@ -704,7 +704,7 @@ function ToneChoiceCard({
   return (
     <div
       className={cn(
-        "relative flex min-h-28 items-start rounded-xl border p-5 transition-[border-color,background-color]",
+        "relative flex min-h-28 items-start rounded-xl border p-5 transition-[border-color,background-color] has-[:focus-visible]:border-2 has-[:focus-visible]:border-primary",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-background hover:border-primary/45",
@@ -726,7 +726,7 @@ function ToneChoiceCard({
       <label
         htmlFor={inputId}
         onClick={onSelect}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {label}</span>
       </label>
@@ -773,7 +773,7 @@ function PersonaVoiceChoice({
   return (
     <div
       className={cn(
-        "relative flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors",
+        "relative flex cursor-pointer flex-col gap-3 rounded-xl border p-4 transition-colors has-[:focus-visible]:border-2 has-[:focus-visible]:border-primary",
         selected
           ? "border-primary bg-primary/10"
           : "border-border bg-background hover:border-primary/45",
@@ -797,7 +797,7 @@ function PersonaVoiceChoice({
       />
       <label
         htmlFor={inputId}
-        className="absolute inset-0 cursor-pointer rounded-xl peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2"
+        className="absolute inset-0 cursor-pointer rounded-xl"
       >
         <span className="sr-only">Select {option.label}</span>
       </label>
