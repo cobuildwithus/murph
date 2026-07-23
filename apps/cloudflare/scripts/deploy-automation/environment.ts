@@ -45,7 +45,7 @@ export interface HostedContainerSshKey {
 }
 
 const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
-  disk_mb: 12000,
+  disk_mb: 6000,
   memory_mib: 6144,
   vcpu: 2,
 };

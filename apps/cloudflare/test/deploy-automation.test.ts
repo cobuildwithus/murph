@@ -476,7 +476,7 @@ describe("hosted deploy automation helpers", () => {
     };
 
     const expectedDefaultInstanceType = {
-      disk_mb: 12000,
+      disk_mb: 6000,
       memory_mib: 6144,
       vcpu: 2,
     };
@@ -549,7 +549,7 @@ describe("hosted deploy automation helpers", () => {
     );
 
     for (const expectedLine of [
-      "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":12000}' }}",
+      "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "CF_CONTAINER_SSH_KEY_NAME: ${{ vars.CF_CONTAINER_SSH_KEY_NAME }}",
       "CF_CONTAINER_SSH_PUBLIC_KEY: ${{ vars.CF_CONTAINER_SSH_PUBLIC_KEY }}",

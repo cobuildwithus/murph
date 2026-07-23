@@ -46,7 +46,7 @@ function createDeployEnvironment() {
     platformEnvelopeKeyId: "v1",
     compatibilityDate: "2026-03-27",
     containerInstanceType: {
-      disk_mb: 12000,
+      disk_mb: 6000,
       memory_mib: 6144,
       vcpu: 2,
     },
@@ -891,7 +891,7 @@ describe("hosted runner container image contract", () => {
     expect(container.image).toBe("../../../Dockerfile.cloudflare-hosted-runner");
     expect(container.image_build_context).toBe("..");
     expect(container.instance_type).toEqual({
-      disk_mb: 12000,
+      disk_mb: 6000,
       memory_mib: 6144,
       vcpu: 2,
     });
