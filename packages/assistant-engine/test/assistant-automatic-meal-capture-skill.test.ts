@@ -97,13 +97,15 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('vault-cli meal edit <meal-id>')
     expect(skill).toContain('## Run the automatic 9pm closeout')
     expect(skill).toContain(
-      'engine-supplied `Occurrence local date` from the `Scheduled\n   occurrence context` as the action and search-date anchor',
+      'engine-supplied `Occurrence local date` from the `Scheduled\n   occurrence context` as the action and latest-capture boundary',
     )
     expect(skill).toContain(
       "even when the\n   wall-clock `Today's date` differs",
     )
-    expect(skill).toContain('`externalRef.system: meal-photo-capture`')
     expect(skill).toContain('vault-cli meal remove-photo <meal-id>')
+    expect(skill).toContain('vault-cli meal closeout-work')
+    expect(skill).toContain('oldest bounded batch')
+    expect(skill).not.toContain('preceding 31 local days')
     expect(skill).toContain('label partial totals as partial')
     expect(skill).toContain('each retained photo as pending closeout work')
     expect(skill).toContain('late import gets one dated catch-up')

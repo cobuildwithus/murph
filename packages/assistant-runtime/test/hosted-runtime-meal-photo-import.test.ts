@@ -140,6 +140,33 @@ describe("hosted meal photo mailbox import", () => {
     })).resolves.toBeNull();
   });
 
+  it("binds an email-only member's verified recipient as the closeout route", async () => {
+    const vaultRoot = await createTestVault();
+    const outcome = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({
+        readMealPhoto: vi.fn(async () => JPEG_BYTES),
+      }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake({
+        channel: "email",
+        deliveryTarget: "member@example.test",
+      }),
+    });
+
+    expect(outcome.status).toBe("imported");
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: "email",
+        deliveryTarget: "member@example.test",
+        threadIsDirect: true,
+      },
+    });
+  });
+
   it("retries when the platform has not configured staged-photo reads", async () => {
     const vaultRoot = await createTestVault();
     const outcome = await importHostedMealPhotoCapturedMailboxItem({

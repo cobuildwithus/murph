@@ -36,7 +36,8 @@ export const POST = withJsonError(async (request: Request) => {
     throw hostedOnboardingError({
       code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
       httpStatus: 409,
-      message: "Message Murph first, then retry meal capture.",
+      message:
+        "Connect iMessage, Telegram, or a verified email before retrying meal capture.",
       retryable: false,
     });
   }

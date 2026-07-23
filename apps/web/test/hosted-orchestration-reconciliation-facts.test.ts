@@ -10,6 +10,7 @@ const UNSAFE_SENTINEL = "UNSAFE_STATUS_SENTINEL";
 const mocks = vi.hoisted(() => ({
   decodeHostedMailboxStoredPayload: vi.fn(),
   getPrisma: vi.fn(),
+  hasHostedMailboxMealPhotoCaptureSince: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
   hasHostedMemberEstablishedLinqThreadRoute: vi.fn(),
   hasHostedMemberEstablishedLinqHomeRoute: vi.fn(),
@@ -36,6 +37,8 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   decodeHostedMailboxStoredPayload: mocks.decodeHostedMailboxStoredPayload,
+  hasHostedMailboxMealPhotoCaptureSince:
+    mocks.hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane: mocks.readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem:
     mocks.readHostedMailboxLatestPendingConversationItem,
@@ -134,6 +137,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
     mocks.hasHostedMemberEstablishedLinqThreadRoute.mockResolvedValue(false);
+    mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(false);
     mocks.hasHostedLinqInboundWithinDays.mockImplementation(async () => {
       throw new Error("Configure Linq inbound evidence explicitly for engagement tests.");
     });
@@ -1406,6 +1410,75 @@ describe("hosted orchestration reconciliation facts", () => {
       now: new Date(FIXED_NOW),
       userId: MEMBER_ID,
     });
+  });
+
+  it("treats a recently accepted automatic meal capture as fresh automation engagement", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+    }));
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+    mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(true);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toBeNull();
+    expect(mocks.hasHostedMailboxMealPhotoCaptureSince).toHaveBeenCalledWith({
+      prisma: expect.objectContaining({ kind: "prisma" }),
+      since: new Date("2026-04-22T12:00:00.000Z"),
+      userId: MEMBER_ID,
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
+      mode: "mutating",
+      now: new Date(FIXED_NOW),
+      userId: MEMBER_ID,
+    });
+  });
+
+  it("does not strand a recent meal capture behind a simultaneous due automation wake", async () => {
+    mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
+      nextWakeAt: "2026-05-20T11:59:59.000Z",
+      nextWakeReason: "assistant_due",
+      redactedStatusJson: {
+        conversationImportedSeq: "0",
+        systemImportedSeq: "0",
+      },
+    }));
+    mocks.readHostedMailboxMaxSeqByLane.mockResolvedValue([
+      {
+        lane: "conversation",
+        maxSeq: "0",
+      },
+      {
+        lane: "system",
+        maxSeq: "1",
+      },
+    ]);
+    mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(true);
+    mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false);
+    mocks.hasHostedMailboxMealPhotoCaptureSince.mockResolvedValue(true);
+    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValue({ status: "allowed" });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.blocked).toBeNull();
+    expect(facts.mailboxLag).toContainEqual({
+      importedSeq: "0",
+      lag: "1",
+      lane: "system",
+      maxSeq: "1",
+    });
+    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalled();
   });
 
   it("never pauses fresh conversation mailbox lag for engagement", async () => {

@@ -79,6 +79,7 @@ import {
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
   HOSTED_RUNTIME_CRYPTO_ROOT_PATH,
+  HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -303,6 +304,11 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "device-sync connect-target connect-link",
     path: "/api/internal/device-sync/connect-targets/google/connect-link",
+  },
+  {
+    body: {},
+    name: "hosted email recipient authority",
+    path: HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   },
   {
     body: {

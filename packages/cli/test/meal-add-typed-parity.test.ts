@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-import { addMeal, initializeVault } from '@murphai/core'
+import {
+  addMeal,
+  initializeVault,
+  removeAutomaticMealPhoto,
+} from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import { Cli } from 'incur'
 import { test } from 'vitest'
@@ -60,6 +64,13 @@ interface ShowResult {
     occurredAt: string | null
     data: Record<string, unknown>
   }
+}
+
+interface MealCloseoutWorkResult {
+  items: Array<{
+    id: string
+    data: Record<string, unknown>
+  }>
 }
 
 function createMealCli() {
@@ -260,6 +271,88 @@ test.sequential(
           .totals?.calories,
         520,
       )
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'meal closeout-work returns same-occurrence retries before the oldest retained photos',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-closeout-work-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot })
+      const firstPhotoPath = path.join(parentRoot, 'first-automatic-meal.jpg')
+      const secondPhotoPath = path.join(parentRoot, 'second-automatic-meal.jpg')
+      const manualPhotoPath = path.join(parentRoot, 'manual-meal.jpg')
+      await Promise.all([
+        writeFile(firstPhotoPath, 'first synthetic image', 'utf8'),
+        writeFile(secondPhotoPath, 'second synthetic image', 'utf8'),
+        writeFile(manualPhotoPath, 'manual synthetic image', 'utf8'),
+      ])
+      const first = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_first',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '1'.repeat(64),
+        },
+        occurredAt: '2024-01-02T12:00:00.000Z',
+        photoPath: firstPhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      const retried = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_retry',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '2'.repeat(64),
+        },
+        occurredAt: '2025-02-03T12:00:00.000Z',
+        photoPath: secondPhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      await addMeal({
+        occurredAt: '2023-01-01T12:00:00.000Z',
+        photoPath: manualPhotoPath,
+        source: 'manual',
+        vaultRoot,
+      })
+      await removeAutomaticMealPhoto({
+        eventId: retried.event.id,
+        now: new Date('2099-07-23T21:01:00.000Z'),
+        vaultRoot,
+      })
+
+      const result = await runInProcessJsonCli<MealCloseoutWorkResult>(
+        createMealCli(),
+        [
+          'meal',
+          'closeout-work',
+          '--occurrence-at',
+          '2099-07-23T21:00:00.000Z',
+          '--to',
+          '2099-07-23',
+          '--limit',
+          '2',
+          '--vault',
+          vaultRoot,
+        ],
+      )
+
+      assert.equal(result.exitCode, null)
+      const work = requireData(result.envelope)
+      assert.deepEqual(
+        work.items.map((item) => item.id),
+        [retried.mealId, first.mealId],
+      )
+      assert.deepEqual(work.items[0]?.data.attachments ?? [], [])
     } finally {
       await rm(parentRoot, { force: true, recursive: true })
     }

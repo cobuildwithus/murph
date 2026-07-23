@@ -2318,6 +2318,43 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
   return target;
 }
 
+async function resolveHostedDirectEmailRecipientAtProviderEntry(input: {
+  assistantDeliveryEffect: HostedAssistantDeliveryEffect;
+  effectsPort: HostedRuntimeEffectsPort;
+  signal: AbortSignal | null;
+  target: string;
+  targetKind: "explicit" | "thread";
+}): Promise<string> {
+  const payload = input.assistantDeliveryEffect.payload;
+  if (
+    normalizeHostedAssistantDeliveryChannel(payload.channel)?.toLowerCase()
+      !== "email"
+    || payload.threadIsDirect !== true
+    || input.targetKind !== "explicit"
+  ) {
+    return input.target;
+  }
+
+  const resolveRecipient =
+    input.effectsPort.resolveCurrentVerifiedEmailRecipient;
+  if (!resolveRecipient) {
+    throw markHostedDeliveryPreProviderRetryable(new VaultCliError(
+      "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
+      "Hosted direct email delivery requires current verified-email authority before provider work.",
+      { retryable: true },
+    ));
+  }
+  const target = (await resolveRecipient({ signal: input.signal }))?.trim() ?? "";
+  if (!target) {
+    throw markHostedDeliveryPreProviderRetryable(new VaultCliError(
+      "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
+      "Hosted direct email delivery requires current verified-email authority before provider work.",
+      { retryable: true },
+    ));
+  }
+  return target;
+}
+
 function isHostedAssistantReactionOnlyEffect(
   effect: HostedAssistantDeliveryEffect,
 ): boolean {
@@ -2622,6 +2659,14 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           }
 
           await assertHostedDeliveryCanEnterProvider(input);
+          const providerTarget =
+            await resolveHostedDirectEmailRecipientAtProviderEntry({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              effectsPort: input.effectsPort,
+              signal: input.signal,
+              target: request.target,
+              targetKind: request.targetKind,
+            });
           const hostedEmailThreadTarget = request.targetKind === "thread"
             ? parseHostedEmailThreadTarget(request.target)
             : null;
@@ -2648,7 +2693,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               planGroupFanout: true,
               replyToMessageId: request.replyToMessageId ?? null,
               subject: request.subject ?? null,
-              target: request.target,
+              target: providerTarget,
               targetKind: request.targetKind,
             });
           } catch (error) {

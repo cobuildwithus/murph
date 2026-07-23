@@ -1408,16 +1408,26 @@ export function parseHostedExecutionDirectRoute(
   label = "Hosted execution direct route",
 ): HostedExecutionDirectRoute {
   const record = requireObject(value, label);
-  assertExactHostedExecutionKeys(record, ["channel", "threadId"], label);
   const channel = requireString(record.channel, `${label}.channel`);
-  if (channel !== "linq" && channel !== "telegram") {
-    throw new TypeError(`${label}.channel is invalid.`);
+  if (channel === "email") {
+    assertExactHostedExecutionKeys(record, ["channel", "deliveryTarget"], label);
+    return {
+      channel,
+      deliveryTarget: requireString(
+        record.deliveryTarget,
+        `${label}.deliveryTarget`,
+      ),
+    };
+  }
+  if (channel === "linq" || channel === "telegram") {
+    assertExactHostedExecutionKeys(record, ["channel", "threadId"], label);
+    return {
+      channel,
+      threadId: requireString(record.threadId, `${label}.threadId`),
+    };
   }
 
-  return {
-    channel,
-    threadId: requireString(record.threadId, `${label}.threadId`),
-  };
+  throw new TypeError(`${label}.channel is invalid.`);
 }
 
 function parseHostedExecutionAssistantNotificationDelivery(

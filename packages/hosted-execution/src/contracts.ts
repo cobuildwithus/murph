@@ -385,14 +385,18 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
-export type HostedExecutionDirectRouteChannel =
-  | "linq"
-  | "telegram";
+export type HostedExecutionDirectRoute =
+  | {
+      channel: "linq" | "telegram";
+      threadId: string;
+    }
+  | {
+      channel: "email";
+      deliveryTarget: string;
+    };
 
-export interface HostedExecutionDirectRoute {
-  channel: HostedExecutionDirectRouteChannel;
-  threadId: string;
-}
+export type HostedExecutionDirectRouteChannel =
+  HostedExecutionDirectRoute["channel"];
 
 /** @deprecated Use HostedExecutionDirectRouteChannel. */
 export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =

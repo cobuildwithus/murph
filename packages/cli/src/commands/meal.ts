@@ -9,6 +9,7 @@ import {
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  isoTimestampSchema,
   localDateSchema,
   occurredAtOptionSchema,
   listResultSchema,
@@ -24,6 +25,7 @@ import {
 import {
   deleteMealRecord,
   editMealRecord,
+  listAutomaticMealPhotoCloseoutWorkRecords,
   listMealRecords,
   mealLookupSchema,
   rawImportManifestResultSchema,
@@ -517,6 +519,33 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
       },
     },
     additionalCommands: [
+      {
+        name: 'closeout-work',
+        args: z.object({}),
+        description:
+          'List same-occurrence retries, then the oldest automatic-capture meals that still retain photos.',
+        hint:
+          'Use this bounded oldest-first queue for automatic meal closeout; remove each returned photo with meal remove-photo after enrichment.',
+        options: {
+          limit: commonListLimitOptionSchema,
+          occurrenceAt: isoTimestampSchema
+            .describe('Scheduled occurrence instant used to include same-occurrence removal revisions.'),
+          to: localDateSchema
+            .optional()
+            .describe('Optional inclusive latest capture date in YYYY-MM-DD form.'),
+        },
+        output: listResultSchema,
+        async run({ options }) {
+          return listAutomaticMealPhotoCloseoutWorkRecords({
+            limit: typeof options.limit === 'number'
+              ? options.limit
+              : undefined,
+            occurrenceAt: String(options.occurrenceAt),
+            to: typeof options.to === 'string' ? options.to : undefined,
+            vault: String(options.vault ?? ''),
+          })
+        },
+      },
       {
         name: 'import-json',
         args: z.object({}),

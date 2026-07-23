@@ -4964,6 +4964,42 @@
                     }
                   }
                 },
+                "closeout-work": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "limit": {
+                          "default": 10,
+                          "description": "Maximum number of results to return.",
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 200
+                        },
+                        "occurrenceAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                          "description": "Scheduled occurrence instant used to include same-occurrence removal revisions."
+                        },
+                        "to": {
+                          "description": "Optional inclusive latest capture date in YYYY-MM-DD form.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        }
+                      }
+                    }
+                  }
+                },
                 "import-json": {
                   "type": "object",
                   "additionalProperties": false,

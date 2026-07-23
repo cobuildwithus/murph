@@ -102,11 +102,15 @@ export async function importHostedGroupNewsletterEmailNeededMailboxItem(input: {
 function readGroupNewsletterWakeDirectAssistantRoute(
   wake: HostedExecutionGroupNewsletterEmailNeededWake,
 ): Pick<AssistantInputEventRecord, "conversation" | "replyTarget"> | null {
-  const channel = normalizeAssistantRouteString(wake.directRoute?.channel);
+  const directRoute = wake.directRoute;
+  if (!directRoute || directRoute.channel === "email") {
+    return null;
+  }
+  const channel = normalizeAssistantRouteString(directRoute.channel);
   if (!channel || !DELIVERY_CHANNELS.includes(channel)) {
     return null;
   }
-  const threadId = normalizeAssistantRouteString(wake.directRoute?.threadId);
+  const threadId = normalizeAssistantRouteString(directRoute.threadId);
   if (!threadId) {
     return null;
   }

@@ -626,6 +626,34 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses an email direct route for automatic meal capture", () => {
+    const wake = {
+      directRoute: {
+        channel: "email",
+        deliveryTarget: "member@example.test",
+      },
+      eventId: "meal-photo:enrollment:capture",
+      kind: "meal-photo.captured",
+      mealPhoto: {
+        byteLength: 4,
+        captureId: "a".repeat(64),
+        capturedAt: "2026-04-26T00:00:00.000Z",
+        mealPhotoKey: "meal-photo-key",
+        sha256: "b".repeat(64),
+      },
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    };
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      directRoute: {
+        channel: "email",
+        threadId: "member@example.test",
+      },
+    })).toThrow("directRoute");
+  });
+
   it("parses device-sync reconcile_due wakes", () => {
     expect(
       parseHostedExecutionEvent({

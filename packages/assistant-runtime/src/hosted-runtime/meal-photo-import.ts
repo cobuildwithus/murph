@@ -149,14 +149,20 @@ async function automaticMealCloseoutIsReady(input: {
   vaultRoot: string;
 }): Promise<boolean> {
   try {
+    const emailDeliveryTarget = input.directRoute.channel === "email"
+      ? input.directRoute.deliveryTarget
+      : null;
+    const directThreadId = input.directRoute.channel === "email"
+      ? null
+      : input.directRoute.threadId;
     await ensureAutomaticMealCloseoutAutomation({
       defaultRoute: {
         channel: input.directRoute.channel,
         deliverySource: null,
-        deliveryTarget: null,
+        deliveryTarget: emailDeliveryTarget,
         identityId: null,
         participantId: null,
-        threadId: input.directRoute.threadId,
+        threadId: directThreadId,
         threadIsDirect: true,
       },
       routeValidationProfile: "hosted",

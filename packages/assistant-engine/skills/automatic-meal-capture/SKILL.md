@@ -29,10 +29,10 @@ Use the shortest relevant setup path:
 1. Automatic meal capture requires an iPhone on iOS 26.1 or later.
 2. Download or open Murph from
    `https://apps.apple.com/us/app/murph-ai/id6786145859` and sign in to the same
-   Murph account used in the conversation. The member must have messaged Murph
-   at least once so the automatic closeout has a private direct thread; this is
-   a delivery prerequisite, not a second automation opt-in. Follow the
-   developer prompt's URL placement rule when sending the link.
+   Murph account used in the conversation. The automatic closeout needs an
+   existing private iMessage or Telegram conversation, or a verified email
+   address; this is a delivery prerequisite, not a second automation opt-in.
+   Follow the developer prompt's URL placement rule when sending the link.
 3. In Murph, open the menu, open Settings, choose Meal capture, and choose Set
    up. If Meal capture is absent after updating, the installed build does not
    support it; do not send the member through a setup retry loop.
@@ -152,23 +152,25 @@ intuitive-eating contexts, eating-disorder risk, or number-sensitive members.
 On a scheduled run:
 
 1. Use the engine-supplied `Occurrence local date` from the `Scheduled
-   occurrence context` as the action and search-date anchor, even when the
-   wall-clock `Today's date` differs. Find automatic captures from that date
-   and the preceding 31 local days with date-bounded `meal list` calls; split
-   a range if it reaches the result limit. Identify captures by
-   `externalRef.system: meal-photo-capture` and
-   `externalRef.resourceType: photo`, not `source: device` alone.
+   occurrence context` as the action and latest-capture boundary, even when the
+   wall-clock `Today's date` differs. Run `vault-cli meal closeout-work
+   --occurrence-at <scheduled-occurrence-instant> --to
+   <occurrence-local-date> --limit 20 --format json`. It returns
+   same-occurrence retry evidence first, then the oldest bounded batch of
+   automatic captures that still retain photos. Those photos are the queue,
+   with no separate cursor or state.
 2. Treat each retained photo as pending closeout work. Also include an
    automatic capture with no photo when its latest `recordedAt` is at or after
    this scheduled occurrence instant: that removal revision proves an earlier
-   attempt of the same occurrence already cleaned it. Do not carry that retry
-   evidence into a later occurrence. Group captures by local capture date. A
-   late import gets one dated catch-up.
+   attempt of the same occurrence already cleaned it. `closeout-work` includes
+   that evidence without carrying it into a later occurrence. Group captures
+   by local capture date. A late import gets one dated catch-up.
 3. Compare nearby meals before counting so a manual record or second photo of
    the same eating occasion is not silently double counted.
-4. Inspect the actual photo for a photo-backed selection. For same-occurrence
-   retry evidence, use only the already-saved structured fields and
-   uncertainty. Enrich the existing meal when supported and read it back.
+4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
+   inspect the actual attachment for a photo-backed selection. For
+   same-occurrence retry evidence, use only the already-saved structured fields
+   and uncertainty. Enrich the existing meal when supported and read it back.
 5. Run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
    This automatic-capture-only command preserves the structured meal and
    replaces retained image bytes with a privacy tombstone. Any removal failure

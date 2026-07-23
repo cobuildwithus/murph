@@ -230,7 +230,7 @@ describe("meal photo companion routes", () => {
     });
   });
 
-  it("requires an existing private Murph thread before enrollment", async () => {
+  it("requires an existing private Murph delivery route before enrollment", async () => {
     mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
     const request = jsonRequest(
       "https://app.example.test/enrollment",
@@ -242,7 +242,8 @@ describe("meal photo companion routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
-        message: "Message Murph first, then retry meal capture setup.",
+        message:
+          "Connect iMessage, Telegram, or a verified email before retrying meal capture setup.",
         retryable: false,
       },
     });

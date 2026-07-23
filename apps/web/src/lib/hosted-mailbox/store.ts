@@ -1233,6 +1233,30 @@ export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: 
   return row !== null;
 }
 
+export async function hasHostedMailboxMealPhotoCaptureSince(input: {
+  prisma?: HostedMailboxStoreClient;
+  since: Date;
+  userId: string;
+}): Promise<boolean> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const row = await prisma.hostedMailboxItem.findFirst({
+    select: {
+      id: true,
+    },
+    where: {
+      createdAt: {
+        gte: input.since,
+      },
+      kind: "meal-photo.captured",
+      lane: "system",
+      userId,
+    },
+  });
+
+  return row !== null;
+}
+
 export async function readHostedMailboxLatestPendingConversationItem(input: {
   afterSeq: bigint | number | string;
   prisma?: HostedMailboxStoreClient;
