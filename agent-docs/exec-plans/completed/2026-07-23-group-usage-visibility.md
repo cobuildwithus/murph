@@ -1,6 +1,6 @@
 # Quantified group usage in murph.group read_usage
 
-Status: active
+Status: completed
 Created: 2026-07-23
 
 ## Goal
@@ -75,3 +75,5 @@ Created: 2026-07-23
 4. Add/extend focused tests for all three owners; align product-spec wording.
 5. Run `pnpm test:diff` over the touched owners, complete required audits, then
    finish-task commit and open the PR.
+Updated: 2026-07-23
+Completed: 2026-07-23
