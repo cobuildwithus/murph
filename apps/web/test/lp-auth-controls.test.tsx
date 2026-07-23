@@ -264,6 +264,11 @@ test("LandingAuthActions gives consent and finishing views matching dialog title
   expect(container.textContent).toContain(
     "Review how Murph uses health data before continuing.",
   );
+  expect(
+    Array.from(container.querySelectorAll("button")).some(
+      (candidate) => candidate.textContent?.trim() === "Close",
+    ),
+  ).toBe(false);
 
   const finishingButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent === "Show finishing",

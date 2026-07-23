@@ -629,7 +629,7 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
   );
 
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
-  const continueButton = findButtonByText(container, /Consent & continue/);
+  const continueButton = findButtonByText(container, /^Consent$/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));

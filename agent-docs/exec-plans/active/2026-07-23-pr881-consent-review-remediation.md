@@ -31,9 +31,9 @@ Updated: 2026-07-23
 1. Risk: a partial two-scope write could cause duplicate legal acceptance on retry.
    Mitigation: retain the latest returned status locally and cover the exact retry sequence.
 2. Risk: decline or completion state could leave the dialog visually or behaviorally stuck.
-   Mitigation: make pending states mutually disabling, clear pending auth in `finally`, and cover decline plus view transitions.
+   Mitigation: make pending states mutually disabling, clear pending auth only after authoritative logout, and cover decline failure, retry, and view transitions.
 3. Risk: compact dialog actions or document links could overflow narrow screens.
-   Mitigation: keep min-width-safe grid actions and refresh desktop/mobile design proof.
+   Mitigation: keep the left-secondary/right-primary action row min-width safe and refresh desktop/mobile design proof.
 
 ## Tasks
 
@@ -48,6 +48,9 @@ Updated: 2026-07-23
 - Treat the supplied patch as behavioral intent because its blob context does not exactly match the current PR head.
 - Delete the single-purpose action wrapper and move decline ownership into the existing consent prompt.
 - Reset the existing auth-completion state on decline so clearing the consent gate returns to auth instead of exposing a stale finishing state.
+- Keep Decline as the quiet left action, shorten the affirmative label to `Consent`, and reduce card chrome so the consequential choice is immediately legible.
+- Revoke the authoritative Murph app session before clearing a declined consent gate; keep refusal visible and retryable when logout cannot be confirmed.
+- Reuse `AuthDialog` for sidebar and changelog auth entry points so consent headings and dismissal policy have one owner.
 
 ## Verification
 
@@ -58,6 +61,8 @@ Updated: 2026-07-23
 - Rendered `/design?tab=consent` with the production component at 1440 px and 390 px; direct overflow checks also passed at 320 px.
 - Interactive catalog proof confirmed pending feedback disables both launch actions and restores them after completion.
 - `product-experience-review`: two recovery findings accepted and fixed; re-review returned `NO FINDINGS`.
+- Consent UI revision focused proof: 58 tests passed across consent, auth panel/dialog, app-session helper, logout route, and invite behavior.
+- Consent UI revision product review: authoritative-logout recovery and stale-heading findings fixed; final re-review returned `NO FINDINGS`.
 - Claude Code UI double-check: Fable stopped at explicit usage-credit exhaustion; per policy no fallback request was made.
-- Cloudflare Images upload: blocked because the local least-privilege Images credentials are unavailable; ignored local evidence is retained for ReviewGPT packaging.
+- Cloudflare Images upload: revised desktop and mobile proof uploaded through the local least-privilege credentials; both public delivery URLs returned image responses.
 - Preliminary specialist ReviewGPT, final verification, plan closure, final ReviewGPT, and current-head CI remain pending.

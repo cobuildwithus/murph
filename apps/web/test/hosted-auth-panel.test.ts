@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
     preferredScope?: string;
     source?: string;
   } | null,
+  logoutHostedAppSession: vi.fn(),
   sendCode: vi.fn(),
   usePrivy: vi.fn(),
   useUser: vi.fn(),
@@ -59,6 +60,10 @@ vi.mock("@privy-io/react-auth", () => ({
 
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
   completeHostedPrivyAuth: mocks.completeHostedPrivyAuth,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/hosted-app-session-client", () => ({
+  logoutHostedAppSession: mocks.logoutHostedAppSession,
 }));
 
 vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
@@ -149,6 +154,11 @@ let cleanupRender: (() => Promise<void>) | null = null;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.logoutHostedAppSession.mockImplementation(
+    async ({ logoutPrivy }: { logoutPrivy?: () => Promise<void> | void }) => {
+      await logoutPrivy?.();
+    },
+  );
   mocks.hostedPhoneAuthProps = null;
   mocks.legalConsentCardProps = null;
   mocks.usePrivy.mockReturnValue({
@@ -484,11 +494,69 @@ test("HostedAuthPanel returns to auth without recording consent when launch cons
   });
 
   expect(logout).toHaveBeenCalledTimes(1);
+  expect(mocks.logoutHostedAppSession).toHaveBeenCalledWith({
+    logoutPrivy: logout,
+  });
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain("Hosted legal consent card");
   expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
   await vi.waitFor(() => {
     expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  });
+});
+
+test("HostedAuthPanel keeps consent retryable when authoritative sign-out fails", async () => {
+  const logout = vi.fn().mockResolvedValue(undefined);
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout,
+    ready: true,
+  });
+  mocks.logoutHostedAppSession.mockRejectedValueOnce(
+    new Error("Sign-out unavailable."),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  );
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const firstDeclineButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Decline",
+  );
+  await act(async () => {
+    firstDeclineButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Unable to sign out");
+    expect(container.textContent).toContain("Select Decline to try again.");
+    expect(container.textContent).toContain("Hosted legal consent card");
+  });
+  const retryDeclineButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Decline",
+  ) as HTMLButtonElement | undefined;
+  expect(retryDeclineButton?.disabled).toBe(false);
+  expect(logout).not.toHaveBeenCalled();
+
+  await act(async () => {
+    retryDeclineButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.logoutHostedAppSession).toHaveBeenCalledTimes(2);
+    expect(logout).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Hosted legal consent card");
   });
 });
 

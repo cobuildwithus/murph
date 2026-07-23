@@ -16,6 +16,7 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
 import { cn } from "@/src/lib/utils";
 import type { HostedAuthCompletionResult } from "./hosted-auth-completion";
+import { logoutHostedAppSession } from "./hosted-app-session-client";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
 
 import {
@@ -65,6 +66,7 @@ export function HostedAuthPanel({
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const [consentDeclinePending, setConsentDeclinePending] = useState(false);
+  const [consentDeclineError, setConsentDeclineError] = useState<string | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
@@ -131,17 +133,25 @@ export function HostedAuthPanel({
     if (consentDeclinePending) return;
 
     setConsentDeclinePending(true);
+    setConsentDeclineError(null);
     try {
-      await logout();
+      await logoutHostedAppSession({ logoutPrivy: logout });
+    } catch {
+      setConsentDeclineError("Couldn’t confirm sign-out. Select Decline to try again.");
+      setConsentDeclinePending(false);
+      return;
+    }
+
+    try {
       await onSignOut?.();
     } catch {
-      // Declining must never record consent or leave the gate stuck.
-    } finally {
-      pendingAuthCompletionRef.current = null;
-      completion.resetCompletion();
-      setPendingAuthCompletion(null);
-      setConsentDeclinePending(false);
+      // The authoritative Murph app session is already gone.
     }
+
+    pendingAuthCompletionRef.current = null;
+    completion.resetCompletion();
+    setPendingAuthCompletion(null);
+    setConsentDeclinePending(false);
   }
 
   async function handleContinueResumableAuth() {
@@ -153,25 +163,36 @@ export function HostedAuthPanel({
   }
 
   async function handleSignOutResumableAuth() {
-    await logout();
+    await logoutHostedAppSession({ logoutPrivy: logout });
     await onSignOut?.();
   }
 
   if (pendingAuthCompletion) {
     return (
-      <HostedLegalConsentCard
-        declinePending={consentDeclinePending}
-        mode="compact"
-        onAccepted={handleConsentSatisfied}
-        onDecline={() => void handleConsentDeclined()}
-        onRequirementChange={(required) => {
-          if (!required) {
-            void handleConsentSatisfied();
-          }
-        }}
-        preferredScope="launch.legal"
-        source="homepage-auth-dialog"
-      />
+      <div className="space-y-4">
+        {consentDeclineError ? (
+          <Alert
+            className="rounded-lg border-destructive/30 bg-destructive/10 px-3.5 py-3 before:hidden"
+            variant="destructive"
+          >
+            <AlertTitle>Unable to sign out</AlertTitle>
+            <AlertDescription>{consentDeclineError}</AlertDescription>
+          </Alert>
+        ) : null}
+        <HostedLegalConsentCard
+          declinePending={consentDeclinePending}
+          mode="compact"
+          onAccepted={handleConsentSatisfied}
+          onDecline={() => void handleConsentDeclined()}
+          onRequirementChange={(required) => {
+            if (!required) {
+              void handleConsentSatisfied();
+            }
+          }}
+          preferredScope="launch.legal"
+          source="homepage-auth-dialog"
+        />
+      </div>
     );
   }
 

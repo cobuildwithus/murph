@@ -161,6 +161,10 @@ export function AuthDialog({
       : description;
 
   function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && panelView === "consent") {
+      return;
+    }
+
     if (!nextOpen) {
       setPanelView("auth");
     }
@@ -169,7 +173,13 @@ export function AuthDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+      <DialogContent
+        className={cn(
+          "max-w-md gap-6 p-6 md:p-7",
+          panelView === "consent" ? "rounded-2xl" : null,
+        )}
+        showCloseButton={panelView !== "consent"}
+      >
         <DialogHeader
           className={cn({
             "pr-10": panelView === "auth",

@@ -83,6 +83,7 @@ export function ConsentContent() {
                 documents={DESIGN_LEGAL_DOCUMENTS}
                 mode="panel"
                 onContinue={() => {}}
+                onDecline={() => {}}
                 variant="legal"
               />
             </div>
@@ -93,6 +94,7 @@ export function ConsentContent() {
                 errorMessage="Could not record consent. Try again."
                 mode="panel"
                 onContinue={() => {}}
+                onDecline={() => {}}
               />
             </div>
           </div>
@@ -112,7 +114,7 @@ function PreviewFrame({
   return (
     <div className="flex flex-col gap-3">
       <PreviewLabel>{label}</PreviewLabel>
-      <div className="rounded-3xl border border-border bg-card p-6">
+      <div className="rounded-2xl border border-border bg-card p-5 sm:p-6">
         {children}
       </div>
     </div>

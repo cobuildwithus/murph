@@ -246,9 +246,16 @@ function HostedLegalConsentCardState({
           </Alert>
           <div
             className={cn({
-              "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": onDecline,
+              "grid grid-cols-[7rem_minmax(0,1fr)] gap-3": onDecline,
             })}
           >
+            {onDecline ? (
+              <ConsentDeclineButton
+                busy={declinePending}
+                disabled={declinePending || retrying}
+                onDecline={onDecline}
+              />
+            ) : null}
             <Button
               disabled={declinePending || retrying}
               onClick={loadStatus}
@@ -257,13 +264,6 @@ function HostedLegalConsentCardState({
             >
               {retrying ? "Trying again..." : "Try again"}
             </Button>
-            {onDecline ? (
-              <ConsentDeclineButton
-                busy={declinePending}
-                disabled={declinePending || retrying}
-                onDecline={onDecline}
-              />
-            ) : null}
           </div>
         </div>
       </div>
@@ -374,15 +374,15 @@ export function HostedLaunchConsentPrompt({
   const accepting = pending || handoffPending;
   const actionPending = accepting || declinePending;
   const introduction = (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2.5">
         <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
           {copy.eyebrow}
         </p>
-        <p className="font-serif text-2xl font-semibold leading-tight tracking-tight text-foreground">
+        <p className="max-w-sm font-serif text-2xl font-semibold leading-[1.15] tracking-tight text-balance text-foreground">
           {copy.title}
         </p>
-        <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+        <p className="max-w-[40rem] text-[15px] leading-6 text-pretty text-muted-foreground">
           {copy.description}
         </p>
       </div>
@@ -390,7 +390,10 @@ export function HostedLaunchConsentPrompt({
     </div>
   );
   const error = errorMessage ? (
-    <Alert variant="destructive">
+    <Alert
+      className="rounded-lg border-destructive/30 bg-destructive/10 px-3.5 py-3 before:hidden"
+      variant="destructive"
+    >
       <AlertTitle>Unable to record consent</AlertTitle>
       <AlertDescription>{errorMessage}</AlertDescription>
     </Alert>
@@ -398,10 +401,10 @@ export function HostedLaunchConsentPrompt({
   const primaryButton = (
     <Button
       aria-busy={accepting}
-      className={cn("w-full", {
-        "min-w-0 px-4": mode === "compact",
-        "sm:w-auto": mode === "panel",
-      })}
+      className={cn(
+        onDecline ? "min-w-32 px-6" : "w-full",
+        !onDecline && mode === "panel" ? "sm:w-auto" : null,
+      )}
       disabled={actionPending}
       onClick={onContinue}
       size="lg"
@@ -416,12 +419,11 @@ export function HostedLaunchConsentPrompt({
   );
   const actions = (
     <div
-      className={cn({
-        "flex justify-end": !onDecline && mode === "panel",
-        "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": onDecline,
-      })}
+      className={cn(
+        "flex items-center gap-3 border-t border-border/70 pt-4",
+        onDecline ? "justify-between" : "justify-end",
+      )}
     >
-      {primaryButton}
       {onDecline ? (
         <ConsentDeclineButton
           busy={declinePending}
@@ -429,6 +431,7 @@ export function HostedLaunchConsentPrompt({
           onDecline={onDecline}
         />
       ) : null}
+      {primaryButton}
     </div>
   );
 
@@ -467,12 +470,12 @@ function ConsentDeclineButton({
   return (
     <Button
       aria-busy={busy}
-      className="w-full px-4"
+      className="px-3 text-muted-foreground hover:text-foreground"
       disabled={disabled}
       onClick={onDecline}
       size="lg"
       type="button"
-      variant="outline"
+      variant="ghost"
     >
       {busy ? "Declining..." : "Decline"}
     </Button>
@@ -512,21 +515,19 @@ function LaunchDocumentLinks({
   return (
     <nav
       aria-label="Consent documents"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs leading-5 text-muted-foreground"
     >
-      <span>Review</span>
-      {documents.map((document, index) => (
-        <span className="inline-flex items-center gap-2" key={document.id}>
-          {index > 0 ? <span aria-hidden>·</span> : null}
-          <a
-            className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
-            href={document.href}
-            rel="noreferrer"
-            target="_blank"
-          >
-            {shortDocumentTitle(document.title)}
-          </a>
-        </span>
+      <span className="mr-1">Review</span>
+      {documents.map((document) => (
+        <a
+          className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+          href={document.href}
+          key={document.id}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {shortDocumentTitle(document.title)}
+        </a>
       ))}
     </nav>
   );
@@ -591,7 +592,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
 } {
   if (variant === "legal") {
     return {
-      actionLabel: "Agree & continue",
+      actionLabel: "Agree",
       description: "Review the updated terms and disclosures that govern your use of Murph.",
       eyebrow: "Terms update",
       title: "Review Murph’s terms",
@@ -600,18 +601,18 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
 
   if (variant === "health-data") {
     return {
-      actionLabel: "Consent & continue",
+      actionLabel: "Consent",
       description:
-        "Murph uses health data you add or connect—including through contracted AI providers—to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+        "Murph uses health data you add or connect, including through contracted AI providers, to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
       eyebrow: "Health data consent",
       title: "Use your health data with Murph",
     };
   }
 
   return {
-    actionLabel: "Consent & continue",
+    actionLabel: "Consent",
     description:
-      "By continuing, you agree to the Terms and consent to Murph using health data you add or connect—including through contracted AI providers—to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+      "By selecting Consent, you agree to the Terms and consent to Murph using health data you add or connect, including through contracted AI providers, to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
     eyebrow: "Health data consent",
     title: "Use your health data with Murph",
   };
@@ -707,11 +708,11 @@ export function ConsentSkeleton({
       </div>
       <div
         className={cn({
-          "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": secondaryAction,
+          "grid grid-cols-[7rem_minmax(0,1fr)] gap-3": secondaryAction,
         })}
       >
-        <Skeleton className="h-11 rounded-2xl" />
         {secondaryAction}
+        <Skeleton className="h-11 rounded-2xl" />
       </div>
     </div>
   );

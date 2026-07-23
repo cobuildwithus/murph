@@ -121,10 +121,15 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   expect(container.textContent).toContain("Health data");
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
 
-  const continueButton = findButtonByText(container, /Consent & continue/);
+  const continueButton = findButtonByText(container, /^Consent$/);
   const declineButton = findButtonByText(container, /^Decline$/);
   expect(continueButton.disabled).toBe(false);
   expect(declineButton.disabled).toBe(false);
+  expect(
+    [...container.querySelectorAll("button")].indexOf(declineButton),
+  ).toBeLessThan(
+    [...container.querySelectorAll("button")].indexOf(continueButton),
+  );
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 });
 
@@ -163,7 +168,7 @@ test("launch consent records both launch scopes from one click", async () => {
   });
 
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
-  const continueButton = findButtonByText(container, /Consent & continue/);
+  const continueButton = findButtonByText(container, /^Consent$/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -236,7 +241,7 @@ test("a legal-only update uses concise legal copy and records only that scope", 
 
   expect(container.textContent).not.toContain("contracted AI providers");
   expect(container.textContent).not.toContain("Health Data Notice");
-  const continueButton = findButtonByText(container, /Agree & continue/);
+  const continueButton = findButtonByText(container, /^Agree$/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -357,7 +362,7 @@ test("launch consent shows a busy state while the second scope is recording", as
   );
   cleanupRender = cleanup;
 
-  const continueButton = findButtonByText(container, /Consent & continue/);
+  const continueButton = findButtonByText(container, /^Consent$/);
   const declineButton = findButtonByText(container, /^Decline$/);
 
   await act(async () => {
@@ -412,7 +417,7 @@ test("launch consent retries only the remaining scope after a partial failure", 
   );
   cleanupRender = cleanup;
 
-  const firstContinueButton = findButtonByText(container, /Consent & continue/);
+  const firstContinueButton = findButtonByText(container, /^Consent$/);
   await act(async () => {
     firstContinueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -422,7 +427,7 @@ test("launch consent retries only the remaining scope after a partial failure", 
   });
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
 
-  const retryButton = findButtonByText(container, /Consent & continue/);
+  const retryButton = findButtonByText(container, /^Consent$/);
   await act(async () => {
     retryButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -475,7 +480,7 @@ test("launch consent keeps the prompt visible when the accepted handoff fails", 
   );
   cleanupRender = cleanup;
 
-  const continueButton = findButtonByText(container, /Consent & continue/);
+  const continueButton = findButtonByText(container, /^Consent$/);
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
   });
@@ -483,7 +488,7 @@ test("launch consent keeps the prompt visible when the accepted handoff fails", 
   await vi.waitFor(() => {
     expect(container.textContent).toContain("Could not finish sign in.");
   });
-  const retryButton = findButtonByText(container, /Consent & continue/);
+  const retryButton = findButtonByText(container, /^Consent$/);
   expect(retryButton.disabled).toBe(false);
 
   await act(async () => {
