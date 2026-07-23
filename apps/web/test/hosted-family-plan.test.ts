@@ -927,9 +927,86 @@ describe("hosted Family plan", () => {
     expect(
       cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mock.invocationCallOrder[0],
     ).toBeLessThan(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    const acceptedMemberId = tx.$queryRaw.mock.calls[1]?.[1];
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      1,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_owner",
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      acceptedMemberId,
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      3,
+      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      acceptedMemberId,
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
+      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
+    );
     expect(tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]).toBeLessThan(
       tx.hostedAccountGroupMembership.upsert.mock.invocationCallOrder[0],
     );
+  });
+
+  it("keeps the Telegram route when family acceptance is rejected after member locking", async () => {
+    const tx = createTxMock({
+      activeMembershipCount: 4,
+      billedSeatCount: 4,
+    });
+    tx.hostedAccountGroupInvite.findMany.mockResolvedValueOnce([
+      {
+        inviteCode: "invite_telegram",
+      },
+    ]);
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite({
+      inviteCode: "invite_telegram",
+      targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Dad_User"),
+    }));
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: "dad_user",
+      text: "/start",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+    });
+
+    const acceptedMemberId = tx.$queryRaw.mock.calls[1]?.[1];
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(4);
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      1,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_owner",
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      acceptedMemberId,
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      3,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      acceptedMemberId,
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      4,
+      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      acceptedMemberId,
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[3]).toBeLessThan(
+      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
+    );
+    expect(tx.hostedMemberRouting.upsert).toHaveBeenCalledOnce();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects explicit Telegram tokens from a different bound username", async () => {
@@ -1089,6 +1166,22 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
     expect(tx.hostedMember.create).not.toHaveBeenCalled();
+    expect(tx.hostedMemberRouting.upsert).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      1,
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_mom",
+    );
+    expect(tx.$queryRaw).toHaveBeenNthCalledWith(
+      2,
+      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      "member_mom",
+    );
+    expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("rejects an accepted explicit Telegram token from a different stable account", async () => {

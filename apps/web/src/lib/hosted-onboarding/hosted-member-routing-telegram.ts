@@ -15,6 +15,7 @@ import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingTelegramPrivateState,
 } from "./member-private-codecs";
+import { lockHostedMemberRoutingStateTx } from "./hosted-member-routing-state";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "./shared";
@@ -35,6 +36,10 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     memberId: input.memberId,
     prisma: input.prisma,
     telegramUserId: input.telegramUserId,
+  });
+  await lockHostedMemberRoutingStateTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
   });
   const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
     where: {

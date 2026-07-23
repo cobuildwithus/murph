@@ -12,6 +12,18 @@ import {
 } from "./linq-participant-contact";
 import type { HostedOnboardingReadClient } from "./shared";
 
+export async function lockHostedMemberRoutingStateTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member_routing"
+    WHERE "member_id" = ${input.memberId}
+    FOR UPDATE
+  `;
+}
+
 export const hostedMemberRoutingStateSelect =
   Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
     linqChatIdEncrypted: true,

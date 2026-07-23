@@ -3071,20 +3071,41 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
     reason: "hosted-family.telegram-routing",
     userId: member.id,
   });
-  await upsertHostedMemberTelegramRoutingBindingTx({
-    memberId: member.id,
-    prisma: input.tx,
-    telegramThreadId: input.telegramThreadId,
-    telegramUserId: input.telegramUserId,
-  });
-  return acceptHostedFamilyInviteTx({
-    acceptedMemberId: member.id,
-    inviteCode,
-    now,
-    onAcceptedMemberActivated: input.onAcceptedMemberActivated,
-    telegramUsername: input.telegramUsername ?? null,
-    tx: input.tx,
-  });
+  let telegramBindingAttempted = false;
+  let telegramBindingWritten = false;
+  const writeTelegramBinding = async (): Promise<void> => {
+    telegramBindingAttempted = true;
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: member.id,
+      prisma: input.tx,
+      telegramThreadId: input.telegramThreadId,
+      telegramUserId: input.telegramUserId,
+    });
+    telegramBindingWritten = true;
+  };
+
+  try {
+    const membership = await acceptHostedFamilyInviteTx({
+      acceptedMemberId: member.id,
+      inviteCode,
+      now,
+      onAcceptedMemberLocked: writeTelegramBinding,
+      onAcceptedMemberActivated: input.onAcceptedMemberActivated,
+      telegramUsername: input.telegramUsername ?? null,
+      tx: input.tx,
+    });
+    if (!telegramBindingWritten) {
+      await lockHostedMemberRow(input.tx, member.id);
+      await writeTelegramBinding();
+    }
+    return membership;
+  } catch (error) {
+    if (!telegramBindingAttempted && isHostedOnboardingError(error)) {
+      await lockHostedMemberRow(input.tx, member.id);
+      await writeTelegramBinding();
+    }
+    throw error;
+  }
 }
 
 async function readHostedFamilyInviteCodePendingActiveTx(input: {

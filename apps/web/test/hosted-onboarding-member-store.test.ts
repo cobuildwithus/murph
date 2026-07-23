@@ -2758,9 +2758,11 @@ describe("hosted-member-store", () => {
   it("upserts Telegram bindings into the routing table", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -2838,9 +2840,11 @@ describe("hosted-member-store", () => {
       },
     ]);
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue(null),
@@ -2894,15 +2898,18 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
     ]);
+    const findUnique = vi.fn().mockResolvedValue({
+      memberId: "member_123",
+      telegramUserIdEncrypted: existingTelegramPrivateColumns.telegramUserIdEncrypted,
+    });
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
-        findUnique: vi.fn().mockResolvedValue({
-          memberId: "member_123",
-          telegramUserIdEncrypted: existingTelegramPrivateColumns.telegramUserIdEncrypted,
-        }),
+        findUnique,
         upsert,
       },
     } as never;
@@ -2927,6 +2934,9 @@ describe("hosted-member-store", () => {
       telegramThreadId: "456:business:biz-42:dm-topic:9",
       telegramUserId: "456",
     });
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      findUnique.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("clears a legacy same-user Telegram thread target during a user-id-only resync", async () => {
@@ -2944,9 +2954,11 @@ describe("hosted-member-store", () => {
         memberId: "member_123",
       },
     ]);
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
         findUnique: vi.fn().mockResolvedValue({
