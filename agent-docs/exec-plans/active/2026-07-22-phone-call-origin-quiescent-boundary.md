@@ -107,5 +107,12 @@ persisted lifecycle.
   returned `NO FINDINGS`; it recorded only non-blocking latency and full
   tool-to-user roundtrip evidence gaps.
 - Canonical `pnpm test:diff` passed all touched Assistant Engine and Assistant
-  Runtime suites; the broader CLI expansion tail reproduced unrelated exact
-  60-second subprocess timeouts and is still draining to its final result.
+  Runtime suites (1,804 Runtime tests, two expected skips); the broader CLI
+  expansion tail reproduced widespread unrelated exact 60-second subprocess
+  timeouts and was stopped after the pattern was conclusive rather than spend
+  further Testbox time on untouched CLI paths.
+- Current-head CI exposed one compile-only integration gap in Cloudflare's
+  deliberate unsupported-reason boundary test. The production bridge remains
+  narrowly typed; the test now documents its intentional legacy-wire type
+  violation and still proves rejection before snapshot side effects. Cloudflare
+  typecheck and all 37 focused bridge tests pass after that correction.
