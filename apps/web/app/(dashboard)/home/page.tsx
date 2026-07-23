@@ -105,6 +105,9 @@ export default async function HomePage({
     initialVisitContactActionResult,
     null,
   );
+  const shouldRenderInitialVisitPersonaPicker =
+    showInitialVisitPersonaPicker
+    && initialVisitContactActionResult.status === "fulfilled";
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
@@ -169,7 +172,7 @@ export default async function HomePage({
         <DeviceSyncCompletionDialog model={completionDialog} />
       ) : null}
 
-      {showInitialVisitPersonaPicker ? (
+      {shouldRenderInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
           contactAction={initialVisitContactAction}
         />

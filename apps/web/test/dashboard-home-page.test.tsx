@@ -332,13 +332,13 @@ test("DashboardCriticalLoadError refreshes the unavailable dashboard layout", as
   }
 });
 
-test("DashboardError keeps a critical auth failure in a retryable dashboard state", async () => {
+test("DashboardError gives non-home dashboard child failures a route-group reset", async () => {
   const reset = vi.fn();
   const { default: DashboardError } = await import(
     "../app/(dashboard)/error"
   );
   const rendered = await renderClientComponent(createElement(DashboardError, {
-    error: new Error("session store unavailable"),
+    error: new Error("records data unavailable"),
     reset,
   }));
 
@@ -351,6 +351,14 @@ test("DashboardError keeps a critical auth failure in a retryable dashboard stat
       rendered.container.textContent ?? "",
       /could not load this dashboard right now/,
     );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Log in or sign up/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /records data unavailable/,
+    );
 
     await act(async () => {
       rendered.button.dispatchEvent(new rendered.window.Event("click", {
@@ -359,6 +367,7 @@ test("DashboardError keeps a critical auth failure in a retryable dashboard stat
     });
 
     assert.equal(reset.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
   } finally {
     await rendered.cleanup();
   }
@@ -698,6 +707,47 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.doesNotMatch(markup, /Start Pulse|Upgrade to Edge/);
   assert.doesNotMatch(markup, /href="\/settings/);
   assert.doesNotMatch(markup, /Resets in/u);
+});
+
+test("HomePage preserves the initial-visit marker when contact projection retry is needed", async () => {
+  mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
+    new Error("contact context unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const searchParams = {
+    initialVisit: "true",
+  };
+  const failedMarkup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve(searchParams),
+    }),
+  );
+
+  assert.match(failedMarkup, /Welcome to Murph/);
+  assert.match(failedMarkup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(
+    failedMarkup,
+    /data-home-initial-visit-persona-picker/,
+  );
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+
+  const recoveredMarkup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve(searchParams),
+    }),
+  );
+
+  assert.doesNotMatch(
+    recoveredMarkup,
+    /Some dashboard details are unavailable/,
+  );
+  assert.match(
+    recoveredMarkup,
+    /data-home-initial-visit-persona-picker="shown"/,
+  );
+  assert.match(recoveredMarkup, /data-contact-action-href="sms:\+15555550123"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 2);
 });
 
 test("HomePage opens persona onboarding for initial visits", async () => {
