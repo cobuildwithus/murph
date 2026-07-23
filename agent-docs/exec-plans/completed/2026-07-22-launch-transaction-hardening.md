@@ -6,7 +6,7 @@ Goal (incl. success criteria):
 Constraints/Assumptions:
 - This is high-risk auth, billing, crypto, and concurrency work. Preserve product-critical signup, trial, activation, and welcome flows; do not disable them as a reliability fix.
 - Prefer reordering and the existing domain-root unwrap cache, transaction owners, idempotency keys, and routing locks. Add no queue, semaphore, state owner, table, schema, or reconciliation loop.
-- PlanetScale M-80's current `max_connections=50`, PgBouncer `default_pool_size=45`, and `max_client_conn=900` are size-generated defaults and remain unchanged.
+- PlanetScale M-80's current `max_connections=50`, PgBouncer `default_pool_size=45`, and `max_client_conn=900` are user-confirmed managed defaults and remain unchanged. PlanetScale documents size-dependent defaults and resize recalculation, but does not publish the exact M-80 tuple in its public table.
 - Preserve the separate Privy metadata cleanup worktree and unrelated primary-checkout changes.
 - `agent-docs/exec-plans/active/2026-06-21-hosted-signup-timezone-handoff.md` overlaps `authentication-service.ts`, `hosted-member-store.ts`, and `member-activation.ts`; this task stays isolated, minimizes those hunks, and will reconcile the current main/base before final proof.
 
@@ -20,7 +20,7 @@ Key decisions:
 - Preserve the existing join-flow recovery UI: every newly introduced pressure error is a typed retryable domain error, so the existing Retry action remains the single frontend recovery owner without a new client fallback or visual surface.
 
 State:
-- In progress.
+- Done.
 
 Done:
 - Confirmed PlanetScale resize-default behavior from official parameter documentation and retracted the PS-80 example-based tuning recommendation.
@@ -33,15 +33,20 @@ Done:
 - Added user-safe typed retry behavior for routing and billing-lock contention. The existing join-flow Retry action consumes the domain `retryable` field, so no frontend behavior or styling change is needed.
 - Added a two-phase activation route decision: existing home/promotable pending authority uses only the member route lock; true claims use a fail-fast pool try-lock, then member lock and locked reread.
 - Focused signup/time-zone, auto-trial, activation/crypto, routing, and client retry tests pass; focused Web typecheck and lint/diff checks pass.
-- Direct PostgreSQL proof confirms the exact transaction advisory lock is reentrant for its owner, fails immediately for a concurrent transaction, and becomes available after rollback.
-- Full Web verification passed typecheck, 6,243 tests, lint with no errors, development smoke, and the production build.
-- The exact final 12-file focused suite passed 359 tests; targeted lint, `git diff --check`, and the privacy/secret diff scan passed.
+- Direct PostgreSQL proof confirms the exact transaction advisory lock is reentrant for its owner, fails immediately for a concurrent transaction, and becomes available after transaction release.
+- Preliminary completion-specialists ReviewGPT audited exact head `e1cff346d6` and returned two coverage findings: fail-fast prewarming could expose a sibling failure before a late root was zeroized, and the advisory-lock behavior lacked an executable PostgreSQL regression in CI.
+- Replaced fail-fast prewarming with `Promise.allSettled`, added a deterministic late-root zeroization regression, and added a loopback-only two-client PostgreSQL concurrency suite to the hosted PostgreSQL CI job and testing map.
+- The executable PostgreSQL concurrency suite passed against an isolated migrated database.
+- Final canonical diff verification passed 6,258 tests with 155 skipped, lint with no errors, development smoke, typecheck, and the production build.
+- Reconciled current `origin/main` with an ordinary merge; no newer base commit touched the task's onboarding owners.
+- Clean-room repository acceptance passed in Blacksmith Testbox `tbx_01ky6my181q13t2rt0r6gwbxx4`, including all workspace typechecks, coverage lanes, Web production build, and Cloudflare suites.
+- Parent final review found no remaining correctness, privacy, security, reliability, ownership, or unnecessary-complexity issue in the task patch.
 
 Now:
-- Reconcile current `origin/main`, rerun repository acceptance, and complete the PR review gates. The first acceptance run passed the full Web owner but exposed three unrelated assistant-runtime tests fixed by the newer base.
+- Close this execution plan and certify the exact pushed PR head through final ReviewGPT and required CI.
 
 Next:
-- Complete preliminary ReviewGPT specialist review, parent final review, plan closure, final ReviewGPT, CI, and mergeability proof.
+- Mark PR #886 ready after final ReviewGPT, required CI, and mergeability proof pass.
 
 Open questions (UNCONFIRMED if needed):
 - No existing durable owner completes a browser-abandoned auto-trial activation. The safe launch behavior is foreground retry with stable subscription reuse; a true pending-activation owner and extraction of Stripe/KMS work are explicitly deferred rather than adding a launch-time queue/table or weakening current correctness.
@@ -55,6 +60,12 @@ Working set (files/ids/commands):
 - apps/web/src/lib/hosted-onboarding/linq-home-routing.ts
 - apps/web/src/lib/hosted-onboarding/hosted-member-routing-linq.ts
 - apps/web/src/lib/hosted-crypto/domain-root-unwrap-cache.ts
+- apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts
+- .github/workflows/cloudflare-hosted-e2e.yml
+- agent-docs/references/testing-ci-map.md
 - focused hosted onboarding, billing, crypto, and PostgreSQL concurrency tests
 - pnpm test:diff <touched paths>
 - pnpm verify:acceptance
+Status: completed
+Updated: 2026-07-23
+Completed: 2026-07-23
