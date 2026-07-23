@@ -181,8 +181,8 @@ function RecoveryArtifact() {
       </div>
 
       <p className="mt-3 font-serif text-[1rem] leading-[1.45] text-[#2d3436]">
-        Recovery is solid. The sauna nights are finally showing up, so you
-        can hit the hard session today.
+        Recovery is above your recent baseline, and HRV was highest on the
+        sauna nights. Today looks like a strong training day.
       </p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
