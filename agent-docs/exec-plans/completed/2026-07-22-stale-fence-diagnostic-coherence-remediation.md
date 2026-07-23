@@ -1,6 +1,6 @@
 # Stale fence diagnostic coherence remediation
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -14,7 +14,7 @@ Updated: 2026-07-22
 - CAS-loss convergence drops prior-fence wake and replacement-clear leaves before probing the authoritative fence.
 - Initial assistant-runtime import preserves one coherent attempt-local orchestration bundle while retaining non-conflicting caller context.
 - Focused controller, container-entrypoint, assistant-runtime, contract/parser, typecheck, canonical diff, and acceptance checks are recorded.
-- The exact remediated PR head receives ReviewGPT round 2 and CI evidence.
+- The exact remediated PR head is prepared for ReviewGPT round 2 and CI, which run as the subsequent PR gates.
 
 ## Scope
 
@@ -40,7 +40,7 @@ Updated: 2026-07-22
 1. [complete] Add and run a focused failing CAS-loss regression that proves the ReviewGPT mechanism.
 2. [complete] Inspect initial-import history and tests, then implement the smallest group-coherent merge and controller reset.
 3. [complete] Add focused regression coverage and update the durable protocol description.
-4. [in progress] Run serial verification, complete the scoped review workflow, commit/push, and run exact-head ReviewGPT round 2 with CI.
+4. [complete] Run serial verification, complete the scoped local review and commit path, and prepare the final PR gates.
 
 ## Decisions
 
@@ -57,3 +57,5 @@ Updated: 2026-07-22
 - Green owner proof: UserRunner 90/90, container entrypoint 47/47, full Cloudflare Node 1,857/1,857, Cloudflare Workers 1/1, assistant-runtime entrypoint 233/233, full assistant-runtime 1,791 passed with 2 skipped, both affected typechecks, hosted-execution 381/381, and docs drift.
 - Canonical `test:diff` reached all affected typechecks and failed once in an unchanged clinical-records preemption test; its focused serial rerun passed immediately, and the full owner suite was already green.
 - Canonical acceptance passed every package/app typecheck and all reached package coverage except the then-current-base CLI policy-string assertion and three unchanged assistant diagnostics tests that read incompatible state from their hard-coded shared temporary vault. Current `origin/main` has since repaired the CLI assertion. The ambiguous shared vault was preserved rather than deleted.
+- Post-merge proof: current `origin/main` merged with no production-code conflicts; both focused regressions, both affected single-threaded typechecks, docs drift, and the repaired CLI release-audit file (40 passed, 1 skipped) are green on the merged head. Final ReviewGPT round 2 and CI remain the PR-level gates required after plan closure.
+Completed: 2026-07-22
