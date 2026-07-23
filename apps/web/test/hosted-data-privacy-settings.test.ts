@@ -747,6 +747,7 @@ function createBrowserVaultReplicaForTest() {
         },
         rowSchema: "murph.browser-vault.lab-result-row.v1",
         sourceLabel: "Clinical records",
+        specimenKind: "serum",
         textValue: null,
         unit: "%",
         value: 5.4,

@@ -394,6 +394,9 @@ describe("hosted mailbox conversation import adapter", () => {
         order.push("projection-prepared");
       },
       item,
+      onConversationActivityObserved() {
+        order.push("activity-callback");
+      },
       onConversationInputStaged() {
         order.push("staged-callback");
       },
@@ -404,7 +407,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
     try {
       await notificationObserved.promise;
-      assert.deepEqual(order, ["staged-callback", "notify"]);
+      assert.deepEqual(order, ["activity-callback", "staged-callback", "notify"]);
 
       projectionRelease.resolve(undefined);
       const outcome = await importPromise;
@@ -415,6 +418,7 @@ describe("hosted mailbox conversation import adapter", () => {
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(listed.events.length, 1);
       assert.deepEqual(order, [
+        "activity-callback",
         "staged-callback",
         "notify",
         "projection-prepared",
@@ -486,6 +490,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
+      let activityCallbackCount = 0;
       let stagedCallbackCount = 0;
       const outcome = await importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -500,6 +505,9 @@ describe("hosted mailbox conversation import adapter", () => {
         },
         async prepareWakeContext() {},
         item,
+        onConversationActivityObserved() {
+          activityCallbackCount += 1;
+        },
         onConversationInputStaged() {
           stagedCallbackCount += 1;
         },
@@ -509,6 +517,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
       assert.equal(outcome.status, "imported");
       assert.equal(notificationCount, 0);
+      assert.equal(activityCallbackCount, 0);
       assert.equal(stagedCallbackCount, 0);
     } finally {
       controller.close();
@@ -850,6 +859,8 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
 
+    let conversationActivityCount = 0;
+    let foregroundStagedCount = 0;
     const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
       importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -872,6 +883,12 @@ describe("hosted mailbox conversation import adapter", () => {
               runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
             },
           },
+        },
+        onConversationActivityObserved() {
+          conversationActivityCount += 1;
+        },
+        onConversationInputStaged() {
+          foregroundStagedCount += 1;
         },
         runtime: createRuntime({
           platform: {
@@ -896,6 +913,8 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
+    assert.equal(conversationActivityCount, 1);
+    assert.equal(foregroundStagedCount, 0);
     assert.equal(latencyTraceRequests.length, 1);
     const event = latencyTraceRequests[0]?.event;
     assert.equal(event?.type, "assistant_input_staged");

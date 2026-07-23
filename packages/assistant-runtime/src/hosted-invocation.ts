@@ -47,6 +47,7 @@ export interface HostedWorkspaceInvocationInput {
   job: HostedAssistantWorkspaceRuntimeJobInput;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder;
+  onConversationActivityObserved?: () => void;
   platform: HostedRuntimePlatform;
   readCurrentLease: () =>
     | HostedRuntimeBridgeCheckpointLease
@@ -83,6 +84,9 @@ export async function runHostedWorkspaceInvocation(
     return await runHostedWorkspaceRuntimeJobInProcess(input.job, {
       ...options,
       latencyMilestones: input.latencyMilestones ?? null,
+      onConversationActivityObserved: input.onConversationActivityObserved
+        ? () => input.onConversationActivityObserved?.()
+        : undefined,
       runtimeWakeSignal,
       shutdownSignal: input.shutdownSignal ?? null,
       signal: input.signal ?? null,

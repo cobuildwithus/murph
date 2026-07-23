@@ -5,6 +5,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 const captured = vi.hoisted(() => ({
   chartAriaLabel: null as string | null,
   chartConfig: null as Record<string, unknown> | null,
+  chartInitialDimension: null as { height: number; width: number } | null,
   gridRendered: false,
   lineChartProps: null as Record<string, unknown> | null,
   referenceLines: [] as Record<string, unknown>[],
@@ -64,9 +65,11 @@ vi.mock("@/src/components/ui/chart", async () => {
       "aria-label"?: string;
       children?: ReactNode;
       config?: Record<string, unknown>;
+      initialDimension?: { height: number; width: number };
     }) {
       captured.chartAriaLabel = props["aria-label"] ?? null;
       captured.chartConfig = props.config ?? null;
+      captured.chartInitialDimension = props.initialDimension ?? null;
       return passthrough(props);
     },
     ChartTooltip({ content }: { content?: ReactNode }) {
@@ -90,6 +93,7 @@ import { LabBiomarkerHistoryChart } from "@/src/components/biomarkers/lab-biomar
 beforeEach(() => {
   captured.chartAriaLabel = null;
   captured.chartConfig = null;
+  captured.chartInitialDimension = null;
   captured.gridRendered = false;
   captured.lineChartProps = null;
   captured.referenceLines = [];
@@ -116,6 +120,7 @@ test("lab chart keeps tiny values precise without adding a nested keyboard stop"
   expect(captured.chartConfig).toMatchObject({
     value: { color: "var(--chart-1)" },
   });
+  expect(captured.chartInitialDimension).toEqual({ height: 320, width: 1 });
 
   const tooltip = captured.tooltipFormatter?.(0.0015);
   expect(tooltip).toBeTruthy();
@@ -174,6 +179,57 @@ test("a single reference bound renders one dashed line and no band", () => {
   expect(markup).toContain("Up to 99 mg/dL");
   expect(markup).toContain("border-dashed");
   expect(captured.referenceLines.map((line) => line.y)).toEqual([99]);
+});
+
+test("a fallback bound uses a distinct general-reference label", () => {
+  const markup = renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "HbA1c",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 5 },
+      { date: "2026-06-14", id: "p2", value: 4.7 },
+    ],
+    referenceRange: { high: 5.7, low: null },
+    referenceRangeLabel: "<5.7%",
+    referenceRangeSourceLabel: "Reviewed source",
+    referenceRangeTitle: "General reference",
+    unit: "percent",
+  }));
+
+  expect(markup).toContain("General reference");
+  expect(markup).toContain("Reviewed source");
+  expect(markup).not.toContain("Latest lab range");
+  expect(captured.chartAriaLabel).toBe(
+    "HbA1c results over time; general reference <5.7% from Reviewed source",
+  );
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([5.7]);
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(4.7)).toBe(4.7);
+  expect(maximum(5)).toBe(5.7);
+});
+
+test("a lower-only reference keeps its bound visible below the data", () => {
+  renderToStaticMarkup(createElement(LabBiomarkerHistoryChart, {
+    displayName: "eGFR",
+    points: [
+      { date: "2025-06-03", id: "p1", value: 102 },
+      { date: "2026-06-14", id: "p2", value: 79 },
+    ],
+    referenceRange: { high: null, low: 60 },
+    referenceRangeLabel: ">=60 mL/min/1.73m^2",
+    referenceRangeTitle: "General reference",
+    unit: "mL/min/1.73m^2",
+  }));
+
+  expect(captured.referenceLines.map((line) => line.y)).toEqual([60]);
+  const [minimum, maximum] = captured.yAxisDomain as [
+    (value: number) => number,
+    (value: number) => number,
+  ];
+  expect(minimum(79)).toBe(60);
+  expect(maximum(102)).toBe(102);
 });
 
 test("a supplied display value preserves the lab's reported precision in the tooltip", () => {

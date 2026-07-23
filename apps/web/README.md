@@ -129,6 +129,20 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+## Saved biomarker reference context
+
+Saved lab-result pages keep the imported source flag and per-result laboratory
+range authoritative. A normalized latest source range may appear on the chart
+as two dashed boundary rules or an exact one-sided limit. If the latest
+comparable result has no usable numeric source range, the server may provide an exact-unit,
+sourced Health Commons range labeled `Published adult comparator`; its legend
+states that it is not the reporting lab's range. The browser requires an exact
+unit and eligible coarse specimen kind, and it does not infer ranges, convert
+units, or use a comparator to relabel the result. The initial catalog contains
+named Mayo Clinic Laboratories adult serum intervals for chloride, LDH,
+phosphate, and total protein. Missing, mismatched, and context-dependent
+specimens omit the comparator.
+
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
 ## Core responsibilities
