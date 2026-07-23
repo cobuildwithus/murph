@@ -2416,7 +2416,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "100");
       assert.equal(
         result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
-        "100",
+        undefined,
       );
       assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);
@@ -4816,7 +4816,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.equal(result.latestMailboxImport.state.watermarks.conversation, "3");
       assert.equal(
         result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
-        "1",
+        undefined,
       );
       assert.equal(
         result.assistantPhaseResult?.nextWakeAt,
@@ -8802,13 +8802,14 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("publishes the imported prefix when complete local pending evidence has no gap", async () => {
+  test("marks imported conversation lag dirty without publishing a guessed prefix", async () => {
     const result = await runConversationHandledThroughScenario({});
 
     assert.equal(
       result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
-      "1",
+      undefined,
     );
+    assert.equal(result.runtimeStateDirty, true);
   });
 
   test.each([
@@ -8835,6 +8836,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
       undefined,
     );
+    assert.equal(result.runtimeStateDirty, true);
   });
 
   test("marks replay-only handled progress dirty so a lagging durable prefix can repair", async () => {
@@ -8846,12 +8848,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     assert.equal(
       result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
-      "100",
+      undefined,
     );
     assert.equal(result.runtimeStateDirty, true);
   });
 
-  test("publishes only the safe prefix before a later pending conversation input", async () => {
+  test("leaves prefix derivation to Web when a later conversation input is pending", async () => {
     const result = await runConversationHandledThroughScenario({
       foregroundReplyFailed: 1,
       items: [
@@ -8873,8 +8875,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
 
     assert.equal(
       result.runtimeRedactedStatus?.["hostedMailboxConversationHandledThroughSeq"],
-      "1",
+      undefined,
     );
+    assert.equal(result.runtimeStateDirty, true);
   });
 
   test.each([

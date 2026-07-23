@@ -594,24 +594,37 @@ necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
 checkpoint replay floor. The system lane advances that floor from its
-checkpointed handled-through status. The conversation lane advances it in the
-same successful `idle_shutdown` snapshot transaction as a runtime-published
-handled-through prefix. The runtime caps that prefix at its imported watermark
-and immediately before the earliest still-pending hosted conversation input;
-missing index evidence, a missing indexed event, or a malformed conversation
-lane sequence fails closed without advancing it. Retryable reply failures remain
-in that pending index and therefore stop the prefix before the failed input.
-Status-only assistant or canonical-runtime checkpoints may retain the marker,
-but they never advance the floor because their snapshot ref can still predate
-the terminal evidence or durable reply intent.
-The prefix is local handling authority: a durable reply intent in the same
-snapshot remains delivery work, while terminal no-reply evidence needs no
-provider callback. A checkpoint conflict or transaction rollback leaves the
-floor unchanged, and a restored workspace whose local imported prefix is ahead
-of the server floor republishes the handled-through prefix on its next idle
-checkpoint.
+checkpointed handled-through status. At the conversation lane's successful
+`idle_shutdown` checkpoint, the runtime instead carries up to 256 exact mailbox
+item ids whose local inputs have terminal evidence. In the same transaction as
+the accepted snapshot CAS, Web stamps `consumed_at` only on matching same-user
+live `conversation.message` rows at or below the snapshot's imported watermark,
+then advances `consumed_seq` only to the item immediately before the first
+remaining live unstamped row. Thus a terminal item at sequence 20 cannot move
+the floor across an unresolved item at sequence 19. A missing event, missing
+input-to-mailbox mapping, missing row, malformed sequence, retryable reply
+failure, checkpoint conflict, or transaction rollback fails closed without
+acknowledging that item or crossing its gap. Status-only assistant or
+canonical-runtime checkpoints never stamp conversation rows.
 
-Accepted Linq reply delivery carries the finer delivery-time consume authority:
+The local hosted pending-input index uses schema v2 for this exact-ack protocol.
+Terminal conversation ids stay in the checkpointed snapshot until a later
+mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
+checks terminal evidence so those retained ids do not schedule another reply.
+When more exact ids are pending than the checkpoint request cap, v2 persists a
+batch cursor in the same snapshot and rotates later checkpoints through the
+remaining ids. It never deletes an id merely because it was selected, so a
+blocked earlier sequence cannot make the first batch permanently starve later
+terminal rows.
+On first compaction of a deployed v1 index, the runtime rebuilds it from all
+retained assistant-input events rather than trusting v1's channel-filtered
+`backfilled` projection. This recovers dormant Telegram or other temporarily
+disabled-channel inputs that v1 could have deleted. The exact item stamps are
+idempotent, and repeated idle checkpoints safely resend them until the durable
+floor confirms the accepted transaction.
+
+Accepted Linq reply delivery carries an earlier copy of the same exact-item
+consume authority:
 the runtime reports
 `answeredMailboxItemIds`, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
@@ -624,15 +637,17 @@ side table or lane high-water advance past gaps. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
 
-This handled-through field is an additive Cloudflare-to-Web checkpoint
-extension. Deploy Web first so the consumer understands it, then deploy the
-Cloudflare worker and runner bundle with immediate container rollout and verify
-the managed runner fingerprint. Old runners omit the field and new Web keeps
-the prior replay behavior; new runners talking to old Web have their marker
-stored as ordinary redacted status but do not advance the floor, so they also
-remain replay-safe. Roll back in reverse order (runner producer, then Web
-consumer). There is no hard rollback floor: any already-advanced prefix was
-coupled to a compatible durable snapshot, and old runtimes already honor the
+`handledConversationMailboxItemIds` is an additive Cloudflare-to-Web checkpoint
+extension. Deploy the Cloudflare worker and runner bundle first with immediate
+container rollout, verify the managed runner fingerprint, and only then deploy
+Web. The old Web parser tolerates and ignores the new field, while the new
+runner retains terminal local ids until `consumedSeqByLane` confirms them, so
+that producer-first window is replay-safe. Do not deploy Web first: an old
+runner can still remove terminal ids under the retired v1/prefix behavior while
+new Web intentionally refuses to trust that prefix. Roll back in the opposite
+order—Web first, then the runner producer. There is no hard rollback floor:
+already-advanced floors were derived from exact row stamps in an accepted
+snapshot transaction, and old runtimes already honor both `consumedAt` and the
 existing `consumedSeqByLane` response. After rollout, verify that conversation
 lane floors converge toward checkpointed imported prefixes and run a Telegram
 reload smoke proving one reply without replay delay or duplication.

@@ -163,6 +163,7 @@ import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
+  compactHostedConversationMailboxHandledItemIds,
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -4495,6 +4496,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
+  const handledConversationMailboxItemIds =
+    await compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
+        input.redactedStatus,
+      ),
+      signal: input.checkpointSignal ?? input.runtimeAbortSignal,
+      vaultRoot: input.vaultRoot,
+    });
+  input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
@@ -4502,6 +4512,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
+    handledConversationMailboxItemIds,
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
       : {}),
@@ -4541,6 +4552,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   return checkpoint;
+}
+
+function readHostedConversationConsumedSeqFromStatus(
+  status: HostedWorkspaceInvocationResult["redactedStatus"] | null,
+): string | null {
+  const value = status?.["hostedMailboxConversationConsumedSeq"];
+  return typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? value
+    : null;
 }
 
 async function withHostedSystemMailboxHandledThroughStatus(input: {

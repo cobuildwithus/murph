@@ -53,6 +53,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
+  HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -4778,6 +4779,14 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",
     ),
+    ...(record.handledConversationMailboxItemIds === undefined
+      ? {}
+      : {
+          handledConversationMailboxItemIds:
+            parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
+              record.handledConversationMailboxItemIds,
+            ),
+        }),
     ...(record.idleCheckpointTrigger === undefined
       ? {}
       : {
@@ -4836,6 +4845,40 @@ export function parseHostedWorkspaceCheckpointRequest(
       "Hosted workspace checkpoint request snapshotRef",
     ),
   };
+}
+
+function parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
+  value: unknown,
+): string[] {
+  const itemIds = requireArray(
+    value,
+    "Hosted workspace checkpoint handledConversationMailboxItemIds",
+  ).map((entry, index) => {
+    const itemId = requireString(
+      entry,
+      `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}]`,
+    );
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(itemId)) {
+      throw new TypeError(
+        `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}] must be a mailbox item id.`,
+      );
+    }
+    return itemId;
+  });
+  if (
+    itemIds.length
+      > HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
+  ) {
+    throw new TypeError(
+      `Hosted workspace checkpoint handledConversationMailboxItemIds must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} ids.`,
+    );
+  }
+  if (new Set(itemIds).size !== itemIds.length) {
+    throw new TypeError(
+      "Hosted workspace checkpoint handledConversationMailboxItemIds must not contain duplicates.",
+    );
+  }
+  return itemIds;
 }
 
 export function parseHostedWorkspaceCheckpointResponse(

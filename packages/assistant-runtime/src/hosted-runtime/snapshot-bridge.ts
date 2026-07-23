@@ -159,6 +159,12 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion:
             checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
+          ...(checkpointInput.handledConversationMailboxItemIds === undefined
+            ? {}
+            : {
+                handledConversationMailboxItemIds:
+                  [...checkpointInput.handledConversationMailboxItemIds],
+              }),
           inboxMediaRetentionWakeAt: Object.hasOwn(checkpointInput, "inboxMediaRetentionWakeAt")
             ? checkpointInput.inboxMediaRetentionWakeAt ?? null
             : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,

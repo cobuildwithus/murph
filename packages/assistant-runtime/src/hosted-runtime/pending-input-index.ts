@@ -7,7 +7,9 @@ import {
   compareAssistantInputCursors,
   createStoreBackedAssistantInputSource,
   DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+  listAssistantInputEvents,
   readAssistantInputEvent,
+  readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
@@ -17,21 +19,26 @@ import {
 } from "@murphai/assistant-engine/assistant-state";
 import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/retention";
 import {
-  readVersionedJsonStateFile,
+  parseVersionedJsonStateEnvelope,
+  readLocalStateTextFile,
 } from "@murphai/runtime-state/node";
+import {
+  HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
+} from "@murphai/hosted-execution/runtime-control";
 import {
   resolveAssistantStatePaths,
   writeAssistantStateVersionedJson,
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
 export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA =
-  "murph.hosted-pending-assistant-inputs.v1";
-export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION = 1;
+  "murph.hosted-pending-assistant-inputs.v2";
+export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION = 2;
 export const HOSTED_PENDING_ASSISTANT_INPUT_STATE_RELATIVE_PATH =
   ".runtime/operations/assistant/hosted-pending-inputs.json";
 
 export interface HostedPendingAssistantInputState {
   backfilled: boolean;
+  handledBatchCursorInputId: string | null;
   inputIds: string[];
 }
 
@@ -42,21 +49,35 @@ export interface HostedPendingAssistantInputMediaRetentionProtections {
 }
 
 interface HostedPendingAssistantInputStateReadResult {
+  legacy: boolean;
   missing: boolean;
   state: HostedPendingAssistantInputState;
 }
 
 interface HostedPendingAssistantInputCompactionResult {
-  conversationPrefixEvidenceComplete: boolean;
-  earliestPendingConversationLaneSeq: string | null;
+  handledConversationBatchCursorInputId: string | null;
+  handledConversationInputIds: string[];
   runnableInputIds: string[];
   unresolvedInputIds: string[];
 }
 
+export interface HostedConversationMailboxHandledItemCandidate {
+  inputId: string;
+  mailboxItemId: string;
+}
+
+export interface HostedConversationMailboxHandledItemBatch {
+  candidates: HostedConversationMailboxHandledItemCandidate[];
+  nextCursorInputId: string | null;
+}
+
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL =
   "hosted pending assistant input state";
+const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA =
+  "murph.hosted-pending-assistant-inputs.v1";
+const HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION = 1;
 const HOSTED_PENDING_ASSISTANT_INPUT_STATE_KEYS =
-  new Set(["backfilled", "inputIds"]);
+  new Set(["backfilled", "handledBatchCursorInputId", "inputIds"]);
 const HOSTED_PENDING_ASSISTANT_INPUT_INSPECTION_WAVE_SIZE = 8;
 type HostedPendingAssistantInputReplyabilityEvent = Pick<
   AssistantInputEventRecord,
@@ -219,16 +240,30 @@ export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
         })
       ),
     );
-    if (existingEvents.some((event) =>
-      event !== null
-      && isHostedPendingAssistantInputStillReplyable({
-        enabledAutoReplyChannels,
-        event,
-      })
-    )) {
+    const replyableEvents = existingEvents.filter(
+      (event): event is AssistantInputEventRecord =>
+        event !== null
+        && isHostedPendingAssistantInputStillReplyable({
+          enabledAutoReplyChannels,
+          event,
+        }),
+    );
+    const incompleteReplyableEvidence = await Promise.all(
+      replyableEvents.map(async (event) =>
+        !await hasCompleteAssistantAutoReplyTerminalEvidence({
+          captureId: event.projection.captureId,
+          inputId: event.inputId,
+          vault: input.vaultRoot,
+        })
+      ),
+    );
+    if (incompleteReplyableEvidence.some(Boolean)) {
       return {
         hasCandidate: true,
-        indexComplete: !existing.missing && existing.state.backfilled,
+        indexComplete:
+          !existing.missing
+          && !existing.legacy
+          && existing.state.backfilled,
       };
     }
     probed += waveSize;
@@ -236,15 +271,17 @@ export async function inspectHostedPendingAssistantInputWakeCandidate(input: {
   }
 
   return {
-    // Missing indexed events remain durable replay-prefix blockers, but they
+    // Missing indexed events remain durable pending-state blockers, but they
     // cannot be selected as runnable assistant work or schedule an immediate
-    // hot loop. Probe newest-first in bounded waves so fresh appended input is
-    // discovered quickly without an unbounded filesystem burst. If the bound
-    // is exhausted, defer ordinary maintenance instead of guessing that the
-    // whole index contains no runnable event.
+    // hot loop. A legacy index is also incomplete until compaction rebuilds it
+    // from retained events. Probe newest-first in bounded waves so fresh
+    // appended input is discovered quickly without an unbounded filesystem
+    // burst. If the bound is exhausted, defer ordinary maintenance instead of
+    // guessing that the whole index contains no runnable event.
     hasCandidate: false,
     indexComplete:
       !existing.missing
+      && !existing.legacy
       && existing.state.backfilled
       && probed === inputIds.length,
   };
@@ -256,7 +293,7 @@ export async function enqueueHostedPendingAssistantInputId(input: {
 }): Promise<string[]> {
   const inputId = parseHostedPendingAssistantInputId(input.inputId);
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
-    const state = await readHostedPendingAssistantInputStateForWrite({
+    const existing = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
@@ -264,6 +301,7 @@ export async function enqueueHostedPendingAssistantInputId(input: {
         backfilled: false,
       }),
     });
+    const state = existing.state;
     const nextState = appendHostedPendingAssistantInputId({
       inputId,
       state,
@@ -276,6 +314,7 @@ export async function enqueueHostedPendingAssistantInputId(input: {
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
+      legacy: existing.legacy,
       state: nextState,
     });
     return [...nextState.inputIds];
@@ -288,7 +327,8 @@ export async function compactHostedPendingAssistantInputIds(input: {
 }): Promise<string[]> {
   return [...(await compactHostedPendingAssistantInputState({
     ...input,
-    inspectConversationPrefix: false,
+    collectHandledConversationInputIds: false,
+    consumedConversationThroughSeq: null,
   })).runnableInputIds];
 }
 
@@ -298,42 +338,119 @@ export async function compactHostedUnresolvedAssistantInputIds(input: {
 }): Promise<string[]> {
   return [...(await compactHostedPendingAssistantInputState({
     ...input,
-    inspectConversationPrefix: false,
+    collectHandledConversationInputIds: false,
+    consumedConversationThroughSeq: null,
   })).unresolvedInputIds];
 }
 
-export async function compactHostedConversationMailboxHandledThroughSeq(input: {
-  importedThroughSeq: string;
+export async function compactHostedConversationMailboxHandledItemIds(input: {
+  consumedThroughSeq: string | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
-}): Promise<string | null> {
-  const importedThroughSeq = parseHostedMailboxConversationSeq(
-    input.importedThroughSeq,
-  );
-  if (importedThroughSeq === null) {
-    return null;
-  }
-
+}): Promise<string[]> {
   const compacted = await compactHostedPendingAssistantInputState({
     ...input,
-    inspectConversationPrefix: true,
+    collectHandledConversationInputIds: true,
+    consumedConversationThroughSeq:
+      parseHostedMailboxConversationSeq(input.consumedThroughSeq),
   });
-  if (!compacted.conversationPrefixEvidenceComplete) {
-    return null;
+  const handledInputIds = compacted.handledConversationInputIds;
+  const details = await readHostedMailboxAssistantInputItemDetails({
+    inputIds: handledInputIds,
+    signal: input.signal,
+    vault: input.vaultRoot,
+  });
+  const candidates = handledInputIds.flatMap((inputId) => {
+    const item = details.get(inputId);
+    return item
+      ? [{ inputId, mailboxItemId: item.mailboxItemId }]
+      : [];
+  });
+  const batch = selectHostedConversationMailboxHandledItemBatch({
+    candidates,
+    cursorInputId: compacted.handledConversationBatchCursorInputId,
+  });
+  if (batch.nextCursorInputId !== null) {
+    await advanceHostedConversationMailboxHandledBatchCursor({
+      cursorInputId: batch.nextCursorInputId,
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+  }
+  return batch.candidates.map((candidate) => candidate.mailboxItemId);
+}
+
+export function selectHostedConversationMailboxHandledItemBatch(input: {
+  candidates: readonly HostedConversationMailboxHandledItemCandidate[];
+  cursorInputId: string | null;
+}): HostedConversationMailboxHandledItemBatch {
+  if (input.candidates.length === 0) {
+    return {
+      candidates: [],
+      nextCursorInputId: null,
+    };
   }
 
-  const earliestPendingSeq = compacted.earliestPendingConversationLaneSeq === null
-    ? null
-    : BigInt(compacted.earliestPendingConversationLaneSeq);
-  if (earliestPendingSeq === null || earliestPendingSeq > importedThroughSeq) {
-    return importedThroughSeq.toString();
-  }
+  const cursorIndex = input.cursorInputId === null
+    ? -1
+    : input.candidates.findIndex(
+      (candidate) => candidate.inputId === input.cursorInputId,
+    );
+  const startIndex = cursorIndex < 0
+    ? 0
+    : (cursorIndex + 1) % input.candidates.length;
+  const batchSize = Math.min(
+    input.candidates.length,
+    HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
+  );
+  const candidates = Array.from({ length: batchSize }, (_, offset) =>
+    input.candidates[(startIndex + offset) % input.candidates.length]!
+  );
+  return {
+    candidates,
+    nextCursorInputId: candidates.at(-1)?.inputId ?? null,
+  };
+}
 
-  return (earliestPendingSeq - 1n).toString();
+async function advanceHostedConversationMailboxHandledBatchCursor(input: {
+  cursorInputId: string;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<void> {
+  const cursorInputId = parseHostedPendingAssistantInputId(input.cursorInputId);
+  await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
+    input.signal?.throwIfAborted();
+    const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
+      paths.assistantStateRoot,
+    );
+    const existing = await readHostedPendingAssistantInputStateAtPath({
+      filePath,
+    });
+    if (existing.missing || existing.legacy) {
+      throw new Error(
+        "Hosted handled-item batch cursor requires a current pending-input index.",
+      );
+    }
+    const nextCursorInputId = existing.state.inputIds.includes(cursorInputId)
+      ? cursorInputId
+      : null;
+    if (existing.state.handledBatchCursorInputId === nextCursorInputId) {
+      return;
+    }
+    await writeHostedPendingAssistantInputStateAtPath({
+      filePath,
+      state: {
+        ...existing.state,
+        handledBatchCursorInputId: nextCursorInputId,
+      },
+    });
+    input.signal?.throwIfAborted();
+  }, input.signal);
 }
 
 async function compactHostedPendingAssistantInputState(input: {
-  inspectConversationPrefix: boolean;
+  collectHandledConversationInputIds: boolean;
+  consumedConversationThroughSeq: bigint | null;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputCompactionResult> {
@@ -343,9 +460,15 @@ async function compactHostedPendingAssistantInputState(input: {
     filePath,
   });
   input.signal?.throwIfAborted();
-  const backfilledState = existingBeforeLock.missing || !existingBeforeLock.state.backfilled
+  const backfilledState = existingBeforeLock.missing
+    || existingBeforeLock.legacy
+    || !existingBeforeLock.state.backfilled
     ? await createBackfilledHostedPendingAssistantInputState({
-      respectEligibleAfter: true,
+      // Deployed v1 snapshots may have deleted an accepted input solely
+      // because its reply channel was temporarily unavailable. Rebuild those
+      // legacy projections from every retained input event; a greenfield or
+      // pre-backfill index keeps the existing eligibility boundary.
+      respectEligibleAfter: !existingBeforeLock.legacy,
       signal: input.signal,
       vaultRoot: input.vaultRoot,
     })
@@ -355,17 +478,18 @@ async function compactHostedPendingAssistantInputState(input: {
     const filePath = resolveHostedPendingAssistantInputStatePathFromRoot(
       paths.assistantStateRoot,
     );
-    const stateBeforeCompaction = await readHostedPendingAssistantInputStateForWrite({
+    const existingForWrite = await readHostedPendingAssistantInputStateForWrite({
       filePath,
       missingState: backfilledState,
     });
+    const stateBeforeCompaction = existingForWrite.state;
     input.signal?.throwIfAborted();
-    const state = stateBeforeCompaction.backfilled
+    const state = stateBeforeCompaction.backfilled && !existingForWrite.legacy
       ? stateBeforeCompaction
       : mergeHostedPendingAssistantInputBackfill({
         backfilledState: backfilledState
           ?? await createBackfilledHostedPendingAssistantInputState({
-            respectEligibleAfter: true,
+            respectEligibleAfter: !existingForWrite.legacy,
             signal: input.signal,
             vaultRoot: input.vaultRoot,
           }),
@@ -374,8 +498,11 @@ async function compactHostedPendingAssistantInputState(input: {
     input.signal?.throwIfAborted();
     return await compactHostedPendingAssistantInputStateForWrite({
       backfilled: true,
+      collectHandledConversationInputIds:
+        input.collectHandledConversationInputIds,
+      consumedConversationThroughSeq: input.consumedConversationThroughSeq,
       filePath,
-      inspectConversationPrefix: input.inspectConversationPrefix,
+      forceCurrentSchemaWrite: existingForWrite.legacy,
       paths,
       signal: input.signal,
       state,
@@ -389,8 +516,10 @@ async function compactHostedPendingAssistantInputState(input: {
 
 async function compactHostedPendingAssistantInputStateForWrite(input: {
   backfilled: boolean;
+  collectHandledConversationInputIds: boolean;
+  consumedConversationThroughSeq: bigint | null;
   filePath: string;
-  inspectConversationPrefix: boolean;
+  forceCurrentSchemaWrite: boolean;
   paths: Parameters<typeof readAssistantInputEvent>[0]["paths"];
   signal?: AbortSignal | null;
   state: HostedPendingAssistantInputState;
@@ -402,7 +531,10 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     const emptyState = createHostedPendingAssistantInputState([], {
       backfilled: input.backfilled,
     });
-    if (!sameHostedPendingAssistantInputState(emptyState, input.stateBeforeCompaction)) {
+    if (
+      input.forceCurrentSchemaWrite
+      || !sameHostedPendingAssistantInputState(emptyState, input.stateBeforeCompaction)
+    ) {
       await writeHostedPendingAssistantInputStateAtPath({
         filePath: input.filePath,
         state: emptyState,
@@ -410,8 +542,8 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       input.signal?.throwIfAborted();
     }
     return {
-      conversationPrefixEvidenceComplete: true,
-      earliestPendingConversationLaneSeq: null,
+      handledConversationBatchCursorInputId: null,
+      handledConversationInputIds: [],
       runnableInputIds: [],
       unresolvedInputIds: [],
     };
@@ -425,8 +557,10 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
   const runnable: { cursor: AssistantInputCursor; inputId: string }[] = [];
   const unresolved: { cursor: AssistantInputCursor; inputId: string }[] = [];
   const missingInputIds: string[] = [];
-  let conversationPrefixEvidenceComplete = true;
-  let earliestPendingConversationLaneSeq: bigint | null = null;
+  const handledConversationInputs: {
+    cursor: AssistantInputCursor;
+    inputId: string;
+  }[] = [];
   for (const inputId of input.state.inputIds) {
     input.signal?.throwIfAborted();
     const event = await readAssistantInputEvent({
@@ -436,9 +570,6 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     input.signal?.throwIfAborted();
     if (!event) {
       missingInputIds.push(inputId);
-      if (input.inspectConversationPrefix) {
-        conversationPrefixEvidenceComplete = false;
-      }
       continue;
     }
     const complete = await hasCompleteAssistantAutoReplyTerminalEvidence({
@@ -453,29 +584,36 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
         inputId,
       });
       if (
-        input.inspectConversationPrefix
-        && event.sourceRef.kind === "hosted-mailbox"
-        && event.sourceRef.lane === "conversation"
-      ) {
-        const laneSeq = parseHostedMailboxConversationPositiveSeq(
-          event.sourceRef.laneSeq,
-        );
-        if (laneSeq === null) {
-          conversationPrefixEvidenceComplete = false;
-        } else if (
-          earliestPendingConversationLaneSeq === null
-          || laneSeq < earliestPendingConversationLaneSeq
-        ) {
-          earliestPendingConversationLaneSeq = laneSeq;
-        }
-      }
-      if (
         isHostedPendingAssistantInputStillReplyable({
           enabledAutoReplyChannels,
           event,
         })
       ) {
         runnable.push({
+          cursor: event.cursor,
+          inputId,
+        });
+      }
+    } else if (
+      event.sourceRef.kind === "hosted-mailbox"
+      && event.sourceRef.lane === "conversation"
+    ) {
+      const laneSeq = parseHostedMailboxConversationSeq(event.sourceRef.laneSeq);
+      if (
+        laneSeq === null
+        || input.consumedConversationThroughSeq === null
+        || laneSeq > input.consumedConversationThroughSeq
+      ) {
+        if (input.collectHandledConversationInputIds) {
+          handledConversationInputs.push({
+            cursor: event.cursor,
+            inputId,
+          });
+        }
+        // Keep terminal conversation IDs in the snapshot being checkpointed.
+        // A later checkpoint removes them only after the server-provided floor
+        // proves their exact row acknowledgement committed.
+        unresolved.push({
           cursor: event.cursor,
           inputId,
         });
@@ -494,22 +632,20 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
       ...missingInputIds,
       ...unresolvedInputIds,
     ],
-    { backfilled: input.backfilled },
+    {
+      backfilled: input.backfilled,
+      handledBatchCursorInputId:
+        input.state.handledBatchCursorInputId !== null
+        && unresolvedInputIds.includes(input.state.handledBatchCursorInputId)
+          ? input.state.handledBatchCursorInputId
+          : null,
+    },
   );
 
-  // A missing event or malformed conversation sequence means this pass cannot
-  // prove a safe replay prefix. Keep the index untouched so a later call does
-  // not mistake information loss for terminal handling.
-  if (input.inspectConversationPrefix && !conversationPrefixEvidenceComplete) {
-    return {
-      conversationPrefixEvidenceComplete: false,
-      earliestPendingConversationLaneSeq: null,
-      runnableInputIds,
-      unresolvedInputIds: [...input.state.inputIds],
-    };
-  }
-
-  if (!sameHostedPendingAssistantInputState(remainingState, input.stateBeforeCompaction)) {
+  if (
+    input.forceCurrentSchemaWrite
+    || !sameHostedPendingAssistantInputState(remainingState, input.stateBeforeCompaction)
+  ) {
     await writeHostedPendingAssistantInputStateAtPath({
       filePath: input.filePath,
       state: remainingState,
@@ -517,9 +653,11 @@ async function compactHostedPendingAssistantInputStateForWrite(input: {
     input.signal?.throwIfAborted();
   }
   return {
-    conversationPrefixEvidenceComplete: true,
-    earliestPendingConversationLaneSeq:
-      earliestPendingConversationLaneSeq?.toString() ?? null,
+    handledConversationBatchCursorInputId:
+      remainingState.handledBatchCursorInputId,
+    handledConversationInputIds: handledConversationInputs
+      .sort((left, right) => compareAssistantInputCursors(left.cursor, right.cursor))
+      .map((item) => item.inputId),
     runnableInputIds,
     unresolvedInputIds: [
       ...missingInputIds,
@@ -534,16 +672,11 @@ function parseHostedMailboxConversationSeq(value: unknown): bigint | null {
     : null;
 }
 
-function parseHostedMailboxConversationPositiveSeq(value: unknown): bigint | null {
-  const parsed = parseHostedMailboxConversationSeq(value);
-  return parsed !== null && parsed > 0n ? parsed : null;
-}
-
 export async function ensureHostedPendingAssistantInputIndex(input: {
   vaultRoot: string;
 }): Promise<string[]> {
   return await withAssistantRuntimeWriteLock(input.vaultRoot, async (paths) => {
-    const state = await readHostedPendingAssistantInputStateForWrite({
+    const existing = await readHostedPendingAssistantInputStateForWrite({
       filePath: resolveHostedPendingAssistantInputStatePathFromRoot(
         paths.assistantStateRoot,
       ),
@@ -551,7 +684,7 @@ export async function ensureHostedPendingAssistantInputIndex(input: {
         backfilled: false,
       }),
     });
-    return [...state.inputIds];
+    return [...existing.state.inputIds];
   });
 }
 
@@ -576,9 +709,24 @@ export function parseHostedPendingAssistantInputState(
       "hosted pending assistant input state backfilled",
     )
     : false;
+  const handledBatchCursorInputId = "handledBatchCursorInputId" in state
+    ? parseHostedPendingAssistantInputNullableId(
+      state.handledBatchCursorInputId,
+      "hosted pending assistant input handled batch cursor",
+    )
+    : null;
+  if (
+    handledBatchCursorInputId !== null
+    && !inputIds.includes(handledBatchCursorInputId)
+  ) {
+    throw new TypeError(
+      "hosted pending assistant input handled batch cursor must reference an indexed input.",
+    );
+  }
 
   return {
     backfilled,
+    handledBatchCursorInputId,
     inputIds,
   };
 }
@@ -594,12 +742,12 @@ async function readHostedPendingAssistantInputState(input: {
 async function readHostedPendingAssistantInputStateForWrite(input: {
   filePath: string;
   missingState: HostedPendingAssistantInputState | null;
-}): Promise<HostedPendingAssistantInputState> {
+}): Promise<HostedPendingAssistantInputStateReadResult> {
   const existing = await readHostedPendingAssistantInputStateAtPath({
     filePath: input.filePath,
   });
   if (!existing.missing) {
-    return existing.state;
+    return existing;
   }
 
   const state = input.missingState ?? createEmptyHostedPendingAssistantInputState({
@@ -609,27 +757,46 @@ async function readHostedPendingAssistantInputStateForWrite(input: {
     filePath: input.filePath,
     state,
   });
-  return state;
+  return {
+    legacy: false,
+    missing: false,
+    state,
+  };
 }
 
 async function readHostedPendingAssistantInputStateAtPath(input: {
   filePath: string;
 }): Promise<HostedPendingAssistantInputStateReadResult> {
   try {
-    const result = await readVersionedJsonStateFile({
-      currentPath: input.filePath,
+    const parsed = JSON.parse(
+      (await readLocalStateTextFile({ currentPath: input.filePath })).text,
+    );
+    const envelope = assertPlainObject(
+      parsed,
+      HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL,
+    );
+    const legacy = envelope.schema === HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA
+      && envelope.schemaVersion
+        === HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION;
+    const state = parseVersionedJsonStateEnvelope(parsed, {
       label: HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL,
       parseValue: parseHostedPendingAssistantInputState,
-      schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
-      schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
+      schema: legacy
+        ? HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA
+        : HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
+      schemaVersion: legacy
+        ? HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION
+        : HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
     });
     return {
+      legacy,
       missing: false,
-      state: result.value,
+      state,
     };
   } catch (error) {
     if (isNodeFileNotFoundError(error)) {
       return {
+        legacy: false,
         missing: true,
         state: createEmptyHostedPendingAssistantInputState({
           backfilled: false,
@@ -642,13 +809,24 @@ async function readHostedPendingAssistantInputStateAtPath(input: {
 
 async function writeHostedPendingAssistantInputStateAtPath(input: {
   filePath: string;
+  legacy?: boolean;
   state: HostedPendingAssistantInputState;
 }): Promise<void> {
+  const state = parseHostedPendingAssistantInputState(input.state);
   await writeAssistantStateVersionedJson({
     filePath: input.filePath,
-    schema: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
-    schemaVersion: HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
-    value: parseHostedPendingAssistantInputState(input.state),
+    schema: input.legacy
+      ? HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA
+      : HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA,
+    schemaVersion: input.legacy
+      ? HOSTED_PENDING_ASSISTANT_INPUT_LEGACY_STATE_SCHEMA_VERSION
+      : HOSTED_PENDING_ASSISTANT_INPUT_STATE_SCHEMA_VERSION,
+    value: input.legacy
+      ? {
+          backfilled: state.backfilled,
+          inputIds: state.inputIds,
+        }
+      : state,
   });
 }
 
@@ -664,6 +842,18 @@ async function createBackfilledHostedPendingAssistantInputState(input: {
   vaultRoot: string;
 }): Promise<HostedPendingAssistantInputState> {
   input.signal?.throwIfAborted();
+  if (!input.respectEligibleAfter) {
+    const listed = await listAssistantInputEvents({
+      limit: Number.MAX_SAFE_INTEGER,
+      signal: input.signal,
+      vault: input.vaultRoot,
+    });
+    return createHostedPendingAssistantInputState(
+      listed.events.map((event) => event.inputId),
+      { backfilled: true },
+    );
+  }
+
   const automationState = await readAssistantAutomationState(input.vaultRoot);
   input.signal?.throwIfAborted();
   if (automationState.autoReply.length === 0) {
@@ -767,6 +957,7 @@ function createEmptyHostedPendingAssistantInputState(input: {
 }): HostedPendingAssistantInputState {
   return {
     backfilled: input.backfilled,
+    handledBatchCursorInputId: null,
     inputIds: [],
   };
 }
@@ -775,10 +966,16 @@ function createHostedPendingAssistantInputState(
   inputIds: readonly string[],
   input?: {
     backfilled?: boolean;
+    handledBatchCursorInputId?: string | null;
   },
 ): HostedPendingAssistantInputState {
   return {
     backfilled: input?.backfilled ?? false,
+    handledBatchCursorInputId:
+      parseHostedPendingAssistantInputNullableId(
+        input?.handledBatchCursorInputId ?? null,
+        "hosted pending assistant input handled batch cursor",
+      ),
     inputIds: parseHostedPendingAssistantInputIds(inputIds),
   };
 }
@@ -796,6 +993,7 @@ function appendHostedPendingAssistantInputId(input: {
     input.inputId,
   ], {
     backfilled: input.state.backfilled,
+    handledBatchCursorInputId: input.state.handledBatchCursorInputId,
   });
 }
 
@@ -808,7 +1006,10 @@ function mergeHostedPendingAssistantInputBackfill(input: {
       ...input.state.inputIds,
       ...input.backfilledState.inputIds,
     ]),
-    { backfilled: true },
+    {
+      backfilled: true,
+      handledBatchCursorInputId: input.state.handledBatchCursorInputId,
+    },
   );
 }
 
@@ -835,6 +1036,20 @@ function parseHostedPendingAssistantInputId(value: unknown): string {
     );
   }
   return value;
+}
+
+function parseHostedPendingAssistantInputNullableId(
+  value: unknown,
+  label: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+  try {
+    return parseHostedPendingAssistantInputId(value);
+  } catch {
+    throw new TypeError(`${label} must be null or a non-empty string.`);
+  }
 }
 
 function parseHostedPendingAssistantInputBoolean(value: unknown, label: string): boolean {
@@ -883,6 +1098,7 @@ function sameHostedPendingAssistantInputState(
   right: HostedPendingAssistantInputState,
 ): boolean {
   return left.backfilled === right.backfilled
+    && left.handledBatchCursorInputId === right.handledBatchCursorInputId
     && sameStringArray(left.inputIds, right.inputIds);
 }
 

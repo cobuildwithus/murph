@@ -36,6 +36,13 @@ spine used by local automation:
 source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active turn -> accepted-input journal -> Codex
 ```
 
+Conversation import and handling progress remain distinct. The imported
+watermark records local staging; terminal inputs stay in the hosted pending
+index until an accepted idle checkpoint stamps their exact Web-owned mailbox
+rows and a later fetch confirms the resulting contiguous consumed floor. The
+v2 index rotates capped exact-id checkpoint batches with a snapshot-persisted
+cursor, so an earlier unresolved sequence cannot starve later terminal rows.
+
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.
 Plain-text Linq plus attachment-free Telegram and WhatsApp input proceeds

@@ -835,12 +835,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot({
       ...createCheckpointInput("idle_shutdown"),
+      handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       runtimeWakePendingAtCheckpoint: false,
     });
 
     const checkpointRequest =
       calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
+    expect(checkpointRequest?.handledConversationMailboxItemIds).toEqual([
+      "item_terminal_7",
+    ]);
     expect(checkpointRequest?.idleCheckpointTrigger).toBe("shutdown_signal");
     expect(checkpointRequest?.runtimeWakePendingAtCheckpoint).toBe(false);
 

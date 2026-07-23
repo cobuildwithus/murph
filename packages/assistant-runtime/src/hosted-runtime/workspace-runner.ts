@@ -85,7 +85,6 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "./pending-assistant-input.ts";
 import {
-  compactHostedConversationMailboxHandledThroughSeq,
   compactHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
 } from "./pending-input-index.ts";
@@ -156,6 +155,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
+    handledConversationMailboxItemIds?: string[];
     idleCheckpointTrigger?: HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"];
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
@@ -446,6 +446,12 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
           ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef ?? null }
           : {}),
         expectedWorkspaceVersion: metadata.expectedWorkspaceVersion,
+        ...(input.handledConversationMailboxItemIds === undefined
+          ? {}
+          : {
+              handledConversationMailboxItemIds:
+                [...input.handledConversationMailboxItemIds],
+            }),
         ...(input.idleCheckpointTrigger
           ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
           : {}),
@@ -546,6 +552,12 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
+    ...(input.requestInput.handledConversationMailboxItemIds === undefined
+      ? {}
+      : {
+          handledConversationMailboxItemIds:
+            [...input.requestInput.handledConversationMailboxItemIds],
+        }),
     ...(input.requestInput.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.requestInput.idleCheckpointTrigger }
       : {}),
@@ -1178,21 +1190,14 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
-    const conversationHandledThroughSeq =
-      await resolveHostedConversationMailboxHandledThroughSeq({
-        conversationConsumedSeq: checkpointRequestSession.conversationConsumedSeq(),
-        latestMailboxImport:
-          checkpointRequestSession.latestMailboxImport() ?? initialMailboxImport,
-        signal: input.signal ?? null,
-        vaultRoot: input.vaultRoot,
-      });
-    if (conversationHandledThroughSeq !== null) {
-      mergeRuntimeRedactedStatus({
-        hostedMailboxConversationHandledThroughSeq: conversationHandledThroughSeq,
-      });
+    if (hostedConversationReplayFloorNeedsCheckpoint({
+      conversationConsumedSeq: checkpointRequestSession.conversationConsumedSeq(),
+      latestMailboxImport:
+        checkpointRequestSession.latestMailboxImport() ?? initialMailboxImport,
+    })) {
       // A replay-only restore may have no other dirty state. Force the existing
-      // idle checkpoint so Web can couple this handled prefix to the snapshot
-      // that proves no pending reply work was dropped.
+      // idle checkpoint so Web can stamp exact terminal mailbox rows and derive
+      // the contiguous replay floor in the snapshot transaction.
       checkpointRequestSession.markRuntimeStateDirty();
     }
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
@@ -2686,40 +2691,18 @@ async function reconcilePendingAssistantInputWake(input: {
   }
 }
 
-async function resolveHostedConversationMailboxHandledThroughSeq(input: {
+function hostedConversationReplayFloorNeedsCheckpoint(input: {
   conversationConsumedSeq: string | null;
   latestMailboxImport: HostedMailboxImportCheckpointResult;
-  signal: AbortSignal | null;
-  vaultRoot: string;
-}): Promise<string | null> {
+}): boolean {
   const consumedSeq = parseHostedConversationMailboxSeq(input.conversationConsumedSeq);
   const importedSeq = parseHostedConversationMailboxSeq(
     input.latestMailboxImport.state.watermarks.conversation,
   );
   if (consumedSeq === null || importedSeq === null || importedSeq <= consumedSeq) {
-    return null;
+    return false;
   }
-
-  // Complete and inspect the pending index only after the server-provided
-  // floor proves there is an actual prefix to advance. The compaction and
-  // pending-sequence read share one assistant-state write lock.
-  const handledThroughSeq =
-    await compactHostedConversationMailboxHandledThroughSeq({
-      importedThroughSeq: importedSeq.toString(),
-      ...(input.signal ? { signal: input.signal } : {}),
-      vaultRoot: input.vaultRoot,
-    });
-
-  const handledThrough = parseHostedConversationMailboxSeq(handledThroughSeq);
-  if (handledThrough === null || handledThrough <= consumedSeq) {
-    return null;
-  }
-
-  // This is local handled authority, not provider-delivery authority. A reply
-  // intent that still needs delivery remains durable in the same snapshot;
-  // exact accepted Linq deliveries continue to use per-item consumedAt. A
-  // still-pending input stops the prefix immediately before its lane sequence.
-  return handledThrough.toString();
+  return true;
 }
 
 function parseHostedConversationMailboxSeq(value: string | null): bigint | null {
