@@ -14,7 +14,9 @@ import {
 import {
   hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx,
+  unwrapHostedDomainRootForWeb,
 } from "../hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   appendHostedMailboxEnvelopeTx,
   hasHostedMailboxItemByKind,
@@ -80,7 +82,9 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
   );
 
   try {
-    const result = await activateHostedMemberForPositiveSourceTxInner(input);
+    const result = await runWithHostedDomainRootUnwrapCache(() =>
+      activateHostedMemberForPositiveSourceTxInner(input)
+    );
 
     finishHostedOnboardingTiming(timing, "completed", {
       activated: result.activated,
@@ -102,23 +106,25 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
   prisma: Prisma.TransactionClient;
   sourceEventId: string;
 }): Promise<HostedMemberActivationResult> {
-  return activateHostedMemberForPositiveSourceTxInner({
-    dispatchContext: {
-      eventCreatedAt: input.occurredAt,
-      occurredAt: input.occurredAt.toISOString(),
-      sourceEventId: input.sourceEventId,
-      sourceType: "hosted.family.sponsorship",
-    },
-    memberId: input.memberId,
-    preserveBillingStatus: true,
-    prisma: input.prisma,
-    skipIfPreviouslyActivated: true,
-    welcomeMessage: renderUserFacingMessage({
-      context: {},
-      key: "assistant.family_welcome",
-      seed: input.memberId,
-    }).text,
-  });
+  return runWithHostedDomainRootUnwrapCache(() =>
+    activateHostedMemberForPositiveSourceTxInner({
+      dispatchContext: {
+        eventCreatedAt: input.occurredAt,
+        occurredAt: input.occurredAt.toISOString(),
+        sourceEventId: input.sourceEventId,
+        sourceType: "hosted.family.sponsorship",
+      },
+      memberId: input.memberId,
+      preserveBillingStatus: true,
+      prisma: input.prisma,
+      skipIfPreviouslyActivated: true,
+      welcomeMessage: renderUserFacingMessage({
+        context: {},
+        key: "assistant.family_welcome",
+        seed: input.memberId,
+      }).text,
+    })
+  );
 }
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
@@ -224,6 +230,10 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
     tx: input.prisma,
     userId: currentMember.core.id,
   });
+  await prewarmHostedMemberActivationWriteDomainRoots({
+    memberId: currentMember.core.id,
+    prisma: input.prisma,
+  });
 
   const linqRoute = await resolveHostedMemberActivationWelcomeLinqRoute({
     member: currentMember,
@@ -256,6 +266,29 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
       : {}),
     memberId: currentMember.core.id,
   };
+}
+
+async function prewarmHostedMemberActivationWriteDomainRoots(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  const outcomes = await Promise.allSettled(
+    (["control", "ingress"] as const).map(async (domain) => {
+      const root = await unwrapHostedDomainRootForWeb({
+        domain,
+        prisma: input.prisma,
+        userId: input.memberId,
+      });
+      root.rootKey.fill(0);
+    }),
+  );
+  const failure = outcomes.find(
+    (outcome): outcome is PromiseRejectedResult =>
+      outcome.status === "rejected",
+  );
+  if (failure) {
+    throw failure.reason;
+  }
 }
 
 export function buildHostedMemberActivationWelcomeRoute(input: {
