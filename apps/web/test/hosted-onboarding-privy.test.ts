@@ -2,22 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
   const createPrivyClient = vi.fn();
-  const privyUsersSetCustomMetadata = vi.fn();
   class PrivyClient {
     constructor(input: unknown) {
       createPrivyClient(input);
-    }
-
-    users() {
-      return {
-        setCustomMetadata: privyUsersSetCustomMetadata,
-      };
     }
   }
 
   return {
     createPrivyClient,
-    privyUsersSetCustomMetadata,
     PrivyClient,
     runtimeEnv: {
       privyAppId: "cm_app_123" as string | null,
@@ -44,7 +36,6 @@ import {
   requireHostedPrivyIdentity,
   requireHostedPrivyPhoneAuthConfig,
   remapHostedPrivyCompletionLagError,
-  syncHostedPrivyMemberIdMetadata,
   verifyHostedPrivyIdentityToken,
 } from "@/src/lib/hosted-onboarding/privy";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -55,7 +46,6 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-token";
 import {
   buildHostedPrivySessionState,
-  readHostedPrivyMemberIdFromVerifiedUser,
 } from "@/src/lib/hosted-onboarding/privy-user";
 
 describe("hosted Privy verification", () => {
@@ -69,23 +59,8 @@ describe("hosted Privy verification", () => {
     mocks.runtimeEnv.privyVerificationKey = "line-1\\nline-2";
   });
 
-  it("reads the Murph member id from verified Privy custom metadata", () => {
-    expect(readHostedPrivyMemberIdFromVerifiedUser({
-      custom_metadata: {
-        murph_member_id: "member_123",
-      },
-      id: "did:privy:user_123",
-    } as never)).toBe("member_123");
-    expect(readHostedPrivyMemberIdFromVerifiedUser({
-      custom_metadata: {
-        murph_member_id: 123,
-      },
-      id: "did:privy:user_123",
-    } as never)).toBeNull();
-  });
-
-  it("builds the shared hosted Privy session state from a verified user", () => {
-    expect(buildHostedPrivySessionState({
+  it("builds hosted session state without projecting provider custom metadata", () => {
+    const session = buildHostedPrivySessionState({
       custom_metadata: {
         murph_member_id: "member_123",
       },
@@ -109,7 +84,9 @@ describe("hosted Privy verification", () => {
           wallet_index: 0,
         },
       ],
-    } as never)).toMatchObject({
+    } as never);
+
+    expect(session).toMatchObject({
       identity: {
         phone: {
           number: "+14155552671",
@@ -126,11 +103,11 @@ describe("hosted Privy verification", () => {
           type: "wallet",
         },
       ],
-      memberId: "member_123",
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
+    expect(session).not.toHaveProperty("memberId");
   });
 
   it("derives server-side phone-auth readiness from the app id plus verification key", () => {
@@ -300,58 +277,6 @@ describe("hosted Privy verification", () => {
       code: "PRIVY_AUTH_FAILED",
       httpStatus: 401,
     });
-  });
-
-  it("syncs the Murph member id into Privy custom metadata when app-secret config is present", async () => {
-    await expect(syncHostedPrivyMemberIdMetadata({
-      memberId: "member_123",
-      privyUserId: "did:privy:user_123",
-      verifiedPrivyUser: {
-        custom_metadata: {
-          existing_flag: true,
-        },
-        id: "did:privy:user_123",
-      } as never,
-    })).resolves.toBe(true);
-
-    expect(mocks.createPrivyClient).toHaveBeenCalledWith({
-      appId: "cm_app_123",
-      appSecret: "app_secret_123",
-    });
-    expect(mocks.privyUsersSetCustomMetadata).toHaveBeenCalledWith("did:privy:user_123", {
-      custom_metadata: {
-        existing_flag: true,
-        murph_member_id: "member_123",
-      },
-    });
-  });
-
-  it("skips custom-metadata sync when the verified token already carries the Murph member id", async () => {
-    await expect(syncHostedPrivyMemberIdMetadata({
-      memberId: "member_123",
-      privyUserId: "did:privy:user_123",
-      verifiedPrivyUser: {
-        custom_metadata: {
-          murph_member_id: "member_123",
-        },
-        id: "did:privy:user_123",
-      } as never,
-    })).resolves.toBe(false);
-
-    expect(mocks.privyUsersSetCustomMetadata).not.toHaveBeenCalled();
-  });
-
-  it("skips custom-metadata sync when the server-side app secret is unavailable", async () => {
-    mocks.runtimeEnv.privyAppSecret = null;
-
-    await expect(syncHostedPrivyMemberIdMetadata({
-      memberId: "member_123",
-      privyUserId: "did:privy:user_123",
-      verifiedPrivyUser: null,
-    })).resolves.toBe(false);
-
-    expect(mocks.createPrivyClient).not.toHaveBeenCalled();
-    expect(mocks.privyUsersSetCustomMetadata).not.toHaveBeenCalled();
   });
 
   it("maps missing server-side account state to a retryable not-ready error for completion", () => {

@@ -10,10 +10,7 @@ import {
   assertActiveHostedMemberAccessAllowed,
 } from "./member-access";
 import { hostedOnboardingError } from "./errors";
-import {
-  lookupHostedMemberForPrivyPrincipal,
-  type HostedMemberPrivyIdentityLookup,
-} from "./member-identity-service";
+import { lookupHostedMemberForPrivyPrincipal } from "./member-identity-service";
 import {
   type HostedPrivyIdentity,
   type HostedPrivyUser,
@@ -29,7 +26,6 @@ import {
 export interface PrivyMemberAuthContext {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
-  memberLookup: HostedMemberPrivyIdentityLookup | null;
   member: HostedMemberCoreState | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
@@ -48,42 +44,12 @@ export async function getPrivySession(
 
 export async function resolvePrivyMemberAuthFromSession(input: {
   identity: HostedPrivyIdentity;
-  memberId: string | null;
   prisma: PrismaClient;
-}): Promise<{
-  member: HostedMemberCoreState | null;
-  memberLookup: HostedMemberPrivyIdentityLookup | null;
-}> {
-  const memberLookup = await lookupHostedMemberForPrivyPrincipal({
+}): Promise<HostedMemberCoreState | null> {
+  return lookupHostedMemberForPrivyPrincipal({
     identity: input.identity,
     prisma: input.prisma,
   });
-
-  if (!input.memberId) {
-    return {
-      member: memberLookup?.core ?? null,
-      memberLookup,
-    };
-  }
-
-  if (!memberLookup) {
-    return {
-      member: null,
-      memberLookup: null,
-    };
-  }
-
-  if (input.memberId !== memberLookup.core.id) {
-    return {
-      member: memberLookup.core,
-      memberLookup,
-    };
-  }
-
-  return {
-    member: memberLookup.core,
-    memberLookup: null,
-  };
 }
 
 export async function getPrivyMemberAuth(
@@ -96,9 +62,8 @@ export async function getPrivyMemberAuth(
     return null;
   }
 
-  const { member, memberLookup } = await resolvePrivyMemberAuthFromSession({
+  const member = await resolvePrivyMemberAuthFromSession({
     identity: session.identity,
-    memberId: session.memberId,
     prisma,
   });
 
@@ -106,7 +71,6 @@ export async function getPrivyMemberAuth(
     identity: session.identity,
     linkedAccounts: session.linkedAccounts,
     member,
-    memberLookup,
     verifiedPrivyUser: session.verifiedPrivyUser,
   };
 }
@@ -229,9 +193,8 @@ export async function requirePrivyMemberAuthFromBearerToken(
     });
   }
 
-  const { member, memberLookup } = await resolvePrivyMemberAuthFromSession({
+  const member = await resolvePrivyMemberAuthFromSession({
     identity: session.identity,
-    memberId: session.memberId,
     prisma,
   });
 
@@ -247,7 +210,6 @@ export async function requirePrivyMemberAuthFromBearerToken(
     identity: session.identity,
     linkedAccounts: session.linkedAccounts,
     member,
-    memberLookup,
     verifiedPrivyUser: session.verifiedPrivyUser,
   };
 }

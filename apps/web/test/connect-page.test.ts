@@ -110,7 +110,6 @@ beforeEach(() => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.resolveHostedMurphContactOption.mockResolvedValue(null);
@@ -2078,7 +2077,6 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
     authenticated: false,
     authenticatedMember: null,
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
 
