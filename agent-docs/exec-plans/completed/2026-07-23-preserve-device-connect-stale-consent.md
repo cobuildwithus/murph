@@ -1,6 +1,6 @@
 # Preserve device connection through stale launch consent
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -83,3 +83,30 @@ Updated: 2026-07-23
 - Canonical `verify:acceptance` Testbox
   `tbx_01ky74jk7bjt1teqzvbg7yvfw9` passed, including the production Web build
   and Cloudflare hosted-runtime verification.
+- The reconciled preliminary specialist pass first returned evidence-only
+  `INVALID`; complete public desktop/mobile evidence then produced three
+  actionable findings. The implementation now retains successful intermediate
+  consent scopes across retries, keeps Function Health unconditionally on the
+  export/share-and-upload path, and uses a flat full-width mobile consent-card
+  composition.
+- Post-remediation consent coverage passed 9 tests across the dashboard and
+  card suites, Assistant Engine prompt coverage passed 29 tests, and the Hosted
+  Web typecheck passed.
+- Refreshed public design evidence covers unchecked, checked, saving, accepted
+  handoff, and retryable-error consent states at desktop and mobile widths. The
+  composition evidence includes production device-source cards below the
+  reminder so available Connect actions are directly visible.
+- Post-remediation `pnpm test:diff` Testbox
+  `tbx_01ky79cvd0hjj1t15tjete5ma5` passed all changed-owner tests and
+  typechecks, then stopped on the same two unrelated baseline failures: the
+  hosted-local-harness parent-signal timeout and a missing generated Health
+  Commons fixture path in Vault Usecases.
+- The first post-remediation `pnpm verify:acceptance` Testbox
+  `tbx_01ky79cvcxxnd47t2em3gc2sap` passed the production Web build and
+  Cloudflare runtime suite, then hit one unrelated full-load preference-handoff
+  sweeper timeout. The exact sweeper file passed all 9 tests immediately in
+  isolation. Full acceptance retry Testbox
+  `tbx_01ky79qe58k6r3pc2jn2gywc10` then passed end to end, including the
+  production Web build, all workspace checks, 1,872 Cloudflare node-platform
+  tests, and the Workers suite.
+Completed: 2026-07-23
