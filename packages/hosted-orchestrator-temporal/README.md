@@ -279,34 +279,35 @@ Worker concurrency:
 
 - `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS` /
   `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS`: maximum
-  concurrent Activity executions, default `2`. `ensureRuntimeProcessing` should
-  return within the short command timeout; Cloudflare owns the longer runtime
+  concurrent Activity executions, default `100`. The Activities issue bounded
+  signed HTTP control-plane requests; Cloudflare owns the longer runtime
   invocation after accepting the start or wake.
-- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS` /
-  `TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS`: maximum concurrent
-  Activity task polls, default `2`, and must be no higher than the Activity
-  execution limit.
 - `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS` /
   `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS`: maximum concurrent
   Workflow task executions, default `20`.
-- `HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS` /
-  `TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS`: maximum concurrent
-  Workflow task polls, default `5`, and must be no higher than the Workflow task
-  execution limit.
+- Activity and Workflow Task pollers use Temporal's server-feedback
+  autoscaling behavior. Fixed poll-count environment variables are not part of
+  the worker contract; the SDK manages the poller count and only polls when an
+  execution slot is available.
 - Production always enables Temporal's reusable V8 context and fixes the cache
   ceiling at `100` Workflow executions instead of deriving cache capacity from
   the process heap. The ceiling is intentionally not operator-configurable.
-- Local development omits these Worker performance options unless an override is
-  configured. Production startup always sets explicit values instead of relying
-  on Temporal SDK defaults.
+- Local development also enables poller autoscaling, while omitting execution
+  and cache overrides unless an execution override is configured. Production
+  startup always sets explicit execution and cache values instead of relying on
+  Temporal SDK defaults.
 
 ## Render Deployment
 
-The repo root `render.yaml` defines `murph-temporal-worker` as a Render
-Background Worker on the 2 GB Standard plan. It builds the Temporal package,
-including the fail-closed production Workflow bundle, ensures the device-sync
-reconciler Schedule, and starts
+The repo root `render.yaml` defines two `murph-temporal-worker` instances as
+Render Background Workers on the 2 GB Standard plan. They share one Temporal
+Task Queue, for an aggregate ceiling of 200 concurrent Activity executions and
+40 concurrent Workflow Task executions. The service build compiles the Temporal
+package, including the fail-closed production Workflow bundle. Each instance
+ensures the device-sync reconciler Schedule and starts
 `pnpm --dir packages/hosted-orchestrator-temporal temporal:worker:prod`.
+The schedule ensure command is idempotent, so concurrent instance startup keeps
+one canonical Schedule.
 
 Use Render Blueprint sync from the dashboard or validate it with:
 

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,6 +93,12 @@ describe("hosted runtime Temporal worker", () => {
     expect(workerOptions.workflowBundle).toBeUndefined();
     expect(workerOptions.shutdownGraceTime).toBeUndefined();
     expect(workerOptions.shutdownForceTime).toBeUndefined();
+    expect(workerOptions.activityTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
+    expect(workerOptions.workflowTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
     expect(workerOptions.maxConcurrentActivityTaskExecutions).toBeUndefined();
     expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
     expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBeUndefined();
@@ -124,10 +130,16 @@ describe("hosted runtime Temporal worker", () => {
       expect(workerOptions.workflowsPath).toBeUndefined();
       expect(workerOptions.shutdownGraceTime).toBe(270_000);
       expect(workerOptions.shutdownForceTime).toBe(295_000);
-      expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(2);
-      expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
+      expect(workerOptions.activityTaskPollerBehavior).toEqual({
+        type: "autoscaling",
+      });
+      expect(workerOptions.workflowTaskPollerBehavior).toEqual({
+        type: "autoscaling",
+      });
+      expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(100);
+      expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
       expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(20);
-      expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(5);
+      expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBeUndefined();
       expect(workerOptions.maxCachedWorkflows).toBe(100);
       expect(workerOptions.reuseV8Context).toBe(true);
     } finally {
@@ -164,11 +176,9 @@ describe("hosted runtime Temporal worker", () => {
     })).toThrow(/greater than or equal/u);
   });
 
-  it("uses worker concurrency env overrides when configured", async () => {
+  it("uses worker execution env overrides when configured", async () => {
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = "3";
-    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = "2";
     process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS = "12";
-    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = "6";
     const {
       createHostedUserRuntimeWorker,
       readHostedUserRuntimeWorkerPerformanceOptions,
@@ -180,30 +190,49 @@ describe("hosted runtime Temporal worker", () => {
     });
 
     const workerOptions = readCreatedWorkerOptions();
+    expect(workerOptions.activityTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
+    expect(workerOptions.workflowTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
     expect(workerOptions.maxConcurrentActivityTaskExecutions).toBe(3);
-    expect(workerOptions.maxConcurrentActivityTaskPolls).toBe(2);
+    expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
     expect(workerOptions.maxCachedWorkflows).toBe(100);
     expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBe(12);
-    expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBe(6);
+    expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBeUndefined();
     expect(workerOptions.reuseV8Context).toBe(true);
     expect(readHostedUserRuntimeWorkerPerformanceOptions({
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "2",
     })).toEqual({
+      activityTaskPollerBehavior: {
+        type: "autoscaling",
+      },
       maxConcurrentActivityTaskExecutions: 1,
-      maxConcurrentActivityTaskPolls: 1,
       maxCachedWorkflows: 100,
       maxConcurrentWorkflowTaskExecutions: 2,
-      maxConcurrentWorkflowTaskPolls: 2,
       reuseV8Context: true,
+      workflowTaskPollerBehavior: {
+        type: "autoscaling",
+      },
     });
-    expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
-      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS: "1",
-      HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS: "2",
-    })).toThrow(/less than or equal/u);
     expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "101",
     })).toThrow(/fixed 100-Workflow cache limit/u);
+  });
+
+  it("runs two Render worker instances", async () => {
+    const renderBlueprint = await readFile(
+      new URL("../../../render.yaml", import.meta.url),
+      "utf8",
+    );
+    const workerService = renderBlueprint
+      .split(/\n(?=\s{2}- type:)/u)
+      .find((service) => service.includes("name: murph-temporal-worker"));
+
+    expect(workerService).toBeDefined();
+    expect(workerService).toMatch(/\n {4}numInstances: 2\n/u);
   });
 
   it("fails production startup when the workflow bundle is missing", async () => {
@@ -259,6 +288,7 @@ describe("hosted runtime Temporal worker", () => {
 
 interface CreatedWorkerOptions {
   activities?: unknown;
+  activityTaskPollerBehavior?: unknown;
   maxCachedWorkflows?: unknown;
   maxConcurrentActivityTaskExecutions?: unknown;
   maxConcurrentActivityTaskPolls?: unknown;
@@ -268,6 +298,7 @@ interface CreatedWorkerOptions {
   shutdownForceTime?: unknown;
   shutdownGraceTime?: unknown;
   taskQueue?: unknown;
+  workflowTaskPollerBehavior?: unknown;
   workflowBundle?: unknown;
   workflowsPath?: unknown;
 }

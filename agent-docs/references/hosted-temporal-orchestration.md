@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-07-14
+Last verified: 2026-07-22
 
 ## Decision
 
@@ -193,6 +193,14 @@ Production workers explicitly reuse the V8 context and cache at most 100
 Workflow executions; the cache ceiling must remain no lower than concurrent
 Workflow task executions. This avoids deriving a much larger cache from the
 container heap after an instance-size change.
+Each production worker uses fixed execution slots for at most 100 concurrent
+Activities and 20 concurrent Workflow Tasks, while both poller types use
+Temporal's server-feedback autoscaling behavior. Render runs two Standard
+instances on the same Task Queue, so loss of one process does not remove all
+polling capacity and the aggregate execution ceilings are 200 Activities and
+40 Workflow Tasks. Capacity changes must preserve fixed slot accounting and
+should be evaluated with slot availability plus Activity and Workflow Task
+schedule-to-start latency rather than process memory alone.
 Production Temporal Cloud clients must use the configured frontend address,
 namespace, API-key auth when configured, and TLS settings. The web signal client
 and worker connection code must support the same API key, TLS enablement,
