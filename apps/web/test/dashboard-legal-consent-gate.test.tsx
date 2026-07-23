@@ -111,8 +111,8 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
   });
 
   mocks.requestHostedOnboardingJson
-    .mockRejectedValueOnce(new Error("Consent save is temporarily unavailable."))
     .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockRejectedValueOnce(new Error("Consent save is temporarily unavailable."))
     .mockResolvedValueOnce(acceptedStatus);
 
   const rendered = await renderClientComponent(
@@ -145,6 +145,11 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
     "Consent save is temporarily unavailable.",
   );
   expect(continueButton.disabled).toBe(false);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  expect(readRequestedConsentScopes()).toEqual([
+    "launch.legal",
+    "launch.health-data",
+  ]);
   expect(rendered.reload).not.toHaveBeenCalled();
 
   await act(async () => {
@@ -158,6 +163,11 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
   });
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+  expect(readRequestedConsentScopes()).toEqual([
+    "launch.legal",
+    "launch.health-data",
+    "launch.health-data",
+  ]);
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
@@ -277,6 +287,12 @@ function findButton(container: Element, label: string): HTMLButtonElement {
   );
   expect(button).toBeTruthy();
   return button as HTMLButtonElement;
+}
+
+function readRequestedConsentScopes(): unknown[] {
+  return mocks.requestHostedOnboardingJson.mock.calls.map(
+    ([request]) => request.payload.scope,
+  );
 }
 
 async function flushPromises() {

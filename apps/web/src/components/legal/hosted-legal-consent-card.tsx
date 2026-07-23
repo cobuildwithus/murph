@@ -60,7 +60,7 @@ function HostedLegalConsentCardState({
   const [legalAccepted, setLegalAccepted] = useState(false);
   const [healthDataAccepted, setHealthDataAccepted] = useState(false);
   const [featureAccepted, setFeatureAccepted] = useState(false);
-  const status = initialStatus ?? loadedStatus;
+  const status = loadedStatus ?? initialStatus;
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -152,8 +152,8 @@ function HostedLegalConsentCardState({
     setAcceptedHandoffPending(false);
     setErrorMessage(null);
 
+    let latestStatus = status;
     try {
-      let latestStatus = status;
       for (const scope of pendingScopes) {
         const scopeStatus = findConsentScope(latestStatus, scope);
         if (scopeStatus && !scopeStatus.granted) {
@@ -175,6 +175,7 @@ function HostedLegalConsentCardState({
         await onAccepted(latestStatus);
       }
     } catch (error) {
+      setLoadedStatus(latestStatus);
       setAcceptedHandoffPending(false);
       setErrorMessage(readConsentErrorMessage(error, "Could not record Murph legal consent right now."));
     } finally {
@@ -274,15 +275,15 @@ function HostedLegalConsentCardState({
 
   return (
     <div className={joinClassNames(cardClassName(mode), className)}>
-      <div className="flex items-start gap-3">
+      <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
           <ShieldCheckIcon className="size-4" aria-hidden />
         </span>
-        <div className="min-w-0 flex-1 space-y-5">
-          <div className="space-y-1">
-            <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
-            <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
-          </div>
+        <div className="min-w-0 space-y-1">
+          <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
+        </div>
+        <div className="col-span-2 min-w-0 space-y-5 sm:col-span-1 sm:col-start-2">
           {checkboxes}
           {errorMessage ? (
             <Alert variant="destructive">
@@ -314,7 +315,7 @@ function LaunchConsentCheckboxes({
 }) {
   return (
     <div className="space-y-6">
-      <p className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm leading-relaxed text-muted-foreground">
+      <p className="border-y border-border py-4 text-sm leading-relaxed text-muted-foreground">
         Hosted Murph processes readable health data through contracted AI and other service
         providers to provide features you request. Murph does not sell health data or use it for
         advertising or general-purpose AI model training. Connected-source rules may further limit

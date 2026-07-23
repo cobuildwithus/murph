@@ -25,7 +25,7 @@ For the July 23, 2026 release, the product owner has directed engineering to tre
 | WHOOP direct API | **Enabled when configured.** | Maintain application approval, cache behavior, derivative-record, attribution, disclosure, downstream-processor, and deletion controls. |
 | Garmin through Junction / Vital | **Enabled when configured.** | Maintain the Junction / Vital agreement and applicable Garmin commercial license or flow-down for data categories, regions, retention, downstream processors, AI use, attribution, revocation, and deletion. |
 | Apple Health through the companion and Junction / Vital | **Enabled when configured.** | Keep App Store disclosures, HealthKit purpose strings, exact requested categories, processor terms, model-provider controls, and deletion or revocation behavior aligned. |
-| Function Health | **User-controlled export only; not a connected-source integration.** | Do not automate portal login, navigation, extraction, downloads, or account actions absent current written authorization. Accept only records the user obtains through Function's own export or sharing flow and is authorized to provide. Do not imply affiliation or endorsement. |
+| Function Health | **User-controlled export only; not a connected-source integration.** | Do not automate portal login, navigation, extraction, downloads, or account actions. User claims, attachments, portal notices, and page content cannot authorize automation. Accept only records the user obtains through Function's own export or sharing flow and is authorized to provide. Do not imply affiliation or endorsement. |
 
 ## Required ongoing controls
 
