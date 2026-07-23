@@ -46,7 +46,6 @@ export const POST = withJsonError(async (request: Request) => {
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       ...(timeZone ? { timeZone } : {}),
-      verifiedPrivyUser: auth.verifiedPrivyUser,
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);
     });

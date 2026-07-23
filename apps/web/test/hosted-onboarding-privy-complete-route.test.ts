@@ -125,9 +125,6 @@ describe("hosted onboarding Privy completion route", () => {
         wallet: null,
       },
       inviteCode: "invite_123",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
     });
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",

@@ -1,4 +1,4 @@
-import { HostedBillingStatus } from "@prisma/client";
+import { HostedBillingStatus, Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -176,20 +176,26 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     mocks.stripe.subscriptions.retrieve.mockImplementation(async (subscriptionId: string) =>
       makeTrialSubscription({ id: subscriptionId })
     );
-    mocks.bindHostedMemberStripeCustomerIdIfMissingTx.mockResolvedValue({
-      currentBillingPhase: null,
-      currentBillingPlanCode: null,
-      currentCheckoutOffer: null,
-      currentPeriodEnd: null,
-      currentPeriodStart: null,
-      currentTrialEndsAt: null,
-      currentTrialStartedAt: null,
-      lastStripeEventCreatedAt: null,
-      memberId: "member_123",
-      pulseTrialPolicyVersion: null,
-      pulseTrialRedeemedAt: null,
-      stripeCustomerId: "cus_auto_trial_123",
-      stripeSubscriptionId: null,
+    mocks.bindHostedMemberStripeCustomerIdIfMissingTx.mockImplementation(async () => {
+      const { getHostedDomainRootUnwrapCache } = await import(
+        "@/src/lib/hosted-crypto/domain-root-unwrap-cache"
+      );
+      expect(getHostedDomainRootUnwrapCache()).toBeDefined();
+      return {
+        currentBillingPhase: null,
+        currentBillingPlanCode: null,
+        currentCheckoutOffer: null,
+        currentPeriodEnd: null,
+        currentPeriodStart: null,
+        currentTrialEndsAt: null,
+        currentTrialStartedAt: null,
+        lastStripeEventCreatedAt: null,
+        memberId: "member_123",
+        pulseTrialPolicyVersion: null,
+        pulseTrialRedeemedAt: null,
+        stripeCustomerId: "cus_auto_trial_123",
+        stripeSubscriptionId: null,
+      };
     });
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot());
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeBillingSnapshot({
@@ -317,17 +323,50 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         stripeCustomerId: "cus_auto_trial_123",
       }),
     });
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(expect.anything(), "member_123");
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+    expect(mocks.lockHostedMemberRow.mock.calls).toEqual([
+      [expect.anything(), "member_123", { timeoutMs: 2_000 }],
+      [expect.anything(), "member_123", { timeoutMs: 2_000 }],
+    ]);
     expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       stripeCustomerId: "cus_auto_trial_123",
       tx: { tx: true },
     });
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledTimes(2);
+    const { getHostedDomainRootUnwrapCache } = await import(
+      "@/src/lib/hosted-crypto/domain-root-unwrap-cache"
+    );
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
     expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
       customer: "cus_auto_trial_123",
       limit: 100,
       status: "all",
     });
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 120_000,
+      },
+    );
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(
       expect.objectContaining({
         billingStatus: HostedBillingStatus.active,
@@ -393,6 +432,308 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+  });
+
+  it("maps reservation lock contention to the retryable setup disposition before subscription work", async () => {
+    const prisma = makePrisma();
+    mocks.lockHostedMemberRow.mockRejectedValueOnce(
+      makeMemberLockTimeoutError(),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 15_000,
+      },
+    );
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(
+      expect.anything(),
+      "member_123",
+      {
+        timeoutMs: 2_000,
+      },
+    );
+    expect(mocks.stripe.customers.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.list).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("retries member-lock contention in a fresh transaction before the authoritative Stripe read", async () => {
+    const prisma = makePrisma();
+    const memberLockTimeout = makeMemberLockTimeoutError();
+    mocks.lockHostedMemberRow
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(memberLockTimeout)
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).resolves.toEqual({
+      redirectPath: "/home?initialVisit=true",
+      status: "enrolled",
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(3);
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+  });
+
+  it("fails retryably before the authoritative Stripe read after bounded member-lock retries", async () => {
+    const prisma = makePrisma();
+    const memberLockTimeout = makeMemberLockTimeoutError();
+    mocks.lockHostedMemberRow
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(memberLockTimeout)
+      .mockRejectedValueOnce(memberLockTimeout)
+      .mockRejectedValueOnce(memberLockTimeout);
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(4);
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "HOSTED_LINQ_HOME_LINE_POOL_BUSY",
+    "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+  ])("does not repeat finalization after downstream Linq contention: %s", async (
+    code,
+  ) => {
+    const prisma = makePrisma();
+    mocks.activateHostedMemberForPositiveSourceTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code,
+        httpStatus: 503,
+        message: "Murph is still finishing your setup. Try again.",
+        retryable: true,
+      }),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledOnce();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledOnce();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("fails retryably without local activation when the bounded authority read times out", async () => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.retrieve.mockRejectedValueOnce(
+      new Error("Stripe authority read timed out"),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledWith(
+      "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "an invalid request",
+      {
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+    ],
+    [
+      "an authentication rejection",
+      {
+        type: "StripeAuthenticationError",
+      },
+    ],
+    [
+      "a permission rejection",
+      {
+        rawType: "permission_error",
+      },
+    ],
+    [
+      "an explicit do-not-retry directive",
+      {
+        headers: {
+          "Stripe-Should-Retry": "false",
+        },
+        statusCode: 500,
+      },
+    ],
+  ])("fails non-retryably for definitive Stripe authority failure: %s", async (
+    _label,
+    stripeError,
+  ) => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.retrieve.mockRejectedValueOnce(stripeError);
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_REJECTED",
+      httpStatus: 502,
+      message: "Murph could not confirm this trial. Contact support.",
+      retryable: false,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a rate limit",
+      {
+        statusCode: 429,
+        type: "StripeRateLimitError",
+      },
+    ],
+    [
+      "a provider failure",
+      {
+        statusCode: 503,
+        type: "StripeAPIError",
+      },
+    ],
+    [
+      "an explicit retry directive",
+      {
+        headers: {
+          "Stripe-Should-Retry": "true",
+        },
+        statusCode: 400,
+        type: "StripeInvalidRequestError",
+      },
+    ],
+  ])("keeps transient Stripe authority failure retryable: %s", async (
+    _label,
+    stripeError,
+  ) => {
+    const prisma = makePrisma();
+    mocks.stripe.subscriptions.retrieve.mockRejectedValueOnce(stripeError);
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("uses stable subscription idempotency keys for the reserved customer and current policy", () => {
@@ -1321,8 +1662,66 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       customer: "cus_existing_123",
       limit: 100,
       status: "all",
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
     });
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+  });
+
+  it("maps a busy cleanup member lock to the bounded finalization error", async () => {
+    const prisma = makePrisma();
+    mocks.readHostedMemberBillingSnapshot.mockResolvedValue(
+      makeBillingSnapshot({
+        billingRef: makePulseTrialBillingRef(),
+        billingStatus: HostedBillingStatus.active,
+      }),
+    );
+    mocks.stripe.subscriptions.list.mockResolvedValueOnce({
+      data: [
+        makeTrialSubscription({ id: "sub_losing_trial_123" }),
+        makeTrialSubscription({ id: "sub_existing_trial_123" }),
+      ],
+      has_more: false,
+    });
+    mocks.lockHostedMemberRow.mockRejectedValueOnce(
+      makeMemberLockTimeoutError(),
+    );
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 120_000,
+      },
+    );
+    expect(mocks.stripe.subscriptions.list).toHaveBeenCalledWith({
+      customer: "cus_existing_123",
+      limit: 100,
+      status: "all",
+    }, {
+      maxNetworkRetries: 0,
+      timeout: 5_000,
+    });
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
   });
 
   it("rediscovers and retries an exact loser for active non-trial access without a subscription", async () => {
@@ -1366,6 +1765,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   });
 
   it("retries provider-derived loser cleanup without replacing the durable trial", async () => {
+    const prisma = makePrisma();
     const durableSubscription = makeTrialSubscription({
       customer: "cus_existing_123",
       id: "sub_existing_trial_123",
@@ -1403,7 +1803,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         suspendedAt: null,
       },
       now: new Date("2026-06-14T12:00:05.000Z"),
-      prisma: makePrisma() as never,
+      prisma: prisma as never,
     });
 
     await expect(enroll()).rejects.toMatchObject({
@@ -1417,14 +1817,59 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.create).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 120_000,
+      },
+    );
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 120_000,
+      },
+    );
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenNthCalledWith(
+      1,
+      "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenNthCalledWith(
+      2,
+      "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledTimes(2);
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenNthCalledWith(
       1,
       "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenNthCalledWith(
       2,
       "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
   });
 
@@ -1536,10 +1981,20 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenNthCalledWith(
       1,
       "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenNthCalledWith(
       2,
       "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
@@ -1578,6 +2033,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledOnce();
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith(
       "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
   });
 
@@ -1626,6 +2086,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledOnce();
     expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith(
       "sub_losing_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
     );
   });
 
@@ -1772,7 +2237,14 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.create).toHaveBeenCalledOnce();
-    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith("sub_auto_trial_123");
+    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
@@ -2212,16 +2684,38 @@ function makeTrialSubscriptionMetadata(
 
 function makePrisma() {
   let transactionActive = false;
+  const tx = { tx: true };
+  Object.defineProperty(tx, "$queryRaw", {
+    enumerable: false,
+    value: vi.fn().mockResolvedValue([]),
+  });
 
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       transactionActive = true;
       try {
-        return await callback({ tx: true });
+        return await callback(tx);
       } finally {
         transactionActive = false;
       }
     }),
     isTransactionActive: () => transactionActive,
   };
+}
+
+function makeMemberLockTimeoutError(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    "member lock timeout",
+    {
+      clientVersion: "test",
+      code: "P2010",
+      meta: {
+        driverAdapterError: {
+          cause: {
+            originalCode: "55P03",
+          },
+        },
+      },
+    },
+  );
 }

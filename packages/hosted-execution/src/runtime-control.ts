@@ -2235,6 +2235,8 @@ export const HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS = [
 export type HostedWorkspaceCheckpointConflictReason =
   (typeof HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS)[number];
 
+export const HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS = 256;
+
 export const HOSTED_IDLE_CHECKPOINT_TRIGGERS = [
   "idle_window",
   "runtime_wake",
@@ -2248,6 +2250,7 @@ export interface HostedWorkspaceCheckpointRequest {
   attemptId: string;
   browserVaultReplicaRef?: HostedBrowserVaultReplicaCursorRef;
   expectedWorkspaceVersion: string;
+  handledConversationMailboxItemIds?: string[];
   idleCheckpointTrigger?: HostedIdleCheckpointTrigger;
   inboxMediaRetentionWakeAt?: string | null;
   leaseGeneration: string;

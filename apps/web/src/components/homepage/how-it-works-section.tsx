@@ -49,6 +49,11 @@ export function HowItWorksSection() {
           <RunCard />
           <LearnCard />
         </div>
+
+        <p className="mx-auto mt-8 max-w-[72ch] text-center text-xs leading-[1.6] text-[#736a58]">
+          Illustrative examples. Changes in personal data can have many causes
+          and do not establish that an intervention produced the result.
+        </p>
       </div>
     </section>
   );

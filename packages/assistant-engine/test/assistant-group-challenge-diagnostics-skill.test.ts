@@ -179,7 +179,10 @@ describe('assistant group challenge diagnostics guidance', () => {
       'During later standings, Murph may proactively open the existing server-authored permission offer',
     )
     expect(challenge).toContain(
-      'contains neither an explicit decline for that share nor a prior offer for it.',
+      'neither an explicit decline for that exact share nor a prior handled offer action for that exact participant and scope.',
+    )
+    expect(challenge).toContain(
+      'A handled action for one participant never suppresses an offer needed by another.',
     )
     expect(challenge).toContain(
       'do not create a hosted group or post a permission offer as part of challenge setup.',
@@ -197,6 +200,9 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Never infer a missing permission from granted-but-missing or stale data.',
     )
     expect(challenge).toContain(
+      'A prior handled action for one participant does not cover a newly affected participant.',
+    )
+    expect(challenge).toContain(
       'call `murph.group action="post_join_offer"` exactly once after the read with only those `projectionScopes`.',
     )
     expect(challenge).toContain(
@@ -211,7 +217,23 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
-    expect(challenge).toContain('separate permission card is available')
+    expect(challenge).toContain(
+      'Treat a `sent` result as an opaque handled result',
+    )
+    expect(challenge).toContain(
+      'Do not infer, announce, or append a separate assistant message claiming that a card is visible or newly posted.',
+    )
+    expect(challenge).not.toContain(
+      'Say only that a separate permission card is available',
+    )
+    expect(challenge).not.toContain("Web's card is the visible confirmation")
+    expect(challenge).toContain(
+      'record that the offer action was handled for that exact participant and scope',
+    )
+    expect(challenge).toContain(
+      'When the card is the only user-facing outcome, call `murph.finish_without_reply`',
+    )
+    expect(challenge).not.toContain('If the returned group proves')
     expect(challenge).toContain('active-offer/all-granted dedupe')
     expect(challenge).toContain(
       'Never offer the scoring scope merely because its grant exists but current data is missing.',

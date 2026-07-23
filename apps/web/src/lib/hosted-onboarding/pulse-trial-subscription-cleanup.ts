@@ -1,4 +1,8 @@
-import { HostedBillingStatus, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 import type Stripe from "stripe";
 
 import {
@@ -12,6 +16,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import {
   withHostedMemberStripeMutationLock,
+  withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
 import {
   readHostedMemberBillingSnapshot,
@@ -129,6 +134,10 @@ function isHostedPulseTrialLegacyMeteredItem(item: {
 }
 
 export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
+  lockBudget?: {
+    acquisitionTimeoutMs: number;
+    transactionTimeoutMs: number;
+  };
   memberId: string;
   prisma: PrismaClient;
   priceId: string;
@@ -141,54 +150,67 @@ export async function cancelHostedPulseTrialLoserSubscriptionsForMember(input: {
     return;
   }
 
+  const run = async (tx: Prisma.TransactionClient): Promise<void> => {
+    const currentMember = await readHostedMemberBillingSnapshot({
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    if (
+      !currentMember ||
+      subscriptionIds.some((subscriptionId) =>
+        classifyHostedPulseTrialCandidateDisposition({
+          billingStatus: currentMember.core.billingStatus,
+          currentBillingPhase: currentMember.billingRef?.currentBillingPhase ?? null,
+          currentStripeSubscriptionId:
+            currentMember.billingRef?.stripeSubscriptionId ?? null,
+          pulseTrialRedeemedAt:
+            currentMember.billingRef?.pulseTrialRedeemedAt ?? null,
+          subscriptionId,
+        }) !== "loser"
+      )
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
+        httpStatus: 409,
+        message: "Murph could not confirm the unused Stripe trial. Try again.",
+        retryable: true,
+      });
+    }
+
+    for (const subscriptionId of subscriptionIds) {
+      const subscription = await retrieveHostedPulseTrialCleanupTarget({
+        memberId: input.memberId,
+        priceId: input.priceId,
+        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+        stripe: input.stripe,
+        subscriptionId,
+      });
+      if (!subscription) {
+        continue;
+      }
+      await cancelHostedPulseTrialLoserSubscription({
+        ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
+        stripe: input.stripe,
+        subscriptionId,
+      });
+    }
+  };
+
+  if (input.lockBudget) {
+    await withHostedMemberStripeMutationLockForOps({
+      acquisitionTimeoutMs: input.lockBudget.acquisitionTimeoutMs,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      run,
+      transactionTimeoutMs: input.lockBudget.transactionTimeoutMs,
+    });
+    return;
+  }
+
   await withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
-    run: async (tx) => {
-      const currentMember = await readHostedMemberBillingSnapshot({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-      if (
-        !currentMember ||
-        subscriptionIds.some((subscriptionId) =>
-          classifyHostedPulseTrialCandidateDisposition({
-            billingStatus: currentMember.core.billingStatus,
-            currentBillingPhase: currentMember.billingRef?.currentBillingPhase ?? null,
-            currentStripeSubscriptionId:
-              currentMember.billingRef?.stripeSubscriptionId ?? null,
-            pulseTrialRedeemedAt:
-              currentMember.billingRef?.pulseTrialRedeemedAt ?? null,
-            subscriptionId,
-          }) !== "loser"
-        )
-      ) {
-        throw hostedOnboardingError({
-          code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
-          httpStatus: 409,
-          message: "Murph could not confirm the unused Stripe trial. Try again.",
-          retryable: true,
-        });
-      }
-
-      for (const subscriptionId of subscriptionIds) {
-        const subscription = await retrieveHostedPulseTrialCleanupTarget({
-          memberId: input.memberId,
-          priceId: input.priceId,
-          ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-          stripe: input.stripe,
-          subscriptionId,
-        });
-        if (!subscription) {
-          continue;
-        }
-        await cancelHostedPulseTrialLoserSubscription({
-          ...(input.requestOptions ? { requestOptions: input.requestOptions } : {}),
-          stripe: input.stripe,
-          subscriptionId,
-        });
-      }
-    },
+    run,
   });
 }
 

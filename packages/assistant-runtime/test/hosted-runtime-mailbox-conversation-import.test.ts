@@ -35,6 +35,7 @@ import {
   updateAssistantInputProjection,
 } from "@murphai/assistant-engine";
 import {
+  reconcileManagedAssistantAutoReplyChannelsLocal,
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
@@ -54,7 +55,9 @@ import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -1311,6 +1314,142 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
       listed.events[0]!.inputId,
     ]);
+  });
+
+  test("does not resurrect either class of ambiguous v1-omitted Telegram input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-legacy-v1-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
+    const configuredRuntime = createRuntime({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: true,
+        },
+        deviceSync: null,
+        managedAutoReplyChannels: [{
+          capabilityReady: true,
+          channel: "telegram",
+          memberChannel: "telegram",
+        }],
+      },
+      userEnv: HOSTED_ASSISTANT_SEED_ENV,
+    });
+    const importConversationWake = async () => ({
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+    });
+    const admittedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_legacy_admitted",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "781",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "admitted before the legacy channel became unavailable",
+          threadId: "123456789",
+        },
+      },
+    });
+    const admitted = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(admittedWake),
+        importConversationWake,
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: admittedWake.eventId,
+          id: "mailbox_item_telegram_legacy_admitted",
+          laneSeq: "10",
+        }),
+        runtime: configuredRuntime,
+        vaultRoot,
+      })
+    );
+    assert.equal(admitted.status, "imported");
+    assert.equal("assistantInputId" in admitted, true);
+    const admittedInputId = "assistantInputId" in admitted
+      ? admitted.assistantInputId
+      : null;
+    assert.notEqual(admittedInputId, null);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      admittedInputId,
+    ]);
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-04-26T00:01:00.000Z",
+      version: 1,
+    });
+    const contextWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_legacy_context",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "782",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "context retained while Telegram reply was unavailable",
+          threadId: "123456789",
+        },
+      },
+    });
+    const contextOnly = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(contextWake),
+        importConversationWake,
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: contextWake.eventId,
+          id: "mailbox_item_telegram_legacy_context",
+          laneSeq: "20",
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      })
+    );
+    assert.equal(contextOnly.status, "imported");
+    assert.equal("assistantInputId" in contextOnly, false);
+    const retained = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(retained.events.length, 2);
+
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v1",
+      schemaVersion: 1,
+      value: {
+        backfilled: true,
+        inputIds: [],
+      },
+    }, null, 2)}\n`, "utf8");
+    const enabled = await reconcileManagedAssistantAutoReplyChannelsLocal({
+      desiredChannels: ["telegram"],
+      vault: vaultRoot,
+    });
+    assert.deepEqual(enabled.state.autoReply, [{
+      channel: "telegram",
+      eligibleAfter: retained.events.at(-1)!.cursor,
+      enabledAt: retained.events.at(-1)!.cursor.createdAt,
+    }]);
+
+    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    const migrated = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(migrated.schema, "murph.hosted-pending-assistant-inputs.v2");
+    assert.equal(migrated.schemaVersion, 2);
   });
 
   test("does not enqueue input when the hosted assistant is unconfigured", async () => {

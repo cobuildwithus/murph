@@ -18,7 +18,6 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingEnvironment } from "../hosted-onboarding/env";
 import {
   resolveHostedPrivyIdentityFromVerifiedUser,
-  syncHostedPrivyMemberIdMetadata,
   type HostedPrivyUser,
 } from "../hosted-onboarding/privy";
 
@@ -36,7 +35,6 @@ export interface HostedOpsAppReviewMemberSummary {
   consentGranted: boolean;
   consentScopes: readonly string[];
   member: string | null;
-  metadataSynced: boolean;
   principal: string;
   privyUser: string;
   suspended?: boolean;
@@ -86,7 +84,6 @@ export async function prepareHostedOpsAppReviewMember(input: {
       billingStatus: existing?.core.billingStatus ?? null,
       consentScopes: existingConsentScopes,
       memberId: existing?.core.id ?? null,
-      metadataSynced: readPrivyMetadataMemberId(user) === existing?.core.id,
       principal: input.principal,
       privyUserId: identity.userId,
     });
@@ -121,12 +118,6 @@ export async function prepareHostedOpsAppReviewMember(input: {
     prisma,
   });
 
-  const metadataUpdated = await syncHostedPrivyMemberIdMetadata({
-    memberId: member.id,
-    privyUserId: identity.userId,
-    verifiedPrivyUser: user as HostedPrivyUser,
-  });
-
   for (const scope of REQUIRED_CONSENT_SCOPES) {
     await recordHostedLaunchRequiredConsent({
       memberId: member.id,
@@ -157,7 +148,6 @@ export async function prepareHostedOpsAppReviewMember(input: {
     billingStatus: currentMember.billingStatus,
     consentScopes: consent.launchScopes.filter((scope) => scope.granted).map((scope) => scope.scope),
     memberId: currentMember.id,
-    metadataSynced: metadataUpdated || readPrivyMetadataMemberId(user) === member.id,
     principal: input.principal,
     privyUserId: identity.userId,
     suspended: Boolean(currentMember.suspendedAt),
@@ -362,22 +352,12 @@ function normalizeNullableString(value: string | null | undefined): string | nul
   return normalized.length > 0 ? normalized : null;
 }
 
-function readPrivyMetadataMemberId(user: PrivyUser): string | null {
-  const metadata = user.custom_metadata;
-  if (!metadata || typeof metadata !== "object") {
-    return null;
-  }
-  const value = Reflect.get(metadata, "murph_member_id");
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
 function buildSummary(input: {
   action: "applied" | "dry-run";
   activated?: boolean;
   billingStatus: HostedBillingStatus | null;
   consentScopes: readonly string[];
   memberId: string | null;
-  metadataSynced: boolean;
   principal: HostedOpsAppReviewMemberPrincipal;
   privyUserId: string;
   suspended?: boolean;
@@ -389,7 +369,6 @@ function buildSummary(input: {
     consentGranted: REQUIRED_CONSENT_SCOPES.every((scope) => input.consentScopes.includes(scope)),
     consentScopes: input.consentScopes,
     member: input.memberId ? redactIdentifier(input.memberId) : null,
-    metadataSynced: input.metadataSynced,
     principal: redactPrincipal(input.principal),
     privyUser: redactIdentifier(input.privyUserId),
     suspended: input.suspended,

@@ -453,6 +453,18 @@ export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input
   });
 }
 
+export async function tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx(input: {
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(
+      hashtext(${"hosted-linq-routing:recipient-assignment"}),
+      hashtext(${"home-line-pool"})
+    ) AS locked
+  `;
+  return rows[0]?.locked === true;
+}
+
 export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;

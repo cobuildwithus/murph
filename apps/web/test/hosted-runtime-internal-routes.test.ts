@@ -1582,6 +1582,7 @@ describe("hosted runtime internal web routes", () => {
       {
         attemptId: "attempt_1",
         expectedWorkspaceVersion: "4",
+        handledConversationMailboxItemIds: ["item_terminal_12"],
         inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
         leaseGeneration: "2",
         nextWakeAt: "2026-04-26T00:05:00.000Z",
@@ -1608,6 +1609,7 @@ describe("hosted runtime internal web routes", () => {
     });
     expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledWith({
       expectedVersion: "4",
+      handledConversationMailboxItemIds: ["item_terminal_12"],
       inboxMediaRetentionWakeAt: "2026-04-26T00:10:00.000Z",
       nextWakeAt: "2026-04-26T00:05:00.000Z",
       nextWakeReason: "mailbox",

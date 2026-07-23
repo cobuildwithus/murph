@@ -9,6 +9,7 @@ import {
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
+  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "./hosted-member-routing-store";
@@ -450,12 +451,62 @@ export async function resolveHostedMemberActivationLinqRoute(input: {
   member: HostedMemberSnapshot;
   prisma: Prisma.TransactionClient;
 }): Promise<HostedMemberActivationLinqRouteResolution> {
-  // Activation may either promote existing authority or claim a new line.
-  // Take the fixed pool -> member order once so its decision and any home
-  // mutation share one transaction-owned authority boundary.
-  await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+  const initialRouting = await readHostedMemberRoutingState({
+    memberId: input.member.core.id,
     prisma: input.prisma,
-  });
+  }) ?? input.member.routing;
+  const initialAuthority = readHostedLinqHomeLineAuthority(initialRouting);
+  const initialLinqContactLookupKey =
+    resolveHostedMemberActivationLinqContactLookupKey({
+      member: input.member,
+      routing: initialRouting,
+    });
+  const canResolveWithoutPool =
+    initialAuthority.kind === "home"
+    || (
+      initialAuthority.kind === "pending"
+      && canPromoteHostedMemberActivationPendingLinqRoute({
+        authority: initialAuthority,
+        linqContactLookupKey: initialLinqContactLookupKey,
+        memberPhoneNumber: input.member.identity?.phoneNumber ?? null,
+      })
+    );
+
+  if (canResolveWithoutPool) {
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: input.member.core.id,
+      prisma: input.prisma,
+    });
+    const resolved = await resolveHostedMemberActivationLinqRouteAttempt({
+      claimNewHomeLine: false,
+      member: input.member,
+      prisma: input.prisma,
+    });
+    if (resolved) {
+      return resolved;
+    }
+
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      message: "Hosted Linq home routing changed while activation was resolving.",
+      retryable: true,
+    });
+  }
+
+  // A new assignment still preserves the global pool -> member lock order,
+  // but fails fast instead of holding this transaction connection in PgBouncer
+  // while another activation owns the shared pool.
+  if (!(await tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+    prisma: input.prisma,
+  }))) {
+    throw hostedOnboardingError({
+      code: "HOSTED_LINQ_HOME_LINE_POOL_BUSY",
+      httpStatus: 503,
+      message: "Murph is still finishing your setup. Try again.",
+      retryable: true,
+    });
+  }
   await acquireHostedMemberHomeLinqRouteLockTx({
     memberId: input.member.core.id,
     prisma: input.prisma,
@@ -492,10 +543,10 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   const memberPhoneNumber = input.member.identity?.phoneNumber ?? null;
   const authority = readHostedLinqHomeLineAuthority(routing);
   const linqContactLookupKey =
-    input.member.identity?.phoneLookupKey
-    ?? routing?.pendingLinqParticipantContact?.lookupKey
-    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
-    ?? null;
+    resolveHostedMemberActivationLinqContactLookupKey({
+      member: input.member,
+      routing,
+    });
 
   if (authority.kind === "home") {
     if (routing?.pendingLinqChatId) {
@@ -524,12 +575,11 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
   // depend on the line still being in the assignable pool.
   if (
     authority.kind === "pending"
-    && linqContactLookupKey
-    && (
-      memberPhoneNumber
-        ? authority.recipientPhone !== null
-        : true
-    )
+    && canPromoteHostedMemberActivationPendingLinqRoute({
+      authority,
+      linqContactLookupKey,
+      memberPhoneNumber,
+    })
   ) {
     await upsertHostedMemberHomeLinqBindingTx({
       clearPending: true,
@@ -601,6 +651,32 @@ async function resolveHostedMemberActivationLinqRouteAttempt(input: {
       messaging,
     }),
   };
+}
+
+function resolveHostedMemberActivationLinqContactLookupKey(input: {
+  member: HostedMemberSnapshot;
+  routing: HostedMemberRoutingStateSnapshot | null;
+}): string | null {
+  return input.member.identity?.phoneLookupKey
+    ?? input.routing?.pendingLinqParticipantContact?.lookupKey
+    ?? input.member.emailAuthorization?.verifiedEmail?.lookupKey
+    ?? null;
+}
+
+function canPromoteHostedMemberActivationPendingLinqRoute(input: {
+  authority: {
+    recipientPhone: string | null;
+  };
+  linqContactLookupKey: string | null;
+  memberPhoneNumber: string | null;
+}): boolean {
+  return Boolean(
+    input.linqContactLookupKey
+    && (
+      input.memberPhoneNumber === null
+      || input.authority.recipientPhone !== null
+    ),
+  );
 }
 
 async function reserveHostedLinqHomeLineFromCandidatesTx(input: {

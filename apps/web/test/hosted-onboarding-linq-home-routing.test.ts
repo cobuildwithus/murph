@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   listHostedLinqAssignableHomeLines: vi.fn(),
   readHostedMemberRoutingState: vi.fn(),
+  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   upsertHostedMemberHomeLinqBindingTx: vi.fn(),
   upsertHostedMemberHomeLinqRecipientPhoneTx: vi.fn(),
 }));
@@ -28,6 +29,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState: mocks.readHostedMemberRoutingState,
+  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx:
+    mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   upsertHostedMemberHomeLinqBindingTx: mocks.upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberHomeLinqRecipientPhoneTx: mocks.upsertHostedMemberHomeLinqRecipientPhoneTx,
 }));
@@ -517,6 +520,7 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(true);
     mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([]);
     mocks.readHostedMemberRoutingState.mockResolvedValue(null);
+    mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(true);
     mocks.upsertHostedMemberHomeLinqBindingTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
   });
@@ -558,6 +562,15 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
       recipientPhone: "+15550100001",
     });
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
   });
 
   it("keeps a legacy phone-backed home route on its existing thread", async () => {
@@ -702,7 +715,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -744,7 +758,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).toHaveBeenCalledWith({
       excludedMemberId: "member_123",
       now: expect.any(Date),
@@ -804,7 +819,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -873,7 +889,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -919,7 +936,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       },
     });
 
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
@@ -1000,7 +1018,8 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
 
     // The existing pending route is durable authority: the locked decision
     // does not read the pool or claim new capacity.
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).toHaveBeenCalledWith({
@@ -1051,18 +1070,19 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     });
 
     expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
     expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: {} as never,
     });
-    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
     expect(
-      mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
+      mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx.mock.invocationCallOrder[0],
     ).toBeLessThan(mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]);
     expect(
       mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[0]);
+    ).toBeLessThan(mocks.readHostedMemberRoutingState.mock.invocationCallOrder[1]);
     expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
       clearPending: true,
       homeLineAssignedAt: expect.any(Date),
@@ -1070,6 +1090,90 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
       prisma: {} as never,
       recipientPhone: "+15550100002",
     });
+  });
+
+  it("fails retryably without taking a member lock when the shared assignment pool is busy", async () => {
+    mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(false);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_LINE_POOL_BUSY",
+      httpStatus: 503,
+      message: "Murph is still finishing your setup. Try again.",
+      retryable: true,
+    });
+
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it("retries when an existing route becomes a pool claim under the member lock", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce(buildMember({
+        linqChatId: "chat_initial",
+        linqRecipientPhone: "+15550100001",
+      }).routing)
+      .mockResolvedValueOnce(buildMember().routing);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqBindingTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
+  });
+
+  it("uses a route that appears after taking the pool and member locks without claiming capacity", async () => {
+    mocks.readHostedMemberRoutingState
+      .mockResolvedValueOnce(buildMember().routing)
+      .mockResolvedValueOnce(buildMember({
+        linqChatId: "chat_concurrent",
+        linqRecipientPhone: "+15550100001",
+      }).routing);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toMatchObject({
+      welcomeRoute: {
+        delivery: {
+          kind: "thread",
+          target: "chat_concurrent",
+        },
+      },
+    });
+
+    expect(mocks.tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
+    expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
+    expect(mocks.listHostedLinqAssignableHomeLines).not.toHaveBeenCalled();
+    expect(mocks.countHostedMemberHomeLinqBindingsByRecipientPhone).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqProactiveConversationCapacityTx).not.toHaveBeenCalled();
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).not.toHaveBeenCalled();
   });
 
   it("falls back to another line when the preferred line reaches 50 proactive conversations", async () => {
