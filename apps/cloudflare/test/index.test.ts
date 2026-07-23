@@ -2588,6 +2588,7 @@ describe("cloudflare worker routes", () => {
           leaseGeneration: token.generation,
           orchestration: {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
@@ -2635,6 +2636,7 @@ describe("cloudflare worker routes", () => {
           leaseGeneration: oldToken.generation,
           orchestration: {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },

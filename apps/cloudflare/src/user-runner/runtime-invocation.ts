@@ -167,6 +167,8 @@ export class RuntimeInvocationService {
     input: RuntimeInvocationInput;
     token: RunnerWriteFenceToken;
   }): Promise<PreparedRuntimeInvocation> {
+    const preparationStartedAtMs = Date.now();
+    const workspaceReadStartedAtMs = Date.now();
     const workspaceRead = await this.input.readHostedWorkspaceFromWeb(
       input.input.userId,
       {
@@ -178,13 +180,23 @@ export class RuntimeInvocationService {
           : this.input.env.webControlTimeoutMs,
       },
     );
-    this.input.assertWorkspaceBelongsToRunnerUser(workspaceRead.workspace, input.input.userId);
+    const workspaceReadElapsedMs = Math.max(
+      0,
+      Date.now() - workspaceReadStartedAtMs,
+    );
+    this.input.assertWorkspaceBelongsToRunnerUser(
+      workspaceRead.workspace,
+      input.input.userId,
+    );
     const workspaceVersion = workspaceRead.workspace?.version ?? "0";
     const token = await this.input.stateStore.bindWriteFenceWorkspaceVersion({
       token: input.token,
       workspaceVersion,
     });
-    const workspaceRunnerInvocation = await this.prepareWorkspaceRunnerInvocation({
+    const {
+      runtimeStoreEnsureElapsedMs,
+      ...workspaceRunnerInvocation
+    } = await this.prepareWorkspaceRunnerInvocation({
       commandBudget: input.commandBudget,
       hostedAssistantModelOverride:
         workspaceRead.hostedAssistantModelOverride ?? null,
@@ -198,7 +210,16 @@ export class RuntimeInvocationService {
     });
 
     return {
-      input: input.input,
+      input: {
+        ...input.input,
+        orchestration: {
+          ...(input.input.orchestration ?? {}),
+          runtimeInvocationPreparationElapsedMs:
+            Math.max(0, Date.now() - preparationStartedAtMs),
+          runtimeStoreEnsureElapsedMs,
+          workspaceReadElapsedMs,
+        },
+      },
       ...workspaceRunnerInvocation,
       token,
       workspaceVersion,
@@ -638,6 +659,7 @@ export class RuntimeInvocationService {
   }): Promise<{
     job: HostedExecutionWorkspaceInvocationJobInput;
     runnerContainerName: string;
+    runtimeStoreEnsureElapsedMs: number;
   }> {
     if (!this.input.runnerContainerNamespace) {
       throw new Error("Native hosted execution requires a RunnerContainer binding.");
@@ -661,11 +683,16 @@ export class RuntimeInvocationService {
           stepTimeoutMs: this.input.env.webControlTimeoutMs,
         })
       : undefined;
+    const runtimeStoreEnsureStartedAtMs = Date.now();
     const stores = await this.input.runnerStoreCache.ensure(
       input.userId,
       webControlTimeoutMs === undefined
         ? undefined
         : { webControlTimeoutMs },
+    );
+    const runtimeStoreEnsureElapsedMs = Math.max(
+      0,
+      Date.now() - runtimeStoreEnsureStartedAtMs,
     );
     const readRunnerSecrets = async () =>
       await stores.runnerSecrets.readRunnerSecrets(input.userId);
@@ -814,6 +841,7 @@ export class RuntimeInvocationService {
     return {
       job,
       runnerContainerName,
+      runtimeStoreEnsureElapsedMs,
     };
   }
 
