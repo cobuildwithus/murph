@@ -14,6 +14,7 @@ import {
   readHostedFamilyPlanCapacities,
   sumHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan-capacity";
+import { HOSTED_MESSAGE_VOLUME_FLOOR } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -830,6 +831,32 @@ export async function captureHostedGrowthDailySnapshot(
       snapshotDate,
     },
   });
+}
+
+/**
+ * Lifetime message total for public marketing surfaces. Snapshot message
+ * counts only exist from July 2026 onward, so the floor stands in for the
+ * untracked history; it is also the fallback when the read fails.
+ */
+export async function readHostedMessageVolumeTotal(
+  prisma: HostedGrowthPrisma = getPrisma(),
+): Promise<number> {
+  try {
+    const sums = await prisma.hostedGrowthDailySnapshot.aggregate({
+      _sum: {
+        inboundMessagesPriorDay: true,
+        outboundMessagesPriorDay: true,
+      },
+    });
+
+    return Math.max(
+      HOSTED_MESSAGE_VOLUME_FLOOR,
+      (sums._sum.inboundMessagesPriorDay ?? 0) +
+        (sums._sum.outboundMessagesPriorDay ?? 0),
+    );
+  } catch {
+    return HOSTED_MESSAGE_VOLUME_FLOOR;
+  }
 }
 
 async function readCurrentHostedGrowthMetrics(

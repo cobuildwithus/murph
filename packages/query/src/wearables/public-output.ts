@@ -5,7 +5,11 @@ import {
 } from "./summaries.ts";
 import { summarizeMetricsConfidence } from "./confidence.ts";
 import { resolveWearablePublicSourceProvider } from "./origin.ts";
-import { formatProviderName, resolveMetricTolerance } from "./provider-policy.ts";
+import {
+  formatMetricLabel,
+  formatProviderName,
+  resolveMetricTolerance,
+} from "./provider-policy.ts";
 import { normalizeLowercaseString, uniqueStrings } from "./shared.ts";
 import type {
   WearableActivityDay,
@@ -18,6 +22,7 @@ import type {
   WearableSummaryConfidence,
 } from "./types.ts";
 import {
+  ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
@@ -314,9 +319,20 @@ function projectWearableResolvedMetricPublicSources(
       ? resolvePublicSourceProvider(selectedCandidate)
       : resolveWearablePublicSourceProvider({ provider: resolved.selection.provider })
     : null;
-  const publicConflictingProviders = collectPublicConflictingProviders(resolved, selectedCandidate, selectionProvider);
-  const sameSourceDisagreement = hasSamePublicSourceDisagreement(resolved, selectedCandidate, selectionProvider);
-  const publicAgreeingProviders = collectPublicAgreeingProviders(resolved);
+  const confidenceCandidates = selectPublicConfidenceCandidates(resolved, selectedCandidate);
+  const publicConflictingProviders = collectPublicConflictingProviders(
+    resolved,
+    confidenceCandidates,
+    selectedCandidate,
+    selectionProvider,
+  );
+  const sameSourceDisagreement = hasSamePublicSourceDisagreement(
+    resolved,
+    confidenceCandidates,
+    selectedCandidate,
+    selectionProvider,
+  );
+  const publicAgreeingProviders = collectPublicAgreeingProviders(resolved, confidenceCandidates);
   const conflictingProviders = uniqueStrings([
     ...publicConflictingProviders,
     ...(sameSourceDisagreement && selectionProvider ? [selectionProvider] : []),
@@ -324,11 +340,19 @@ function projectWearableResolvedMetricPublicSources(
 
   return {
     ...resolved,
-    candidates: resolved.candidates.map((candidate) => ({
-      ...candidate,
-      provider: resolvePublicSourceProvider(candidate),
-      title: projectProviderTextPublicSources(candidate.title, buildProviderTextProjectionEntries([candidate])),
-    })),
+    candidates: resolved.candidates.map((candidate) => {
+      const {
+        reconciliationDurationConsistent: _reconciliationDurationConsistent,
+        reconciliationExactKey: _reconciliationExactKey,
+        workoutMetricContributors: _workoutMetricContributors,
+        ...publicCandidate
+      } = candidate;
+      return {
+        ...publicCandidate,
+        provider: resolvePublicSourceProvider(candidate),
+        title: projectWearableMetricCandidateTitle(resolved.metric, candidate),
+      };
+    }),
     confidence: {
       ...resolved.confidence,
       conflictingProviders,
@@ -345,9 +369,33 @@ function projectWearableResolvedMetricPublicSources(
     selection: {
       ...resolved.selection,
       provider: selectionProvider,
-      title: projectProviderTextPublicSources(resolved.selection.title, selectionTitleProjectionEntries),
+      title: selectedCandidate
+        ? projectWearableMetricCandidateTitle(resolved.metric, selectedCandidate)
+        : projectProviderTextPublicSources(resolved.selection.title, selectionTitleProjectionEntries),
     },
   };
+}
+
+function projectWearableMetricCandidateTitle(
+  metric: string,
+  candidate: WearableMetricCandidate,
+): string | null {
+  const activityMetric = [...ACTIVITY_METRIC_KEYS].find((key) => key === metric);
+  if (activityMetric && !isActivitySessionOwnedCandidate(candidate)) {
+    return `${formatProviderName(resolvePublicSourceProvider(candidate))} ${formatMetricLabel(activityMetric)}`;
+  }
+
+  return projectProviderTextPublicSources(
+    candidate.title,
+    buildProviderTextProjectionEntries([candidate]),
+  );
+}
+
+function isActivitySessionOwnedCandidate(
+  candidate: WearableMetricCandidate,
+): boolean {
+  return candidate.sourceKind === "activity_session"
+    || isActivitySessionRollupCandidate(candidate);
 }
 
 function rebuildPublicSummaryConfidence(
@@ -514,6 +562,7 @@ function escapeRegExp(value: string): string {
 
 function collectPublicConflictingProviders(
   resolved: WearableResolvedMetric,
+  candidates: readonly WearableMetricCandidate[],
   selectedCandidate: WearableMetricCandidate | null,
   selectedPublicProvider: string | null,
 ): string[] {
@@ -523,7 +572,7 @@ function collectPublicConflictingProviders(
 
   const selectedValue = resolved.selection.value;
   return uniqueStrings(
-    resolved.candidates
+    candidates
       .filter((candidate) => candidate.candidateId !== selectedCandidate?.candidateId)
       .filter((candidate) => resolvePublicSourceProvider(candidate) !== selectedPublicProvider)
       .filter((candidate) => !isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value))
@@ -533,6 +582,7 @@ function collectPublicConflictingProviders(
 
 function hasSamePublicSourceDisagreement(
   resolved: WearableResolvedMetric,
+  candidates: readonly WearableMetricCandidate[],
   selectedCandidate: WearableMetricCandidate | null,
   selectedPublicProvider: string | null,
 ): boolean {
@@ -541,7 +591,7 @@ function hasSamePublicSourceDisagreement(
   }
 
   const selectedValue = resolved.selection.value;
-  return resolved.candidates
+  return candidates
     .filter((candidate) => candidate.candidateId !== selectedCandidate?.candidateId)
     .some((candidate) =>
       resolvePublicSourceProvider(candidate) === selectedPublicProvider
@@ -549,17 +599,43 @@ function hasSamePublicSourceDisagreement(
     );
 }
 
-function collectPublicAgreeingProviders(resolved: WearableResolvedMetric): string[] {
+function collectPublicAgreeingProviders(
+  resolved: WearableResolvedMetric,
+  candidates: readonly WearableMetricCandidate[],
+): string[] {
   if (resolved.selection.value === null) {
     return [];
   }
 
   const selectedValue = resolved.selection.value;
   return uniqueStrings(
-    resolved.candidates
+    candidates
       .filter((candidate) => isWithinMetricTolerance(resolved.metric, selectedValue, candidate.value))
       .map(resolvePublicSourceProvider),
   ).sort();
+}
+
+function selectPublicConfidenceCandidates(
+  resolved: WearableResolvedMetric,
+  selectedCandidate: WearableMetricCandidate | null,
+): readonly WearableMetricCandidate[] {
+  if (
+    !selectedCandidate
+    || !isWearableMetricKey(resolved.metric)
+    || !ACTIVITY_BRANCH_SCOPED_METRIC_KEYS.has(resolved.metric)
+  ) {
+    return resolved.candidates;
+  }
+
+  const selectedIsWorkoutRollup = isActivitySessionRollupCandidate(selectedCandidate);
+  return resolved.candidates.filter((candidate) =>
+    isActivitySessionRollupCandidate(candidate) === selectedIsWorkoutRollup
+  );
+}
+
+function isActivitySessionRollupCandidate(candidate: WearableMetricCandidate): boolean {
+  return candidate.sourceKind === "activity-session-aggregate"
+    || candidate.sourceKind === "activity-session-day-rollup";
 }
 
 function projectMetricConfidenceReasons(input: {
