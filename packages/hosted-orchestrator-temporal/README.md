@@ -311,11 +311,16 @@ one canonical Schedule.
 
 The 200-Activity aggregate is an execution ceiling, not a request-rate target.
 Reconciliation Activities reach the signed hosted-Web callback and its pooled
-Prisma path; pending work then reaches Cloudflare's per-user runtime admission
-owner. During rollout, monitor Activity retries/timeouts, hosted-Web
-database-pool failures, unrelated signed callback health, and Cloudflare
-ensure-processing acceptance. The Activity execution env override and Render
-instance count are the rollback controls if those shared boundaries regress.
+Prisma path. The default Workflow reconciliation call uses the mutating AI
+allowance gate: denied fresh conversation work can claim and deliver a
+usage-limit notice through Linq or Telegram, while allowed pending work reaches
+Cloudflare's per-user runtime admission owner. Durable notice claims preserve
+notice idempotency when concurrency rises. During rollout, monitor Activity
+retries/timeouts, hosted-Web database-pool failures, unrelated signed callback
+health, usage-notice claim/delivery failures and provider errors, and
+Cloudflare ensure-processing acceptance. The Activity execution env override
+and Render instance count are the rollback controls if those shared boundaries
+regress.
 
 Use Render Blueprint sync from the dashboard or validate it with:
 

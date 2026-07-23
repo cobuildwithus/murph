@@ -201,17 +201,26 @@ polling capacity and the aggregate execution ceilings are 200 Activities and
 40 Workflow Tasks. Capacity changes must preserve fixed slot accounting and
 should be evaluated with slot availability plus Activity and Workflow Task
 schedule-to-start latency rather than process memory alone.
-Those Activity ceilings also bound peak pressure on two shared downstream
-surfaces: every reconciliation read consumes a signed hosted-Web callback nonce
-transaction plus bounded per-user Prisma reads, and pending work issues a
-signed ensure-processing request to Cloudflare's per-user runtime owner. The
-worker still has no direct database access. Automated coverage proves the
-configured ceilings, the bounded owner paths, and the end-to-end single-user
-Temporal handoff; it does not claim a provider-faithful 200-user production
-load test. Roll out a higher ceiling while watching Activity retries and
-timeouts, hosted-Web database-pool failure telemetry, unrelated signed callback
-health, and Cloudflare ensure-processing acceptance. Reduce the execution env
-override or Render instance count if those downstream signals regress.
+Those Activity ceilings also bound peak pressure across the existing
+reconciliation path. Every call consumes a signed hosted-Web callback nonce
+transaction and bounded per-user Prisma reads. When AI-gated work is present,
+the default Workflow path also runs the mutating allowance transaction; denied
+fresh conversation work can claim durable usage-notice delivery and send
+through Linq or Telegram, while allowed pending work issues a signed
+ensure-processing request to Cloudflare's per-user runtime owner. The worker
+still has no direct database access. Durable notice claims retain notice
+idempotency; higher Worker capacity changes concurrency and timing, not the
+number of authorized notice epochs.
+
+Automated coverage proves the configured ceilings, the bounded owner paths,
+Linq and Telegram notice claim/retry behavior, and full-stack Temporal handoff
+through provider-facing Linq and Cloudflare stubs; it does not claim a
+provider-faithful 200-user production load test. Roll out a higher ceiling while
+watching Activity retries and timeouts, hosted-Web database-pool failure
+telemetry, unrelated signed callback health, usage-notice claim/delivery
+failures and provider errors, and Cloudflare ensure-processing acceptance.
+Reduce the execution env override or Render instance count if those downstream
+signals regress.
 Production Temporal Cloud clients must use the configured frontend address,
 namespace, API-key auth when configured, and TLS settings. The web signal client
 and worker connection code must support the same API key, TLS enablement,
