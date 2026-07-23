@@ -66,3 +66,20 @@ Updated: 2026-07-23
   `pnpm verify:acceptance`, mergeability/CI checks, and final ReviewGPT rounds.
 - Expected outcomes: all task-owned checks pass; any unrelated baseline failure
   is recorded with direct evidence.
+
+## Evidence
+
+- Hosted Web typecheck passed.
+- Focused Hosted Web verification passed across 15 files and 250 tests; the
+  consent-reminder resilience subset passed across 6 files and 133 tests.
+- Device Syncd connect-target coverage passed with 7 tests, and Assistant
+  Runtime provider-offer/workspace coverage passed with 248 tests.
+- Legal PDF generation was deterministic across two consecutive runs, and the
+  generated manifest and versioned/current PDFs match the authored policies.
+- Canonical `test:diff` Testbox `tbx_01ky74jbxa1a6n7vv3hgeerwds` passed all
+  task-owned checks and stopped on two unrelated baseline failures: the hosted
+  local harness parent-signal timeout and a missing generated Health Commons
+  fixture path in Vault Usecases.
+- Canonical `verify:acceptance` Testbox
+  `tbx_01ky74jk7bjt1teqzvbg7yvfw9` passed, including the production Web build
+  and Cloudflare hosted-runtime verification.
