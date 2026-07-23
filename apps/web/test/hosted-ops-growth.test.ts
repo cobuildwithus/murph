@@ -10,7 +10,9 @@ import {
   calculatePercentChange,
   captureHostedGrowthDailySnapshot,
   findComparableSnapshot,
+  HOSTED_MESSAGE_VOLUME_FLOOR,
   readHostedGrowthDashboard,
+  readHostedMessageVolumeTotal,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
 
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   hostedGrowthDailySnapshot: {
+    aggregate: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
@@ -377,6 +380,36 @@ describe("hosted ops growth metrics", () => {
       started: 2,
       stillTrialing: 0,
     });
+  });
+
+  it("sums snapshot message counts for the public message volume total", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(7_300);
+  });
+
+  it("applies the floor when snapshot sums are low, null, or unreadable", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _sum: {
+        inboundMessagesPriorDay: 400,
+        outboundMessagesPriorDay: null,
+      },
+    });
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(
+      HOSTED_MESSAGE_VOLUME_FLOOR,
+    );
+
+    mocks.hostedGrowthDailySnapshot.aggregate.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(
+      HOSTED_MESSAGE_VOLUME_FLOOR,
+    );
   });
 
   it("counts own-paid or family-paid members in the mature converted count query", async () => {
