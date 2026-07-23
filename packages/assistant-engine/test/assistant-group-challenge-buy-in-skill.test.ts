@@ -43,10 +43,7 @@ describe('assistant group challenge buy-in guidance', () => {
       'Score only the people recorded as in; shared data does not add a pending or silent person to the challenge.',
     )
     expect(challenge).toContain(
-      'If a confirmed participant still owes an intro or photo a day later',
-    )
-    expect(challenge).toContain(
-      'Never ask a pending person for challenge materials; their silence is not something to follow up on.',
+      'Never ask a pending, declined, or withdrawn person.',
     )
     expect(challenge).toContain(
       'participation state (`in`, `pending`, `declined`, or `withdrawn`)',
@@ -71,6 +68,50 @@ describe('assistant group challenge buy-in guidance', () => {
     )
     expect(comedy).toContain(
       'A neutral named update about who is in and still pending is status, not a comedy bit.',
+    )
+  })
+
+  it('requires the cast-material ask without gating the challenge', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      'Always ask for introductions and photos.',
+    )
+    expect(challenge).toContain(
+      'At kickoff, ask each currently confirmed participant by name in one group message',
+    )
+    expect(challenge).toContain(
+      'The contributions are optional; the ask is required.',
+    )
+    expect(challenge).toContain(
+      'Do not skip it because the setup is short, late, or already underway.',
+    )
+    expect(challenge).toContain(
+      'If someone confirms after kickoff, include the same ask in the acknowledgement of their opt-in.',
+    )
+    expect(challenge).toContain(
+      'Say plainly that the challenge starts or continues without either.',
+    )
+    expect(challenge).toContain(
+      'Use a photo sent or explicitly approved by the person depicted.',
+    )
+    expect(challenge).toContain(
+      'any intro or fun fact they volunteered (verbatim), and the capture refs for any approved photos.',
+    )
+    expect(challenge).toContain(
+      'optional materials never delay the challenge.',
+    )
+    expect(challenge).toContain(
+      'Missing optional material never delays a comic or dispatch.',
+    )
+    expect(challenge).toContain(
+      'Use pinned photos when available; never delay close-out to collect them.',
+    )
+    expect(challenge).not.toContain(
+      'If a confirmed participant still owes an intro or photo a day later',
+    )
+    expect(challenge).not.toContain(
+      'invite the room to introduce them or send a picture of them',
     )
   })
 
