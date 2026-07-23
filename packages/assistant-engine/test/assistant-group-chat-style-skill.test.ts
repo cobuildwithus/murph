@@ -40,8 +40,9 @@ describe('assistant group-chat style guidance', () => {
       'Keep ordinary replies flat. In a busy room, use `murph.select_reply_target`',
     )
     expect(normalized).toContain(
-      'The selection applies to the whole response, including every `---` bubble.',
+      'The selection applies to the whole single response.',
     )
+    expect(normalized).not.toContain('including every `---` bubble')
     expect(normalized).toContain(
       'Reactions and reply selection remain independent; neither action implies the other.',
     )

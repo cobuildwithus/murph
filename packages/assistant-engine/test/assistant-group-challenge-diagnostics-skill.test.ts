@@ -211,7 +211,13 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'permission offer cannot connect a source, grant Apple Health or operating-system Steps access',
     )
-    expect(challenge).toContain('separate permission card is available')
+    expect(challenge).toContain("Web's card is the visible confirmation")
+    expect(challenge).toContain(
+      'Do not send or append a separate assistant announcement that the card is available.',
+    )
+    expect(challenge).not.toContain(
+      'Say only that a separate permission card is available',
+    )
     expect(challenge).toContain('active-offer/all-granted dedupe')
     expect(challenge).toContain(
       'Never offer the scoring scope merely because its grant exists but current data is missing.',

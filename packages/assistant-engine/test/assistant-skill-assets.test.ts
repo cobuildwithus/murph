@@ -941,6 +941,8 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/explicitly says they do not want to share a scope, record that choice and do\s+not offer, repeat, or nag/u)
     expect(raw).toMatch(/grant\s+Apple Health or\s+operating-system Steps access/u)
     expect(raw).toContain('A `sent` result may mean a matching card was already active.')
+    expect(raw).toContain("Web's card is\n   the visible confirmation.")
+    expect(raw).toMatch(/Do not send or append a separate assistant\s+announcement that the card is available\./u)
     expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
     expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')

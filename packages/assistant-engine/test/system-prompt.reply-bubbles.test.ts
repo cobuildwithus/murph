@@ -10,6 +10,10 @@ const TEXTING_RHYTHM_PROMPT = `Texting rhythm:
 - Write a line containing only \`---\` between bubbles. The delivery layer turns each bubble into its own message. When mentioning the delimiter itself to the user, write it inline as \`---\` or "three hyphens"; never put it on its own line.
 - Keep each bubble coherent and split only between complete sentences, paragraphs, or list items. Lists and structured answers can span bubbles; group related items together. Never separate a safety caveat, dosage, or warning from the item it qualifies. If the user needs to respond, ask exactly one question in the final bubble and put no text or later bubble after it. An owning skill may still require attached response media to accompany that final bubble.`
 
+const GROUP_TEXTING_RHYTHM_PROMPT = `Group texting rhythm:
+- Return exactly one assistant-authored message. Do not write a standalone \`---\` delimiter or split the reply into multiple bubbles. A separate server-owned permission card is not part of this reply.
+- When the useful next action is a question, ask it directly. Do not prepend a standalone setup-status, progress, or transition sentence.`
+
 describe('assistant reply bubble prompt guidance', () => {
   it.each(['linq', 'telegram'])(
     'includes texting rhythm guidance for %s',
@@ -19,6 +23,21 @@ describe('assistant reply bubble prompt guidance', () => {
       )
 
       expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
+    },
+  )
+
+  it.each(['linq', 'telegram'])(
+    'uses one-message texting guidance for %s groups',
+    (channel) => {
+      const layers = buildAssistantSystemPromptLayers(
+        createPromptInput({ channel, conversationScope: 'group' }),
+      )
+
+      expect(layers.threadContextPrompt).toContain(GROUP_TEXTING_RHYTHM_PROMPT)
+      expect(layers.threadContextPrompt).not.toContain(TEXTING_RHYTHM_PROMPT)
+      expect(layers.threadContextPrompt).not.toContain(
+        'use one bubble per section',
+      )
     },
   )
 
