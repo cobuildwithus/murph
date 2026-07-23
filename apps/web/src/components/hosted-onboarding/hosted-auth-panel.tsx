@@ -6,6 +6,7 @@ import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
+import { HostedLaunchConsentActions } from "@/src/components/legal/hosted-launch-consent-actions";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/privy-client";
 import {
@@ -60,6 +61,7 @@ export function HostedAuthPanel({
   const [telegramNotice, setTelegramNotice] = useState<TelegramAuthNotice | null>(null);
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
+  const [consentDeclinePending, setConsentDeclinePending] = useState(false);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
@@ -113,6 +115,18 @@ export function HostedAuthPanel({
     navigateHostedAuthRedirect(result.redirectUrl);
   }
 
+  async function handleConsentDeclined() {
+    setConsentDeclinePending(true);
+    try {
+      await logout();
+      await onSignOut?.();
+    } finally {
+      pendingAuthCompletionRef.current = null;
+      setPendingAuthCompletion(null);
+      setConsentDeclinePending(false);
+    }
+  }
+
   async function handleContinueResumableAuth() {
     if (!resumableAuth) return;
 
@@ -128,17 +142,22 @@ export function HostedAuthPanel({
 
   if (pendingAuthCompletion) {
     return (
-      <HostedLegalConsentCard
-        mode="compact"
-        onAccepted={handleConsentSatisfied}
-        onRequirementChange={(required) => {
-          if (!required) {
-            void handleConsentSatisfied();
-          }
-        }}
-        preferredScope="launch.legal"
-        source="homepage-auth-dialog"
-      />
+      <HostedLaunchConsentActions
+        declinePending={consentDeclinePending}
+        onDecline={() => void handleConsentDeclined()}
+      >
+        <HostedLegalConsentCard
+          mode="compact"
+          onAccepted={handleConsentSatisfied}
+          onRequirementChange={(required) => {
+            if (!required) {
+              void handleConsentSatisfied();
+            }
+          }}
+          preferredScope="launch.legal"
+          source="homepage-auth-dialog"
+        />
+      </HostedLaunchConsentActions>
     );
   }
 
