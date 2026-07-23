@@ -26,6 +26,7 @@ test("launch consent exposes a clear decline action beside the affirmative flow"
   );
   cleanupRender = cleanup;
 
+  expect(container.querySelectorAll("button")).toHaveLength(2);
   const declineButton = [...container.querySelectorAll("button")].find(
     (button) => button.textContent === "Decline",
   );
