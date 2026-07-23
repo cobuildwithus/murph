@@ -1,6 +1,6 @@
 # Fix subagent hosted usage recording
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -57,3 +57,15 @@ Updated: 2026-07-23
   packages/assistant-engine/test/assistant-codex-runtime.test.ts`.
 - Expected outcomes: all produced subagent records parse successfully and the
   affected owner plus reverse dependents pass.
+- Results:
+  - The focused extractor regression passed: 9 tests.
+  - The focused runtime regressions passed: 5 tests.
+  - Canonical `pnpm test:diff` passed all affected guards, typechecks, and the
+    full assistant-engine owner suite: 172 files and 2,610 tests, with 5 skipped.
+  - The canonical lane later reached unrelated assistant CLI coverage and stopped
+    on pre-existing 60-second test timeouts plus unrelated experiment-journal
+    assertions. GitHub CI provides the clean-environment reverse-dependent proof.
+  - Preliminary ReviewGPT specialist review passed with no findings and confirmed
+    the parser round trip, privacy boundary, failure path, cap, eviction, and
+    ordinal coverage.
+Completed: 2026-07-23
