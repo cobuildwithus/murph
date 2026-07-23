@@ -5279,7 +5279,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
-    const stagedTerminalFailureInputCount =
+    const terminalFailureStaging =
       await stageHostedTerminalOutboxFailureInputs({
         deliveryEffects: input.assistantDeliveryEffects,
         outcomes,
@@ -5287,7 +5287,7 @@ async function drainHostedPostCheckpointDelivery(input: {
       });
     return await yieldHostedBackgroundPostCheckpointDrain(input, {
       resetPreparedDelivery: false,
-      stagedTerminalFailureInputCount,
+      stagedTerminalFailureInputCount: terminalFailureStaging.stagedInputCount,
       yieldedDeliveryCount: backgroundDeliveryDrainYieldedCount,
     });
   }
@@ -5298,12 +5298,13 @@ async function drainHostedPostCheckpointDelivery(input: {
     shouldYieldBackgroundDrain: input.shouldYieldBackgroundDrain ?? null,
     wake: input.wake,
   });
-  const stagedTerminalFailureInputCount =
+  const terminalFailureStaging =
     await stageHostedTerminalOutboxFailureInputs({
       deliveryEffects: input.assistantDeliveryEffects,
       outcomes,
       vaultRoot: input.input.restored.vaultRoot,
     });
+  const stagedTerminalFailureInputCount = terminalFailureStaging.stagedInputCount;
   const postDeliveryPendingAssistantInputWakeAt =
     await resolvePendingAssistantInputWakeAt(input.input, { inspectOnly: true });
   const postOutboxWakeAt = await resolveHostedAssistantOutboxNextWakeAt({
@@ -5317,6 +5318,29 @@ async function drainHostedPostCheckpointDelivery(input: {
       canConsumeWorkspaceAssistantWake: input.canConsumeWorkspaceAssistantWake,
       phaseInput: input.input,
     });
+  let postDeliveryAssistantCronWake: HostedRuntimeWakeCandidate | null = null;
+  if (terminalFailureStaging.projectAssistantCronWake) {
+    const postDeliveryAssistantCronWakeState =
+      await resolveHostedAssistantCronWakeStateBestEffort(input.input);
+    const projectedAssistantCronWake = postDeliveryAssistantCronWakeState.available
+      ? dropConsumedWorkspaceAssistantWake(
+          resolveHostedAssistantCronWakeCandidate({
+            phaseInput: input.input,
+            state: postDeliveryAssistantCronWakeState,
+          }),
+        )
+      : null;
+    postDeliveryAssistantCronWake = selectHostedRuntimeWakeCandidate([
+      projectedAssistantCronWake,
+      createHostedRuntimeWakeCandidate(
+        new Date(
+          resolveHostedAssistantPhaseNowMs(input.input)
+            + HOSTED_ASSISTANT_CRON_STATUS_RETRY_DELAY_MS,
+        ).toISOString(),
+        HOSTED_ASSISTANT_WAKE_REASON,
+      ),
+    ]);
+  }
   const postSystemMailboxWakeAt = await resolveHostedSystemMailboxNextWakeAt({
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -5326,6 +5350,7 @@ async function drainHostedPostCheckpointDelivery(input: {
   const postNextWake = selectHostedRuntimeWakeCandidate([
     postBaseNextWake,
     input.postDeliveryReconciliationWake,
+    postDeliveryAssistantCronWake,
     createHostedRuntimeWakeCandidate(postOutboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(postSystemMailboxWakeAt, "assistant"),
     createHostedRuntimeWakeCandidate(
@@ -5502,16 +5527,23 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
   deliveryEffects: HostedAssistantDeliveryEffects;
   outcomes: readonly HostedAssistantDeliveryOutcome[];
   vaultRoot: string;
-}): Promise<number> {
+}): Promise<{
+  projectAssistantCronWake: boolean;
+  stagedInputCount: number;
+}> {
   const terminalFailures = input.outcomes.filter((outcome) =>
     shouldStageHostedTerminalOutboxFailureInput(outcome)
   );
   if (terminalFailures.length === 0) {
-    return 0;
+    return {
+      projectAssistantCronWake: false,
+      stagedInputCount: 0,
+    };
   }
   const effectsById = new Map(
     input.deliveryEffects.map((effect) => [effect.effectId, effect]),
   );
+  let projectAssistantCronWake = false;
   let staged = 0;
 
   for (const outcome of terminalFailures) {
@@ -5521,6 +5553,7 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
       && intent?.automationAuthority?.automationId
         === MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
     ) {
+      projectAssistantCronWake = true;
       continue;
     }
     const occurredAt = readHostedTerminalOutboxFailureInputOccurredAt(intent);
@@ -5578,7 +5611,10 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
     staged += 1;
   }
 
-  return staged;
+  return {
+    projectAssistantCronWake,
+    stagedInputCount: staged,
+  };
 }
 
 function readHostedTerminalOutboxFailureInputOccurredAt(

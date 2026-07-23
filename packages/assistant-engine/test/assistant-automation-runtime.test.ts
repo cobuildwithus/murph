@@ -6532,6 +6532,7 @@ describe('assistant auto-reply runtime', () => {
       expect.objectContaining({
         limit: 1,
       }),
+      expect.any(Function),
     )
   })
 
@@ -6904,6 +6905,56 @@ describe('assistant auto-reply runtime', () => {
     }
   })
 
+  it('reports repair-only pending cron delivery reconciliation as progress', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    runLoopMocks.processDueAssistantCronJobs.mockImplementationOnce(async (
+      _input: unknown,
+      onPendingDeliveryRecordsReconciled?: (reconciled: number) => void,
+    ) => {
+      onPendingDeliveryRecordsReconciled?.(1)
+      return {
+        failed: 0,
+        processed: 0,
+        succeeded: 0,
+      }
+    })
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomationPass({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted-repair-only-cron-progress',
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.cronProcessed).toBe(0)
+    expect(result.progressed).toBe(true)
+  })
+
   it('passes runtime scope and background-yield policy into cron processing and status', async () => {
     const shouldYieldBackgroundMaintenance = vi.fn(() => false)
     const executionContext = {
@@ -6954,6 +7005,7 @@ describe('assistant auto-reply runtime', () => {
         shouldYieldBackgroundMaintenance,
         turnEnvironment: null,
       }),
+      expect.any(Function),
     )
     expect(runLoopMocks.processDueAssistantCronJobs.mock.calls[0]?.[0])
       .not.toHaveProperty('operationScope')
@@ -7107,6 +7159,7 @@ describe('assistant auto-reply runtime', () => {
         expect.objectContaining({
           shouldYield: shouldDeferCron,
         }),
+        expect.any(Function),
       )
       expect(result.cronProcessed).toBe(0)
       expect(result.nextWakeAt).toBe('2026-05-08T15:59:00.000Z')
@@ -11524,6 +11577,7 @@ describe('assistant automation run loop', () => {
       expect.objectContaining({
         turnEnvironment,
       }),
+      expect.any(Function),
     )
   })
 
@@ -11549,6 +11603,7 @@ describe('assistant automation run loop', () => {
       expect.objectContaining({
         onTraceEvent,
       }),
+      expect.any(Function),
     )
   })
 

@@ -85,6 +85,7 @@ import {
   validateAssistantCronDeliveryTarget,
 } from './cron/targets.ts'
 import {
+  projectTerminalAssistantCronDeliveryRepairs,
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 } from './cron/delivery-reconciliation.ts'
@@ -449,9 +450,20 @@ export async function getAssistantCronStatus(
     runtimeStore,
   })
   const canonicalJobs = projection.jobs
-  const now = new Date().toISOString()
+  const nowDate = new Date()
+  const now = nowDate.toISOString()
   const enabledJobs = canonicalJobs.filter((job) => job.enabled)
-  const dueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now)).length
+  const normallyDueJobs = enabledJobs.filter((job) => isAssistantCronJobDue(job, now))
+  const pendingDeliveryRepairs = await projectTerminalAssistantCronDeliveryRepairs({
+    localStore,
+    now: nowDate,
+    runtimeStore,
+    vault,
+  })
+  // A terminal outbox intent can remain attached when dispatch reconciliation
+  // fails. Count that stable repair deadline as due so the ordinary cron pass
+  // enters its existing pending-delivery repair owner before claiming work.
+  const dueJobs = normallyDueJobs.length + pendingDeliveryRepairs.dueRepairs
   const runningJobs = canonicalJobs.filter((job) => job.state.runningAt !== null).length
   const visibleNextRunAt =
     enabledJobs.find((job) => job.state.nextRunAt !== null)?.state.nextRunAt ?? null
@@ -472,6 +484,7 @@ export async function getAssistantCronStatus(
   const nextRunAt = earliestAssistantAutomationWakeAt(
     visibleNextRunAt,
     backgroundMaintenanceRetryWakeAt,
+    pendingDeliveryRepairs.nextRepairAt,
   )
 
   return {
@@ -575,6 +588,7 @@ export async function processDueAssistantCronJobs(
 
 export async function processDueAssistantCronJobsLocal(
   input: ProcessDueAssistantCronJobsInput,
+  onPendingDeliveryRecordsReconciled?: (reconciled: number) => void,
 ): Promise<AssistantCronProcessDueResult> {
   const paths = resolveAssistantStatePaths(input.vault)
   await ensureAssistantCronState(paths)
@@ -592,10 +606,13 @@ export async function processDueAssistantCronJobsLocal(
     return summary
   }
 
-  await repairPendingAssistantCronDeliveries({
+  const pendingDeliveryRepair = await repairPendingAssistantCronDeliveries({
     paths,
     vault: input.vault,
   })
+  if (pendingDeliveryRepair.reconciled > 0) {
+    onPendingDeliveryRecordsReconciled?.(pendingDeliveryRepair.reconciled)
+  }
   if (input.shouldYield?.() === true) {
     return summary
   }

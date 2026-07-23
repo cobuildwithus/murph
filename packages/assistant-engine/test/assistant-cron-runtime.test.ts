@@ -7024,6 +7024,12 @@ describe('assistant cron runtime orchestration', () => {
         target: oldTarget,
       }),
     )
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual(
+      expect.objectContaining({
+        dueJobs: 0,
+        nextRunAt: null,
+      }),
+    )
 
     currentRouteTarget = currentTarget
     const providerSend = vi.fn(async (input: { target: string }) => ({
@@ -7047,6 +7053,9 @@ describe('assistant cron runtime orchestration', () => {
       return providerSend(input)
     })
 
+    cronMocks.withAssistantCronWriteLock.mockRejectedValueOnce(
+      new Error('cron delivery reconciliation unavailable'),
+    )
     const staleDispatch = await dispatchAssistantOutboxIntent({
       dependencies: { sendTelegram: guardedSendTelegram },
       force: true,
@@ -7061,19 +7070,32 @@ describe('assistant cron runtime orchestration', () => {
     }))
     expect(providerSend).not.toHaveBeenCalled()
     const paths = resolveAssistantStatePaths(vaultRoot)
-    const failedRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
-    expect(failedRuntime.jobs).toEqual([
+    const unreconciledRuntime = await readAssistantCronCanonicalRuntimeStore(paths)
+    expect(unreconciledRuntime.jobs).toEqual([
       expect.objectContaining({
         jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
         state: expect.objectContaining({
-          consecutiveFailures: 1,
+          pendingDeliveryIntentId: firstIntentId,
           pendingOccurrenceAt: '2026-07-22T21:00:00.000Z',
-          retryAfterAt: '2026-07-22T21:20:30.000Z',
+          retryAfterAt: null,
         }),
       }),
     ])
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual(
+      expect.objectContaining({
+        dueJobs: 0,
+        nextRunAt: '2026-07-22T21:20:30.000Z',
+      }),
+    )
 
     vi.setSystemTime(new Date('2026-07-22T21:20:30.000Z'))
+    await expect(getAssistantCronStatus(vaultRoot)).resolves.toEqual(
+      expect.objectContaining({
+        dueJobs: 1,
+        nextRunAt: '2026-07-22T21:20:30.000Z',
+      }),
+    )
+
     await expect(processDueAssistantCronJobsLocal({
       deliveryDispatchMode: 'queue-only',
       executionContext,
@@ -9390,19 +9412,24 @@ describe('assistant cron runtime orchestration', () => {
       safeDetails?: string
       type: string
     }> = []
+    const onPendingDeliveryRecordsReconciled = vi.fn()
     await expect(
-      processDueAssistantCronJobsLocal({
-        deliveryDispatchMode: 'queue-only',
-        onEvent: (event) => {
-          events.push(event)
+      processDueAssistantCronJobsLocal(
+        {
+          deliveryDispatchMode: 'queue-only',
+          onEvent: (event) => {
+            events.push(event)
+          },
+          vault: vaultRoot,
         },
-        vault: vaultRoot,
-      }),
+        onPendingDeliveryRecordsReconciled,
+      ),
     ).resolves.toEqual({
       failed: 0,
       processed: 0,
       succeeded: 0,
     })
+    expect(onPendingDeliveryRecordsReconciled).toHaveBeenCalledExactlyOnceWith(1)
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
 
     const repaired = await getAssistantCronJob(vaultRoot, 'automation-repair-terminal')

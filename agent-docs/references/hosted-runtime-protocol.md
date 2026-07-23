@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-21
+Last verified: 2026-07-22
 
 ## Decision
 
@@ -319,20 +319,44 @@ discard a valid uploaded
 snapshot or create a second metadata-only shutdown snapshot. Assistant
 admission, assistant automation, outbox intent creation, and reply delivery
 remain independent of device-sync and other maintenance completion.
-Once terminal reply delivery is durable, the foreground lane releases ownership;
-it does not wait for provider cleanup or another exact automation inventory
-scan. A conversation import that lands while foreground-owned maintenance is
-in flight aborts that work through the runner-scoped background-maintenance
-signal so the new message can enter assistant admission immediately.
+Once terminal reply delivery is durable, the foreground lane releases provider-
+turn ownership; it does not wait for provider cleanup or a broad automation
+inventory pass. When the typed stale-route failure terminalizes an automatic-
+meal closeout and intentionally creates no replyable failure input, the
+existing pending cron delivery id and exact terminal outbox intent remain the
+repair owner. Canonical cron status derives their stable first-backoff deadline,
+publishes it on later passes while that exact terminal evidence remains
+retained, and counts it due at the deadline until ordinary cron processing
+reconciles the pending delivery. Post-checkpoint delivery has
+one narrow wake-projection obligation: reread that status once and feed its
+wake into the existing earliest-wake selector. A bounded one-pass safety
+candidate accompanies that reread when status is unavailable or does not yet
+surface the exact repair deadline; it is not another repair owner. A
+conversation import that
+lands while foreground-owned maintenance is in flight aborts that work through
+the runner-scoped background-maintenance signal so the new message can enter
+assistant admission immediately.
+
+A pending-delivery repair that mutates cron records marks the assistant pass as
+progressed even when no runnable cron job is processed. The ordinary hosted
+runtime checkpoint therefore persists repair-only changes for paused, disabled,
+or orphaned records without redefining the cron processed-job count.
 
 Foreground wake projection is read-only unless the foreground turn itself
 committed a canonical write under `bank/automations`. That write arms an
 immediate assistant maintenance wake, where exact cron reconciliation remains
-owned. Ordinary post-delivery work does not rescan exact cron status. Pending
-assistant-input probes also inspect only the existing index: a candidate in a
-complete index keeps its immediate wake, while a missing or incomplete index
-gets a bounded 30-second maintenance wake. Compaction and legacy backfill stay
-in the maintenance lane rather than extending reply ownership.
+owned. The closeout-only post-delivery cron-status reread projects either the
+persisted reconciliation result or the stable deadline derived from unchanged
+pending cron state plus exact terminal outbox evidence; it does not create or
+reconcile automation records. Later checkpoints derive the same deadline while
+that exact terminal evidence remains retained. Missing-intent recovery keeps its
+existing 24-hour scan behavior and is not part of this wake projection. Other
+ordinary post-delivery work does not rescan exact
+cron status. Pending assistant-input probes also inspect only the existing
+index: a candidate in a complete index keeps its immediate wake, while a
+missing or incomplete index gets a bounded 30-second maintenance wake.
+Compaction and legacy backfill stay in the maintenance lane rather than
+extending reply ownership.
 If an `inbox_media_retention` invocation is the active write-fenced child when
 foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts

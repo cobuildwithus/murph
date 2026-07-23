@@ -16,10 +16,12 @@ import {
   upsertAssistantCronCanonicalRuntimeRecord,
   type AssistantCronCanonicalRuntimeRecord,
   type AssistantCronCanonicalRuntimeState,
+  type AssistantCronCanonicalRuntimeStore,
 } from './runtime-state.js'
 import {
   readAssistantCronStore,
   writeAssistantCronStore,
+  type AssistantCronStore,
 } from './store.js'
 import {
   buildCanonicalAutomationUpsertInput,
@@ -45,6 +47,11 @@ export interface AssistantCronDeliveryReconciliationResult {
 export interface AssistantCronPendingDeliveryRepairResult {
   checked: number
   reconciled: number
+}
+
+export interface AssistantCronPendingDeliveryRepairProjection {
+  dueRepairs: number
+  nextRepairAt: string | null
 }
 
 type TerminalAssistantCronDeliveryOutcome =
@@ -266,6 +273,52 @@ export async function repairPendingAssistantCronDeliveries(input: {
   return {
     checked: pendingIntentIds.size,
     reconciled,
+  }
+}
+
+export async function projectTerminalAssistantCronDeliveryRepairs(input: {
+  localStore: AssistantCronStore
+  now: Date
+  runtimeStore: AssistantCronCanonicalRuntimeStore
+  vault: string
+}): Promise<AssistantCronPendingDeliveryRepairProjection> {
+  const pendingIntentIds = new Set<string>()
+  for (const job of input.localStore.jobs) {
+    if (job.state.pendingDeliveryIntentId) {
+      pendingIntentIds.add(job.state.pendingDeliveryIntentId)
+    }
+  }
+  for (const runtimeState of input.runtimeStore.jobs) {
+    if (runtimeState.state.pendingDeliveryIntentId) {
+      pendingIntentIds.add(runtimeState.state.pendingDeliveryIntentId)
+    }
+  }
+
+  const repairAt: string[] = []
+  for (const intentId of pendingIntentIds) {
+    const intent = await readAssistantOutboxIntent(input.vault, intentId)
+    if (!intent) {
+      continue
+    }
+    const terminal = resolveTerminalAssistantCronDeliveryOutcome(intent)
+    if (!terminal) {
+      continue
+    }
+    const terminalAtMs = Date.parse(terminal.at)
+    if (!Number.isFinite(terminalAtMs)) {
+      continue
+    }
+    repairAt.push(new Date(
+      terminalAtMs + resolveAssistantCronFailureBackoffMs(1),
+    ).toISOString())
+  }
+  repairAt.sort((left, right) => Date.parse(left) - Date.parse(right))
+
+  return {
+    dueRepairs: repairAt.filter((candidate) =>
+      Date.parse(candidate) <= input.now.getTime()
+    ).length,
+    nextRepairAt: repairAt[0] ?? null,
   }
 }
 

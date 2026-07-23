@@ -6,7 +6,7 @@ import type { VaultServices } from '@murphai/vault-usecases/vault-services'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import {
   getAssistantCronStatus,
-  processDueAssistantCronJobsLocal as processDueAssistantCronJobs,
+  processDueAssistantCronJobsLocal,
 } from '../cron.js'
 import {
   normalizeAssistantExecutionContext,
@@ -999,20 +999,26 @@ export async function runAssistantAutomationPass(
     input.shouldDeferCron?.() === true
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller
+  let pendingCronDeliveryRecordsReconciled = 0
   const cronResult = applyCanonicalWrites && !shouldDeferCron
-    ? await processDueAssistantCronJobs({
-        deliveryDispatchMode: input.deliveryDispatchMode,
-        executionContext,
-        onEvent: input.onEvent,
-        onTraceEvent: input.onTraceEvent,
-        shouldYield: input.shouldDeferCron ?? null,
-        vault: input.vault,
-        signal: input.signal,
-        shouldYieldBackgroundMaintenance:
-          input.shouldYieldBackgroundMaintenance ?? null,
-        turnEnvironment: input.turnEnvironment ?? null,
-        limit: input.maxPerScan,
-      })
+    ? await processDueAssistantCronJobsLocal(
+        {
+          deliveryDispatchMode: input.deliveryDispatchMode,
+          executionContext,
+          onEvent: input.onEvent,
+          onTraceEvent: input.onTraceEvent,
+          shouldYield: input.shouldDeferCron ?? null,
+          vault: input.vault,
+          signal: input.signal,
+          shouldYieldBackgroundMaintenance:
+            input.shouldYieldBackgroundMaintenance ?? null,
+          turnEnvironment: input.turnEnvironment ?? null,
+          limit: input.maxPerScan,
+        },
+        (reconciled) => {
+          pendingCronDeliveryRecordsReconciled += reconciled
+        },
+      )
     : {
         failed: 0,
         processed: 0,
@@ -1064,6 +1070,7 @@ export async function runAssistantAutomationPass(
     stateProgressed ||
     outboxResult.attempted > 0 ||
     cronResult.processed > 0 ||
+    pendingCronDeliveryRecordsReconciled > 0 ||
     replies.checkpointRequired === true
   passTiming.postScanTailElapsedMs = Date.now() - postScanTailStartedAt
 

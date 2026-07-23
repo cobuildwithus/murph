@@ -226,6 +226,7 @@ import {
 import {
   parseAssistantSessionRecord,
 } from "@murphai/operator-config/assistant-cli-contracts";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 import {
   runHostedWorkspaceAssistantPhase,
   type HostedWorkspaceRuntimeAssistantPhaseInput,
@@ -1981,6 +1982,37 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.getAssistantCronStatus).toHaveBeenCalledTimes(2);
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: dueAt,
+      progressed: true,
+    }));
+  });
+
+  it("checkpoints repair-only assistant cron progress", async () => {
+    const dueAt = "2026-04-27T00:00:00.000Z";
+    mocks.getAssistantCronStatus.mockResolvedValueOnce({
+      dueJobs: 1,
+      enabledJobs: 0,
+      nextRunAt: dueAt,
+      runningJobs: 0,
+      totalJobs: 0,
+    });
+    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+      assistantAutomationCronProcessed: 0,
+      assistantAutomationCurrentTurnDeliveryIntentIds: [],
+      assistantAutomationProgressed: true,
+      nextWakeAt: null,
+      redactedLogEntries: [],
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 0,
+      now: () => dueAt,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: dueAt,
+      }),
+    }));
+
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "canonical_runtime_commit",
       progressed: true,
     }));
   });
@@ -7736,67 +7768,109 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("drops a consumed workspace assistant wake echo when post-delivery cron status is unavailable", async () => {
-    const consumedWakeAt = "2026-05-08T16:00:05.000Z";
-    mocks.getAssistantCronStatus
-      .mockResolvedValueOnce({
-        dueJobs: 0,
-        enabledJobs: 0,
-        nextRunAt: null,
-        runningJobs: 0,
-        totalJobs: 0,
-      })
-      .mockRejectedValueOnce(new Error("cron status unavailable"));
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationProgressed: true,
-      nextWakeAt: consumedWakeAt,
-      redactedLogEntries: [],
-    });
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      createDeliveryEffect(),
-    ]);
-    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
-      {
-        cleanupMessages: [],
-        cleanupTargetAliases: [],
-        deliveryChannel: "telegram",
-        deliveryErrorCode: null,
-        deliveryErrorMessage: null,
-        deliveryStatus: "sent",
-        effectFingerprint: "fingerprint_synthetic",
-        effectId: "effect_synthetic",
-        journalMethod: "PUT",
-        journalStatus: "200",
-        providerMessageId: null,
-        providerMessageIds: [],
-        providerThreadId: "thread_synthetic",
-        retryable: false,
-        target: null,
-        targetKind: null,
-      },
-    ]);
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      now: () => "2026-05-08T16:00:08.000Z",
-      workspace: createDueAssistantWorkspace({
-        checkpointedAt: "2026-05-08T16:00:00.000Z",
-        createdAt: "2026-05-08T16:00:00.000Z",
+  it.each([
+    {
+      postDeliveryStatus: "unavailable",
+      postDeliveryNextRunAt: null,
+      rejectPostDeliveryStatus: true,
+    },
+    {
+      postDeliveryStatus: "readable without a wake",
+      postDeliveryNextRunAt: null,
+      rejectPostDeliveryStatus: false,
+    },
+    {
+      postDeliveryStatus: "readable with a later unrelated wake",
+      postDeliveryNextRunAt: "2026-05-09T16:00:00.000Z",
+      rejectPostDeliveryStatus: false,
+    },
+  ])(
+    "retries cron wake projection when post-delivery status is $postDeliveryStatus",
+    async ({ postDeliveryNextRunAt, rejectPostDeliveryStatus }) => {
+      const consumedWakeAt = "2026-05-08T16:00:05.000Z";
+      const cronStatusRetryAt = "2026-05-08T16:00:38.000Z";
+      const effectId = "effect_synthetic_stale_closeout";
+      let deliveryReconciled = false;
+      mocks.getAssistantCronStatus.mockImplementation(async () => {
+        if (deliveryReconciled && rejectPostDeliveryStatus) {
+          throw new Error("cron status unavailable");
+        }
+        return {
+          dueJobs: 0,
+          enabledJobs: 0,
+          nextRunAt: deliveryReconciled ? postDeliveryNextRunAt : null,
+          runningJobs: 0,
+          totalJobs: 0,
+        };
+      });
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationProgressed: true,
         nextWakeAt: consumedWakeAt,
-        updatedAt: "2026-05-08T16:00:00.000Z",
-      }),
-    }));
-    const postCheckpoint = await result.afterCheckpoint?.();
+        redactedLogEntries: [],
+      });
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId,
+      };
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        deliveryEffect,
+      ]);
+      mocks.readAssistantOutboxIntent.mockResolvedValue(
+        createTerminalFailureOutboxIntent({
+          automationAuthority: {
+            automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+            expectedUpdatedAt: "2026-05-08T15:00:00.000Z",
+          },
+          bindingDeliveryTarget: "telegram_direct_stale",
+          channel: "telegram",
+          createdAt: "2026-05-08T16:00:00.000Z",
+          effectId,
+          explicitTarget: null,
+          threadId: "telegram_direct_stale",
+          threadIsDirect: true,
+        }),
+      );
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(
+        async () => {
+          deliveryReconciled = true;
+          return [{
+            ...createFailedDeliveryOutcome({
+              deliveryChannel: "telegram",
+              deliveryErrorCode: "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+              effectId,
+            }),
+            deliveryStatus: "failed" as const,
+            effectFingerprint: deliveryEffect.fingerprint,
+            retryable: false,
+          }];
+        },
+      );
 
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_receipt",
-      nextWakeAt: null,
-      redactedStatus: expect.objectContaining({
-        hostedAssistantNextWakeAt: null,
-        hostedOutboxDeliverySent: 1,
-        nextWakeAt: null,
-      }),
-    }));
-  });
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => "2026-05-08T16:00:08.000Z",
+        workspace: createDueAssistantWorkspace({
+          checkpointedAt: "2026-05-08T16:00:00.000Z",
+          createdAt: "2026-05-08T16:00:00.000Z",
+          nextWakeAt: consumedWakeAt,
+          updatedAt: "2026-05-08T16:00:00.000Z",
+        }),
+      }));
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: cronStatusRetryAt,
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: cronStatusRetryAt,
+          hostedOutboxDeliverySent: 0,
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          nextWakeAt: cronStatusRetryAt,
+        }),
+      }));
+      expect(mocks.getAssistantCronStatus.mock.calls.length)
+        .toBeGreaterThanOrEqual(2);
+    },
+  );
 
   it("preserves a post-delivery outbox wake matching a consumed assistant wake", async () => {
     let now = "2026-05-08T16:00:00.000Z";
@@ -8105,62 +8179,184 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       tmpdir(),
       "murph-meal-closeout-stale-route-failure-input-",
     ));
+    vi.useFakeTimers();
     try {
       const now = "2026-07-22T21:20:00.000Z";
       const retryAt = "2026-07-22T21:20:30.000Z";
       const intentCreatedAt = "2026-07-22T21:19:50.000Z";
+      const occurrenceAt = "2026-07-22T21:00:00.000Z";
+      const automationUpdatedAt = "2026-07-22T20:00:00.000Z";
+      const staleTarget = "telegram_direct_stale";
+      const currentTarget = "telegram_direct_current";
+      const deliveryIdempotencyKey =
+        "assistant-outbox:meal-closeout-stale-route";
+      vi.setSystemTime(new Date(now));
+      await initializeVault({
+        createdAt: automationUpdatedAt,
+        vaultRoot,
+      });
+      const automation = await upsertAutomation({
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        continuityPolicy: "fresh",
+        instructions: "Summarize today's imported meals and remove eligible photos.",
+        now: new Date(automationUpdatedAt),
+        route: {
+          channel: "telegram",
+          deliverySource: null,
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: staleTarget,
+          threadIsDirect: true,
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+        },
+        slug: "automatic-meal-daily-closeout",
+        status: "active",
+        tags: [
+          "assistant",
+          "scheduled",
+          "murph-managed:automatic-meal-daily-closeout",
+        ],
+        title: "Automatic meal daily closeout",
+        vaultRoot,
+      });
+      const actualAssistantEngine =
+        await vi.importActual<typeof import("@murphai/assistant-engine")>(
+          "@murphai/assistant-engine",
+        );
+      const intent = await actualAssistantEngine.createAssistantOutboxIntent({
+        automationAuthority: {
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        bindingDelivery: {
+          kind: "thread",
+          target: staleTarget,
+        },
+        channel: "telegram",
+        createdAt: intentCreatedAt,
+        deliveryIdempotencyKey,
+        deliveryTransportIdempotent: true,
+        explicitTarget: null,
+        message: "Daily meal summary",
+        sessionId: "session_meal_closeout_stale_route",
+        threadId: staleTarget,
+        threadIsDirect: true,
+        turnId: "turn_meal_closeout_stale_route",
+        vault: vaultRoot,
+      });
+      const assistantStatePaths = resolveAssistantStatePaths(vaultRoot);
+      await mkdir(assistantStatePaths.cronDirectory, { recursive: true });
+      await writeFile(
+        assistantStatePaths.cronAutomationStatePath,
+        `${JSON.stringify({
+          version: 1,
+          jobs: [{
+            schema: "murph.assistant-canonical-cron-runtime-state.v1",
+            jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+            alias: null,
+            sessionId: intent.sessionId,
+            createdAt: automationUpdatedAt,
+            updatedAt: intentCreatedAt,
+            state: {
+              activatedAt: automationUpdatedAt,
+              pendingOccurrenceAt: occurrenceAt,
+              retryAfterAt: null,
+              lastRunAt: intentCreatedAt,
+              lastSucceededAt: null,
+              lastFailedAt: null,
+              consecutiveFailures: 0,
+              lastError: null,
+              pendingDeliveryIntentId: intent.intentId,
+              runningAt: null,
+              runningClaimId: null,
+              runningPid: null,
+            },
+          }],
+        }, null, 2)}\n`,
+        "utf8",
+      );
       const baseEffect = createDeliveryEffect();
       const deliveryEffect = {
         ...baseEffect,
-        effectId: "intent_meal_closeout_stale_route",
+        effectId: intent.intentId,
         fingerprint: "fingerprint_meal_closeout_stale_route",
         payload: {
           ...baseEffect.payload,
+          bindingDeliveryKind: "thread" as const,
+          bindingDeliveryTarget: staleTarget,
           channel: "telegram" as const,
-          idempotencyKey: "assistant-outbox:intent_meal_closeout_stale_route",
+          idempotencyKey: deliveryIdempotencyKey,
+          threadId: staleTarget,
         },
       };
-      const terminalFailure = {
-        ...createFailedDeliveryOutcome({
-          deliveryChannel: "telegram",
-          deliveryErrorCode: "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
-          effectId: deliveryEffect.effectId,
-        }),
-        deliveryStatus: "failed" as const,
-        effectFingerprint: deliveryEffect.fingerprint,
-        retryable: false,
-      };
-      mocks.readAssistantOutboxIntent.mockImplementation(async (
-        _vaultRoot: string,
-        intentId: string,
-      ) => intentId === deliveryEffect.effectId
-        ? createTerminalFailureOutboxIntent({
-          automationAuthority: {
-            automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-            expectedUpdatedAt: "2026-07-22T20:00:00.000Z",
-          },
-          bindingDeliveryTarget: "telegram_direct_stale",
-          channel: "telegram",
-          createdAt: intentCreatedAt,
-          effectId: deliveryEffect.effectId,
-          explicitTarget: null,
-          threadId: "telegram_direct_stale",
-          threadIsDirect: true,
-        })
-        : null);
+      mocks.getAssistantCronStatus.mockImplementation(
+        actualAssistantEngine.getAssistantCronStatus,
+      );
+      mocks.readAssistantOutboxIntent.mockImplementation(
+        actualAssistantEngine.readAssistantOutboxIntent,
+      );
       mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
         deliveryEffect,
       ]);
       mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
         preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
       });
-      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
-        terminalFailure,
-      ]);
+      const providerSend = vi.fn(async (input: { target: string }) => ({
+        providerMessageId: "telegram_provider_current_route",
+        target: input.target,
+      }));
+      const guardedSendTelegram = vi.fn(async (input: {
+        idempotencyKey?: string | null;
+        message: string;
+        replyToMessageId?: string | null;
+        signal?: AbortSignal;
+        target: string;
+      }) => {
+        if (input.target !== currentTarget) {
+          throw new VaultCliError(
+            "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+            "Hosted automatic meal closeout no longer matches the current direct route.",
+            { retryable: false },
+          );
+        }
+        return providerSend(input);
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementationOnce(async () => {
+        const staleDispatch =
+          await actualAssistantEngine.dispatchAssistantOutboxIntent({
+            dependencies: {
+              sendTelegram: guardedSendTelegram,
+            },
+            force: true,
+            intentId: intent.intentId,
+            now: new Date(now),
+            vault: vaultRoot,
+          });
+        expect(staleDispatch.intent.status).toBe("failed");
+        expect(staleDispatch.deliveryError).toEqual(expect.objectContaining({
+          code: "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+        }));
+        expect(guardedSendTelegram).toHaveBeenCalledTimes(1);
+        expect(providerSend).not.toHaveBeenCalled();
+        return [{
+          ...createFailedDeliveryOutcome({
+            deliveryChannel: "telegram",
+            deliveryErrorCode: staleDispatch.deliveryError?.code ?? null,
+            effectId: deliveryEffect.effectId,
+          }),
+          deliveryStatus: "failed" as const,
+          effectFingerprint: deliveryEffect.fingerprint,
+          retryable: false,
+        }];
+      });
       mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
         assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
         assistantAutomationProgressed: true,
-        nextWakeAt: retryAt,
+        nextWakeAt: null,
         redactedLogEntries: [],
       });
 
@@ -8187,6 +8383,27 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot,
       })).resolves.toEqual([]);
 
+      const persistedCronRuntime = JSON.parse(
+        await readFile(assistantStatePaths.cronAutomationStatePath, "utf8"),
+      ) as {
+        jobs: Array<{
+          jobId: string;
+          state: Record<string, unknown>;
+        }>;
+      };
+      expect(persistedCronRuntime.jobs).toHaveLength(1);
+      expect(persistedCronRuntime.jobs[0]).toEqual(expect.objectContaining({
+        jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        state: expect.objectContaining({
+          consecutiveFailures: 1,
+          pendingOccurrenceAt: occurrenceAt,
+          retryAfterAt: retryAt,
+        }),
+      }));
+      expect(persistedCronRuntime.jobs[0]?.state)
+        .not.toHaveProperty("pendingDeliveryIntentId");
+
+      vi.setSystemTime(new Date(retryAt));
       mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
       mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (input) => {
         expect(input.freshAssistantInputIds).toEqual([]);
@@ -8208,6 +8425,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         }),
       }));
     } finally {
+      vi.useRealTimers();
       await rm(vaultRoot, { force: true, recursive: true });
     }
   });
@@ -10594,6 +10812,209 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       nextWakeAt: outboxWakeAt,
       nextWakeReason: "assistant",
     }));
+  });
+
+  it("keeps terminal-pending cron repair armed through a mailbox checkpoint", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-terminal-pending-cron-repair-wake-",
+    ));
+    vi.useFakeTimers();
+    try {
+      const automationUpdatedAt = "2026-07-22T20:00:00.000Z";
+      const terminalAt = "2026-07-22T21:20:00.000Z";
+      const mailboxAt = "2026-07-22T21:20:10.000Z";
+      const repairAt = "2026-07-22T21:20:30.000Z";
+      const staleTarget = "telegram_direct_stale";
+      vi.setSystemTime(new Date(terminalAt));
+      await initializeVault({
+        createdAt: automationUpdatedAt,
+        vaultRoot,
+      });
+      const automation = await upsertAutomation({
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        continuityPolicy: "fresh",
+        instructions: "Summarize today's imported meals and remove eligible photos.",
+        now: new Date(automationUpdatedAt),
+        route: {
+          channel: "telegram",
+          deliverySource: null,
+          deliveryTarget: null,
+          identityId: null,
+          participantId: null,
+          threadId: staleTarget,
+          threadIsDirect: true,
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+        },
+        slug: "automatic-meal-daily-closeout",
+        status: "active",
+        tags: [
+          "assistant",
+          "scheduled",
+          "murph-managed:automatic-meal-daily-closeout",
+        ],
+        title: "Automatic meal daily closeout",
+        vaultRoot,
+      });
+      const actualAssistantEngine =
+        await vi.importActual<typeof import("@murphai/assistant-engine")>(
+          "@murphai/assistant-engine",
+        );
+      const intent = await actualAssistantEngine.createAssistantOutboxIntent({
+        automationAuthority: {
+          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+          expectedUpdatedAt: automation.record.updatedAt,
+        },
+        bindingDelivery: {
+          kind: "thread",
+          target: staleTarget,
+        },
+        channel: "telegram",
+        createdAt: "2026-07-22T21:19:50.000Z",
+        deliveryIdempotencyKey:
+          "assistant-outbox:terminal-pending-cron-repair-wake",
+        deliveryTransportIdempotent: true,
+        explicitTarget: null,
+        message: "Daily meal summary",
+        sessionId: "session_terminal_pending_cron_repair",
+        threadId: staleTarget,
+        threadIsDirect: true,
+        turnId: "turn_terminal_pending_cron_repair",
+        vault: vaultRoot,
+      });
+      const terminalDispatch =
+        await actualAssistantEngine.dispatchAssistantOutboxIntent({
+          dependencies: {
+            sendTelegram: async () => {
+              throw new VaultCliError(
+                "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+                "Hosted automatic meal closeout no longer matches the current direct route.",
+                { retryable: false },
+              );
+            },
+          },
+          force: true,
+          intentId: intent.intentId,
+          now: new Date(terminalAt),
+          vault: vaultRoot,
+        });
+      expect(terminalDispatch.intent.status).toBe("failed");
+
+      const assistantStatePaths = resolveAssistantStatePaths(vaultRoot);
+      await mkdir(assistantStatePaths.cronDirectory, { recursive: true });
+      await writeFile(
+        assistantStatePaths.cronAutomationStatePath,
+        `${JSON.stringify({
+          version: 1,
+          jobs: [{
+            schema: "murph.assistant-canonical-cron-runtime-state.v1",
+            jobId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+            alias: null,
+            sessionId: intent.sessionId,
+            createdAt: automationUpdatedAt,
+            updatedAt: terminalAt,
+            state: {
+              activatedAt: automationUpdatedAt,
+              pendingOccurrenceAt: "2026-07-22T21:00:00.000Z",
+              retryAfterAt: null,
+              lastRunAt: "2026-07-22T21:19:50.000Z",
+              lastSucceededAt: null,
+              lastFailedAt: null,
+              consecutiveFailures: 0,
+              lastError: null,
+              pendingDeliveryIntentId: intent.intentId,
+              runningAt: null,
+              runningClaimId: null,
+              runningPid: null,
+            },
+          }],
+        }, null, 2)}\n`,
+        "utf8",
+      );
+      mocks.getAssistantCronStatus.mockImplementation(
+        actualAssistantEngine.getAssistantCronStatus,
+      );
+
+      vi.setSystemTime(new Date(mailboxAt));
+      await expect(actualAssistantEngine.getAssistantCronStatus(vaultRoot))
+        .resolves.toEqual(expect.objectContaining({
+          dueJobs: 0,
+          nextRunAt: repairAt,
+        }));
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_before_cron_repair",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+      const mailboxResult = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => mailboxAt,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: repairAt,
+          updatedAt: terminalAt,
+        }),
+      }));
+      expect(mailboxResult).toEqual(expect.objectContaining({
+        checkpointReason: "system_mailbox_receipt",
+        nextWakeAt: repairAt,
+        progressed: true,
+      }));
+      await expect(mailboxResult.afterCheckpoint?.()).resolves.toEqual(
+        expect.objectContaining({
+          checkpointReason: "system_mailbox_receipt",
+          nextWakeAt: repairAt,
+          nextWakeReason: "assistant",
+        }),
+      );
+
+      vi.setSystemTime(new Date(repairAt));
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockClear();
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+        item: createSystemMailboxItem(),
+        itemId: "system_mailbox_item_due_with_cron_repair",
+        metrics: {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [],
+        },
+        status: "processed",
+      });
+      mocks.runHostedAssistantAutomationLane.mockClear();
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      });
+      await expect(actualAssistantEngine.getAssistantCronStatus(vaultRoot))
+        .resolves.toEqual(expect.objectContaining({
+          dueJobs: 1,
+          nextRunAt: repairAt,
+        }));
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => repairAt,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace({
+          nextWakeAt: repairAt,
+          updatedAt: mailboxAt,
+        }),
+      }));
+      expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
   });
 
   it("preserves future provider cleanup wakes while recording unrelated system mailbox work", async () => {
