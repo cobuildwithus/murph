@@ -288,7 +288,7 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
-  it("clears existing provider contact-card images during reconciliation", async () => {
+  it("keeps legacy provider fields when the contact-card first name is current", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
       syncedCount: 1,
@@ -315,22 +315,10 @@ describe("hosted Linq contact card client", () => {
               first_name: "Murph",
               image_url: "https://cdn.linqapp.com/example/contact-card/sample/image-current.png",
               is_active: true,
+              last_name: "Legacy",
               phone_number: "+15550000001",
             },
           ],
-        });
-      }
-
-      if (url.pathname.endsWith("/contact_card") && init?.method === "PATCH") {
-        expect(readJsonRequestBody(init)).toEqual({
-          first_name: "Murph",
-          image_url: null,
-        });
-        return createJsonResponse({
-          first_name: "Murph",
-          image_url: null,
-          is_active: true,
-          phone_number: "+15550000001",
         });
       }
 
@@ -342,15 +330,15 @@ describe("hosted Linq contact card client", () => {
       observedAt,
       prisma: prisma as never,
     })).resolves.toEqual({
-      activeCards: 0,
+      activeCards: 1,
       atRiskLines: 0,
       createdCards: 0,
       criticalLines: 0,
       inactiveCards: 0,
       lineCount: 1,
-      updatedCards: 1,
+      updatedCards: 0,
     });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).toHaveBeenCalledWith(expect.objectContaining({
       maxLines: 250,
       observedAt,
