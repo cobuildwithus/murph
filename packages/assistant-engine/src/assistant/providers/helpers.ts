@@ -1191,7 +1191,6 @@ function subtractAssistantProviderUsageRecords(
 }
 
 export interface CodexSubagentTokenUsageSample {
-  eventCount: number
   firstEvent: unknown
   lastEvent: unknown
 }
@@ -1211,10 +1210,8 @@ export interface CodexSubagentTokenUsageSample {
 // inherit the parent model by default, so evidence without a model falls
 // back to parentModel. Warm processes are reused across threads, so a
 // foreign thread id alone is not proof of a subagent — a stale flush from a
-// previous thread must never mint a usage row. Unattributed threads are
-// counted, not billed.
+// previous thread must never mint a usage row.
 export function extractCodexSubagentUsageDrafts(input: {
-  droppedThreadCount: number
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
@@ -1232,8 +1229,6 @@ export function extractCodexSubagentUsageDrafts(input: {
   const attributedThreads = [...input.subagentTokenUsageByThread].filter(
     ([threadId]) => spawnModelByThreadId.has(threadId),
   )
-  const unattributedThreadCount =
-    input.subagentTokenUsageByThread.size - attributedThreads.length
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
   for (const [threadId, sample] of attributedThreads) {
@@ -1252,17 +1247,6 @@ export function extractCodexSubagentUsageDrafts(input: {
 
     const model =
       spawnModelByThreadId.get(threadId) ?? input.parentModel ?? null
-    const rawUsageJson: Record<string, unknown> = {
-      codexSubagentThreadId: threadId,
-      tokenUsage: delta,
-      tokenUsageEventCount: sample.eventCount,
-      ...(input.droppedThreadCount > 0
-        ? { droppedSubagentUsageThreadCount: input.droppedThreadCount }
-        : {}),
-      ...(unattributedThreadCount > 0
-        ? { unattributedSubagentUsageThreadCount: unattributedThreadCount }
-        : {}),
-    }
     const inputTokens = readAssistantProviderInteger(
       delta,
       'inputTokens',
@@ -1295,8 +1279,8 @@ export function extractCodexSubagentUsageDrafts(input: {
         providerMetadataJson: null,
         providerName: input.modelProvider,
         providerRequestId: null,
-        rawUsageJson,
-        rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+        rawUsageJson: delta,
+        rawUsageJsonHash: hashAssistantProviderStableJson(delta),
         reasoningTokens: readAssistantProviderInteger(
           delta,
           'reasoningTokens',
