@@ -279,11 +279,10 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       userId: directReplyUserId,
     });
 
-    // Recreate the old inter-invocation gap deterministically. A direct-woken
-    // invocation has finished and accepted exactly one reply; a later Temporal
-    // ensure now reaches the same Worker endpoint after delivery stamped this
-    // mailbox item with consumedAt. The late invocation must quiesce without
-    // another model turn or Linq send.
+    // Recreate the old late-handoff path after exactly one accepted reply.
+    // Depending on whether the existing runner child has cleared before the
+    // late ensure arrives, the control plane can start or wake processing. Both
+    // accepted paths must quiesce without another model turn or Linq send.
     const assistantProviderResponseCountAfterReply =
       countAssistantProviderResponsesApiRequests();
     const answeredMailboxItem = await readHostedMailboxItemForTest({
@@ -296,10 +295,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       harness: requireScenario().harness,
       userId: directReplyUserId,
     });
-    expect(lateEnsure).toMatchObject({
-      action: "started",
-      kind: "runtime_processing_accepted",
-    });
+    expect(lateEnsure.kind).toBe("runtime_processing_accepted");
     const quiescentStatus = await requireScenario().waitForHostedIdle(
       directReplyUserId,
     );

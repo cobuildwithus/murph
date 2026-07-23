@@ -343,6 +343,7 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantSkillRouteHintText(),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
+      progressUpdateMode: conversationScope === "group" ? "group" : "direct",
     }),
     conversationScope === "direct" ? buildAssistantComputerUseGuidanceText() : null,
     conversationScope === "direct" ? buildAssistantPhoneCallGuidanceText() : null,

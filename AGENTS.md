@@ -71,7 +71,10 @@ Always read these before repo code/docs/test/config work:
 - Do not invent compatibility, deployment, or runtime requirements. Document them in the matching durable docs and scripts in the same change that introduces them.
 - Do not weaken production runtime, auth, or env invariants for tests, smoke checks, or builds. Fix harnesses with test-only config or wrappers instead.
 - Follow the persisted-state placement gate in `agent-docs/operations/agent-workflow-routing.md` and `ARCHITECTURE.md`; user-facing or queryable product truth must not start in assistant runtime state.
-- Historical plan docs under `agent-docs/exec-plans/completed/` are immutable snapshots.
+- Historical plan docs under `agent-docs/exec-plans/completed/` are immutable,
+  non-operative snapshots. Never use them as current implementation, deployment,
+  rollback, or incident instructions; the live owner docs indexed in
+  `agent-docs/index.md` prevail.
 
 ## Workflow Defaults
 

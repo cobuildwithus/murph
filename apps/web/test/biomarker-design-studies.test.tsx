@@ -96,6 +96,14 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain("Homepage security and privacy");
+  expect(sectionsMarkup).toContain("Consumer Health Data Privacy Notice");
+  expect(sectionsMarkup).toContain(
+    'href="/consumer-health-data-privacy-policy"',
+  );
+  expect(sectionsMarkup).toContain("Homepage experiment flow");
+  expect(sectionsMarkup).toContain("Homepage personas");
+  expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Group usage funding");

@@ -18,10 +18,10 @@ test("the persistent dashboard layout fences fresh vault authority to its server
   assert.equal(existsSync(templateUrl), false);
   assert.doesNotMatch(layoutSource, /getHostedBrowserVaultPageAuthority/u);
   assert.doesNotMatch(layoutSource, /authorized=/u);
-  assert.match(layoutSource, /getHostedPageAuthSnapshot/u);
+  assert.match(layoutSource, /getHostedDashboardLayoutAuthSnapshot/u);
   assert.match(
     layoutSource,
-    /initialMemberId=\{pageAuth\.authenticatedMember\?\.id \?\? null\}/u,
+    /initialMemberId=\{auth\.pageAuth\.authenticatedMember\?\.id \?\? null\}/u,
   );
   assert.match(contextSource, /expectedMemberId: initialMemberId/u);
   assert.match(contextSource, /reloadCurrentHostedAuthDocument/u);

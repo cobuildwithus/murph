@@ -181,6 +181,11 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
+    const checkpointConsumedOlderMailboxItem = await waitForConsumedMailboxItem(
+      olderEventId,
+    );
+    expect(checkpointConsumedOlderMailboxItem.id).toBe(olderMailboxItem.id);
+    expect(checkpointConsumedOlderMailboxItem.consumedAt).not.toBeNull();
 
     const foregroundWebhookResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, foregroundChatId, {
@@ -225,9 +230,9 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(requireLinqStub().countAcceptedSends(olderReplyPath, olderReplyMatcher)).toBe(
       baselineOlderAcceptedCount,
     );
-    const unconsumedOlderMailboxItem = await readMailboxItem(olderEventId);
-    expect(unconsumedOlderMailboxItem).toMatchObject({
-      consumedAt: null,
+    const consumedOlderMailboxItemBeforeRetry = await readMailboxItem(olderEventId);
+    expect(consumedOlderMailboxItemBeforeRetry).toMatchObject({
+      consumedAt: checkpointConsumedOlderMailboxItem.consumedAt,
       id: olderMailboxItem.id,
     });
     const consumedForegroundMailboxItem = await waitForConsumedMailboxItem(
@@ -246,7 +251,9 @@ describe("hosted local retryable outbox foreground restart e2e", () => {
     expect(requireLinqStub().readObservedMessageText(olderRetriedReply)).toBe(olderReplyText);
     const consumedOlderMailboxItem = await waitForConsumedMailboxItem(olderEventId);
     expect(consumedOlderMailboxItem.id).toBe(olderMailboxItem.id);
-    expect(consumedOlderMailboxItem.consumedAt).not.toBeNull();
+    expect(consumedOlderMailboxItem.consumedAt).toBe(
+      checkpointConsumedOlderMailboxItem.consumedAt,
+    );
     await expect(readMemberState()).resolves.toEqual({
       homeChatId: foregroundChatId,
       homeRecipientPhone: homePhone,

@@ -12312,7 +12312,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
@@ -12348,7 +12352,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
         expect.objectContaining({
           preferredEffectIds: [scenario.effectId],
@@ -12374,7 +12382,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -12408,7 +12420,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
