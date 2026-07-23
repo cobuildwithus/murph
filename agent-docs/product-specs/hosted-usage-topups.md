@@ -829,8 +829,9 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- coarse group usage reads, trusted low-capacity next-turn context, and the
-  route-authorized exhausted-notice funding link; and
+- group usage reads with a remaining percentage but no currency accounting,
+  trusted low-capacity next-turn context, and the route-authorized
+  exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

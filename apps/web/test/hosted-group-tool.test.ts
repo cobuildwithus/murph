@@ -296,6 +296,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       capacityState: "low",
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
+      remainingPercent: 20,
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -374,7 +375,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("returns only coarse usage state and the first-party group funding link", async () => {
+  it("returns currency-free quantified usage and the first-party group funding link", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
@@ -387,6 +388,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
           periodEnd: "2026-08-01T00:00:00.000Z",
+          remainingPercent: 20,
         },
       },
     });

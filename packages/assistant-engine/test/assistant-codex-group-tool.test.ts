@@ -159,6 +159,18 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("percentage of the current period's usage remaining");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("floored and clamped to 0-100");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("means under 1 percent remains");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("share the returned remainingPercent and periodEnd");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("Never infer or disclose internal currency accounting");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("contributor identity, purchase history, or payment status");
     expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell waits and exact replay");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("poll every accepted ask_member call until it returns completed or unavailable");
