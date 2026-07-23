@@ -231,6 +231,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
 export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
+  assistantAskCompletionOccurredBefore?: string | null;
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
@@ -241,6 +242,12 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   vaultRoot: string;
 }): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  const hasAssistantAskCompletionCutoff = Object.hasOwn(
+    input,
+    "assistantAskCompletionOccurredBefore",
+  );
+  const assistantAskCompletionOccurredBefore =
+    input.assistantAskCompletionOccurredBefore ?? null;
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
@@ -253,6 +260,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           && (
             input.allowedWakeKinds == null
             || input.allowedWakeKinds.includes(item.wake.kind)
+          )
+          && (
+            item.wake.kind !== "assistant.ask.completed"
+            || !hasAssistantAskCompletionCutoff
+            || (
+              assistantAskCompletionOccurredBefore !== null
+              && hostedSystemMailboxTimestampPrecedes(
+                item.occurredAt,
+                assistantAskCompletionOccurredBefore,
+              )
+            )
           )
         ),
       };
@@ -381,6 +399,17 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       status: "retryable_failed",
     };
   }
+}
+
+function hostedSystemMailboxTimestampPrecedes(
+  occurredAt: string,
+  beforeAt: string,
+): boolean {
+  const occurredAtMs = Date.parse(occurredAt);
+  const beforeAtMs = Date.parse(beforeAt);
+  return Number.isFinite(occurredAtMs)
+    && Number.isFinite(beforeAtMs)
+    && occurredAtMs < beforeAtMs;
 }
 
 export async function retainHostedSystemMailboxItemAfterForegroundPreemption(input: {

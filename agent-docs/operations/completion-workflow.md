@@ -133,7 +133,7 @@ become fallback product-decision owners.
    - any product-owned dimension separately adds local `product-experience-review`, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the later cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Run the coverage-bearing verification command chosen from the verification doc once implementation is stable enough to produce a truthful signal. Prefer `pnpm test:diff <path ...>` when it covers the touched owner truthfully; otherwise run the edited owner package/app coverage command. Retain Crabbox/Testbox evidence when the canonical command dispatches remotely.
-6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
+6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. Prefer an attached in-app Browser when it is available; if no tab is attached or the connection is unusable, use the repository-installed Playwright runtime against the local design page. A missing in-app Browser attachment is not a completion blocker when Playwright can reach the catalog. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Run exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not three audits.
 9. Triage every preliminary finding locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned review thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted prompt/frontend findings in the parent, rerun focused proof, commit, and push the resulting candidate. Do not rerun the preliminary pass merely because its findings caused corrections; the parent's final review and any applicable final ReviewGPT full-patch gate review the resulting diff.
@@ -201,7 +201,19 @@ Required:
   `/design?tab=components` or `/design?tab=sections` catalog surface and embed
   hosted desktop and mobile screenshots captured there. The screenshots must
   show every materially changed component or section and the states needed for
-  review. PRs without a user-facing frontend UI diff may write `Not applicable`.
+  review. Keep screenshot binaries out of the repository. Capture them only in
+  an ignored local audit path, then upload them from the local machine through
+  the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
+  using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
+  token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
+  `requireSignedURLs=false`, embed a returned public
+  `https://imagedelivery.net/...` variant URL in the PR body, and confirm the
+  URL renders. Retain the local capture only until required review packaging is
+  complete, then delete it. Never print, commit, persist in repository files,
+  or pass the credential to ReviewGPT or another external reviewer; if the
+  local credential is unavailable, report the blocker instead of committing
+  proof images. Proof screenshots must not contain private member data. PRs
+  without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 

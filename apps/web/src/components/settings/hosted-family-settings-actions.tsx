@@ -32,6 +32,12 @@ import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shar
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
+import {
+  HostedUsageTopUpDialog,
+  type HostedUsageTopUpActivePurchase,
+  type HostedUsageTopUpOffer,
+  type HostedUsageTopUpReturn,
+} from "./hosted-usage-top-up-dialog";
 
 export interface FamilyManagerTier {
   name: string;
@@ -221,6 +227,11 @@ export function HostedFamilyManager(props: {
     used: number;
   };
   tiers: FamilyManagerTier[];
+  usageTopUpActiveMemberId?: string | null;
+  usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
+  usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpReturnMemberId?: string | null;
 }) {
   const router = useRouter();
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -501,8 +512,8 @@ export function HostedFamilyManager(props: {
         ) : null}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[44rem] text-sm">
+      <div className="min-w-0">
+        <table className="w-full text-sm md:table-fixed">
           <thead className="sr-only">
             <tr>
               <th>Member</th>
@@ -511,9 +522,12 @@ export function HostedFamilyManager(props: {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
+          <tbody className="grid gap-3 md:table-row-group md:divide-y md:divide-border">
             {props.members.map((member) => {
               const isRetry = member.pendingPlanCode !== null;
+              const usageTargetLabel = member.isOwner
+                ? "you"
+                : member.label ?? "this family member";
               const targetPlanCode = member.pendingPlanCode
                 ?? props.tiers.find((tier) => tier.planCode !== member.planCode)?.planCode;
               const targetTier = props.tiers.find(
@@ -521,8 +535,11 @@ export function HostedFamilyManager(props: {
               );
 
               return (
-                <tr key={member.memberId}>
-                  <td className="py-3 pr-3">
+                <tr
+                  key={member.memberId}
+                  className="grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-border bg-background p-4 md:table-row md:rounded-none md:border-0 md:bg-transparent md:p-0"
+                >
+                  <td className="col-span-2 block min-w-0 md:table-cell md:py-3 md:pr-3">
                     <div className="truncate font-medium text-foreground">
                       {member.isOwner ? "You" : member.label ?? "Family member"}
                     </div>
@@ -532,25 +549,50 @@ export function HostedFamilyManager(props: {
                       </div>
                     ) : null}
                   </td>
-                  <td className="py-3 pr-3 align-top">
+                  <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                      Plan
+                    </span>
                     <Badge variant="outline">
                       {props.tiers.find((tier) => tier.planCode === member.planCode)?.name}
                     </Badge>
                   </td>
-                  <td className="py-3 pr-3 align-top">
+                  <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                    <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                      Status
+                    </span>
                     <Badge variant={member.pendingPlanCode ? "secondary" : member.isOwner ? "outline" : "default"}>
                       {member.pendingPlanCode
                         ? `Updating to ${props.tiers.find((tier) => tier.planCode === member.pendingPlanCode)?.name}`
                         : member.isOwner ? "Owner" : "Active"}
                     </Badge>
                   </td>
-                  <td className="py-3 text-right align-top">
-                    <div className="inline-flex items-center gap-1">
+                  <td className="col-span-2 block text-right align-top md:table-cell md:py-3">
+                    <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:gap-1">
+                      <HostedUsageTopUpDialog
+                        activePurchase={
+                          props.usageTopUpActiveMemberId === member.memberId
+                            ? props.usageTopUpActivePurchase
+                            : null
+                        }
+                        checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(member.memberId)}/usage-credit/checkout`}
+                        offers={props.usageTopUpActivePurchase
+                          ? []
+                          : props.usageTopUpOffers ?? []}
+                        purchaseReturn={
+                          props.usageTopUpReturnMemberId === member.memberId
+                            ? props.usageTopUpPurchaseReturn
+                            : null
+                        }
+                        scope="family"
+                        targetLabel={usageTargetLabel}
+                      />
                       {targetTier ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
+                          className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                           aria-label={isRetry
                             ? member.isOwner
                               ? `Retry updating your plan to ${targetTier.name}`
@@ -582,30 +624,45 @@ export function HostedFamilyManager(props: {
           const link = inviteShareLink(invite);
           const secondary = invite.targetLabel ? inviteContacts(invite)[0] ?? null : null;
           return (
-            <tr key={invite.id}>
-              <td className="py-3 pr-3">
+            <tr
+              key={invite.id}
+              className="grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-border bg-background p-4 md:table-row md:rounded-none md:border-0 md:bg-transparent md:p-0"
+            >
+              <td className="col-span-2 block min-w-0 md:table-cell md:py-3 md:pr-3">
                 <div className="truncate font-medium text-foreground">
                   {inviteDisplayName(invite)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {secondary ? `${secondary} · ` : ""}Expires {formatFamilyDate(invite.expiresAtIso)}
+                  {secondary ? (
+                    <>
+                      <span className="break-all">{secondary}</span> ·{" "}
+                    </>
+                  ) : null}
+                  Expires {formatFamilyDate(invite.expiresAtIso)}
                 </div>
               </td>
-              <td className="py-3 pr-3 align-top">
+              <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                  Plan
+                </span>
                 <Badge variant="outline">
                   {props.tiers.find((tier) => tier.planCode === invite.planCode)?.name}
                 </Badge>
               </td>
-              <td className="py-3 pr-3 align-top">
+              <td className="block align-top md:table-cell md:py-3 md:pr-3">
+                <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground md:hidden">
+                  Status
+                </span>
                 <Badge variant="secondary">Pending</Badge>
               </td>
-              <td className="py-3 text-right align-top">
-                <div className="inline-flex items-center gap-1">
+              <td className="col-span-2 block text-right align-top md:table-cell md:py-3">
+                <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:gap-1">
                   {link ? (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
+                      className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                       onClick={() => void copyInviteLink(invite)}
                     >
                       {copiedId === invite.id ? (
@@ -623,6 +680,7 @@ export function HostedFamilyManager(props: {
                     type="button"
                     variant="ghost"
                     size="sm"
+                    className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
                     onClick={() =>
                       setPendingAction({
                         id: invite.id,
@@ -641,6 +699,42 @@ export function HostedFamilyManager(props: {
         </tbody>
       </table>
       </div>
+
+      {[props.usageTopUpActiveMemberId, props.usageTopUpReturnMemberId]
+        .filter((memberId, index, memberIds): memberId is string => Boolean(
+          memberId
+          && !props.members.some((member) => member.memberId === memberId)
+          && memberIds.indexOf(memberId) === index,
+        ))
+        .map((memberId) => {
+          const activePurchase = props.usageTopUpActiveMemberId === memberId
+            ? props.usageTopUpActivePurchase ?? null
+            : null;
+          return (
+            <div
+              key={memberId}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <p className="text-sm text-muted-foreground">
+                Review an unfinished checkout for a former family member. It
+                cannot be paid here.
+              </p>
+              <HostedUsageTopUpDialog
+                activePurchase={activePurchase}
+                checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(memberId)}/usage-credit/checkout`}
+                deferTerminalRefreshUntilClose
+                offers={[]}
+                purchaseReturn={
+                  props.usageTopUpReturnMemberId === memberId
+                    ? props.usageTopUpPurchaseReturn
+                    : null
+                }
+                scope="family"
+                targetLabel="a former family member"
+              />
+            </div>
+          );
+        })}
 
       {!props.billingActive ? (
         <p

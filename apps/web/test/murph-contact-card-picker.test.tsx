@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 
+import { createElement, type HTMLAttributes, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   DEFAULT_MURPH_CONTACT_AVATAR_ID,
@@ -10,7 +11,24 @@ import {
   MurphContactAvatarArt,
   MurphContactAvatarGrid,
   MurphContactCardPreview,
+  MurphContactCardPicker,
 } from "@/src/components/murph/murph-contact-card-picker";
+
+vi.mock("@/src/components/ui/drawer", () => ({
+  Drawer: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
+    open ? createElement("div", { "data-drawer-open": "true" }, children) : null,
+  DrawerContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
+    createElement("div", { className, "data-drawer-content": "true" }, children),
+  DrawerDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+    createElement("p", props),
+  DrawerFooter: (props: HTMLAttributes<HTMLDivElement>) => createElement("div", props),
+  DrawerHeader: (props: HTMLAttributes<HTMLDivElement>) => createElement("div", props),
+  DrawerTitle: (props: HTMLAttributes<HTMLHeadingElement>) => createElement("h2", props),
+}));
+
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => true,
+}));
 
 test("avatar options have unique ids and headshots resolve to bundled assets", () => {
   const ids = MURPH_CONTACT_AVATAR_OPTIONS.map((option) => option.id);
@@ -109,4 +127,16 @@ test("contact card preview shows Murph with the selected avatar", () => {
   );
   expect(markup).toContain("Murph");
   expect(markup).toContain("murph-headshot-04-sm.png");
+});
+
+test("contact card picker fills the mobile viewport and keeps safe-area actions", () => {
+  const markup = renderToStaticMarkup(
+    <MurphContactCardPicker onOpenChange={() => {}} open />,
+  );
+
+  expect(markup).toContain('data-drawer-content="true"');
+  expect(markup).toContain("h-dvh");
+  expect(markup).toContain("max-h-dvh");
+  expect(markup).not.toContain("92dvh");
+  expect(markup).toContain("safe-area-inset-bottom");
 });

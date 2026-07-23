@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import type {
+  HealthCommonsWebBiomarkerFallbackRange,
   HealthCommonsWebBiomarkerOverview,
   HealthCommonsWebBiomarkerResearch,
   HealthCommonsWebBiomarkerShell,
@@ -9,7 +10,7 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 const ROUTE_INDEX_SCHEMA_VERSION = "murph.commons.web.route-index.v1";
-const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v1";
+const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v3";
 const BIOMARKER_SHELL_SCHEMA_VERSION = "murph.commons.web.biomarker-shell.v1";
 const BIOMARKER_OVERVIEW_SCHEMA_VERSION = "murph.commons.web.biomarker-overview.v1";
 const BIOMARKER_RESEARCH_SCHEMA_VERSION = "murph.commons.web.biomarker-research.v1";
@@ -39,6 +40,7 @@ export interface GeneratedBiomarkerIndex {
 export interface GeneratedBiomarkerIndexEntry {
   aliases: string[];
   categories: string[];
+  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
   hidden: boolean;
   key: string;
   published: boolean;
@@ -449,6 +451,8 @@ function isGeneratedBiomarkerIndexEntry(value: unknown): value is GeneratedBioma
     && entry["aliases"].every((alias) => typeof alias === "string")
     && Array.isArray(entry["categories"])
     && entry["categories"].every((category) => typeof category === "string")
+    && Array.isArray(entry["fallbackRanges"])
+    && entry["fallbackRanges"].every(isGeneratedBiomarkerFallbackRange)
     && typeof entry["hidden"] === "boolean"
     && typeof entry["key"] === "string"
     && typeof entry["published"] === "boolean"
@@ -457,6 +461,46 @@ function isGeneratedBiomarkerIndexEntry(value: unknown): value is GeneratedBioma
     && (typeof entry["summary"] === "string" || entry["summary"] === null)
     && typeof entry["title"] === "string"
     && (typeof entry["unit"] === "string" || entry["unit"] === null);
+}
+
+function isGeneratedBiomarkerFallbackRange(
+  value: unknown,
+): value is HealthCommonsWebBiomarkerFallbackRange {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const range = value as Record<string, unknown>;
+  const lowerBound = range["lowerBound"];
+  const upperBound = range["upperBound"];
+  return typeof range["applicability"] === "string"
+    && Array.isArray(range["eligibleSpecimenKinds"])
+    && range["eligibleSpecimenKinds"].length > 0
+    && range["eligibleSpecimenKinds"].every((kind) => kind === "serum" || kind === "plasma")
+    && typeof range["label"] === "string"
+    && typeof range["unit"] === "string"
+    && (lowerBound === undefined || isGeneratedBiomarkerFallbackBound(lowerBound))
+    && (upperBound === undefined || isGeneratedBiomarkerFallbackBound(upperBound))
+    && (lowerBound !== undefined || upperBound !== undefined)
+    && !(
+      isGeneratedBiomarkerFallbackBound(lowerBound)
+      && isGeneratedBiomarkerFallbackBound(upperBound)
+      && lowerBound.value >= upperBound.value
+    );
+}
+
+function isGeneratedBiomarkerFallbackBound(value: unknown): value is {
+  inclusive: boolean;
+  value: number;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const bound = value as Record<string, unknown>;
+  return typeof bound["inclusive"] === "boolean"
+    && typeof bound["value"] === "number"
+    && Number.isFinite(bound["value"]);
 }
 
 function assertGeneratedBiomarkerShell(value: unknown): asserts value is HealthCommonsWebBiomarkerShell {

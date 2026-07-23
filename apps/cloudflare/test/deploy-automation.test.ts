@@ -477,6 +477,15 @@ describe("hosted deploy automation helpers", () => {
       };
     };
 
+    const expectedDefaultInstanceType = {
+      disk_mb: 6000,
+      memory_mib: 6144,
+      vcpu: 2,
+    };
+    expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
+      expectedDefaultInstanceType,
+      expectedDefaultInstanceType,
+    ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
       expect(checkedInConfig.containers[index]).toMatchObject({
@@ -542,7 +551,7 @@ describe("hosted deploy automation helpers", () => {
     );
 
     for (const expectedLine of [
-      "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":1,\"memory_mib\":3072,\"disk_mb\":6000}' }}",
+      "CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{\"vcpu\":2,\"memory_mib\":6144,\"disk_mb\":6000}' }}",
       "CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}",
       "CF_CONTAINER_SSH_KEY_NAME: ${{ vars.CF_CONTAINER_SSH_KEY_NAME }}",
       "CF_CONTAINER_SSH_PUBLIC_KEY: ${{ vars.CF_CONTAINER_SSH_PUBLIC_KEY }}",

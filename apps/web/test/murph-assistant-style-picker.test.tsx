@@ -70,10 +70,16 @@ vi.mock("@/src/components/ui/drawer", () => ({
 }));
 
 vi.mock("@/src/components/ui/voice-memo-player", () => ({
-  VoiceMemoPlayer: forwardRef<{ play: () => void }, { src: string }>(
-    function MockVoiceMemoPlayer({ src }, ref) {
+  VoiceMemoPlayer: forwardRef<
+    { play: () => void },
+    { showDuration?: boolean; src: string }
+  >(
+    function MockVoiceMemoPlayer({ showDuration, src }, ref) {
       useImperativeHandle(ref, () => ({ play: componentMocks.playerPlay }));
-      return createElement("div", { "data-voice-preview": src });
+      return createElement("div", {
+        "data-show-duration": String(showDuration),
+        "data-voice-preview": src,
+      });
     },
   ),
 }));
@@ -297,7 +303,7 @@ test("MurphAssistantStylePicker keeps the default tone to voice onboarding chain
       tone: "formal",
     });
     assert.match(rendered.container.textContent ?? "", /Pick Murph's voice/u);
-    assert.match(rendered.container.textContent ?? "", /22 voices/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
     assert.equal(onComplete.mock.calls.length, 0);
     assert.equal(onOpenChange.mock.calls.length, 0);
   } finally {
@@ -558,7 +564,7 @@ test("MurphAssistantStylePicker selects a voice when the row outside the label i
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /22 voices/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
     assert.match(
       rendered.container.querySelector("[data-dialog-content='true']")?.className ?? "",
       /sm:max-w-2xl/u,
@@ -715,8 +721,14 @@ test("MurphAssistantStylePicker renders the voice chooser in the mobile drawer",
         "[data-voice-preview='/audio/murph-voices/classic.mp3']",
       ),
     );
+    assert.equal(
+      savedClassicVoiceRow
+        .querySelector("[data-voice-preview]")
+        ?.getAttribute("data-show-duration"),
+      "false",
+    );
     assert.ok(findRadioInput(rendered.container, "Warm and friendly"));
-    assert.match(rendered.container.textContent ?? "", /22 voices/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /\b\d+ voices?\b/u);
     assert.ok(findButton(rendered.container, "Skip"));
     assert.ok(findButton(rendered.container, "Continue"));
   } finally {

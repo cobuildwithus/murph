@@ -397,6 +397,16 @@ pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child.
 
+When a joined-group request reaches a dirty warm runtime, the mailbox prefetch
+may import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes. One shared import context
+revalidates the decoded request target throughout that pre-checkpoint pass,
+including pre-assistant follow-up imports and foreground reruns; a
+consented-member request remains checkpoint-gated regardless of which import
+observes it. Import kicks the existing detached controller; it does not start or
+advance the at-least-180-second idle snapshot. Any unrelated system wake in
+that prefix keeps the whole system prefix checkpoint-gated.
+
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
 the exact membership generation, runtime fence, expiry, and original private
@@ -405,6 +415,23 @@ to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
+
+If that joined-group completion and private input are both pending, the
+completion uses the existing foreground-causal mailbox lane only when its
+occurrence timestamp predates the oldest pending input. A fresh turn derives
+that cutoff from the bounded accepted-input batch it already owns. A pass with
+no fresh batch reads the existing complete pending-input index. Both paths use
+the input's `occurredAt`, not its later receipt time. Missing, incomplete, or
+invalid evidence fails closed without backfill or compaction on the foreground
+reply path; existing background maintenance remains the only repair owner. The
+completion then owns the next assistant pass, and the existing output-only
+continuation composes and durably queues one natural Murph response under its
+stable idempotency key before the still-pending input runs on the next pass. A
+newer completion does not overtake older personal input. This ordering contract
+ends at durable intent creation; ordinary carrier retry ordering remains scoped
+to one assistant turn so a retrying Ask send cannot block all newer personal
+replies. The mailbox
+remains transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask
@@ -1091,9 +1118,12 @@ startup grace only when no active child exists. The command returns
 start or fresh wake acceptance. Fresh starts begin the runtime write fence, then
 overlap container readiness with hosted workspace read, workspace-version
 binding, runtime config/secrets preparation, and container job construction
-before returning accepted; failures in that pre-handoff path clear the fresh
-fence and return `retry_later`. Because readiness is overlapped, a failed
-preparation may still leave a best-effort warm shell behind; write-fence
+before returning accepted. Inside that preparation, the signed workspace read,
+workspace ownership validation, and exact workspace-version fence binding
+precede the runtime-store ensure and job construction. Failures in that
+pre-handoff path clear the fresh fence and return `retry_later`. Because
+readiness is overlapped, a failed preparation may still leave a best-effort
+warm shell behind; write-fence
 ownership remains the only authority to invoke or commit runtime work. The Temporal
 caller sends its existing ensure-processing HTTP timeout as an internal header.
 Cloudflare treats that value as an operational hint only: the foreground
@@ -1734,7 +1764,24 @@ ends at the Cloudflare route/auth stamps, Durable Object activation ends at
 replacement-clear interval, and fresh container allocation/readiness ends at
 `freshStartContainerReadyAtEpochMs`. The outer Temporal-signal-to-runner span is
 not a single Temporal activity duration; the direct wake may win before the
-Temporal activity begins.
+Temporal activity begins. Replacement traces also carry same-call elapsed
+scalars for the active wake and exact fence clear. Fresh-start traces carry
+elapsed scalars for the sequential workspace read, runtime-store ensure, and
+total invocation preparation. Fixed booleans distinguish prior-version targets
+and explicit no-child results. These fields are stamped onto the existing trace
+payload with no additional I/O. Prefer the same-call elapsed scalars when direct
+and Temporal retries may have contributed independently merged epoch
+timestamps.
+Fence-attempt diagnostics remain one coherent bundle across replacement races.
+When a replacement compare-and-swap loses, UserRunner drops the superseded
+fence's observation, active-wake, and replacement-clear leaves before probing
+the authoritative record returned by the store. The container entrypoint may
+then stamp accepted/finished evidence onto that clean pending wake. At the
+initial assistant-runtime import, the invocation-header seed owns overlapping
+orchestration leaves; pending-wake timing and non-overlapping caller context are
+still preserved. Web keeps the first populated trace leaves, so mixed-attempt
+bundles must be prevented at these producer boundaries rather than repaired
+after persistence.
 The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
 for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
 and status plus bounded metadata-only correlation, count, and timing fields. The

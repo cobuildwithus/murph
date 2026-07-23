@@ -17,6 +17,24 @@ referenceGuidance:
   classification: source_range_only
   reviewStatus: reviewed
   use: context_only
+  fallbackRanges:
+    - label: "Mayo Clinic Laboratories adult serum reference interval"
+      unit: "U/L"
+      eligibleSpecimenKinds:
+        - serum
+      lowerBound:
+        value: 122
+        inclusive: true
+      upperBound:
+        value: 222
+        inclusive: true
+      applicability: "For published adult comparison on serum results from adults age 18 or older when the saved result uses this exact unit and has no range; this comparator is not the reporting laboratory's range, and source-laboratory flags and per-result ranges remain authoritative."
+      source:
+        title: "Lactate Dehydrogenase (LDH), Serum"
+        organization: "Mayo Clinic Laboratories"
+        year: 2026
+        sourceType: "assay_documentation"
+        url: "https://www.mayocliniclabs.com/test-catalog/Overview/8344"
   items:
     - kind: reference_interval
       guidance: "Use the reporting laboratory’s reference interval for LDH; Commons does not replace the source range because reference limits depend on assay, specimen, and reference population."

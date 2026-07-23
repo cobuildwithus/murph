@@ -12,12 +12,12 @@ const PILLARS = [
   {
     anchor: "Never sold",
     label: "Privacy",
-    body: "Encrypted at rest. Never used to train AI.",
+    body: "Encrypted in transit and at rest. Health data does not train general-purpose AI models.",
   },
   {
     anchor: "Anytime",
     label: "Export",
-    body: "Take everything with you on the way out.",
+    body: "Export a structured copy of your vault or delete your account.",
   },
 ] as const;
 

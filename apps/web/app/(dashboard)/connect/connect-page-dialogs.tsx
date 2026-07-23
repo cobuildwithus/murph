@@ -1,4 +1,5 @@
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
+import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -10,12 +11,71 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 import {
   buildMurphEmailHref,
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
 import type { ConnectIntentRecoveryRequest, ConnectSource } from "./connect-page-types";
+
+const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC =
+  `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
+
+export function GarminHistoricalDataDialog({
+  open,
+  onContinue,
+  onOpenChange,
+  voiceMemoSrc,
+}: {
+  open: boolean;
+  onContinue: () => void;
+  onOpenChange: (open: boolean) => void;
+  voiceMemoSrc?: string | null;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="gap-5 p-6 sm:max-w-md md:p-7">
+        <DialogHeader className="pr-10">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Garmin
+          </span>
+          <DialogTitle className="font-serif text-2xl font-semibold tracking-normal text-foreground">
+            Turn on Historical Data
+          </DialogTitle>
+          <DialogDescription className="leading-6">
+            When Garmin opens, turn on Historical Data before approving.
+          </DialogDescription>
+        </DialogHeader>
+
+        <VoiceMemoPlayer
+          accessibleLabel="Garmin Historical Data reminder"
+          src={voiceMemoSrc ?? DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC}
+          bars={24}
+          preload="metadata"
+          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+          accentClassName="bg-primary"
+          fillClassName="bg-primary"
+          trackClassName="bg-primary/20"
+        />
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button
+            type="button"
+            size="lg"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button type="button" size="lg" onClick={onContinue}>
+            Continue to Garmin
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 export function ConnectConsentDialog({
   source,

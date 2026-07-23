@@ -85,7 +85,11 @@ export default async function GroupFundingPage({
       }),
       member
         ? readHostedActiveUsageCreditPurchaseForPayer({
-            beneficiaryMemberId: target.runtimeMemberId,
+            serverApprovedPayableTargets: [{
+              beneficiaryMemberId: target.runtimeMemberId,
+              groupJoinCode: target.joinCode,
+              kind: "group",
+            }],
             payerMemberId: member.id,
             prisma,
           }).catch(() => null)
@@ -102,7 +106,21 @@ export default async function GroupFundingPage({
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
   }
-  const offers = member && !member.suspendedAt
+  const activePurchaseMatchesTarget =
+    activePurchase?.target.kind === "group" &&
+    activePurchase.target.beneficiaryMemberId === target.runtimeMemberId &&
+    activePurchase.target.groupJoinCode === target.joinCode;
+  const visibleActivePurchase = activePurchase
+    ? activePurchaseMatchesTarget
+      ? activePurchase
+      : {
+          ...activePurchase,
+          retryAllowed: false,
+          targetConflict: true as const,
+          url: undefined,
+        }
+    : null;
+  const offers = member && !member.suspendedAt && !activePurchase
     ? projectHostedUsageTopUpOffers(readHostedConfiguredUsageCreditOfferCodes())
     : [];
   const purchaseReturn = purchaseReturnMatchesTarget
@@ -114,9 +132,9 @@ export default async function GroupFundingPage({
       <GroupUsageFundingCard
         action={
           member ? (
-            offers.length > 0 || activePurchase ? (
+            offers.length > 0 || visibleActivePurchase ? (
               <HostedUsageTopUpDialog
-                activePurchase={activePurchase}
+                activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
                 offers={offers}
                 purchaseReturn={purchaseReturn}
