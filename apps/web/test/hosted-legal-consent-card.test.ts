@@ -111,8 +111,10 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Use your health data with Murph");
-    expect(container.textContent).toContain("contracted AI providers");
+    expect(container.textContent).toContain("Use your health data");
+    expect(container.textContent).toContain(
+      "let Murph and contracted AI providers use health data you add or connect",
+    );
   });
 
   expect(container.textContent).toContain("Terms");
@@ -124,6 +126,8 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   const continueButton = findButtonByText(container, /^Consent$/);
   const declineButton = findButtonByText(container, /^Decline$/);
   expect(continueButton.disabled).toBe(false);
+  expect(continueButton.classList.contains("w-auto")).toBe(true);
+  expect(continueButton.classList.contains("w-full")).toBe(false);
   expect(declineButton.disabled).toBe(false);
   expect(
     [...container.querySelectorAll("button")].indexOf(declineButton),
@@ -164,7 +168,7 @@ test("launch consent records both launch scopes from one click", async () => {
   cleanupRender = cleanup;
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Use your health data with Murph");
+    expect(container.textContent).toContain("Use your health data");
   });
 
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
@@ -242,6 +246,8 @@ test("a legal-only update uses concise legal copy and records only that scope", 
   expect(container.textContent).not.toContain("contracted AI providers");
   expect(container.textContent).not.toContain("Health Data Notice");
   const continueButton = findButtonByText(container, /^Agree$/);
+  expect(continueButton.classList.contains("w-auto")).toBe(true);
+  expect(continueButton.classList.contains("w-full")).toBe(false);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -542,7 +548,7 @@ test("HostedLegalConsentCard keeps decline available when status loading fails",
   });
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Use your health data with Murph");
+    expect(container.textContent).toContain("Use your health data");
   });
 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);

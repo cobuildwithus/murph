@@ -401,10 +401,7 @@ export function HostedLaunchConsentPrompt({
   const primaryButton = (
     <Button
       aria-busy={accepting}
-      className={cn(
-        onDecline ? "min-w-32 px-6" : "w-full",
-        !onDecline && mode === "panel" ? "sm:w-auto" : null,
-      )}
+      className="w-auto px-6"
       disabled={actionPending}
       onClick={onContinue}
       size="lg"
@@ -603,18 +600,18 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
     return {
       actionLabel: "Consent",
       description:
-        "Murph uses health data you add or connect, including through contracted AI providers, to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+        "Murph and contracted AI providers use health data you add or connect to personalize your experience.",
       eyebrow: "Health data consent",
-      title: "Use your health data with Murph",
+      title: "Use your health data",
     };
   }
 
   return {
     actionLabel: "Consent",
     description:
-      "By selecting Consent, you agree to the Terms and consent to Murph using health data you add or connect, including through contracted AI providers, to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+      "By selecting Consent, you agree to the Terms and let Murph and contracted AI providers use health data you add or connect to personalize your experience.",
     eyebrow: "Health data consent",
-    title: "Use your health data with Murph",
+    title: "Use your health data",
   };
 }
 
