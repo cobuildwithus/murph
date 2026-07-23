@@ -77,9 +77,11 @@ Usage is cost-weighted included capacity across models and modalities. It is
 not a token count or cash balance. Used and remaining included percentages are
 bounded integers that sum to 100. An included period reports 100% used even
 while purchased credit still keeps effective capacity positive. Settings shows
-that carryover credit separately as usage credit; it never folds it into the
-plan percentage or exposes the internal included allowance value. The
-operation that crosses effective capacity may finish, but subsequent
+that purchased credit remains effective without folding it into the plan
+percentage, exposing its exact remaining dollar amount, or exposing the
+internal included allowance value. When included usage is exhausted, Settings
+may explain that Murph will use remaining usage credit without quantifying it.
+The operation that crosses effective capacity may finish, but subsequent
 usage-bearing work blocks and accepted conversation input remains pending.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when

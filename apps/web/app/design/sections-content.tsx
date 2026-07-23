@@ -86,7 +86,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Personal usage credit owner">
+      <StudySection title="Personal usage credit states">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
