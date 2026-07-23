@@ -1,6 +1,6 @@
 # Biomarker fallback reference ranges
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -133,3 +133,17 @@ Updated: 2026-07-22
   finding remained: source context wins, qualified source text blocks fallback,
   exact units gate authored context, one-sided bounds preserve direction, and
   review-only evidence staging stays inside the guarded temporary context.
+- The branch rebased onto current `main`. Its only manual conflict preserved
+  both the upstream Crabbox fixture and this task's packaged frontend-evidence
+  assertions; the PR merge path is clean after that resolution. The post-rebase
+  CLI owner suite passed 114 files and 1,080 tests with one existing skip.
+- Final `MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance` passed on Testbox
+  `tbx_01ky65fd2qkbbjngpfheth7pat` (`brisk-prawn`) in 6m48s, including all repo
+  guards, workspace typechecks, coverage owners, package boundaries, the Web
+  test/build lane, and Cloudflare verification. Evidence is retained in GitHub
+  Actions run `29968762098`.
+- The separate Claude UI double-check could not run because Fable reported
+  explicit credit exhaustion; no substitute UI reviewer was added. The local
+  product-experience review and the valid preliminary ReviewGPT frontend lens
+  both returned no findings on the four Playwright-captured catalog states.
+Completed: 2026-07-22
