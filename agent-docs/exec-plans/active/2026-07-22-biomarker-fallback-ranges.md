@@ -128,3 +128,8 @@ Updated: 2026-07-22
   was inspected, accepted, applied manually after `git apply --check`, and the
   CLI owner suite passed (114 files, 1,080 tests, one existing skip). The prompt
   and frontend lenses reported no findings.
+- Parent final review re-read the full source, contract, generated projection,
+  chart, authored content, workflow, and accepted test diff. No additional
+  finding remained: source context wins, qualified source text blocks fallback,
+  exact units gate authored context, one-sided bounds preserve direction, and
+  review-only evidence staging stays inside the guarded temporary context.
