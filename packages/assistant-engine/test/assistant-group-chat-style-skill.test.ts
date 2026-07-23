@@ -77,13 +77,13 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Exactly one assistant response or dispatch per turn.',
+      'Default to one assistant-authored response per turn.',
     )
     expect(normalized).toContain(
       'Natural `---` bubbles inside that response are allowed.',
     )
     expect(normalized).toContain(
-      'Never send a separate status or permission-card companion follow-up',
+      'Never send a separate unrequested status or permission-card companion follow-up',
     )
     expect(normalized).not.toContain('Exactly one message per turn.')
   })

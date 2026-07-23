@@ -1,6 +1,6 @@
 # Explicit group song and contact card
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -46,6 +46,15 @@ Updated: 2026-07-23
   now prioritizes pending answers and first-reply card work over unsolicited
   songs, and the real Codex app-server/scripted-provider lane proves compound
   success plus truthful owner-failure propagation. No patch artifact returned.
-- Remediation proof: focused prompt and real app-server tests passed (19 tests);
-  assistant-engine typecheck passed.
-- Final canonical verification, parent review, CI, and mergeability: pending.
+- Remediation proof after reconciling latest `main`: focused prompt and real
+  app-server tests passed (21 tests); assistant-engine typecheck passed.
+- Final canonical verification: policy guards, affected typechecks, the
+  assistant-engine suite (2,605 passed, 5 skipped), and assistant-cli (128
+  passed) were green. The run stopped on two untouched assistant-runtime
+  idle-checkpoint timing failures with a temp-directory cleanup race; both
+  passed immediately in a focused rerun.
+- Parent final review: no remaining finding. The merged prompt keeps `main`'s
+  natural-bubble and unrequested-companion restrictions while allowing only
+  explicitly requested compound tool effects.
+- CI and mergeability after the final push: pending.
+Completed: 2026-07-23
