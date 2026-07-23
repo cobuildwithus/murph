@@ -43,10 +43,7 @@ describe('assistant group challenge buy-in guidance', () => {
       'Score only the people recorded as in; shared data does not add a pending or silent person to the challenge.',
     )
     expect(challenge).toContain(
-      'If a confirmed participant still owes an intro or photo a day later',
-    )
-    expect(challenge).toContain(
-      'Never ask a pending person for challenge materials; their silence is not something to follow up on.',
+      'Never ask a pending, declined, or withdrawn person.',
     )
     expect(challenge).toContain(
       'participation state (`in`, `pending`, `declined`, or `withdrawn`)',
@@ -71,6 +68,41 @@ describe('assistant group challenge buy-in guidance', () => {
     )
     expect(comedy).toContain(
       'A neutral named update about who is in and still pending is status, not a comedy bit.',
+    )
+  })
+
+  it('keeps challenge personalization optional without inventing setup rationale', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      'Offer optional introductions and photos once.',
+    )
+    expect(challenge).toContain(
+      'Say plainly that the challenge starts without either.',
+    )
+    expect(challenge).toContain(
+      'Do not follow up on silence or name who is "missing" optional material.',
+    )
+    expect(challenge).toContain(
+      'Accept a photo from the person depicted or with their explicit approval',
+    )
+    expect(challenge).toContain(
+      'optional materials never delay the challenge.',
+    )
+    expect(challenge).toContain(
+      'Do not quote this skill or invent a hidden rationale',
+    )
+    expect(challenge).toContain(
+      'If the record does not establish why, own the omission briefly, make the optional invitation, and continue.',
+    )
+    expect(challenge).toContain(
+      'Missing optional material never delays a comic or dispatch.',
+    )
+    expect(challenge).not.toContain(
+      'If a confirmed participant still owes an intro or photo a day later',
+    )
+    expect(challenge).not.toContain(
+      'invite the room to introduce them or send a picture of them',
     )
   })
 

@@ -4,11 +4,11 @@ description: |
   How Murph runs a group health challenge end to end. Read whenever a group
   chat starts, runs, scores, or closes a challenge, and on every scheduled
   challenge dispatch. Owns the challenge lifecycle: kickoff (metric
-  negotiation, consent, introductions and photos, baselines, stakes), the
-  durable challenge page that survives context resets, daily standings
-  dispatches in rotating formats, comic strips built from members' photos,
-  rulings, confounders, and close-out. Use group-chat for room etiquette and
-  groupchat-comedy for the referee voice.
+  negotiation, consent, optional introductions and photos, baselines, stakes),
+  the durable challenge page that survives context resets, daily standings
+  dispatches in rotating formats, comic strips built from approved member
+  photos, rulings, confounders, and close-out. Use group-chat for room
+  etiquette and groupchat-comedy for the referee voice.
 ---
 
 # Group Challenge
@@ -120,8 +120,8 @@ The page carries these sections, kept current:
   settled any dispute about it.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
-  `pending`, `declined`, or `withdrawn`), their intro or fun fact (verbatim),
-  and the capture refs for their photos.
+  `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
+  (verbatim), and the capture refs for any approved photos.
 - **Sharing choices** — per participant and exact scope, explicit sharing
   declines and any permission offer already made available. Silence is not
   consent or refusal, but an ignored offer is not a reason to repost it.
@@ -220,12 +220,17 @@ loses a reminder; it must never lose the challenge.
    current-handle association exists, record that roster identity as
    `unresolved` and do not baseline, score, or diagnose that person until it is
    resolved. Scheduled and detached reads carry no handles and never guess.
-5. **Ask for introductions and photos.** Each participant gives a one-line
-   intro or a fun fact about themselves, plus a photo if they're willing.
-   Record every intro verbatim on the page — they are seed material for
-   jokes, comics, and song lyrics all challenge long — and the photos are
-   the raw material for every comic and generated image. Pin each photo
-   durably the day it arrives:
+5. **Offer optional introductions and photos once.** Invite the confirmed
+   roster to share a one-line intro or fun fact, plus a photo if they want their
+   likeness in challenge comics. Say plainly that the challenge starts without
+   either. This is one group invitation, not a checklist or readiness gate. Do
+   not follow up on silence or name who is "missing" optional material. Never
+   ask a pending, declined, or withdrawn person. Accept a photo from the person
+   depicted or with their explicit approval; nobody else can volunteer their
+   likeness.
+
+   Record volunteered intros verbatim as seed material for jokes, comics, and
+   song lyrics. Pin each approved photo durably the day it arrives:
 
    ```
    vault-cli capture add --media <absolute path of the inbox photo> \
@@ -241,24 +246,19 @@ loses a reminder; it must never lose the challenge.
    `referenceImageRefs` for `generate_image` on any later day; inbox
    paths expire, captures do not.
 
-   If a confirmed participant still owes an intro or photo a day later,
-   follow up once in the group, lightly: name who is missing, ask them
-   directly, and invite the room to introduce them or send a picture of them
-   if they won't do it themselves. A crowd-sourced intro is usually funnier
-   than a self-supplied one, and it is fair game. One follow-up, then let it
-   go — and if the person themselves declines, that wins: they appear by
-   name, never by likeness, and nobody overrides that with a proxy photo.
-   Never ask a pending person for challenge materials; their silence is not
-   something to follow up on.
+   If asked why an invitation was skipped or setup was handled a certain way,
+   use visible conversation facts only. Do not quote this skill or invent a
+   hidden rationale. If the record does not establish why, own the omission
+   briefly, make the optional invitation, and continue.
 6. **Set baselines.** Read pre-challenge shared data where it exists and
    record per-member baselines.
 7. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
-8. **Open with a kickoff comic.** Once the intros and photos are in, a short
-   comic introducing the cast, the premise, and the stakes is the strongest
-   opening artifact — it pays off the photos everyone just contributed and
-   sets the tone for the whole run. Build it under the Comics rules below.
+8. **Open with the strongest available kickoff.** Use a short cast-and-stakes
+   comic when approved photos are already in. Otherwise start immediately with
+   a text bit or another format that fits the material on hand; optional
+   materials never delay the challenge. Use later photos in a later comic.
 
 ## The daily loop
 
@@ -462,8 +462,8 @@ Construction:
   reference the photos of people in that panel; a call takes at most 16
   reference images, so split a big cast across panels. Caricature the bit,
   never the body — no exaggerating weight, body shape, or appearance. A
-  member who declined a photo appears by name and speech bubble, not
-  likeness, and never holds up the kickoff comic.
+  member without an approved photo appears by name and speech bubble, not
+  likeness. Missing optional material never delays a comic or dispatch.
 - **Text in panels:** at most one or two short speech bubbles per panel, and
   end every prompt with "Spell all visible text exactly as written." If text
   garbles, shorten the bubbles before changing anything else.
@@ -498,8 +498,8 @@ when they recover.
    snapshots.
 2. Declare the winner with a stakes callback, and settle only safe, opted-in
    stakes within the `groupchat-comedy` hard limits.
-3. Produce one closing artifact — a comic or recap built from the pinned
-   photos and the challenge's canon.
+3. Produce one closing artifact in the best format for the saved material. Use
+   pinned photos when available; never delay close-out to collect them.
 4. Flip the page to `--status archived` and forget the pointer with
    `vault-cli memory forget <memory-id>` (the id recorded at kickoff).
 5. Results belong to the members. For personal write-ups or what the data
@@ -509,8 +509,9 @@ when they recover.
 ## Signals the loop is working
 
 Watch the engagement ladder per member: react → reply → argue with the
-referee → contribute photos or memos → commission bits. Climbing is the
-system working. Metric-fairness arguments are engagement — adjudicate them.
+referee → volunteer creative material → commission bits. Climbing is the
+system working, but optional photos and intros are never a participation or
+engagement score. Metric-fairness arguments are engagement — adjudicate them.
 A confirmed participant going silent for days is a flag for a gentle private
 check-in, not louder group jokes. Pending silence never creates a private
 check-in.
