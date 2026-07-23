@@ -68,6 +68,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
+  resolveHostedMurphContactOptions: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -92,6 +93,7 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 
 vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
   resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+  resolveHostedMurphContactOptions: mocks.resolveHostedMurphContactOptions,
 }));
 
 beforeEach(() => {
@@ -114,6 +116,7 @@ beforeEach(() => {
     session: null,
   });
   mocks.resolveHostedMurphContactOption.mockResolvedValue(null);
+  mocks.resolveHostedMurphContactOptions.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -137,6 +140,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(markup, /Health data source from the Just Cobuild priority catalog/u);
+  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[0]?.[0], {
+    message: {
+      body: "Help me finish setting up WHOOP through Apple Health.",
+    },
+  });
 
   const sources = [
     {
@@ -2521,7 +2529,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent reaches capacity", async () => {
+test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches capacity", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
@@ -2563,24 +2571,22 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connection link unavailable/);
-  assert.equal(
-    rendered.container.querySelector("input[aria-label='Search sources']"),
-    null,
+  assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Two quick steps and Murph sees everything WHOOP tracks\./,
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /the Murph app brings in your WHOOP data through Apple Health\./,
+    /Download Murph and sign in/,
   );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Download it, sign in, and it walks you through the rest\./,
-  );
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in WHOOP/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /full right now/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Junction/);
 
@@ -2601,25 +2607,25 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
   assert.equal(appStoreLink.rel, "noopener noreferrer");
   assert.equal(
     appStoreLink.getAttribute("aria-label"),
-    "Download Murph for iPhone (opens in a new tab)",
+    "Download App to sync WHOOP through Apple Health",
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
 
-  const viewOtherSourcesButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "View other sources");
-  assert.ok(viewOtherSourcesButton instanceof rendered.window.HTMLButtonElement);
+  const continueButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue with Murph");
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
 
   await act(async () => {
-    viewOtherSourcesButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
   assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Murph left you a message/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Get your full sync/);
 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual start", async () => {
+test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
     _init?: RequestInit,
@@ -2653,6 +2659,13 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
         name: "Whoop",
       },
     ],
+    whoopSyncContactAction: {
+      href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "telegram",
+      label: "Text Murph",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
     whoopSyncVoiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
   }));
 
@@ -2661,7 +2674,7 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
   });
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
@@ -2671,6 +2684,15 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
     rendered.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
     "expected the member's picked-voice WHOOP sync memo",
   );
+  assert.match(rendered.container.textContent ?? "", /Download Murph and sign in/);
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in WHOOP/);
+
+  const continueLink = rendered.container.querySelector(
+    'a[aria-label="Continue with Murph in Telegram (opens in a new tab)"]',
+  );
+  assert.ok(continueLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(continueLink.textContent, "Continue with Murph");
+  assert.equal(continueLink.target, "_blank");
 
   await rendered.cleanup();
 });

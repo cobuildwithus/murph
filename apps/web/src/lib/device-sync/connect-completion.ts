@@ -13,18 +13,16 @@ import {
 import type {
   DeviceSyncCompletionContactAction,
   DeviceSyncCompletionDialogModel,
-  DeviceSyncCompletionSetupGuide,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/device-sync-voice-memos";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
+import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const DEVICE_SYNC_COMPLETION_HOME_MARKER = "deviceSyncCompletion";
-
-const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
 
 const DEVICE_SYNC_COMPLETION_REDIRECT_KEYS = [
   "source",
@@ -399,33 +397,6 @@ function resolveCompletionDetail(input: {
   }
 
   return "Your wearable is ready. Murph will start learning from your data.";
-}
-
-function buildWhoopAppleHealthSetupGuide(voiceMemoSrc: string): DeviceSyncCompletionSetupGuide {
-  return {
-    actionAriaLabel: "See how to sync all of your WHOOP data",
-    actionLabel: "Get full sync",
-    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
-    downloadAction: {
-      ariaLabel: "Download App to sync WHOOP through Apple Health",
-      href: MURPH_IOS_APP_STORE_URL,
-      label: "Download App",
-      rel: "noopener noreferrer",
-      target: "_blank",
-    },
-    steps: [
-      {
-        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
-        title: "Download Murph and sign in",
-      },
-      {
-        detail: "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
-        title: "Turn on Apple Health in WHOOP",
-      },
-    ],
-    title: "Get your full sync",
-    voiceMemoSrc,
-  };
 }
 
 function isWhoopCompletion(input: {

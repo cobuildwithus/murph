@@ -22,7 +22,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
-import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import type {
+  DeviceSyncCompletionContactAction,
+  DeviceSyncCompletionDialogModel,
+  DeviceSyncCompletionSetupGuide,
+} from "@/src/lib/device-sync/connect-completion-types";
 import { cn } from "@/src/lib/utils";
 
 // Keys are duplicated here (rather than imported from the server-only resolver
@@ -73,100 +77,12 @@ export function DeviceSyncCompletionDialog({
 
   if (setupGuide && showSetupGuide) {
     return (
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          showCloseButton={false}
-          className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
-        >
-          <DialogHeader className="items-center gap-4 text-center">
-            <span
-              aria-hidden="true"
-              data-device-sync-icon="smartphone"
-              className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"
-            >
-              <SmartphoneIcon className="size-8" />
-            </span>
-            <div className="flex flex-col gap-2">
-              <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-                {setupGuide.title}
-              </DialogTitle>
-              <DialogDescription className="text-sm leading-6 text-muted-foreground">
-                {setupGuide.detail}
-              </DialogDescription>
-            </div>
-          </DialogHeader>
-
-          <VoiceMemoPlayer
-            src={setupGuide.voiceMemoSrc}
-            bars={24}
-            preload="metadata"
-            containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
-            accentClassName="bg-primary"
-            fillClassName="bg-primary"
-            trackClassName="bg-primary/20"
-          />
-
-          <ol className="flex flex-col gap-4">
-            {setupGuide.steps.map((step, index) => (
-              <li key={step.title} className="flex items-start gap-3 text-left">
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-sm font-medium text-primary"
-                >
-                  {index + 1}
-                </span>
-                <div className="flex flex-col gap-0.5">
-                  <p className="text-sm font-medium text-foreground">{step.title}</p>
-                  <p className="text-sm leading-6 text-muted-foreground">{step.detail}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          <div className="flex flex-col gap-2">
-            <a
-              aria-label={setupGuide.downloadAction.ariaLabel}
-              className={buttonVariants({
-                className: "w-full",
-                size: "xl",
-              })}
-              href={setupGuide.downloadAction.href}
-              rel={setupGuide.downloadAction.rel}
-              target={setupGuide.downloadAction.target}
-            >
-              <SmartphoneIcon data-icon="inline-start" />
-              {setupGuide.downloadAction.label}
-            </a>
-            {model.contactAction ? (
-              <a
-                aria-label={resolveContinueWithMurphAriaLabel(model.contactAction)}
-                className={buttonVariants({
-                  className: "w-full",
-                  size: "xl",
-                  variant: "outline",
-                })}
-                href={model.contactAction.href}
-                onClick={() => setOpen(false)}
-                rel={model.contactAction.rel}
-                target={model.contactAction.target}
-              >
-                <PrimaryIcon data-icon="inline-start" />
-                Continue with Murph
-              </a>
-            ) : (
-              <Button
-                type="button"
-                className="w-full"
-                size="xl"
-                variant="outline"
-                onClick={() => setOpen(false)}
-              >
-                Continue with Murph
-              </Button>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <DeviceSyncSetupGuideDialog
+        contactAction={model.contactAction}
+        guide={setupGuide}
+        open={open}
+        onOpenChange={setOpen}
+      />
     );
   }
 
@@ -261,6 +177,117 @@ export function DeviceSyncCompletionDialog({
   );
 }
 
+export function DeviceSyncSetupGuideDialog({
+  contactAction,
+  guide,
+  onOpenChange,
+  open,
+}: {
+  contactAction: DeviceSyncCompletionContactAction | null;
+  guide: DeviceSyncCompletionSetupGuide;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  const ContactIcon = contactAction?.kind === "telegram" ? SendIcon : MessageCircleIcon;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        showCloseButton={false}
+        className="max-w-md gap-6 rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
+      >
+        <DialogHeader className="items-center gap-4 text-center">
+          <span
+            aria-hidden="true"
+            data-device-sync-icon="smartphone"
+            className="flex size-16 items-center justify-center rounded-2xl bg-primary/10 text-primary"
+          >
+            <SmartphoneIcon className="size-8" />
+          </span>
+          <div className="flex flex-col gap-2">
+            <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
+              {guide.title}
+            </DialogTitle>
+            <DialogDescription className="text-sm leading-6 text-muted-foreground">
+              {guide.detail}
+            </DialogDescription>
+          </div>
+        </DialogHeader>
+
+        <VoiceMemoPlayer
+          src={guide.voiceMemoSrc}
+          bars={24}
+          preload="metadata"
+          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+          accentClassName="bg-primary"
+          fillClassName="bg-primary"
+          trackClassName="bg-primary/20"
+        />
+
+        <ol className="flex flex-col gap-4">
+          {guide.steps.map((step, index) => (
+            <li key={step.title} className="flex items-start gap-3 text-left">
+              <span
+                aria-hidden="true"
+                className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-sm font-medium text-primary"
+              >
+                {index + 1}
+              </span>
+              <div className="flex flex-col gap-0.5">
+                <p className="text-sm font-medium text-foreground">{step.title}</p>
+                <p className="text-sm leading-6 text-muted-foreground">{step.detail}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="flex flex-col gap-2">
+          <a
+            aria-label={guide.downloadAction.ariaLabel}
+            className={buttonVariants({
+              className: "w-full",
+              size: "xl",
+            })}
+            href={guide.downloadAction.href}
+            rel={guide.downloadAction.rel}
+            target={guide.downloadAction.target}
+          >
+            <SmartphoneIcon data-icon="inline-start" />
+            {guide.downloadAction.label}
+          </a>
+          {contactAction ? (
+            <a
+              aria-label={resolveContinueWithMurphAriaLabel(contactAction)}
+              className={buttonVariants({
+                className: "w-full",
+                size: "xl",
+                variant: "outline",
+              })}
+              href={contactAction.href}
+              onClick={() => onOpenChange(false)}
+              rel={contactAction.rel}
+              target={contactAction.target}
+            >
+              <ContactIcon data-icon="inline-start" />
+              Continue with Murph
+            </a>
+          ) : (
+            <Button
+              type="button"
+              className="w-full"
+              size="xl"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Continue with Murph
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function resolveHeaderIconKind(
   model: DeviceSyncCompletionDialogModel,
 ): "alert" | "watch" | "link" {
@@ -271,7 +298,7 @@ function resolveHeaderIconKind(
 }
 
 function resolveContinueWithMurphAriaLabel(
-  action: NonNullable<DeviceSyncCompletionDialogModel["contactAction"]>,
+  action: DeviceSyncCompletionContactAction,
 ): string {
   const channel = action.kind === "telegram" ? "Telegram" : "Messages";
   const target = action.target === "_blank" ? " (opens in a new tab)" : "";
