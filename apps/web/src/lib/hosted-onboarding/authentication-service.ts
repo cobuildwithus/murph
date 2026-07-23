@@ -5,6 +5,7 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { readHostedPhoneHint } from "./contact-privacy";
 import { assertHostedMemberNotSuspended } from "./entitlement";
 import { deriveHostedPostVerificationStage } from "./lifecycle";
@@ -123,34 +124,37 @@ export async function completeHostedPrivyVerification(input: {
             authMethod: inviteAuthMethod,
             identity: input.identity,
           });
-          const member = await prisma.$transaction(async (tx) => {
-            const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
-              authMethod: inviteAuthMethod,
-              expectedEmailLookupKey: pendingEmailContact?.lookupKey,
-              expectedPhoneHint: pendingEmailContact
-                ? undefined
-                : readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
-              expectedPhoneLookupKey: pendingEmailContact
-                ? undefined
-                : inviteIdentity.phoneLookupKey ?? undefined,
-              identity: input.identity,
-              member: invite.member,
-              prisma: tx,
-              now,
-            });
-            await syncHostedPrivyPrimaryBindingTx({
-              authMethod: inviteAuthMethod,
-              identity: input.identity,
-              memberId: reconciledMember.id,
-              prisma: tx,
-            });
-            await syncHostedMemberPendingActivationTimeZoneTx({
-              memberId: reconciledMember.id,
-              prisma: tx,
-              timeZone,
-            });
-            return reconciledMember;
-          }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+          const member = await prisma.$transaction(
+            (tx) => runWithHostedDomainRootUnwrapCache(async () => {
+              const reconciledMember = await reconcileHostedPrivyIdentityOnMemberTx({
+                authMethod: inviteAuthMethod,
+                expectedEmailLookupKey: pendingEmailContact?.lookupKey,
+                expectedPhoneHint: pendingEmailContact
+                  ? undefined
+                  : readHostedPhoneHint(inviteIdentity.maskedPhoneNumberHint),
+                expectedPhoneLookupKey: pendingEmailContact
+                  ? undefined
+                  : inviteIdentity.phoneLookupKey ?? undefined,
+                identity: input.identity,
+                member: invite.member,
+                prisma: tx,
+                now,
+              });
+              await syncHostedPrivyPrimaryBindingTx({
+                authMethod: inviteAuthMethod,
+                identity: input.identity,
+                memberId: reconciledMember.id,
+                prisma: tx,
+              });
+              await syncHostedMemberPendingActivationTimeZoneTx({
+                memberId: reconciledMember.id,
+                prisma: tx,
+                timeZone,
+              });
+              return reconciledMember;
+            }),
+            HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          );
 
           return {
             bindingAuthMethod: inviteAuthMethod,
@@ -162,31 +166,34 @@ export async function completeHostedPrivyVerification(input: {
         })()
       : {
           bindingAuthMethod: authMethod,
-          ...(await prisma.$transaction(async (tx) => {
-            const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
-              authMethod,
-              identity: input.identity,
-              prisma: tx,
-              now,
-            });
-            await syncHostedPrivyPrimaryBindingTx({
-              authMethod,
-              identity: input.identity,
-              memberId: memberResolution.member.id,
-              prisma: tx,
-            });
-            await syncHostedMemberPendingActivationTimeZoneTx({
-              memberId: memberResolution.member.id,
-              prisma: tx,
-              timeZone,
-            });
+          ...(await prisma.$transaction(
+            (tx) => runWithHostedDomainRootUnwrapCache(async () => {
+              const memberResolution = await ensureHostedMemberForPrivyIdentityResolutionTx({
+                authMethod,
+                identity: input.identity,
+                prisma: tx,
+                now,
+              });
+              await syncHostedPrivyPrimaryBindingTx({
+                authMethod,
+                identity: input.identity,
+                memberId: memberResolution.member.id,
+                prisma: tx,
+              });
+              await syncHostedMemberPendingActivationTimeZoneTx({
+                memberId: memberResolution.member.id,
+                prisma: tx,
+                timeZone,
+              });
 
-            return {
-              initialVisitEligible: memberResolution.created,
-              member: memberResolution.member,
-              primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
-            };
-          }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS)),
+              return {
+                initialVisitEligible: memberResolution.created,
+                member: memberResolution.member,
+                primaryBindingSynced: authMethod === "email" || authMethod === "telegram",
+              };
+            }),
+            HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+          )),
         };
     const member = memberResolution.member;
 
