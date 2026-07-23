@@ -85,6 +85,7 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
+import { lockHostedMemberRow } from "./shared";
 import {
   ensureHostedThreadContainerRouteTx,
 } from "../hosted-routing/thread-container-service";
@@ -292,7 +293,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
-  const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
+  let existingMemberEffectiveActive = existingMember && !existingMemberSuspended
     ? await readActiveHostedMemberAccess({
         memberId: existingMember.id,
         prisma: input.prisma,
@@ -537,6 +538,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-family-invite-token",
       }),
     );
+  }
+
+  if (existingMember && !existingMemberEffectiveActive) {
+    // Activation already owns the member row before taking the route lock.
+    // An inactive first contact may later issue an invite, which owns the same
+    // row, so establish that row -> route order here and reclassify after any
+    // activation that was ahead of us commits.
+    await lockHostedMemberRow(input.prisma, existingMember.id);
+    existingMemberEffectiveActive = await readActiveHostedMemberAccess({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
   }
 
   if (existingMember && existingMemberEffectiveActive) {

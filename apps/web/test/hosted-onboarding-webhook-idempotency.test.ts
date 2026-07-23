@@ -1313,6 +1313,64 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
+  it("rechecks inactive access under the member row before taking the route lock", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    prisma.hostedMember.findUnique
+      .mockResolvedValueOnce({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.not_started,
+        suspendedAt: null,
+        threadContainer: null,
+      })
+      .mockResolvedValueOnce({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    const initialAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    const memberRowLockOrder = prisma.$queryRaw.mock.invocationCallOrder.find(
+      (callOrder) =>
+        callOrder > initialAccessReadOrder
+        && callOrder < refreshedAccessReadOrder,
+    );
+    expect(memberRowLockOrder).toBeDefined();
+    expect(
+      refreshedAccessReadOrder,
+    ).toBeLessThan(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+    );
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+  });
+
   it("attempts confirmation recovery after a rejected current Linq wake", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);

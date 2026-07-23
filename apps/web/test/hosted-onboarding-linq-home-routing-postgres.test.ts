@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
+import {
+  acquireHostedMemberHomeLinqRouteLockTx,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -64,12 +68,12 @@ async function waitForBlockedBackend(input: {
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(
-    "Expected the PostgreSQL proactive-capacity contender to wait on the final slot.",
+    "Expected the PostgreSQL contender to wait on its current owner.",
   );
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "hosted Linq proactive capacity PostgreSQL concurrency",
+  "hosted Linq home-routing PostgreSQL concurrency",
   () => {
     it("admits only one concurrent claim for the final daily slot", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -155,6 +159,77 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer, owner, contender]);
       }
     });
+
+    it.each([
+      ["activation", "first-contact"],
+      ["first-contact", "activation"],
+    ] as const)(
+      "keeps %s then %s on one member-row-to-route-lock order",
+      async (ownerRole, contenderRole) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const memberId = `hbm_linq_route_order_${randomUUID()}`;
+        const ownerLocked = createDeferred();
+        const contenderPid = createDeferred<number>();
+        const releaseOwner = createDeferred();
+        let contenderTransaction: Promise<string> | null = null;
+        let ownerTransaction: Promise<string> | null = null;
+        let memberCreated = false;
+
+        try {
+          await observer.hostedMember.create({
+            data: { id: memberId },
+          });
+          memberCreated = true;
+
+          ownerTransaction = owner.$transaction(async (tx) => {
+            await lockHostedMemberRow(tx, memberId);
+            await acquireHostedMemberHomeLinqRouteLockTx({
+              memberId,
+              prisma: tx,
+            });
+            ownerLocked.resolve();
+            await releaseOwner.promise;
+            return ownerRole;
+          }, transactionOptions);
+          await ownerLocked.promise;
+
+          contenderTransaction = contender.$transaction(async (tx) => {
+            contenderPid.resolve(await readBackendPid(tx));
+            await lockHostedMemberRow(tx, memberId);
+            await acquireHostedMemberHomeLinqRouteLockTx({
+              memberId,
+              prisma: tx,
+            });
+            return contenderRole;
+          }, transactionOptions);
+          await waitForBlockedBackend({
+            observer,
+            pid: await contenderPid.promise,
+          });
+
+          releaseOwner.resolve();
+          await expect(
+            Promise.all([ownerTransaction, contenderTransaction]),
+          ).resolves.toEqual([ownerRole, contenderRole]);
+        } finally {
+          releaseOwner.resolve();
+          await Promise.allSettled(
+            [ownerTransaction, contenderTransaction].filter(
+              (transaction): transaction is Promise<string> =>
+                transaction !== null,
+            ),
+          );
+          if (memberCreated) {
+            await observer.hostedMember.deleteMany({
+              where: { id: memberId },
+            });
+          }
+          await disconnectClients([observer, owner, contender]);
+        }
+      },
+    );
   },
 );
 

@@ -37,6 +37,10 @@ member's sharing edit does not create another confirmation.
   transaction-scoped per-member lock and read durable routing only after taking
   it. There is no global recipient-pool lock: active-member targets are advisory,
   while proactive daily capacity is claimed atomically on the selected line row.
+  An existing member first classified as inactive takes the member row lock and
+  rechecks access before the route lock, matching activation and invite issuance
+  on one member-row-to-route order without adding that row lock to ordinary
+  active-member messages.
   Operations that also mutate chat ownership take the existing chat lock after
   the member route lock.
 - Family invite acceptance resolves and binds its Linq home route only after
