@@ -1,8 +1,8 @@
 # Scale hosted Temporal worker capacity
 
-Status: active
+Status: completed
 Created: 2026-07-22
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 ## Goal
 
@@ -58,10 +58,17 @@ Updated: 2026-07-22
   longer runtime execution remains owned by Cloudflare after acceptance.
 - Multiple Temporal Workers on the same Task Queue load-balance naturally, and
   the startup schedule ensure path is idempotent.
-- Package typecheck, 87-test coverage, and the production Workflow-bundle build
+- Package typecheck, 88-test coverage, and the production Workflow-bundle build
   pass; the bundle remains 1.77 MiB.
 - Render's Blueprint validator accepts `render.yaml` with two instances.
 - Canonical diff verification and scenario-manifest integrity pass.
 - Canonical full acceptance passes in a fresh 16-vCPU Blacksmith Testbox,
   including all workspace typechecks, package coverage, Web build/tests/lint,
   and Cloudflare verification.
+- PR #885 contains the exact candidate. The preliminary completion-specialists
+  ReviewGPT pass found one low-severity coverage gap around stale fixed-poller
+  environment aliases; the focused migration regression now proves all four
+  retired aliases remain inert for production parsing and local Worker options.
+- Package coverage and canonical diff verification pass again after that
+  preliminary remediation.
+Completed: 2026-07-23

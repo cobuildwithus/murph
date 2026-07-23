@@ -30,6 +30,8 @@ describe("hosted runtime Temporal worker", () => {
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS",
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
+    "TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
+    "TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
   ] as const;
   const originalPerformanceEnv = new Map(
     performanceEnvKeys.map((key) => [key, process.env[key]]),
@@ -220,6 +222,49 @@ describe("hosted runtime Temporal worker", () => {
     expect(() => readHostedUserRuntimeWorkerPerformanceOptions({
       HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS: "101",
     })).toThrow(/fixed 100-Workflow cache limit/u);
+  });
+
+  it("ignores retired fixed poller env aliases", async () => {
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = "1";
+    process.env.HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = "2";
+    process.env.TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = "3";
+    process.env.TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = "4";
+    const {
+      createHostedUserRuntimeWorker,
+      readHostedUserRuntimeWorkerPerformanceOptions,
+    } = await import("../src/worker.js");
+
+    expect(readHostedUserRuntimeWorkerPerformanceOptions(process.env)).toEqual({
+      activityTaskPollerBehavior: {
+        type: "autoscaling",
+      },
+      maxConcurrentActivityTaskExecutions: 100,
+      maxCachedWorkflows: 100,
+      maxConcurrentWorkflowTaskExecutions: 20,
+      reuseV8Context: true,
+      workflowTaskPollerBehavior: {
+        type: "autoscaling",
+      },
+    });
+
+    await createHostedUserRuntimeWorker({
+      connection: { kind: "injected" } as never,
+      namespace: "hosted-local",
+    });
+
+    const workerOptions = readCreatedWorkerOptions();
+    expect(workerOptions.activityTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
+    expect(workerOptions.workflowTaskPollerBehavior).toEqual({
+      type: "autoscaling",
+    });
+    expect(workerOptions.maxConcurrentActivityTaskExecutions).toBeUndefined();
+    expect(workerOptions.maxConcurrentActivityTaskPolls).toBeUndefined();
+    expect(workerOptions.maxConcurrentWorkflowTaskExecutions).toBeUndefined();
+    expect(workerOptions.maxConcurrentWorkflowTaskPolls).toBeUndefined();
+    expect(workerOptions.maxCachedWorkflows).toBeUndefined();
+    expect(workerOptions.reuseV8Context).toBeUndefined();
   });
 
   it("runs two Render worker instances", async () => {
