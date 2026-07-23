@@ -1,4 +1,5 @@
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
+import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
 
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
+import { VoiceMemoPlayer } from "@/src/components/ui/voice-memo-player";
 import {
   buildMurphEmailHref,
   type MurphContactOption,
@@ -17,18 +19,23 @@ import {
 
 import type { ConnectIntentRecoveryRequest, ConnectSource } from "./connect-page-types";
 
+const DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC =
+  `/audio/garmin-historical-data-memos/${defaultAssistantVoiceOptionId}.mp3`;
+
 export function GarminHistoricalDataDialog({
   open,
   onContinue,
   onOpenChange,
+  voiceMemoSrc,
 }: {
   open: boolean;
   onContinue: () => void;
   onOpenChange: (open: boolean) => void;
+  voiceMemoSrc?: string | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-6 p-6 sm:max-w-md md:p-7">
+      <DialogContent className="gap-5 p-6 sm:max-w-md md:p-7">
         <DialogHeader className="pr-10">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
             Garmin
@@ -37,16 +44,22 @@ export function GarminHistoricalDataDialog({
             Turn on Historical Data
           </DialogTitle>
           <DialogDescription className="leading-6">
-            Garmin leaves Historical Data off by default. When Garmin asks what
-            to share, turn it on before approving so Murph can receive the
-            recent history Garmin makes available.
+            When Garmin opens, turn on Historical Data before approving.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <Button type="button" size="lg" onClick={onContinue}>
-            Continue to Garmin
-          </Button>
+        <VoiceMemoPlayer
+          accessibleLabel="Garmin Historical Data reminder"
+          src={voiceMemoSrc ?? DEFAULT_GARMIN_HISTORICAL_DATA_VOICE_MEMO_SRC}
+          bars={24}
+          preload="metadata"
+          containerClassName="rounded-lg bg-background px-3 py-2 ring-1 ring-border"
+          accentClassName="bg-primary"
+          fillClassName="bg-primary"
+          trackClassName="bg-primary/20"
+        />
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button
             type="button"
             size="lg"
@@ -54,6 +67,9 @@ export function GarminHistoricalDataDialog({
             onClick={() => onOpenChange(false)}
           >
             Cancel
+          </Button>
+          <Button type="button" size="lg" onClick={onContinue}>
+            Continue to Garmin
           </Button>
         </div>
       </DialogContent>

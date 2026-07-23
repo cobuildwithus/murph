@@ -67,6 +67,7 @@ export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 export function ConnectSourcesGrid({
   authenticated = true,
   deviceConnectRecoveryContactAction = null,
+  garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
   initialConnectIntent = null,
   initialLoadError = null,
@@ -75,6 +76,7 @@ export function ConnectSourcesGrid({
 }: {
   authenticated?: boolean;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
+  garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
@@ -474,6 +476,7 @@ export function ConnectSourcesGrid({
 
       <GarminHistoricalDataDialog
         open={Boolean(garminHistoricalDataRequest)}
+        voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
         onOpenChange={(open) => {
           if (!open) {
             setGarminHistoricalDataRequest(null);

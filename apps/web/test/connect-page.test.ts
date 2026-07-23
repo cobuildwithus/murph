@@ -2186,6 +2186,8 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
   vi.stubGlobal("fetch", fetch);
   const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    garminHistoricalDataVoiceMemoSrc:
+      "/audio/garmin-historical-data-memos/grandpa.mp3",
     sources: [
       {
         connectTarget: "garmin",
@@ -2213,8 +2215,19 @@ test("ConnectSourcesGrid explains Garmin Historical Data before starting the con
   assert.match(rendered.container.textContent ?? "", /Turn on Historical Data/);
   assert.match(
     rendered.container.textContent ?? "",
-    /Garmin leaves Historical Data off by default/,
+    /When Garmin opens, turn on Historical Data before approving\./,
   );
+  assert.ok(
+    rendered.container.querySelector(
+      "audio[src='/audio/garmin-historical-data-memos/grandpa.mp3']",
+    ),
+    "expected the member's picked-voice Garmin reminder",
+  );
+
+  const dialogButtons = [...rendered.container.querySelectorAll("button")]
+    .map((button) => button.textContent?.trim())
+    .filter((label) => label === "Cancel" || label === "Continue to Garmin");
+  assert.deepEqual(dialogButtons, ["Cancel", "Continue to Garmin"]);
 
   const continueButton = [...rendered.container.querySelectorAll("button")]
     .find((button) => button.textContent === "Continue to Garmin");

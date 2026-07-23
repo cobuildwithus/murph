@@ -16,7 +16,7 @@ import type {
   DeviceSyncCompletionSetupGuide,
 } from "@/src/lib/device-sync/connect-completion-types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
-import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/whoop-sync-voice-memo";
+import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/device-sync-voice-memos";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import type { HostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
