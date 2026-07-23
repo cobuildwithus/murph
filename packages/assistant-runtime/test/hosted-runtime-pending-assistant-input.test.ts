@@ -273,11 +273,11 @@ describe("resolveHostedOldestPendingAssistantInputAt", () => {
     });
 
     await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
-      .resolves.toEqual({ hasCandidate: true, indexComplete: false });
+      .resolves.toEqual({ hasCandidate: false, indexComplete: false });
     await expect(resolveHostedOldestPendingAssistantInputAt({ vaultRoot }))
       .resolves.toBeNull();
     await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
-      .resolves.toEqual({ hasCandidate: true, indexComplete: false });
+      .resolves.toEqual({ hasCandidate: false, indexComplete: false });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([event.inputId]);
   });
