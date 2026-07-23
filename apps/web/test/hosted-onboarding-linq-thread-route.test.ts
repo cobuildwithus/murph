@@ -1923,7 +1923,7 @@ describe("Linq explicit external-thread routing", () => {
     vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
     vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
       dayUtc: new Date("2026-06-24T00:00:00.000Z"),
-      inboundCount: linqDailyState.HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
+      inboundCount: linqDailyState.HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT + 1,
       memberId: "member_thread_container_123",
       outboundCount: 0,
       quotaReplySentAt: null,
@@ -1954,6 +1954,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(plan.desiredSideEffects).toHaveLength(1);
     expect(plan.desiredSideEffects[0]?.payload).toMatchObject({
       chatId: "chat_group_123",
+      dailyTextLimit: linqDailyState.HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member_thread_container_123",
       routeAuthority: {
         accountLookupKey: createHostedPhoneLookupKey("+15550000000"),
@@ -1977,6 +1978,41 @@ describe("Linq explicit external-thread routing", () => {
       groupParticipantAdded: true,
     });
     expect(prisma.readPendingParticipantAddition()).toBe(false);
+  });
+
+  it("admits routed thread traffic past the direct-chat daily limit up to the group limit", async () => {
+    const prisma = createPrisma({
+      routeContainerMemberId: "member_thread_container_123",
+    });
+    vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockResolvedValueOnce(null);
+    vi.mocked(linqDailyState.incrementHostedLinqInboundDailyState).mockResolvedValueOnce({
+      dayUtc: new Date("2026-06-24T00:00:00.000Z"),
+      inboundCount: linqDailyState.HOSTED_LINQ_DAILY_TEXT_LIMIT + 1,
+      memberId: "member_thread_container_123",
+      outboundCount: 0,
+      quotaReplySentAt: null,
+    } as Awaited<ReturnType<typeof linqDailyState.incrementHostedLinqInboundDailyState>>);
+    vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockResolvedValueOnce({
+      dedupeConflict: false,
+      duplicate: false,
+      inserted: true,
+      item: buildHostedMailboxItem({
+        id: "mailbox_group_over_direct_limit_123",
+        userId: "member_thread_container_123",
+      }),
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(plan.desiredSideEffects).toHaveLength(0);
   });
 
   it("appends routed thread traffic even when the AI usage gate would deny", async () => {

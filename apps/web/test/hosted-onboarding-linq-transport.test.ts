@@ -134,6 +134,8 @@ import {
 import {
   claimHostedLinqOnboardingLinkNotice,
   claimHostedLinqQuotaReplyNotice,
+  HOSTED_LINQ_DAILY_TEXT_LIMIT,
+  HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
   markHostedLinqOnboardingLinkNoticeSent,
   releaseHostedLinqOnboardingLinkNoticeClaim,
   releaseHostedLinqQuotaReplyNoticeClaim,
@@ -359,6 +361,7 @@ describe("hosted Linq webhook transport", () => {
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -412,6 +415,7 @@ describe("hosted Linq webhook transport", () => {
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -446,6 +450,7 @@ describe("hosted Linq webhook transport", () => {
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -488,6 +493,7 @@ describe("hosted Linq webhook transport", () => {
     });
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -647,6 +653,7 @@ describe("hosted Linq webhook transport", () => {
     const prisma = {};
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -1496,6 +1503,7 @@ describe("hosted Linq webhook transport", () => {
     ));
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -1559,6 +1567,7 @@ describe("hosted Linq webhook transport", () => {
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-group-1",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-thread-container-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -1608,6 +1617,7 @@ describe("hosted Linq webhook transport", () => {
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-group-1",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-thread-container-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -1657,6 +1667,7 @@ describe("hosted Linq webhook transport", () => {
     };
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-group-b",
+      dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
       memberId: "member-thread-container-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
@@ -1738,6 +1749,7 @@ describe("hosted Linq webhook transport", () => {
     vi.mocked(claimHostedLinqQuotaReplyNotice).mockResolvedValueOnce(false);
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",

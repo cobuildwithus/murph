@@ -257,7 +257,7 @@ function HostedLegalConsentCardState({
       className={
         mode === "compact"
           ? "w-full"
-          : "h-auto max-w-full shrink whitespace-normal px-4 py-3 leading-snug sm:px-6"
+          : "h-auto min-h-11 max-w-full whitespace-normal"
       }
       type="button"
       onClick={handleAccept}
@@ -293,7 +293,7 @@ function HostedLegalConsentCardState({
           <p className="font-serif text-xl font-normal tracking-tight text-foreground">{title}</p>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{description}</p>
         </div>
-        <div className="col-span-2 min-w-0 space-y-5 sm:col-span-1 sm:col-start-2">
+        <div className="col-span-2 min-w-0 space-y-5">
           {checkboxes}
           {errorMessage ? (
             <Alert variant="destructive">
@@ -339,11 +339,9 @@ function LaunchConsentCheckboxes({
 }) {
   return (
     <div className="space-y-6">
-      <p className="border-y border-border py-4 text-sm leading-relaxed text-muted-foreground">
-        Hosted Murph processes readable health data through contracted AI and other service
-        providers to provide features you request. Murph does not sell health data or use it for
-        advertising or general-purpose AI model training. Connected-source rules may further limit
-        AI use, sharing, storage, retention, or available features.
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        Murph never sells health data or uses it for advertising or general-purpose AI model
+        training.
       </p>
 
       {legalScope && !legalScope.granted ? (
@@ -389,8 +387,7 @@ function LaunchConsentCheckboxes({
               </a>
               .
               <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                You can stop future collection from a connected source by disconnecting it or
-                revoking its permissions. You can request deletion in Settings.
+                Disconnect a source anytime to stop collection. Request deletion in Settings.
               </span>
             </span>
           }
@@ -411,12 +408,12 @@ function ConsentCheckbox({
 }) {
   const id = useId();
   return (
-    <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
+    <div className="flex items-start gap-3 text-sm leading-relaxed text-foreground">
       <Checkbox
         id={id}
         checked={checked}
         onCheckedChange={onChange}
-        className="size-7 shrink-0"
+        className="mt-0.5 size-5 shrink-0"
       />
       <label htmlFor={id} className="cursor-pointer">
         {label}

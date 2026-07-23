@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   buildHostedLinqAffirmativeReactionMessageEvent: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -23,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -112,10 +110,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRouteLockTx:
     mocks.acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone:
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
@@ -211,9 +205,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation((input: { rawBody: string }) =>
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);
@@ -1321,6 +1313,62 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
+  it("rechecks inactive access under the route owner before routing", async () => {
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
+      core: {
+        billingStatus: HostedBillingStatus.not_started,
+        id: "member_123",
+        suspendedAt: null,
+      },
+    });
+    prisma.hostedMember.findUnique
+      .mockResolvedValueOnce({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.not_started,
+        suspendedAt: null,
+        threadContainer: null,
+      })
+      .mockResolvedValueOnce({
+        accountGroupMemberships: [],
+        billingStatus: HostedBillingStatus.active,
+        suspendedAt: null,
+        threadContainer: null,
+      });
+    mocks.readHostedMemberHomeLinqRoute.mockResolvedValue({
+      linqChatId: "chat_123",
+      linqRecipientPhone: "+15550000000",
+      memberId: "member_123",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      rawBody: buildLinqMessageWebhookBody(),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    expect(prisma.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    const initialAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
+    const refreshedAccessReadOrder =
+      prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
+    const reclassificationLockOrder =
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    expect(initialAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
+    expect(
+      refreshedAccessReadOrder,
+    ).toBeLessThan(
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1],
+    );
+    expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
+  });
+
   it("attempts confirmation recovery after a rejected current Linq wake", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
@@ -1590,7 +1638,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       userId: "member_123",
     });
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
