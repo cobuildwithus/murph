@@ -56,7 +56,6 @@ describe("hosted Privy session", () => {
           type: "phone",
         },
       ],
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
         linked_accounts: [],
@@ -96,7 +95,6 @@ describe("hosted Privy session", () => {
           type: "phone",
         },
       ],
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -118,7 +116,6 @@ describe("hosted Privy session", () => {
       identity: {
         userId: "did:privy:user_123",
       },
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -132,29 +129,4 @@ describe("hosted Privy session", () => {
     });
   });
 
-  it("reads the Murph member id from verified Privy custom metadata", async () => {
-    const { resolveHostedPrivySessionFromRequest } = await import("@/src/lib/hosted-onboarding/hosted-session");
-    mocks.readHostedPrivyIdentityTokenFromRequestCookies.mockReturnValue("identity-token");
-    mocks.buildHostedPrivySessionState.mockReturnValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      linkedAccounts: [],
-      memberId: "member_123",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-        linked_accounts: [],
-      },
-    });
-    const request = new Request("https://join.example.test/api/hosted-onboarding/privy/complete");
-
-    await expect(resolveHostedPrivySessionFromRequest(request)).resolves.toMatchObject({
-      memberId: "member_123",
-    });
-  });
 });

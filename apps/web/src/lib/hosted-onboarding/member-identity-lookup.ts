@@ -38,21 +38,13 @@ export function hasHostedMemberPrivyIdentity(member: {
 export async function lookupHostedMemberForPrivyPrincipal(input: {
   identity: Pick<HostedPrivyIdentity, "userId">;
   prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberPrivyIdentityLookup | null> {
+}): Promise<HostedMemberCoreState | null> {
   const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
     privyUserId: input.identity.userId,
     prisma: input.prisma,
   });
 
-  if (!memberByPrivyUserId) {
-    return null;
-  }
-
-  return {
-    core: memberByPrivyUserId.core,
-    identity: memberByPrivyUserId.identity,
-    matchedBy: [memberByPrivyUserId.matchedBy],
-  };
+  return memberByPrivyUserId?.core ?? null;
 }
 
 export async function lookupHostedMemberForPrivyAuthAttempt(input: {

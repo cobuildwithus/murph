@@ -15,6 +15,19 @@ type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
 
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+};
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 const mocks = vi.hoisted(() => ({
   clearHostedMemberPendingActivationTimeZone: vi.fn(),
   hasHostedMailboxItemByKind: vi.fn(),
@@ -29,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   provisionHostedCryptoDomainRootsForUserTx: vi.fn(),
+  unwrapHostedDomainRootForWeb: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
 }));
 
@@ -36,6 +50,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   hasActiveHostedCryptoDomainRootsForUserTx: mocks.hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx:
     mocks.provisionHostedCryptoDomainRootsForUserTx,
+  unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -201,6 +216,10 @@ describe("hosted onboarding member activation", () => {
       },
     });
     mocks.provisionHostedCryptoDomainRootsForUserTx.mockResolvedValue(undefined);
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(async () => ({
+      envelope: {},
+      rootKey: new Uint8Array(32).fill(7),
+    }));
     mocks.updateHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.active,
       createdAt: new Date("2026-04-12T00:00:00.000Z"),
@@ -250,6 +269,22 @@ describe("hosted onboarding member activation", () => {
       tx: expect.anything(),
       userId: "member_123",
     });
+    expect(mocks.unwrapHostedDomainRootForWeb).toHaveBeenCalledTimes(2);
+    expect(mocks.unwrapHostedDomainRootForWeb).toHaveBeenNthCalledWith(1, {
+      domain: "control",
+      prisma: expect.anything(),
+      userId: "member_123",
+    });
+    expect(mocks.unwrapHostedDomainRootForWeb).toHaveBeenNthCalledWith(2, {
+      domain: "ingress",
+      prisma: expect.anything(),
+      userId: "member_123",
+    });
+    expect(
+      mocks.unwrapHostedDomainRootForWeb.mock.invocationCallOrder[1]!,
+    ).toBeLessThan(
+      mocks.resolveHostedMemberActivationLinqRoute.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         eventId: "member.activated:stripe.invoice.paid:member_123:evt_123",
@@ -276,6 +311,94 @@ describe("hosted onboarding member activation", () => {
       route: expectedRoute,
     });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("zeroes a successful prewarm root when the other domain unwrap fails", async () => {
+    const controlRoot = new Uint8Array(32).fill(9);
+    const ingressError = new Error("ingress root unavailable");
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(
+      async (input: { domain: string }) => {
+        if (input.domain === "ingress") {
+          throw ingressError;
+        }
+        return {
+          envelope: {},
+          rootKey: controlRoot,
+        };
+      },
+    );
+
+    await expect(
+      activateHostedMemberForPositiveSourceTx({
+        dispatchContext: {
+          eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+          occurredAt: "2026-04-12T00:00:00.000Z",
+          sourceEventId: "evt_partial_prewarm",
+          sourceType: "stripe.invoice.paid",
+        },
+        memberId: "member_123",
+        prisma: makeTransactionHarness() as never,
+      }),
+    ).rejects.toBe(ingressError);
+
+    expect(controlRoot).toEqual(new Uint8Array(32));
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("waits for and zeroes a late prewarm root before exposing a sibling failure", async () => {
+    const controlRoot = new Uint8Array(32).fill(11);
+    const controlResult = createDeferred<{
+      envelope: object;
+      rootKey: Uint8Array;
+    }>();
+    const controlStarted = createDeferred<void>();
+    const ingressRejected = createDeferred<void>();
+    const ingressError = new Error("ingress root unavailable first");
+    mocks.unwrapHostedDomainRootForWeb.mockImplementation(
+      async (input: { domain: string }) => {
+        if (input.domain === "control") {
+          controlStarted.resolve();
+          return controlResult.promise;
+        }
+        ingressRejected.resolve();
+        throw ingressError;
+      },
+    );
+
+    const activation = activateHostedMemberForPositiveSourceTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-04-12T00:00:00.000Z"),
+        occurredAt: "2026-04-12T00:00:00.000Z",
+        sourceEventId: "evt_late_control_prewarm",
+        sourceType: "stripe.invoice.paid",
+      },
+      memberId: "member_123",
+      prisma: makeTransactionHarness() as never,
+    });
+    let activationSettled = false;
+    void activation.then(
+      () => {
+        activationSettled = true;
+      },
+      () => {
+        activationSettled = true;
+      },
+    );
+
+    await Promise.all([controlStarted.promise, ingressRejected.promise]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(activationSettled).toBe(false);
+
+    controlResult.resolve({
+      envelope: {},
+      rootKey: controlRoot,
+    });
+    await expect(activation).rejects.toBe(ingressError);
+
+    expect(controlRoot).toEqual(new Uint8Array(32));
+    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("activates family-sponsored members even when their direct billing is canceled", async () => {
