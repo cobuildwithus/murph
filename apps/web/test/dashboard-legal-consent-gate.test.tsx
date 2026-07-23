@@ -392,11 +392,64 @@ test.each([
     await flushPromises();
   });
 
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.container.textContent).not.toContain("Where do you get care?");
+  expect(rendered.window.location.href).toBe(
+    "https://app.example.test/records/connect",
+  );
+  expect(JSON.stringify(rendered.window.history.state)).toContain(claim);
+  const submittedBeforeReload = readRequestedConsentScopes().filter(Boolean);
+  const stagedHistoryState = rendered.window.history.state;
+
+  await cleanupRender();
+  cleanupRender = null;
+  mocks.requestHostedOnboardingJson.mockReset();
+  const acceptedStatus = acceptedStatuses.at(-1)!;
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce(acceptedStatus);
+  const reloaded = await renderClientComponent(
+    createElement(
+      Fragment,
+      null,
+      createElement(DashboardLegalConsentGate, {
+        initialStatus: acceptedStatus,
+        variant,
+      }),
+      createElement(RecordsConnectClient, { authenticated: true }),
+    ),
+    {
+      historyState: stagedHistoryState,
+      location: {
+        hash: "",
+        href: "https://app.example.test/records/connect",
+        origin: "https://app.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = reloaded.cleanup;
+
   await vi.waitFor(() => {
-    expect(rendered.container.textContent).toContain("Where do you get care?");
+    expect(reloaded.container.textContent).toContain("Where do you get care?");
   });
-  expect(rendered.container.textContent).not.toContain("Consent required");
-  expect(readRequestedConsentScopes().filter(Boolean)).toEqual(submittedScopes);
+  expect(reloaded.container.textContent).not.toContain("Consent required");
+  expect(submittedBeforeReload).toEqual(submittedScopes);
+  expect(readRequestedConsentScopes().filter(Boolean)).toEqual([]);
+
+  Object.assign(reloaded.window.location, {
+    hash: "",
+    href: "https://app.example.test/records",
+    pathname: "/records",
+    search: "",
+  });
+  await reloaded.rerender(
+    createElement("p", null, "Medical records"),
+  );
+  expect(reloaded.container.textContent).toContain("Medical records");
+  expect(reloaded.container.textContent).not.toContain("Consent required");
+  expect(reloaded.container.textContent).not.toContain("Review what changed");
+  expect(readRequestedConsentScopes().filter(Boolean)).toEqual([]);
 });
 
 test("a consent preview uses only its injected in-memory acceptance owner", async () => {
