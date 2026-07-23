@@ -201,7 +201,19 @@ Required:
   `/design?tab=components` or `/design?tab=sections` catalog surface and embed
   hosted desktop and mobile screenshots captured there. The screenshots must
   show every materially changed component or section and the states needed for
-  review. PRs without a user-facing frontend UI diff may write `Not applicable`.
+  review. Keep screenshot binaries out of the repository. Capture them only in
+  an ignored local audit path, then upload them from the local machine through
+  the [Cloudflare Images upload API](https://developers.cloudflare.com/api/resources/images/subresources/v1/methods/create/)
+  using `CLOUDFLARE_IMAGES_ACCOUNT_ID` and a least-privilege `Images Write` API
+  token supplied only as local `CLOUDFLARE_IMAGES_API_KEY`. Set
+  `requireSignedURLs=false`, embed a returned public
+  `https://imagedelivery.net/...` variant URL in the PR body, and confirm the
+  URL renders. Retain the local capture only until required review packaging is
+  complete, then delete it. Never print, commit, persist in repository files,
+  or pass the credential to ReviewGPT or another external reviewer; if the
+  local credential is unavailable, report the blocker instead of committing
+  proof images. Proof screenshots must not contain private member data. PRs
+  without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 
