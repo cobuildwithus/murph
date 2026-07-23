@@ -140,16 +140,12 @@ export async function getHostedLinqContactCard(input: {
 
 export async function setupHostedLinqContactCard(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
   const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
     body: buildHostedLinqContactCardBody({
       firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
-      lastName: input.lastName,
       phoneNumber: input.phoneNumber,
     }),
     method: "POST",
@@ -164,8 +160,6 @@ export async function setupHostedLinqContactCard(input: {
 
 export async function updateHostedLinqContactCard(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
@@ -173,8 +167,6 @@ export async function updateHostedLinqContactCard(input: {
   const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
     body: buildHostedLinqContactCardBody({
       firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
-      lastName: input.lastName,
     }),
     method: "PATCH",
     operation: "contact card update",
@@ -240,7 +232,6 @@ async function reconcileHostedLinqContactCardForLine(input: {
 
   const updated = await updateHostedLinqContactCard({
     firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-    imageUrl: null,
     phoneNumber: input.phoneNumber,
     signal: input.signal,
   });
@@ -248,11 +239,7 @@ async function reconcileHostedLinqContactCardForLine(input: {
 }
 
 function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
-  if (card.firstName !== MURPH_CONTACT_CARD_FIRST_NAME || (card.lastName ?? "") !== "") {
-    return false;
-  }
-
-  return card.imageUrl === null;
+  return card.firstName === MURPH_CONTACT_CARD_FIRST_NAME;
 }
 
 /**
@@ -342,19 +329,13 @@ async function fetchHostedLinqResponse(input: {
 
 function buildHostedLinqContactCardBody(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber?: string | null;
-}): Record<string, string | null> {
+}): Record<string, string> {
   const firstName = normalizeNullableString(input.firstName);
-  const imageUrl = input.imageUrl === null ? null : normalizeNullableString(input.imageUrl);
-  const lastName = normalizeNullableString(input.lastName);
   const phoneNumber = normalizeNullableString(input.phoneNumber);
 
   return {
     ...(firstName ? { first_name: firstName } : {}),
-    ...(input.imageUrl === null ? { image_url: null } : imageUrl ? { image_url: imageUrl } : {}),
-    ...(lastName ? { last_name: lastName } : {}),
     ...(phoneNumber ? { phone_number: phoneNumber } : {}),
   };
 }
