@@ -223,6 +223,11 @@ export function PersonasSection({
             </article>
           ))}
         </div>
+
+        <p className="mx-auto mt-10 max-w-[72ch] text-center text-xs leading-[1.6] text-[#f5f0e8]/50">
+          Illustrative examples. Changes in personal data can have many causes
+          and do not establish that an intervention produced the result.
+        </p>
       </div>
     </section>
   );

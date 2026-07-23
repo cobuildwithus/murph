@@ -5,6 +5,10 @@ import {
   BiomarkerPreparingStateStudy,
   BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
+import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
@@ -36,6 +40,24 @@ export function SectionsContent() {
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
         Sections
       </h1>
+
+      <Separator />
+
+      <StudySection title="Homepage security and privacy">
+        <SecurityTeaserSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage experiment flow">
+        <HowItWorksSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage personas">
+        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+      </StudySection>
 
       <Separator />
 
