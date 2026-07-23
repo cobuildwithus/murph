@@ -13,7 +13,7 @@ import { PageHeader } from "@/src/components/ui/page-header";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
-import { resolveWhoopSyncVoiceMemoSrc } from "@/src/lib/device-sync/whoop-sync-voice-memo";
+import { resolveDeviceSyncVoiceMemoSources } from "@/src/lib/device-sync/device-sync-voice-memos";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -254,6 +254,9 @@ export default async function ConnectPage({
   const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
     Boolean(auth.authenticatedMember),
   );
+  const voiceMemoSources = await resolveDeviceSyncVoiceMemoSources(
+    auth.authenticatedMember?.id ?? null,
+  );
 
   if (auth.authenticatedMember) {
     try {
@@ -319,12 +322,11 @@ export default async function ConnectPage({
       <ConnectSourcesGrid
         authenticated={Boolean(auth.authenticatedMember)}
         deviceConnectRecoveryContactAction={recoveryContactAction}
+        garminHistoricalDataVoiceMemoSrc={voiceMemoSources.garminHistoricalData}
         initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
-        whoopSyncVoiceMemoSrc={await resolveWhoopSyncVoiceMemoSrc(
-          auth.authenticatedMember?.id ?? null,
-        )}
+        whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}
       />
     </div>
   );
