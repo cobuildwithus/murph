@@ -14,5 +14,5 @@ test("TrustSection renders the trust pillars and message volume line", () => {
   assert.match(markup, /Studies cited/);
   assert.match(markup, /Apache 2\.0/);
   assert.match(markup, /Never sold/);
-  assert.match(markup, /Take everything with you on the way out\./);
+  assert.match(markup, /Export a structured copy of your vault or delete your account\./);
 });

@@ -15,6 +15,7 @@ import type {
   BrowserVaultLabResultFilters,
   BrowserVaultLabResultReferenceRange,
   BrowserVaultLabResultRow,
+  BrowserVaultLabSpecimenKind,
   BrowserVaultQueryClient,
 } from "./shared.ts";
 
@@ -112,6 +113,7 @@ export function toBrowserVaultLabResultRows(input: {
       referenceRange: readReferenceRange(point.context.referenceRange),
       rowSchema: BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA,
       sourceLabel: readOptionalString(point.provenance.sourceLabel),
+      specimenKind: readLabSpecimenKind(test.attributes.specimenType),
       textValue,
       unit: readOptionalString(point.unit),
       value,
@@ -120,6 +122,10 @@ export function toBrowserVaultLabResultRows(input: {
   }
 
   return sortBrowserVaultLabResultRows([...rowsById.values()]);
+}
+
+function readLabSpecimenKind(value: unknown): BrowserVaultLabSpecimenKind | null {
+  return value === "serum" || value === "plasma" ? value : null;
 }
 
 export function labResultRowMatchesFilters(

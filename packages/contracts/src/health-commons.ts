@@ -301,6 +301,14 @@ export const HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES = [
 export type HealthCommonsBiomarkerGuidanceSourceType =
   (typeof HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES)[number];
 
+export const HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS = [
+  "serum",
+  "plasma",
+] as const;
+
+export type HealthCommonsBiomarkerFallbackSpecimenKind =
+  (typeof HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS)[number];
+
 const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -1589,6 +1597,42 @@ export type HealthCommonsBiomarkerGuidanceSource = z.infer<
   typeof healthCommonsBiomarkerGuidanceSourceSchema
 >;
 
+export const healthCommonsBiomarkerFallbackRangeSchema = z
+  .object({
+    eligibleSpecimenKinds: z
+      .array(z.enum(HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS))
+      .min(1),
+    label: shortStringSchema,
+    unit: shortStringSchema,
+    lowerBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+    upperBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),
+    applicability: longStringSchema,
+    source: healthCommonsBiomarkerGuidanceSourceSchema,
+  })
+  .strict()
+  .superRefine((range, context) => {
+    if (!range.lowerBound && !range.upperBound) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback ranges must preserve at least one explicit bound.",
+      });
+    }
+    if (
+      range.lowerBound
+      && range.upperBound
+      && range.lowerBound.value >= range.upperBound.value
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback range lower bounds must be lower than upper bounds.",
+      });
+    }
+  });
+
+export type HealthCommonsBiomarkerFallbackRange = z.infer<
+  typeof healthCommonsBiomarkerFallbackRangeSchema
+>;
+
 export const healthCommonsBiomarkerGuidanceItemSchema = z
   .object({
     kind: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_ITEM_KINDS),
@@ -1608,6 +1652,7 @@ export const healthCommonsBiomarkerReferenceGuidanceSchema = z
     classification: z.enum(HEALTH_COMMONS_BIOMARKER_GUIDANCE_CLASSIFICATIONS),
     reviewStatus: z.literal("reviewed"),
     use: z.literal("context_only"),
+    fallbackRanges: z.array(healthCommonsBiomarkerFallbackRangeSchema).min(1).optional(),
     items: z.array(healthCommonsBiomarkerGuidanceItemSchema).min(1),
   })
   .strict()
@@ -1629,6 +1674,17 @@ export const healthCommonsBiomarkerReferenceGuidanceSchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Qualitative guidance must not manufacture numeric values.",
+      });
+    }
+    if (
+      guidance.fallbackRanges
+      && new Set(guidance.fallbackRanges.map((range) => range.unit)).size
+        !== guidance.fallbackRanges.length
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Fallback ranges must use unique exact units.",
+        path: ["fallbackRanges"],
       });
     }
   });

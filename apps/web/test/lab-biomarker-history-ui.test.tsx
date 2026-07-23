@@ -2,11 +2,15 @@ import { act, createElement, type ReactNode } from "react";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  createBrowserVaultReplica,
   createBrowserVaultQueryClient,
+  createVaultReadModel,
   type BrowserVaultLabResultRow,
   type BrowserVaultQueryClient,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
+import { buildMetricProjection } from "@murphai/query";
+import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -61,6 +65,8 @@ vi.mock("next/link", () => ({
 
 import { BiomarkersPageClient } from "../app/(dashboard)/biomarkers/biomarkers-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
+
+type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
 beforeEach(() => {
   linkPropsMock.value = [];
@@ -406,7 +412,7 @@ test("a numeric result with source text remains plotted without a qualitative om
     expect(text).toContain("5.6%");
     expect(text).not.toContain("comparable numeric results");
     expect(text).not.toContain("Numeric history");
-    expect(text).toContain("Results over time");
+    expect(text).not.toContain("Results over time");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("qualitative result");
     expect(
@@ -782,7 +788,7 @@ test("a single numeric result stays visible without implying a trend", async () 
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("In range");
     expect(text).not.toContain("comparable numeric result in %");
-    expect(text).toContain("A second comparable numeric result will show a change over time");
+    expect(text).not.toContain("A second comparable numeric result will show a change over time");
     expect(
       rendered.container.querySelector("#biomarker-latest-result-heading")?.className,
     ).toContain("text-primary");
@@ -1109,7 +1115,7 @@ test("a one-sided lab range explains the chart limit", async () => {
   }
 });
 
-test("an exact one-sided range stays in history without becoming an ambiguous chart line", async () => {
+test("an exact one-sided range becomes a labeled chart limit", async () => {
   browserVaultMock.value.client = clientWithRows([
     labRow({
       date: "2025-06-03",
@@ -1134,9 +1140,14 @@ test("an exact one-sided range stays in history without becoming an ambiguous ch
   try {
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("<5.6%");
-    expect(text).not.toContain("Latest lab range");
+    expect(text).toContain("Latest lab range");
     expect(text).not.toContain("results plotted");
     expect(text).not.toContain("Dashed lab limit");
+    expect(
+      rendered.container.querySelector(
+        '[aria-label="HbA1c results over time; latest lab range <5.6% from Example Lab"]',
+      ),
+    ).not.toBeNull();
   } finally {
     await rendered.cleanup();
   }
@@ -1162,7 +1173,11 @@ test("qualified structured ranges keep their exact text and never become a chart
   browserVaultMock.value.status = "ready";
 
   const rendered = await renderClientComponent(
-    <LabBiomarkerDetailClient authenticated metricKey="hba1c" />,
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="hba1c"
+    />,
     { requireButton: false },
   );
 
@@ -1170,8 +1185,279 @@ test("qualified structured ranges keep their exact text and never become a chart
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("70-99 fasting; <140 non-fasting");
     expect(text).not.toContain("Latest lab range");
+    expect(text).not.toContain("Published adult comparator");
     expect(text).not.toContain("shaded area");
     expect(text).not.toContain("Range 70 to 99 mg/dL");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a unit-matched published comparator appears only when the latest lab range is absent", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2025-06-03",
+      id: "chloride-2025",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 102,
+      unit: "mmol/L",
+      value: 102,
+    }),
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      flag: "normal",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("In range");
+    expect(text).not.toContain("Lab rangeNot listed");
+    expect(text).toContain("98 to 107 mmol/L");
+    expect(text).toContain("Mayo Clinic Laboratories adult serum reference interval");
+    expect(text).toContain("Published adult comparator");
+    expect(text).toContain("not the reporting lab's range");
+    expect(text).not.toContain("Latest lab range");
+    expect(
+      rendered.container.querySelector(
+        '[aria-label="Chloride results over time; published adult comparator 98 to 107 mmol/L from Mayo Clinic Laboratories adult serum reference interval · not the reporting lab\'s range"]',
+      ),
+    ).not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  { expected: true, specimenType: "serum" },
+  { expected: false, specimenType: "urine" },
+  { expected: false, specimenType: null },
+] as const)(
+  "production projection selects a canonical-unit published comparator only for $specimenType specimen",
+  async ({ expected, specimenType }) => {
+    const vault = createVaultReadModel({
+      entities: [importedTotalProteinTest(specimenType)],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    });
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-07-22T12:00:00.000Z",
+      metricPoints: buildMetricProjection(vault).metricPoints,
+      sourceBundleHash: "8".repeat(64),
+      vault,
+    });
+    browserVaultMock.value.client = createBrowserVaultQueryClient(replica);
+    browserVaultMock.value.status = "ready";
+
+    const rendered = await renderClientComponent(
+      <LabBiomarkerDetailClient
+        authenticated
+        fallbackRanges={[{
+          applicability: "For published adult comparison on serum results.",
+          eligibleSpecimenKinds: ["serum"],
+          label: "Reviewed serum interval",
+          lowerBound: { inclusive: true, value: 6.3 },
+          unit: "g/dL",
+          upperBound: { inclusive: true, value: 7.9 },
+        }]}
+        metricKey="total-protein"
+      />,
+      { requireButton: false },
+    );
+
+    try {
+      const text = rendered.container.textContent ?? "";
+      expect(text).toContain("7 g/dL");
+      expect(text).toContain("In range");
+      expect(text.includes("Published adult comparator")).toBe(expected);
+      expect(text.includes("not the reporting lab's range")).toBe(expected);
+      expect(text.includes("6.3 to 7.9 g/dL")).toBe(expected);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("a specimen-mismatched published comparator is withheld", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      id: "chloride-plasma",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      specimenKind: "plasma",
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).not.toContain("Published adult comparator");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("the reporting lab range wins over a matching published comparator", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2025-06-03",
+      id: "chloride-2025",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 102,
+      referenceRange: { high: 106, low: 98 },
+      unit: "mmol/L",
+      value: 102,
+    }),
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      referenceRange: { high: 106, low: 98 },
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("Latest lab range");
+    expect(text).toContain("98 to 106 mmol/L");
+    expect(text).not.toContain("Published adult comparator");
+    expect(text).not.toContain("Mayo Clinic Laboratories adult serum reference interval");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("a published comparator with a different unit is withheld", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mEq/L",
+      normalizedValue: 101,
+      unit: "mEq/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).not.toContain("Published adult comparator");
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  {
+    bound: { upperBound: { inclusive: false, value: 107 } },
+    expectedRange: "<107 mmol/L",
+  },
+  {
+    bound: { lowerBound: { inclusive: true, value: 97 } },
+    expectedRange: ">=97 mmol/L",
+  },
+] as const)("a one-sided published comparator preserves $expectedRange", async ({ bound, expectedRange }) => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      date: "2026-06-14",
+      id: "chloride-2026",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={[{
+        applicability: "For published adult comparison on serum or plasma results.",
+        ...bound,
+        eligibleSpecimenKinds: ["serum"],
+        label: "Reviewed adult limit",
+        unit: "mmol/L",
+      }]}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    const text = rendered.container.textContent ?? "";
+    expect(text).toContain("Published adult comparator");
+    expect(text).toContain(expectedRange);
+    expect(text).toContain("Reviewed adult limit");
   } finally {
     await rendered.cleanup();
   }
@@ -1215,6 +1501,15 @@ test("a missing latest range withholds the band without adding summary tiles", a
 function clientWithRows(rows: BrowserVaultLabResultRow[]): BrowserVaultQueryClient {
   return createBrowserVaultQueryClient(createReplica(rows));
 }
+
+const TEST_ADULT_FALLBACK_RANGES: readonly HealthCommonsWebBiomarkerFallbackRange[] = [{
+  applicability: "For published adult comparison on serum results.",
+  eligibleSpecimenKinds: ["serum"],
+  label: "Mayo Clinic Laboratories adult serum reference interval",
+  lowerBound: { inclusive: true, value: 98 },
+  unit: "mmol/L",
+  upperBound: { inclusive: true, value: 107 },
+}];
 
 function createReplica(labResultRows: BrowserVaultLabResultRow[]): BrowserVaultReplica {
   return {
@@ -1262,10 +1557,49 @@ function labRow(
     referenceRange: null,
     rowSchema: "murph.browser-vault.lab-result-row.v1",
     sourceLabel: "Lab result",
+    specimenKind: "serum",
     textValue: null,
     unit: "%",
     value: 5.6,
     ...overrides,
+  };
+}
+
+function importedTotalProteinTest(specimenType: "serum" | "urine" | null): BrowserVaultEntity {
+  return {
+    attributes: {
+      collectedAt: "2026-06-14T08:00:00.000Z",
+      dataOrigin: { importedAt: "2026-06-15T08:00:00.000Z" },
+      labName: "Example Lab",
+      results: [{
+        analyte: "Total Protein",
+        flag: "normal",
+        unit: "g/L",
+        value: 70,
+      }],
+      source: "import",
+      ...(specimenType === null ? {} : { specimenType }),
+      testCategory: "blood",
+      testName: "metabolic_panel",
+    },
+    body: null,
+    date: "2026-06-14",
+    entityId: `evt-total-protein-${specimenType ?? "missing"}`,
+    experimentSlug: null,
+    family: "event",
+    frontmatter: {},
+    kind: "test",
+    links: [],
+    lookupIds: [],
+    occurredAt: "2026-06-14T08:00:00.000Z",
+    path: `ledger/events/evt-total-protein-${specimenType ?? "missing"}.md`,
+    primaryLookupId: `evt-total-protein-${specimenType ?? "missing"}`,
+    recordClass: "ledger",
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: "Metabolic panel",
   };
 }
 
