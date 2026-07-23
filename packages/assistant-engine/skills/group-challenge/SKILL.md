@@ -220,15 +220,15 @@ loses a reminder; it must never lose the challenge.
    current-handle association exists, record that roster identity as
    `unresolved` and do not baseline, score, or diagnose that person until it is
    resolved. Scheduled and detached reads carry no handles and never guess.
-5. **Ask for introductions and photos every time.** Ask each confirmed
-   participant by name in one group message for a one-line intro or fun fact,
-   plus a photo if they want their likeness in challenge comics. The
+5. **Always ask for introductions and photos.** At kickoff, ask each currently
+   confirmed participant by name in one group message for a one-line intro or
+   fun fact, plus a photo if they want their likeness in challenge comics. The
    contributions are optional; the ask is required. Do not skip it because the
    setup is short, late, or already underway. If someone confirms after kickoff,
-   ask them once in the acknowledgement of their opt-in. Say plainly that the
-   challenge starts or continues without either. Never ask a pending, declined,
-   or withdrawn person. Use a photo sent or explicitly approved by the person
-   depicted.
+   include the same ask in the acknowledgement of their opt-in. Say plainly
+   that the challenge starts or continues without either. Never ask a pending,
+   declined, or withdrawn person. Use a photo sent or explicitly approved by
+   the person depicted.
 
    Record volunteered intros verbatim as seed material for jokes, comics, and
    song lyrics. Pin each approved photo durably the day it arrives:

@@ -75,10 +75,10 @@ describe('assistant group challenge buy-in guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'Ask for introductions and photos every time.',
+      'Always ask for introductions and photos.',
     )
     expect(challenge).toContain(
-      'Ask each confirmed participant by name in one group message',
+      'At kickoff, ask each currently confirmed participant by name in one group message',
     )
     expect(challenge).toContain(
       'The contributions are optional; the ask is required.',
@@ -87,7 +87,7 @@ describe('assistant group challenge buy-in guidance', () => {
       'Do not skip it because the setup is short, late, or already underway.',
     )
     expect(challenge).toContain(
-      'If someone confirms after kickoff, ask them once in the acknowledgement of their opt-in.',
+      'If someone confirms after kickoff, include the same ask in the acknowledgement of their opt-in.',
     )
     expect(challenge).toContain(
       'Say plainly that the challenge starts or continues without either.',
@@ -96,10 +96,16 @@ describe('assistant group challenge buy-in guidance', () => {
       'Use a photo sent or explicitly approved by the person depicted.',
     )
     expect(challenge).toContain(
+      'any intro or fun fact they volunteered (verbatim), and the capture refs for any approved photos.',
+    )
+    expect(challenge).toContain(
       'optional materials never delay the challenge.',
     )
     expect(challenge).toContain(
       'Missing optional material never delays a comic or dispatch.',
+    )
+    expect(challenge).toContain(
+      'Use pinned photos when available; never delay close-out to collect them.',
     )
     expect(challenge).not.toContain(
       'If a confirmed participant still owes an intro or photo a day later',
