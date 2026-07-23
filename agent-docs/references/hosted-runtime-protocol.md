@@ -973,17 +973,19 @@ Existing global file-type exclusions still apply regardless of directory.
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. Phone-call
 analysis therefore uses the dedicated `phone-call.resulted` system-mailbox event
-instead. When Engine resolves a newly created attended direct session, its
-initial provider-plan hook identifies that session after local turn persistence
-but before provider execution. Output-only notification turns cannot invoke the
-phone tool and do not add this boundary. The runner stops the foreground mailbox
-watcher and the runtime pauses detached work while it publishes the existing full
-`idle_shutdown` workspace snapshot, then both owners resume in `finally`.
-Snapshot failure prevents the provider and therefore prevents Web or Retell
-from being called. A successful same-session checkpoint may coalesce only for
-that runtime invocation; existing sessions do not add a boundary, and the
-continuing provider turn remains dirty for its ordinary final checkpoint. At
-call start, Web stores the trusted initiating resident-session id
+instead. Before provider execution, Engine identifies every attended direct
+session whose accepted provider batch contains user action. The runtime compares
+that session with the session ids physically restored from the published
+workspace snapshot. If it was absent, including when a deterministic welcome
+created it earlier in the same live invocation, the runner stops the foreground
+mailbox watcher and the runtime pauses detached work while it publishes the
+existing full `idle_shutdown` workspace snapshot; both owners resume in
+`finally`. Output-only notification turns emit no boundary. Snapshot failure
+prevents the provider and therefore prevents Web or Retell from being called.
+A successful same-session checkpoint may coalesce only for that runtime
+invocation. A session already present in the restored published snapshot adds
+no boundary, and the continuing provider turn remains dirty for its ordinary
+final checkpoint. At call start, Web stores the trusted initiating resident-session id
 on the call row. Completion carries that exact id plus at most 4,000 UTF-8 bytes
 of untrusted context; it never re-resolves mutable notification routing. The
 runtime requires the referenced session to exist and remain direct, then appends

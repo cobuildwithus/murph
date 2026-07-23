@@ -2774,10 +2774,10 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
     },
     beforeProviderAcceptedInputs: async ({
       acceptedInputs,
-      newDirectUserActionSession,
+      directUserActionSession,
     }) => {
       assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
-      assert.equal(newDirectUserActionSession, undefined)
+      assert.equal(directUserActionSession, undefined)
       callOrder.push('accepted-inputs')
     },
     prompt: 'Initial prompt',
@@ -2787,7 +2787,30 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
   assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
 })
 
-test('sendAssistantMessageLocal identifies a newly created direct session before provider execution', async () => {
+test.each([
+  {
+    expectedSessionId: 'session-new-direct',
+    label: 'created by the current turn',
+    sessionCreated: true,
+    turnTrigger: 'manual-ask' as const,
+  },
+  {
+    expectedSessionId: 'session-new-direct',
+    label: 'created earlier by an output-only welcome',
+    sessionCreated: false,
+    turnTrigger: 'manual-ask' as const,
+  },
+  {
+    expectedSessionId: null,
+    label: 'used by an output-only notification',
+    sessionCreated: false,
+    turnTrigger: 'automation-cron' as const,
+  },
+])('sendAssistantMessageLocal emits the direct user-action session boundary for a session $label', async ({
+  expectedSessionId,
+  sessionCreated,
+  turnTrigger,
+}) => {
   const callOrder: string[] = []
   const session = createAssistantSession({
     binding: {
@@ -2822,7 +2845,7 @@ test('sendAssistantMessageLocal identifies a newly created direct session before
       },
     },
     session,
-    sessionCreated: true,
+    sessionCreated,
   })
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
     await providerInput.onProviderRequestPlanned?.({
@@ -2858,13 +2881,15 @@ test('sendAssistantMessageLocal identifies a newly created direct session before
         source: 'manual',
       }],
     },
-    beforeProviderAcceptedInputs: async ({ newDirectUserActionSession }) => {
-      assert.deepEqual(newDirectUserActionSession, {
-        sessionId: 'session-new-direct',
-      })
+    beforeProviderAcceptedInputs: async ({ directUserActionSession }) => {
+      assert.deepEqual(
+        directUserActionSession,
+        expectedSessionId ? { sessionId: expectedSessionId } : undefined,
+      )
       callOrder.push('new-direct-session')
     },
     prompt: 'Please place the call.',
+    turnTrigger,
     vault: '/vaults/test',
   })
 

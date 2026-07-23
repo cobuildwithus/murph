@@ -20212,7 +20212,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("publishes a new direct session through the production snapshot bridge before provider start", async () => {
+  test("publishes a direct session absent from the restored snapshot before provider start", async () => {
     const workspaceRoot = await mkdtemp(
       path.join(tmpdir(), "murph-new-direct-session-checkpoint-"),
     );
@@ -20393,7 +20393,7 @@ describe("hosted workspace runtime entrypoint", () => {
           events.push("origin:created");
           await phaseInput.beforeProviderAcceptedInputs?.({
             acceptedInputs: [],
-            newDirectUserActionSession: {
+            directUserActionSession: {
               sessionId: originSessionId,
             },
           });
@@ -20434,6 +20434,132 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       await removeTempRoot(workspaceRoot);
       await removeTempRoot(restoredWorkspaceRoot);
+    }
+  });
+
+  test("does not republish a direct session already present in the restored snapshot", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-restored-direct-session-"),
+    );
+    const sessionId = "asst_restored_direct_session";
+    const snapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-restored-direct-session",
+    );
+    let checkpointCalls = 0;
+    let providerStarted = false;
+
+    try {
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput(),
+        {
+          async createCheckpointSnapshot() {
+            checkpointCalls += 1;
+            throw new Error(
+              "A direct session already in the restored snapshot must not be republished.",
+            );
+          },
+          async importItem() {
+            throw new Error(
+              "Restored direct session test has no mailbox payloads.",
+            );
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({
+                snapshotRef,
+                version: "0",
+              }),
+            }),
+            workspaceSnapshotPort: {
+              async abortSnapshotSession() {
+                throw new Error(
+                  "Restored direct session test should not abort snapshots.",
+                );
+              },
+              async completeSnapshotSession() {
+                throw new Error(
+                  "Restored direct session test should not complete snapshots.",
+                );
+              },
+              async putSnapshotObjectDirect() {
+                throw new Error(
+                  "Restored direct session test should not upload snapshots.",
+                );
+              },
+              async restoreWorkspaceSnapshot(input) {
+                await initializeVault({
+                  createdAt: TEST_NOW,
+                  vaultRoot: input.durableRoot,
+                });
+                await saveAssistantSession(
+                  input.durableRoot,
+                  parseAssistantSessionRecord({
+                    alias: null,
+                    binding: {
+                      actorId: "actor_restored_direct",
+                      channel: "linq",
+                      conversationKey: null,
+                      delivery: {
+                        kind: "thread",
+                        target: "linq_chat_restored_direct",
+                      },
+                      identityId: "identity_restored_direct",
+                      threadId: "thread_restored_direct",
+                      threadIsDirect: true,
+                    },
+                    createdAt: TEST_NOW,
+                    lastTurnAt: TEST_NOW,
+                    resumeState: null,
+                    schema: "murph.assistant-session.v1",
+                    sessionId,
+                    target: {
+                      adapter: "codex-cli",
+                      approvalPolicy: "never",
+                      codexCommand: null,
+                      codexHome: null,
+                      model: "gpt-5.6-terra",
+                      modelProvider: "vercel-ai-gateway",
+                      oss: false,
+                      profile: null,
+                      reasoningEffort: "medium",
+                      sandbox: "danger-full-access",
+                    },
+                    turnCount: 1,
+                    updatedAt: TEST_NOW,
+                  }),
+                );
+              },
+              async startSnapshotSession() {
+                throw new Error(
+                  "Restored direct session test should not start snapshots.",
+                );
+              },
+            },
+          }),
+          async runAssistantPhase(phaseInput) {
+            await phaseInput.beforeProviderAcceptedInputs?.({
+              acceptedInputs: [],
+              directUserActionSession: {
+                sessionId,
+              },
+            });
+            providerStarted = true;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(providerStarted, true);
+      assert.equal(checkpointCalls, 0);
+    } finally {
+      await removeTempRoot(vaultRoot);
     }
   });
 
@@ -20478,7 +20604,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(phaseInput) {
             await phaseInput.beforeProviderAcceptedInputs?.({
               acceptedInputs: [],
-              newDirectUserActionSession: {
+              directUserActionSession: {
                 sessionId: "asst_new_direct_checkpoint_failure",
               },
             });
@@ -20624,7 +20750,7 @@ describe("hosted workspace runtime entrypoint", () => {
               try {
                 await phaseInput.beforeProviderAcceptedInputs?.({
                   acceptedInputs: [],
-                  newDirectUserActionSession: {
+                  directUserActionSession: {
                     sessionId: "asst_new_direct_detached_resume",
                   },
                 });

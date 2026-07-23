@@ -43,6 +43,7 @@ import {
 import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
+  listValidAssistantSessionIds,
 } from "@murphai/assistant-engine";
 import {
   normalizeHostedAssistantRuntimeConfig,
@@ -1102,6 +1103,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspace: workspaceRead.workspace,
     });
     assertRuntimeNotAborted();
+    const durablyCheckpointedDirectAssistantSessionIds =
+      workspaceRead.workspace?.snapshotRef
+        ? new Set(await listValidAssistantSessionIds(restored.vaultRoot))
+        : new Set<string>();
+    assertRuntimeNotAborted();
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
@@ -1752,7 +1758,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let currentAssistantInputId: string | null = null;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
-          checkpointNewDirectAssistantSession,
+          checkpointDirectAssistantSession,
+          shouldCheckpointDirectAssistantSession,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
           initialMailboxImport: passInput.initialMailboxImport,
           initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
@@ -1801,18 +1808,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 },
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
-                  newDirectUserActionSession,
+                  directUserActionSession,
                 }) => {
-                  if (newDirectUserActionSession) {
-                    const checkpointNewDirectSession =
-                      phaseInput.beforeNewDirectAssistantSessionProviderTurn;
-                    if (!checkpointNewDirectSession) {
+                  if (directUserActionSession) {
+                    const checkpointDirectSession =
+                      phaseInput.beforeDirectAssistantSessionProviderTurn;
+                    if (!checkpointDirectSession) {
                       throw new TypeError(
-                        "Hosted new direct assistant sessions require pre-provider checkpoint support.",
+                        "Hosted direct user-action sessions require pre-provider checkpoint support.",
                       );
                     }
-                    await checkpointNewDirectSession(
-                      newDirectUserActionSession.sessionId,
+                    await checkpointDirectSession(
+                      directUserActionSession.sessionId,
                     );
                   }
                   const acceptedInputsOnlyAssistant = acceptedInputs.every(
@@ -2155,9 +2162,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: pendingWake.nextWakeAt,
       });
     };
-    const durablyCheckpointedNewDirectAssistantSessionIds = new Set<string>();
-    const checkpointNewDirectAssistantSession = async (sessionId: string) => {
-      if (durablyCheckpointedNewDirectAssistantSessionIds.has(sessionId)) {
+    const shouldCheckpointDirectAssistantSession = (sessionId: string): boolean =>
+      !durablyCheckpointedDirectAssistantSessionIds.has(sessionId);
+    const checkpointDirectAssistantSession = async (sessionId: string) => {
+      if (!shouldCheckpointDirectAssistantSession(sessionId)) {
         return;
       }
       await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
@@ -2179,7 +2187,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspacePort: foregroundWorkspacePort,
         });
         rebaseCommittedWorkspace(checkpoint.workspace);
-        durablyCheckpointedNewDirectAssistantSessionIds.add(sessionId);
+        durablyCheckpointedDirectAssistantSessionIds.add(sessionId);
         // Provider work continues after this boundary and mutates the same
         // workspace. Keep the ordinary final checkpoint armed for those later
         // writes instead of treating the pre-provider snapshot as clean.

@@ -227,7 +227,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   acceptedAssistantInputCausalSeq?: string | null;
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
-  beforeNewDirectAssistantSessionProviderTurn?: ((sessionId: string) => Promise<void>) | null;
+  beforeDirectAssistantSessionProviderTurn?: ((sessionId: string) => Promise<void>) | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -352,7 +352,7 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
-  checkpointNewDirectAssistantSession?: ((sessionId: string) => Promise<void>) | null;
+  checkpointDirectAssistantSession?: ((sessionId: string) => Promise<void>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -376,6 +376,7 @@ export interface HostedWorkspaceRunnerInput {
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
+  shouldCheckpointDirectAssistantSession?: ((sessionId: string) => boolean) | null;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
@@ -1016,12 +1017,17 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }),
     assistantAutomationScheduleChanged: () => assistantAutomationScheduleChanged,
     backgroundMaintenanceSignal: backgroundMaintenanceAbortController.signal,
-    beforeNewDirectAssistantSessionProviderTurn:
-      input.checkpointNewDirectAssistantSession
+    beforeDirectAssistantSessionProviderTurn:
+      input.checkpointDirectAssistantSession
         ? async (sessionId: string): Promise<void> => {
+            if (
+              input.shouldCheckpointDirectAssistantSession?.(sessionId) === false
+            ) {
+              return;
+            }
             await stopForegroundMailboxImportLoop();
             try {
-              await input.checkpointNewDirectAssistantSession?.(sessionId);
+              await input.checkpointDirectAssistantSession?.(sessionId);
             } finally {
               if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
                 await startForegroundMailboxImportLoop();

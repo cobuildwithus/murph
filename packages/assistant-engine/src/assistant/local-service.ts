@@ -1144,8 +1144,7 @@ export async function sendAssistantMessageLocal(
             acceptedInputItemsForProviderRequest = providerRequestAcceptedInputItems
             return await input.beforeProviderAcceptedInputs?.({
               acceptedInputs: providerRequestAcceptedInputItems,
-              ...(resolved.created
-                && resolveAssistantConversationScope(
+              ...(resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,
                 ) === 'direct'
                 && resolveAssistantUserActionAcceptedInputIds({
@@ -1153,7 +1152,7 @@ export async function sendAssistantMessageLocal(
                   turnTrigger: currentInput.turnTrigger ?? null,
                 }).length > 0
                 ? {
-                    newDirectUserActionSession: {
+                    directUserActionSession: {
                       sessionId: resolved.session.sessionId,
                     },
                   }

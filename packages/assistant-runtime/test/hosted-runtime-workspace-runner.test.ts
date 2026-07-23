@@ -778,7 +778,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("new direct session boundary stops and resumes the foreground mailbox watcher", async () => {
+  test("direct user-action session boundary stops and resumes the foreground mailbox watcher", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-new-direct-boundary-"));
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -787,7 +787,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointNewDirectAssistantSession: async (sessionId) => {
+        checkpointDirectAssistantSession: async (sessionId) => {
           boundarySessionIds.push(sessionId);
           runtimeWakeSignal.notify(Date.now());
         },
@@ -815,7 +815,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase(input) {
           const fetchCountBeforeBoundary = fetchRequests.length;
-          const boundary = input.beforeNewDirectAssistantSessionProviderTurn;
+          const boundary = input.beforeDirectAssistantSessionProviderTurn;
           if (!boundary) {
             throw new Error("Expected new direct session boundary.");
           }
@@ -835,7 +835,64 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("new direct session boundary resumes the foreground watcher after checkpoint failure", async () => {
+  test("direct user-action session already in the durable snapshot skips checkpoint and watcher churn", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-runner-durable-direct-boundary-"),
+    );
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    let checkpointCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointDirectAssistantSession: async () => {
+          checkpointCalls += 1;
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_durable_direct_boundary",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            fetchRequests,
+            items: [],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_durable_direct_boundary",
+        runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+        async runAssistantPhase(input) {
+          const boundary = input.beforeDirectAssistantSessionProviderTurn;
+          if (!boundary) {
+            throw new Error("Expected direct session boundary.");
+          }
+          const fetchCountBeforeBoundary = fetchRequests.length;
+          await boundary("session-durable-direct-boundary");
+          assert.equal(fetchRequests.length, fetchCountBeforeBoundary);
+          return { progressed: false };
+        },
+        shouldCheckpointDirectAssistantSession: () => false,
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(checkpointCalls, 0);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("direct user-action session boundary resumes the foreground watcher after checkpoint failure", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-new-direct-failure-"));
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -844,7 +901,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await runHostedWorkspaceUntilIdleOrBudget({
-        checkpointNewDirectAssistantSession: async () => {
+        checkpointDirectAssistantSession: async () => {
           runtimeWakeSignal.notify(Date.now());
           throw checkpointFailure;
         },
@@ -872,7 +929,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         runtimeWakeSignal,
         async runAssistantPhase(input) {
           const fetchCountBeforeBoundary = fetchRequests.length;
-          const boundary = input.beforeNewDirectAssistantSessionProviderTurn;
+          const boundary = input.beforeDirectAssistantSessionProviderTurn;
           if (!boundary) {
             throw new Error("Expected new direct session boundary.");
           }

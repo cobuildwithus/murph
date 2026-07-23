@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import {
   assistantAutomationStateSchema,
   parseAssistantSessionRecord,
@@ -41,6 +41,7 @@ import {
   retireLegacyAssistantConversationKey,
   writeAutomationState,
   replaceTranscriptEntries,
+  resolveAssistantSessionPath,
   synchronizeAssistantIndexes,
   writeAssistantSession,
 } from './store/persistence.js'
@@ -451,6 +452,30 @@ export async function listAssistantSessionsLocal(
   return withAssistantRuntimeWriteLock(vault, async (paths) => {
     await ensureAssistantState(paths)
     return readAssistantSessionsSorted(paths, await listAssistantSessionFileIds(paths))
+  })
+}
+
+export async function listValidAssistantSessionIds(
+  vault: string,
+): Promise<string[]> {
+  return withAssistantRuntimeWriteLock(vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const validSessionIds: string[] = []
+    for (const sessionId of await listAssistantSessionFileIds(paths)) {
+      try {
+        const session = parseAssistantSessionRecord(
+          JSON.parse(
+            await readFile(resolveAssistantSessionPath(paths, sessionId), 'utf8'),
+          ),
+        )
+        if (session.sessionId === sessionId) {
+          validSessionIds.push(sessionId)
+        }
+      } catch {
+        continue
+      }
+    }
+    return validSessionIds
   })
 }
 
