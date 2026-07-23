@@ -6891,6 +6891,95 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox mode checkpoints deterministic imports before model work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+    const dueWakeAt = "2026-04-10T00:00:00.000Z";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_only",
+            processingMode: "system_mailbox",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-only.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_system_mailbox_only_meal",
+                  kind: "meal-photo.captured",
+                  lane: "system",
+                  laneSeq: "1",
+                }),
+                createMailboxItem({
+                  id: "mailbox_item_system_mailbox_only_conversation",
+                  kind: "conversation.message",
+                  lane: "conversation",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                nextWakeAt: dueWakeAt,
+                nextWakeReason: "assistant_due",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox processing must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"]],
+      );
+      assert.deepEqual(imported, ["system:meal-photo.captured"]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "0",
+      );
+      assert.equal(checkpointRequests[0]?.nextWakeAt, dueWakeAt);
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "assistant_due");
+      assert.equal(result.nextWakeAt, dueWakeAt);
+      assert.equal(result.nextWakeReason, "assistant_due");
+      assert.equal(result.status, "scheduled");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];

@@ -49,9 +49,6 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
-  HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS,
-} from "./ai-usage-gate";
-import {
   decryptHostedMailboxPayloadString,
   encryptHostedMailboxPayloadString,
   type HostedMailboxPayloadStorage,
@@ -1200,61 +1197,6 @@ export async function advanceHostedMailboxConsumedSeqByLane(input: {
   }
 
   return result;
-}
-
-export async function readHostedMailboxPendingSystemItemsNeedAiUsageGate(input: {
-  afterSeq: bigint | number | string;
-  prisma?: HostedMailboxStoreClient;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const afterSeq = normalizeHostedMailboxSeq(
-    input.afterSeq,
-    "Hosted mailbox pending system afterSeq",
-  );
-  const row = await prisma.hostedMailboxItem.findFirst({
-    select: {
-      id: true,
-    },
-    where: {
-      kind: {
-        in: [...HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS],
-      },
-      ...buildHostedMailboxLiveItemWhere(new Date()),
-      lane: "system",
-      laneSeq: {
-        gt: afterSeq,
-      },
-      userId,
-    },
-  });
-
-  return row !== null;
-}
-
-export async function hasHostedMailboxMealPhotoCaptureSince(input: {
-  prisma?: HostedMailboxStoreClient;
-  since: Date;
-  userId: string;
-}): Promise<boolean> {
-  const prisma = input.prisma ?? getPrisma();
-  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
-  const row = await prisma.hostedMailboxItem.findFirst({
-    select: {
-      id: true,
-    },
-    where: {
-      createdAt: {
-        gte: input.since,
-      },
-      kind: "meal-photo.captured",
-      lane: "system",
-      userId,
-    },
-  });
-
-  return row !== null;
 }
 
 export async function readHostedMailboxLatestPendingConversationItem(input: {

@@ -18,6 +18,7 @@ import {
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsRequest,
+  type HostedRuntimeProcessingMode,
   type HostedRuntimeSignal,
   type HostedRuntimeWorkflowState,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -110,7 +111,7 @@ export interface HostedUserRuntimeWorkflowRuntime {
   deprecateReconciliationBeforeMailboxProcessingPatch(): void;
   ensureRuntimeProcessing(input: {
     orchestrationAttemptId: string;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: HostedRuntimeProcessingMode | null;
     userId: string;
   }): Promise<HostedRuntimeEnsureProcessingResponse>;
   nowMs(): number;
@@ -190,7 +191,7 @@ export function createHostedUserRuntimeWorkflowMachine(
 
   const executeRuntimeProcessing = async (processingInput: {
     clearMailboxPointerOnAccepted: boolean;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: HostedRuntimeProcessingMode | null;
   }): Promise<void> => {
     const signalVersionBeforeExecution = state.signalVersion;
     const mailboxVersionBeforeExecution = mailboxSignalVersion;
@@ -367,6 +368,14 @@ export function createHostedUserRuntimeWorkflowMachine(
       // immediately after the migration backfills CURRENT_TIMESTAMP.
       // Inactive/AI-denied users still purge media via the blocked branch
       // above where retention is the only admissible mode.
+      if (hasMailboxLag(facts, "system")) {
+        await executeRuntimeProcessing({
+          clearMailboxPointerOnAccepted: true,
+          processingMode: "system_mailbox",
+        });
+        continue;
+      }
+
       if (hasAnyMailboxLag(facts)) {
         await executeRuntimeProcessing({
           clearMailboxPointerOnAccepted: true,
@@ -667,6 +676,15 @@ function recordReconciliationFactsSummary(
 
 function hasAnyMailboxLag(facts: HostedRuntimeReconciliationFacts): boolean {
   return facts.mailboxLag.some((lane) => BigInt(lane.lag) > 0n);
+}
+
+function hasMailboxLag(
+  facts: HostedRuntimeReconciliationFacts,
+  lane: HostedRuntimeReconciliationFacts["mailboxLag"][number]["lane"],
+): boolean {
+  return facts.mailboxLag.some((entry) =>
+    entry.lane === lane && BigInt(entry.lag) > 0n
+  );
 }
 
 function selectEarliestHostedRuntimeWorkflowWakeAt(

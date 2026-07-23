@@ -27,10 +27,8 @@ import {
 } from "../hosted-mailbox/lag";
 import {
   decodeHostedMailboxStoredPayload,
-  hasHostedMailboxMealPhotoCaptureSince,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLatestPendingConversationItem,
-  readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
 } from "../hosted-mailbox/store";
@@ -47,10 +45,7 @@ import {
 import {
   hasHostedMemberEstablishedLinqHomeRoute,
 } from "../hosted-onboarding/hosted-member-routing-store";
-import {
-  HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
-  hasHostedLinqInboundWithinDays,
-} from "../hosted-onboarding/linq-daily-state";
+import { hasHostedLinqInboundWithinDays } from "../hosted-onboarding/linq-daily-state";
 import type {
   HostedOnboardingReadClient,
 } from "../hosted-onboarding/shared";
@@ -199,6 +194,8 @@ export async function readHostedRuntimeReconciliationFacts(
   });
 
   if (
+    !hasHostedMailboxLag(mailboxLag, "system")
+    &&
     hostedRuntimeReconciliationNeedsAutomationEngagement({
       freshConversationMailboxLag,
       now,
@@ -212,14 +209,6 @@ export async function readHostedRuntimeReconciliationFacts(
       memberId: input.userId,
       now,
       prisma,
-    }))
-    && !(await hasHostedMailboxMealPhotoCaptureSince({
-      prisma,
-      since: new Date(
-        now.getTime()
-          - HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-      ),
-      userId: input.userId,
     }))
   ) {
     const facts = buildHostedRuntimeBlockedFacts({
@@ -239,13 +228,10 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const usageGateRequired = await hostedRuntimeReconciliationNeedsAiUsageGate({
-    consumedSeqByLane,
+  const usageGateRequired = hostedRuntimeReconciliationNeedsAiUsageGate({
     freshConversationMailboxLag,
     mailboxLag,
     now,
-    prisma,
-    userId: input.userId,
     workspace: projectedWorkspace,
   });
 
@@ -331,29 +317,18 @@ function buildHostedRuntimeBlockedFacts(input: {
   });
 }
 
-async function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
-  consumedSeqByLane: readonly HostedMailboxLaneConsumed[];
+function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   freshConversationMailboxLag: boolean;
   mailboxLag: readonly HostedMailboxLaneLag[];
   now: Date;
-  prisma: Parameters<typeof readHostedMailboxMaxSeqByLane>[0]["prisma"];
-  userId: string;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
-}): Promise<boolean> {
-  if (input.freshConversationMailboxLag) {
-    return true;
+}): boolean {
+  if (hasHostedMailboxLag(input.mailboxLag, "system")) {
+    return false;
   }
 
-  if (hasHostedMailboxLag(input.mailboxLag, "system")) {
-    const gatedSystemItemPending =
-      await readHostedMailboxPendingSystemItemsNeedAiUsageGate({
-        afterSeq: readHostedMailboxLaneImportedSeq(input.mailboxLag, "system"),
-        prisma: input.prisma,
-        userId: input.userId,
-      });
-    if (gatedSystemItemPending) {
-      return true;
-    }
+  if (input.freshConversationMailboxLag) {
+    return true;
   }
 
   return isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)

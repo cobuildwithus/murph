@@ -68,7 +68,13 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
-    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "system_mailbox",
+        userId: "member_test",
+      },
+    ]);
   });
 
   it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {

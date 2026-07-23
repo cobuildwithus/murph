@@ -22,7 +22,6 @@ import {
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
-  hasHostedMailboxMealPhotoCaptureSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -33,7 +32,6 @@ import {
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
-  readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
@@ -102,35 +100,6 @@ describe("readHostedMailboxLiveItemById", () => {
           { expiresAt: null },
           { expiresAt: { gt: FIXED_NOW } },
         ],
-      },
-    });
-  });
-});
-
-describe("hasHostedMailboxMealPhotoCaptureSince", () => {
-  it("derives recent capture engagement from the accepted mailbox row", async () => {
-    const findFirst = vi.fn().mockResolvedValue({ id: "mailbox-meal-photo" });
-    const since = new Date("2026-03-29T00:00:00.000Z");
-
-    await expect(hasHostedMailboxMealPhotoCaptureSince({
-      prisma: {
-        hostedMailboxItem: { findFirst },
-      } as never,
-      since,
-      userId: "member-meal-photo",
-    })).resolves.toBe(true);
-
-    expect(findFirst).toHaveBeenCalledWith({
-      select: {
-        id: true,
-      },
-      where: {
-        createdAt: {
-          gte: since,
-        },
-        kind: "meal-photo.captured",
-        lane: "system",
-        userId: "member-meal-photo",
       },
     });
   });
@@ -2237,44 +2206,6 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         kind: "member.activated",
         userId: "member_mailbox_1",
       },
-    });
-  });
-
-  it("checks pending system mailbox rows for any manual item after the imported watermark", async () => {
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
-        id: "mailbox_manual_2",
-        kind: "runtime.manual-requested",
-        lane: "system",
-        laneSeq: 2n,
-      })),
-    });
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const prisma = createHostedMailboxClient({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-
-    await expect(readHostedMailboxPendingSystemItemsNeedAiUsageGate({
-      afterSeq: "0",
-      prisma,
-      userId: "member_mailbox_1",
-    })).resolves.toBe(true);
-
-    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
-      select: {
-        id: true,
-      },
-      where: expectLiveHostedMailboxWhere({
-        kind: {
-          in: ["runtime.manual-requested"],
-        },
-        lane: "system",
-        laneSeq: {
-          gt: 0n,
-        },
-        userId: "member_mailbox_1",
-      }),
     });
   });
 
