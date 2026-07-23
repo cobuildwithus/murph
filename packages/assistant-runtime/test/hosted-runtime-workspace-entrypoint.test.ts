@@ -5915,7 +5915,7 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             platform,
             runtimeWakeSignal,
-            async runAssistantPhase() {
+            async runAssistantPhase(input) {
               assistantPhaseCalls += 1;
               if (assistantPhaseCalls === 1) {
                 setTimeout(() => {
@@ -5934,6 +5934,10 @@ describe("hosted workspace runtime entrypoint", () => {
                   progressed: true,
                 };
               }
+              if (withConversationWork) {
+                events.push("auto-reply.prepare");
+                await input.prepareAutoReplyDelivery?.();
+              }
               return { progressed: false };
             },
             vaultRoot,
@@ -5944,6 +5948,16 @@ describe("hosted workspace runtime entrypoint", () => {
 
         assert.ok(events.includes("ask.import:joined_group:deferred"), events.join(","));
         const idleSnapshotIndex = requireEventIndex(events, "snapshot:idle_shutdown");
+        if (withConversationWork) {
+          assert.ok(events.includes("auto-reply.prepare"), events.join(","));
+          assert.ok(
+            events
+              .slice(0, idleSnapshotIndex)
+              .filter((event) => event === "ask.import:joined_group:deferred")
+              .length >= 2,
+            events.join(","),
+          );
+        }
         assert.equal(
           events.slice(0, idleSnapshotIndex).includes("ask.import:all:imported"),
           false,
