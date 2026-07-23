@@ -5937,6 +5937,7 @@ describe("hosted workspace runtime entrypoint", () => {
               if (withConversationWork) {
                 events.push("auto-reply.prepare");
                 await input.prepareAutoReplyDelivery?.();
+                events.push("auto-reply.delivered");
               }
               return { progressed: false };
             },
@@ -5950,13 +5951,7 @@ describe("hosted workspace runtime entrypoint", () => {
         const idleSnapshotIndex = requireEventIndex(events, "snapshot:idle_shutdown");
         if (withConversationWork) {
           assert.ok(events.includes("auto-reply.prepare"), events.join(","));
-          assert.ok(
-            events
-              .slice(0, idleSnapshotIndex)
-              .filter((event) => event === "ask.import:joined_group:deferred")
-              .length >= 2,
-            events.join(","),
-          );
+          assert.ok(events.includes("auto-reply.delivered"), events.join(","));
         }
         assert.equal(
           events.slice(0, idleSnapshotIndex).includes("ask.import:all:imported"),

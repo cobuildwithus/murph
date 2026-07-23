@@ -7347,7 +7347,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     let shouldYield = false;
     const prepareAutoReplyDelivery = vi.fn(async () => {
       shouldYield = true;
-      return null;
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -14011,9 +14010,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("runs remote system catch-up before successful auto-reply delivery dispatch", async () => {
+  it("stabilizes foreground imports before successful auto-reply delivery dispatch", async () => {
     const deliveryEffect = createDeliveryEffect();
-    const prepareAutoReplyDelivery = vi.fn(async () => null);
+    const prepareAutoReplyDelivery = vi.fn(async () => undefined);
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
     ]);
@@ -14164,87 +14163,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     });
   });
 
-  it("preserves scheduled cleanup wake when a foreground member-channel barrier blocks delivery", async () => {
-    const providerCleanupWakeAt = "2026-04-27T00:14:00.000Z";
-    const baseDeliveryEffect = createDeliveryEffect();
-    const deliveryEffect = {
-      ...baseDeliveryEffect,
-      payload: {
-        ...baseDeliveryEffect.payload,
-        transportIdempotent: false,
-      },
-    };
-    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
-    const prepareAutoReplyDelivery = vi.fn(async () => ({
-      nextWakeAt: "2026-04-27T00:30:00.000Z",
-      nextWakeReason: "assistant",
-      redactedStatus: {
-        hostedMemberChannelPreDispatchImportBlocked: 1,
-      },
-    }));
-    mocks.resolveHostedProviderCleanupScheduledWakeAt.mockResolvedValue(
-      providerCleanupWakeAt,
-    );
-    mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
-      assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
-      assistantAutomationProgressed: true,
-      deviceSyncProcessed: 0,
-      deviceSyncSkipped: true,
-      nextWakeAt: null,
-      parserProcessed: 0,
-      postCheckpointRecord: null,
-      progressed: true,
-      redactedLogEntries: [],
-    });
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      deliveryEffect,
-    ]);
-    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
-      preparedDispatches,
-    });
-    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      intentId: deliveryEffect.effectId,
-      turnId: deliveryEffect.payload.turnId,
-    });
-    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
-      new Set([deliveryEffect.effectId]),
-    );
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      now: () => "2026-04-27T00:09:00.000Z",
-      prepareAutoReplyDelivery,
-    }));
-
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "outbox_sending",
-      nextWakeAt: providerCleanupWakeAt,
-      progressed: true,
-    }));
-
-    const postCheckpoint = await result.afterCheckpoint?.();
-
-    expect(postCheckpoint).toEqual(expect.objectContaining({
-      checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: providerCleanupWakeAt,
-      redactedStatus: expect.objectContaining({
-        hostedMemberChannelPreDispatchImportBlocked: 1,
-        nextWakeAt: providerCleanupWakeAt,
-      }),
-    }));
-    expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
-    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
-      effects: [deliveryEffect],
-      preparedDispatches,
-      vaultRoot: "/tmp/murph-vault",
-    });
-    expect(mocks.listPendingAssistantAutoReplyLinqCleanupEvidence).not.toHaveBeenCalled();
-    expect(mocks.recordHostedProviderCleanupBeforeCommit).not.toHaveBeenCalled();
-    expect(mocks.markAssistantAutoReplyLinqCleanupQueued).not.toHaveBeenCalled();
-    expect(mocks.drainHostedProviderCleanupAfterCommit).not.toHaveBeenCalled();
-  });
-
   it("drains due provider cleanup before returning a background member-channel barrier", async () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
@@ -14321,52 +14239,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         vaultRoot: "/tmp/murph-vault",
       }),
     );
-    expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
-    expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
-      effects: [deliveryEffect],
-      preparedDispatches,
-      vaultRoot: "/tmp/murph-vault",
-    });
-  });
-
-  it("resets prepared delivery claims when remote system catch-up returns a barrier", async () => {
-    const deliveryEffect = createDeliveryEffect();
-    const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
-    const prepareAutoReplyDelivery = vi.fn(async () => ({
-      nextWakeAt: "2026-04-27T00:00:15.000Z",
-      nextWakeReason: "mailbox",
-      redactedStatus: {
-        hostedMemberChannelPreDispatchImportBlocked: 1,
-      },
-    }));
-    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
-      deliveryEffect,
-    ]);
-    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
-      preparedDispatches,
-    });
-    mocks.readAssistantOutboxIntent.mockResolvedValueOnce({
-      intentId: deliveryEffect.effectId,
-      turnId: deliveryEffect.payload.turnId,
-    });
-    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValueOnce(
-      new Set([deliveryEffect.effectId]),
-    );
-
-    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      importedCount: 1,
-      prepareAutoReplyDelivery,
-    }));
-
-    expect(result).toEqual(expect.objectContaining({
-      checkpointReason: "assistant_runtime_commit",
-      nextWakeAt: "2026-04-27T00:00:15.000Z",
-      redactedStatus: expect.objectContaining({
-        hostedMemberChannelPreDispatchImportBlocked: 1,
-      }),
-    }));
-    expect(prepareAutoReplyDelivery).toHaveBeenCalledTimes(1);
-    expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).not.toHaveBeenCalled();
     expect(mocks.drainHostedPreparedAssistantDeliveries).not.toHaveBeenCalled();
     expect(mocks.resetHostedPreparedAssistantDeliveryEffects).toHaveBeenCalledWith({
       effects: [deliveryEffect],

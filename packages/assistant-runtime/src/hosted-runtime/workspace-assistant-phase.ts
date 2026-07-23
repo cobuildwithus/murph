@@ -181,7 +181,6 @@ import {
 import type {
   HostedWorkspaceDurableCheckpointEffect,
   HostedWorkspaceRunnerAssistantPhaseInput,
-  HostedWorkspaceRunnerAssistantPhaseDeliveryBarrier,
   HostedWorkspaceRunnerAssistantPhasePostCheckpoint,
   HostedWorkspaceRunnerAssistantPhaseResult,
 } from "./workspace-runner.ts";
@@ -5805,17 +5804,7 @@ async function flushHostedMemberChannelUpdatesBeforeAutoReplyDelivery(
     return null;
   }
 
-  const remoteBarrier = await input.input.prepareAutoReplyDelivery?.();
-  if (remoteBarrier) {
-    return await buildHostedMemberChannelDeliveryBarrierResult({
-      input,
-      nextWakeAt: remoteBarrier.nextWakeAt ?? null,
-      nextWakeReason: remoteBarrier.nextWakeReason ?? null,
-      redactedStatus: {
-        ...(remoteBarrier.redactedStatus ?? {}),
-      },
-    });
-  }
+  await input.input.prepareAutoReplyDelivery?.();
 
   let processed = 0;
   while (true) {
