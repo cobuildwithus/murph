@@ -923,7 +923,7 @@ export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   namespace: 'murph',
   name: 'finish_without_reply',
   description:
-    'Finish the turn without sending a text reply.',
+    'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,

@@ -1732,6 +1732,86 @@ describe('assistant automation scanner', () => {
     )
   })
 
+  it('leaves a held group replayable when the scan aborts mid-hold', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const heldGroupInput = createCaptureSummary({
+      captureId: 'capture-abort-held-group',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const inputSource = createAssistantInputSourceForCaptures([heldGroupInput])
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    const stateUpdates: AssistantAutomationState[] = []
+    const onStateProgress = async (
+      next: Pick<AssistantAutomationState, 'autoReply'>,
+    ) => {
+      stateUpdates.push({
+        ...createAutomationState(),
+        autoReply: next.autoReply.map((entry) => ({ ...entry })),
+      })
+    }
+    const controller = new AbortController()
+    let now = burstStartedAt + 1_000
+    const sleep = vi.fn(async () => {
+      controller.abort()
+    })
+    const state = createAutomationState({
+      autoReplyChannels: ['telegram'],
+    })
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => now,
+      onStateProgress,
+      signal: controller.signal,
+      sleep,
+      state,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(stateUpdates).toEqual([])
+
+    now = burstStartedAt + 6_000
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => now,
+      onStateProgress,
+      sleep,
+      state,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [
+            assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
+          ],
+        }),
+      }),
+    )
+    const finalState =
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
+    expect(readAutoReplyCursor(finalState, 'telegram')).toEqual(
+      assistantInputCandidateFromInboxCapture(heldGroupInput).event.cursor,
+    )
+  })
+
   it('shares one history reader across every group in an automation pass', async () => {
     const first = createCaptureSummary({
       captureId: 'capture-history-first',

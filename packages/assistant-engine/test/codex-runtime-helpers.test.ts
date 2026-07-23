@@ -179,6 +179,15 @@ function findProviderPromptSizeTraceRawEvent(
 }
 
 describe('Codex assistant registry helpers', () => {
+  it('finish_without_reply description does not claim to withdraw completed replies', () => {
+    const finishWithoutReply = MURPH_DYNAMIC_TOOLS.find(
+      (tool) => tool.name === 'finish_without_reply',
+    )
+    expect(finishWithoutReply?.description).toBe(
+      'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
+    )
+  })
+
   it('resolves provider labels for Codex app-server variants', () => {
     expect(
       resolveCodexAssistantLabel(
