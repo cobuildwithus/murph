@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildHostedExecutionAssistantAskRequestedWake,
+  type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
@@ -1595,6 +1596,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         rows.push(row);
         return row;
       }),
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => rows[0] ?? null),
       findUnique,
     });
     const tx = createHostedMailboxTx({
@@ -1607,7 +1609,10 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       tx,
     });
     const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-b"),
+      envelope: buildHostedMealPhotoEnvelope(
+        "meal-photo-attempt-b",
+        { channel: "telegram", threadId: "telegram_home_thread" },
+      ),
       tx,
     });
 
@@ -1625,6 +1630,16 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       item: { id: first.item.id },
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+    await expect(readHostedMailboxWakeByItemId({
+      availableAt: FIXED_NOW,
+      mailboxItemId: first.item.id,
+      prisma: tx,
+    })).resolves.toMatchObject({
+      directRoute: {
+        channel: "linq",
+        threadId: "linq_home_thread",
+      },
+    });
     expect(vi.mocked(tx.$executeRaw).mock.invocationCallOrder[0]).toBeLessThan(
       findUnique.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
@@ -3085,12 +3100,15 @@ function buildHostedGroupEmailEnvelope(userId: string) {
   };
 }
 
-function buildHostedMealPhotoEnvelope(mealPhotoKey: string) {
+function buildHostedMealPhotoEnvelope(
+  mealPhotoKey: string,
+  directRoute: HostedExecutionDirectRoute = {
+    channel: "linq",
+    threadId: "linq_home_thread",
+  },
+) {
   return {
-    directRoute: {
-      channel: "linq" as const,
-      threadId: "linq_home_thread",
-    },
+    directRoute,
     eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
     kind: "meal-photo.captured" as const,
     mealPhoto: {

@@ -9,7 +9,10 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
-function buildPrompt(): string {
+function buildPrompt(input: {
+  currentLocalDate?: string
+  scheduledOccurrenceAt?: string
+} = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedDeviceConnectAvailable: false,
@@ -20,10 +23,11 @@ function buildPrompt(): string {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
-    currentLocalDate: '2026-07-18',
+    currentLocalDate: input.currentLocalDate ?? '2026-07-18',
     currentTimeZone: 'America/New_York',
     onboardingGuidance: false,
     modelBehaviorProfile: 'gpt5-agentic',
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt,
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,
   })
@@ -92,6 +96,12 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain('vault-cli meal edit <meal-id>')
     expect(skill).toContain('## Run the automatic 9pm closeout')
+    expect(skill).toContain(
+      'engine-supplied `Occurrence local date` from the `Scheduled\n   occurrence context` as the action and search-date anchor',
+    )
+    expect(skill).toContain(
+      "even when the\n   wall-clock `Today's date` differs",
+    )
     expect(skill).toContain('`externalRef.system: meal-photo-capture`')
     expect(skill).toContain('vault-cli meal remove-photo <meal-id>')
     expect(skill).toContain('label partial totals as partial')
@@ -112,6 +122,21 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md',
+    )
+  })
+
+  it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {
+    const prompt = buildPrompt({
+      currentLocalDate: '2026-07-24',
+      scheduledOccurrenceAt: '2026-07-24T01:00:00.000Z',
+    })
+
+    expect(prompt).toContain("Today's date for the user is July 24, 2026.")
+    expect(prompt).toContain('Occurrence instant: `2026-07-24T01:00:00.000Z`.')
+    expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
+    expect(prompt).toContain('Occurrence local date: `2026-07-23`.')
+    expect(prompt).toContain(
+      "Use the local date as the anchor for this automation's relevant action window.",
     )
   })
 })

@@ -151,9 +151,11 @@ intuitive-eating contexts, eating-disorder risk, or number-sensitive members.
 
 On a scheduled run:
 
-1. Use the runtime's current local date. Find automatic captures from today and
-   the preceding 31 local days with date-bounded `meal list` calls; split a
-   range if it reaches the result limit. Identify captures by
+1. Use the engine-supplied `Occurrence local date` from the `Scheduled
+   occurrence context` as the action and search-date anchor, even when the
+   wall-clock `Today's date` differs. Find automatic captures from that date
+   and the preceding 31 local days with date-bounded `meal list` calls; split
+   a range if it reaches the result limit. Identify captures by
    `externalRef.system: meal-photo-capture` and
    `externalRef.resourceType: photo`, not `source: device` alone.
 2. Treat each retained photo as pending closeout work. Also include an

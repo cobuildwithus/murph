@@ -77,4 +77,15 @@ Updated: 2026-07-23
   `tbx_01ky6vegaee3866a8p17eh8axb`. The only later source edit extracted the
   already-identical direct-route selection into the shared resolver; Web
   typecheck and all 101 directly affected Web tests passed afterward.
+- Preliminary exact-head specialist review found three medium gaps. The
+  managed seed now delegates the complete closeout procedure to the reusable
+  skill and anchors post-midnight retries to the engine-supplied occurrence
+  date. Coverage now proves first-route canonicality across direct-route
+  drift and retryability after a real automation write failure. Focused
+  remediation tests pass: assistant engine 50, assistant runtime 4, and Web
+  mailbox 62.
+- The intended runner graph exceeded the prior total-byte ratchet while
+  remaining inside both entry and static-closure budgets. A complete local
+  runner assembly passed at 9,434,851 bytes; the total cap now preserves the
+  documented 32KB reviewed-growth margin above that packaged measurement.
 - Staged diff validation and direct-identifier privacy scan passed.

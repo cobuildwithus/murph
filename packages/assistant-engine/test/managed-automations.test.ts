@@ -1067,40 +1067,31 @@ describe('applyMurphManagedAutomations', () => {
       MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      '`externalRef.system: meal-photo-capture`',
+      'single owner of the closeout workflow',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      '`vault-cli meal remove-photo <meal-id>`',
+      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'manual log or second photo of the same eating occasion is not silently counted twice',
+      'even when the wall-clock `Today\'s date` differs',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'If neither a retained photo nor a same-occurrence removal revision is selected',
+      'If the skill selects neither a retained photo nor a same-occurrence removal revision',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
-      'If no selected photos remain',
+      '`externalRef.system: meal-photo-capture`',
     )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      '`vault-cli meal list`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      '`vault-cli meal remove-photo <meal-id>`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
       'preceding 31 local days',
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'latest `recordedAt` is at or after this scheduled occurrence instant',
-    )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'late import from an earlier date gets one dated catch-up section',
-    )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'partially completed cleanup does not lose a meal',
-    )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'By default, keep each date qualitative',
-    )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      'label partial totals as partial',
-    )
-    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
-      "only when the member's current request, plan, or durable context explicitly establishes calorie or macro tracking",
+      'A removal failure or any selected photo remaining fails the run',
     )
 
     await expect(ensureAutomaticMealCloseoutAutomation({
