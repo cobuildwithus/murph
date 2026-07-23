@@ -566,30 +566,30 @@ test("stored activity composition matches direct numeric and provenance results 
   const run = {
     activityType: "Running",
     date,
-    durationMinutes: 67,
-    endAt: `${date}T13:07:00.000Z`,
+    durationMinutes: 73,
+    endAt: `${date}T13:13:00.000Z`,
     startAt: `${date}T12:00:00.000Z`,
     workoutMetricValues: {
-      activeCalories: 600,
-      distanceKm: 10.33,
-      maxHeartRate: 183,
-      totalElevationGainMeters: 226,
-      workoutStrain: 12,
+      activeCalories: 731,
+      distanceKm: 11.46,
+      maxHeartRate: 176,
+      totalElevationGainMeters: 241,
+      workoutStrain: 13,
     },
   } as const;
   const sessions = [
     activitySession({
       ...run,
-      id: "garmin-private-run-id",
+      id: "garmin-synthetic-run-id",
       provider: "garmin",
-      recordedAt: `${date}T13:08:00.000Z`,
+      recordedAt: `${date}T13:14:00.000Z`,
     }),
     activitySession({
       activityType: "Functional strength training",
       date,
       durationMinutes: 10,
       endAt: `${date}T18:10:00.000Z`,
-      id: "oura-private-strength-id",
+      id: "oura-synthetic-strength-id",
       provider: "oura",
       recordedAt: `${date}T18:11:00.000Z`,
       startAt: `${date}T18:00:00.000Z`,
@@ -601,9 +601,9 @@ test("stored activity composition matches direct numeric and provenance results 
     }),
     activitySession({
       ...run,
-      id: "apple-private-run-mirror-id",
+      id: "apple-synthetic-run-mirror-id",
       provider: "apple-health-kit",
-      recordedAt: `${date}T13:09:00.000Z`,
+      recordedAt: `${date}T13:15:00.000Z`,
     }),
   ];
   const rows = buildWearableSummaryProjectionFromDataset(
@@ -651,7 +651,7 @@ test("stored activity composition matches direct numeric and provenance results 
       );
     }
     if (providers.length === 0) {
-      assert.equal(stored.sessionMinutes.selection.value, 77);
+      assert.equal(stored.sessionMinutes.selection.value, 83);
       assert.equal(stored.sessionCount.selection.value, 2);
     }
   }

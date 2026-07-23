@@ -443,16 +443,16 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
   const run = {
     activityType: "Running",
     dayKey: "2026-02-14",
-    durationMinutes: 67,
-    endAt: "2026-02-14T13:07:00.000Z",
+    durationMinutes: 73,
+    endAt: "2026-02-14T13:13:00.000Z",
     occurredAt: "2026-02-14T12:00:00.000Z",
     startAt: "2026-02-14T12:00:00.000Z",
     workoutMetrics: {
-      activeCalories: 687,
-      distanceKm: 10.33,
-      maxHeartRate: 183,
-      totalElevationGainMeters: 226,
-      workoutStrain: 12,
+      activeCalories: 731,
+      distanceKm: 11.46,
+      maxHeartRate: 176,
+      totalElevationGainMeters: 241,
+      workoutStrain: 13,
     },
   } as const;
   const vault = makeVault([
@@ -460,7 +460,7 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
       ...run,
       entityId: "evt_garmin_run",
       provider: "garmin",
-      recordedAt: "2026-02-14T13:08:00.000Z",
+      recordedAt: "2026-02-14T13:14:00.000Z",
     }),
     makeActivitySession({
       ...run,
@@ -474,7 +474,7 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
       },
       entityId: "evt_junction_garmin_run_mirror",
       provider: "junction",
-      recordedAt: "2026-02-14T13:09:00.000Z",
+      recordedAt: "2026-02-14T13:15:00.000Z",
     }),
     makeActivitySession({
       activityType: "Functional strength training",
@@ -498,15 +498,15 @@ test("daily workout rollup adds distinct sessions and suppresses an imported mir
   const points = buildMetricProjection(vault).metricPoints;
   const point = (key: string) => points.find((candidate) => candidate.metricKey === key)?.value;
 
-  assert.equal(activity?.sessionMinutes.selection.value, 77);
+  assert.equal(activity?.sessionMinutes.selection.value, 83);
   assert.equal(activity?.sessionCount.selection.value, 2);
   assert.deepEqual(activity?.activityTypes, ["Functional strength training", "Running"]);
-  assert.equal(activity?.activeCalories.selection.value, 767);
-  assert.equal(activity?.distanceKm.selection.value, 10.33);
-  assert.equal(activity?.totalElevationGainMeters.selection.value, 226);
-  assert.equal(activity?.maxHeartRate.selection.value, 183);
-  assert.equal(activity?.workoutStrain.selection.value, 12);
-  assert.equal(point("workout-minutes"), 77);
+  assert.equal(activity?.activeCalories.selection.value, 811);
+  assert.equal(activity?.distanceKm.selection.value, 11.46);
+  assert.equal(activity?.totalElevationGainMeters.selection.value, 241);
+  assert.equal(activity?.maxHeartRate.selection.value, 176);
+  assert.equal(activity?.workoutStrain.selection.value, 13);
+  assert.equal(point("workout-minutes"), 83);
   assert.equal(point("workout-count"), 2);
   assert.equal(point("activity-minutes"), undefined);
 });

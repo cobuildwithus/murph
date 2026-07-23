@@ -238,7 +238,7 @@ test("daily maximum reducers compare explicit and workout evidence without summi
     }),
     session({
       id: "run",
-      metrics: { maxHeartRate: 183, workoutStrain: 12 },
+      metrics: { maxHeartRate: 181, workoutStrain: 12 },
       provider: "oura",
     }),
     session({
@@ -252,7 +252,7 @@ test("daily maximum reducers compare explicit and workout evidence without summi
   ]);
 
   for (const [key, expected] of [
-    ["maxHeartRate", 183],
+    ["maxHeartRate", 181],
     ["workoutStrain", 15],
   ] as const) {
     assert.equal(direct[key].selection.value, expected);

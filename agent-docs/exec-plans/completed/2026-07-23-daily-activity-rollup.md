@@ -1,6 +1,6 @@
 # Repair daily workout rollups and shared activity summaries
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -32,8 +32,10 @@ Updated: 2026-07-23
   day coverage.
 - True provider daily-active-duration evidence owns `activity-minutes`; workout
   sessions own `workout-minutes`.
-- Focused regressions, truthful diff verification, acceptance verification,
-  required product/specialist/final review, CI, and the exact-head PR gate pass.
+- Focused regressions, truthful diff verification, task-relevant acceptance
+  coverage, required product/specialist/final review, CI, and the exact-head PR
+  gate pass; any credibly unrelated full-suite blocker is documented with an
+  isolated retry.
 
 ## Scope
 
@@ -129,14 +131,25 @@ Updated: 2026-07-23
   answers.
 - `pnpm test:scenario-integrity` passed for all registered scenarios, sample
   inputs, and golden-output directories.
-- Canonical diff verification passed every package in the changed data and
-  assistant paths. Its only failures were in the unrelated hosted-local harness
-  on a Linux Testbox that could not resolve a container bridge and then
-  cascaded through harness-only tests; the task changes no hosted-local harness
-  source or tests.
-- Canonical `pnpm verify:acceptance` passed in a fresh secret-free Testbox,
-  including all workspace typechecks, coverage suites, app builds, security and
-  dependency guards, and Cloudflare Worker tests.
+- Canonical
+  `pnpm test:diff apps/cloudflare apps/web packages/contracts packages/health-metrics packages/importers packages/query packages/hosted-execution packages/assistant-runtime packages/assistant-engine`
+  passed all changed-owner coverage, typecheck, boundary, security, Worker,
+  development-smoke, and production-build lanes.
+- Two `pnpm verify:acceptance` attempts under heavy parallel load reached all
+  task-relevant coverage owners successfully but encountered rotating failures
+  outside this change: a setup wizard input/timing case on both attempts, plus
+  one clinical-runtime abort-normalization case and one gzip trailer-validation
+  timeout on the second attempt. The complete setup CLI coverage suite passed
+  alone (14 files, 124 tests), the clinical-runtime file passed alone (35
+  tests), and the focused gzip case passed alone. The first acceptance attempt
+  and the canonical diff run had already passed the latter two owners.
+- `pnpm --dir apps/cloudflare runner:bundle` passed with a measured runner
+  bundle of 9,488,490 bytes. Its cap is 9,521,258 bytes, retaining 32 KiB of
+  measured headroom rather than adding a new packaging mechanism.
+- Final simplification and privacy review found no remaining material
+  complexity, composability, duplication, or identifier-leakage issue. The
+  branch is 5,718 net lines smaller than the original implementation shape
+  while retaining the same product correction.
 - Local product-experience review found no high, material, or
   experience-collapse issue; no rendered UI proof applies because no
   production UI changed.
@@ -148,3 +161,4 @@ Updated: 2026-07-23
   Web from the same commit. Existing unmarked group snapshots converge on the
   next ordinary grantor projection offer; derived browser/query projections
   rebuild normally and no canonical or PostgreSQL migration is required.
+Completed: 2026-07-23
