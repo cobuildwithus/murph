@@ -1415,11 +1415,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     });
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
-        invocationOrchestrationLatencySeed,
         consumePendingHostedRuntimeWake(
           options.runtimeWakeSignal ?? null,
           options.shutdownSignal ?? null,
         ),
+        invocationOrchestrationLatencySeed,
       ),
     );
     emitPhaseLog({

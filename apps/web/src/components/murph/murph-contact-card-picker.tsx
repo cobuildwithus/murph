@@ -247,7 +247,7 @@ export function MurphContactCardPicker({
   if (isMobile) {
     return (
       <Drawer onOpenChange={onOpenChange} open={open}>
-        <DrawerContent className="h-[92dvh] max-h-[92dvh]">
+        <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-center text-center">
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
               {pickerCopy.title}
@@ -262,7 +262,7 @@ export function MurphContactCardPicker({
               <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
             </div>
           </div>
-          <DrawerFooter className="border-t border-border px-4 pb-6 pt-3">
+          <DrawerFooter className="border-t border-border px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
             {actions}
           </DrawerFooter>
         </DrawerContent>

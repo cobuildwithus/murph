@@ -6060,7 +6060,17 @@ describe("hosted workspace runtime entrypoint", () => {
     const imported: Array<{ id: string; route: string }> = [];
     const importContextMilestones: unknown[] = [];
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-    runtimeWakeSignal.notify(1_777_000_000_075);
+    runtimeWakeSignal.notify({
+      notifiedAtEpochMs: 1_777_000_000_075,
+      orchestration: {
+        activeFenceObservedAtEpochMs: 1_777_000_000_060,
+        activeFenceTargetWasPriorVersion: false,
+        activeWakeAccepted: true,
+        activeWakeFinishedAtEpochMs: 1_777_000_000_075,
+        activeWakeStartedAtEpochMs: 1_777_000_000_065,
+        triggeredByWebDirect: true,
+      },
+    });
 
     try {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -6108,8 +6118,19 @@ describe("hosted workspace runtime entrypoint", () => {
             phaseBreakdown: {
               schemaVersion: 1,
               orchestration: {
+                activeFenceObservedAtEpochMs: 1_776_999_999_910,
+                activeFenceTargetWasPriorVersion: true,
+                activeWakeAccepted: false,
+                activeWakeElapsedMs: 20,
+                activeWakeFinishedAtEpochMs: 1_776_999_999_940,
+                activeWakeFoundNoActiveChild: true,
+                activeWakeStartedAtEpochMs: 1_776_999_999_920,
                 freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
                 freshStartRequestedAtEpochMs: 1_776_999_999_900,
+                replacedStaleFence: true,
+                replacementFenceClearElapsedMs: 5,
+                replacementFenceClearedAtEpochMs: 1_776_999_999_950,
+                replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
               },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -6144,8 +6165,20 @@ describe("hosted workspace runtime entrypoint", () => {
           phaseBreakdown: expect.objectContaining({
             schemaVersion: 1,
             orchestration: {
+              activeFenceObservedAtEpochMs: 1_776_999_999_910,
+              activeFenceTargetWasPriorVersion: true,
+              activeWakeAccepted: false,
+              activeWakeElapsedMs: 20,
+              activeWakeFinishedAtEpochMs: 1_776_999_999_940,
+              activeWakeFoundNoActiveChild: true,
+              activeWakeStartedAtEpochMs: 1_776_999_999_920,
               freshStartInvocationAcceptedAtEpochMs: 1_776_999_999_990,
               freshStartRequestedAtEpochMs: 1_776_999_999_900,
+              replacedStaleFence: true,
+              replacementFenceClearElapsedMs: 5,
+              replacementFenceClearedAtEpochMs: 1_776_999_999_950,
+              replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
+              triggeredByWebDirect: true,
             },
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,

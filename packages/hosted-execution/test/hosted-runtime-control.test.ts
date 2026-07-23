@@ -1320,17 +1320,24 @@ describe("hosted runtime control contracts", () => {
         cloudflareRouteReceivedAtEpochMs: 1_777_000_000_020,
         userRunnerEnsureStartedAtEpochMs: 1_777_000_000_030,
         activeFenceObservedAtEpochMs: 1_777_000_000_035,
+        activeFenceTargetWasPriorVersion: true,
         activeWakeStartedAtEpochMs: 1_777_000_000_040,
         activeWakeFinishedAtEpochMs: 1_777_000_000_050,
+        activeWakeElapsedMs: 10,
         activeWakeAccepted: false,
+        activeWakeFoundNoActiveChild: true,
         replacementFenceClearStartedAtEpochMs: 1_777_000_000_055,
         replacementFenceClearedAtEpochMs: 1_777_000_000_060,
+        replacementFenceClearElapsedMs: 5,
         replacedStaleFence: true,
         freshStartRequestedAtEpochMs: 1_777_000_000_070,
         freshStartFenceBoundAtEpochMs: 1_777_000_000_080,
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+        workspaceReadElapsedMs: 30,
+        runtimeStoreEnsureElapsedMs: 40,
+        runtimeInvocationPreparationElapsedMs: 60,
       },
       dispatch: {
         invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -1490,8 +1497,12 @@ describe("hosted runtime control contracts", () => {
       { runtimeControlAuthStartedAtEpochMs: "1777000000015" }, // CF-side string leaf
       { cloudflareRouteReceivedAtEpochMs: 1.5 }, // non-integer leaf
       { userRunnerEnsureStartedAtEpochMs: -1 }, // negative leaf
+      { activeFenceTargetWasPriorVersion: 1 }, // boolean leaf must stay boolean
       { activeWakeAccepted: 1 }, // boolean leaf must stay boolean
+      { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
+      { activeWakeElapsedMs: 1.5 }, // duration must be an integer
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+      { runtimeStoreEnsureElapsedMs: -1 }, // duration must be non-negative
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({
         event: {
@@ -1726,8 +1737,11 @@ describe("hosted runtime control contracts", () => {
     );
 
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
+      activeFenceTargetWasPriorVersion: true,
       activeWakeAccepted: true,
+      activeWakeElapsedMs: 25,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeFoundNoActiveChild: false,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
       directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
       directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
@@ -1736,18 +1750,27 @@ describe("hosted runtime control contracts", () => {
       replacedStaleFence: "true",
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      runtimeInvocationPreparationElapsedMs: 120,
+      runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      workspaceReadElapsedMs: 70,
     })).toEqual({
+      activeFenceTargetWasPriorVersion: true,
       activeWakeAccepted: true,
+      activeWakeElapsedMs: 25,
       activeWakeFinishedAtEpochMs: 1_777_000_000_125,
+      activeWakeFoundNoActiveChild: false,
       activeWakeStartedAtEpochMs: 1_777_000_000_100,
       directEnsureRequestStartedAtEpochMs: 1_777_000_000_012,
       directEnsureResponseReceivedAtEpochMs: 1_777_000_000_132,
       runtimeControlAuthFinishedAtEpochMs: 1_777_000_000_110,
       runtimeControlAuthStartedAtEpochMs: 1_777_000_000_090,
+      runtimeInvocationPreparationElapsedMs: 120,
+      runtimeStoreEnsureElapsedMs: 80,
       tokenAcquiredAtEpochMs: 1_777_000_000_010,
       tokenAcquireStartedAtEpochMs: 1_777_000_000_000,
+      workspaceReadElapsedMs: 70,
     });
 
     expect(sanitizeHostedRuntimeOrchestrationLatencyDiagnostics({
