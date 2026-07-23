@@ -2,18 +2,13 @@
 // worth knowing about a member's living context. Product spec, not per-member
 // state — see agent-docs/product-specs/habitat.md.
 
-export const HABITAT_DOMAIN_IDS = [
-  "environment",
-  "workspace",
-  "exercise",
-] as const;
+export const HABITAT_DOMAIN_IDS = ["environment", "workspace", "exercise"] as const;
 
 export type HabitatDomainId = (typeof HABITAT_DOMAIN_IDS)[number];
 
 export const HABITAT_INDICATOR_PRIORITIES = ["high", "medium", "low"] as const;
 
-export type HabitatIndicatorPriority =
-  (typeof HABITAT_INDICATOR_PRIORITIES)[number];
+export type HabitatIndicatorPriority = (typeof HABITAT_INDICATOR_PRIORITIES)[number];
 
 export const HABITAT_DECLINED_VALUE = "declined";
 
@@ -112,9 +107,9 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "temp_control",
           label: "Temperature control",
           priority: "high",
+          informational: true,
           valueType: enumType("ac", "adjustable_heating", "none"),
           question: "Can you control it — AC, heating?",
-          informational: true,
         },
         {
           id: "window_at_night",
@@ -127,9 +122,9 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "co2_meter",
           label: "CO2 meter",
           priority: "high",
+          informational: true,
           valueType: enumType("aranet", "other", "none"),
           question: "Ever measured CO2 in your bedroom?",
-          informational: true,
         },
         {
           id: "co2_typical_ppm",
@@ -143,8 +138,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           label: "Darkness",
           priority: "high",
           valueType: enumType("blackout", "partial", "bright"),
-          question:
-            "Is your bedroom properly dark, or does morning light wake you?",
+          question: "Is your bedroom properly dark, or does morning light wake you?",
           target: "full darkness",
         },
         {
@@ -159,22 +153,17 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "noise_countermeasures",
           label: "Noise countermeasures",
           priority: "medium",
-          valueType: enumType("earplugs", "white_noise", "none"),
           informational: true,
+          valueType: enumType("earplugs", "white_noise", "none"),
         },
         {
           id: "humidity_known",
           label: "Humidity",
           priority: "medium",
-          valueType: enumType(
-            "measured",
-            "humidifier",
-            "dehumidifier",
-            "unmanaged",
-          ),
+          informational: true,
+          valueType: enumType("measured", "humidifier", "dehumidifier", "unmanaged"),
           question: "Does the air get dry in winter? Do you run a humidifier?",
           target: "40-60% RH",
-          informational: true,
         },
         {
           id: "mattress_satisfaction",
@@ -200,14 +189,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "co_sleepers",
           label: "Who shares the bed",
           priority: "medium",
-          valueType: enumType(
-            "alone",
-            "partner",
-            "partner_and_kids",
-            "kids",
-            "pets",
-            "mixed",
-          ),
+          valueType: enumType("alone", "partner", "partner_and_kids", "kids", "pets", "mixed"),
           question: "Do you sleep alone or with someone — partner, kids, pets?",
           informational: true,
         },
@@ -237,13 +219,8 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "ventilation",
           label: "Ventilation",
           priority: "high",
-          valueType: enumType(
-            "mechanical_recuperation",
-            "mechanical",
-            "windows_only",
-          ),
-          question:
-            "Does your place have mechanical ventilation, or do you air it out with windows?",
+          valueType: enumType("mechanical_recuperation", "mechanical", "windows_only"),
+          question: "Does your place have mechanical ventilation, or do you air it out with windows?",
         },
         {
           id: "damp_or_mold",
@@ -256,17 +233,17 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "air_purifier",
           label: "Air purifier",
           priority: "medium",
+          informational: true,
           valueType: enumType("hepa", "other", "none"),
           question: "Do you run an air purifier?",
-          informational: true,
         },
         {
           id: "air_quality_meter",
           label: "Air quality meter",
           priority: "medium",
+          informational: true,
           valueType: enumType("pm25", "co2", "combined", "none"),
           question: "Do you measure air quality at home with anything?",
-          informational: true,
         },
         {
           id: "stove",
@@ -280,12 +257,7 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "smoke_sources",
           label: "Smoke indoors",
           priority: "low",
-          valueType: enumType(
-            "smoking",
-            "fireplace",
-            "frequent_candles",
-            "none",
-          ),
+          valueType: enumType("smoking", "fireplace", "frequent_candles", "none"),
         },
         {
           id: "radon_tested",
@@ -308,22 +280,15 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           label: "Evening light",
           priority: "high",
           valueType: enumType("warm_dim", "warm_bright", "cool", "mixed"),
-          question:
-            "What's your light like in the evening — warm and dim, or bright white?",
+          question: "What's your light like in the evening — warm and dim, or bright white?",
           target: "≤2700-3000K, dimmed in the last 2h before bed",
         },
         {
           id: "morning_light_access",
           label: "Morning light access",
           priority: "high",
-          valueType: enumType(
-            "outdoor_routine",
-            "balcony_or_garden",
-            "east_windows",
-            "none",
-          ),
-          question:
-            "Can you catch daylight in the morning — balcony, a walk, east windows?",
+          valueType: enumType("outdoor_routine", "balcony_or_garden", "east_windows", "none"),
+          question: "Can you catch daylight in the morning — balcony, a walk, east windows?",
           target: "10-30 min of daylight within 1h of waking",
         },
         {
@@ -376,10 +341,9 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "sauna_access",
           label: "Sauna",
           priority: "high",
-          valueType: enumType("home", "gym", "nearby", "none"),
-          question:
-            "Do you have access to a sauna anywhere — at home, at the gym?",
           informational: true,
+          valueType: enumType("home", "gym", "nearby", "none"),
+          question: "Do you have access to a sauna anywhere — at home, at the gym?",
         },
         {
           id: "sauna_type",
@@ -392,14 +356,8 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "cold_exposure",
           label: "Cold exposure",
           priority: "medium",
-          valueType: enumType(
-            "cold_showers",
-            "plunge",
-            "winter_swimming",
-            "none",
-          ),
-          question:
-            "Do you do anything with cold — cold showers, winter swims?",
+          valueType: enumType("cold_showers", "plunge", "winter_swimming", "none"),
+          question: "Do you do anything with cold — cold showers, winter swims?",
           informational: true,
         },
         {
@@ -506,19 +464,18 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "standing_desk",
           label: "Standing desk",
           priority: "high",
-          valueType: enumType("adjustable_used", "adjustable_unused", "fixed"),
-          question:
-            "Do you have a height-adjustable desk? Do you use it standing?",
-          target: "20-8-2 pattern",
           informational: true,
+          valueType: enumType("adjustable_used", "adjustable_unused", "fixed"),
+          question: "Do you have a height-adjustable desk? Do you use it standing?",
+          target: "20-8-2 pattern",
         },
         {
           id: "screen_setup",
           label: "Screen setup",
           priority: "high",
+          informational: true,
           valueType: enumType("external_monitor", "laptop_only", "mixed"),
           question: "Do you work on just the laptop, or an external monitor?",
-          informational: true,
         },
         {
           id: "screen_at_eye_level",
@@ -531,17 +488,16 @@ export const HABITAT_CATALOG: HabitatCatalog = {
           id: "chair",
           label: "Chair",
           priority: "medium",
-          valueType: enumType("ergonomic", "ordinary", "varies"),
-          question:
-            "What do you sit on — a proper chair, or whatever's around?",
           informational: true,
+          valueType: enumType("ergonomic", "ordinary", "varies"),
+          question: "What do you sit on — a proper chair, or whatever's around?",
         },
         {
           id: "external_keyboard",
           label: "External keyboard with laptop",
           priority: "medium",
-          valueType: BOOL,
           informational: true,
+          valueType: BOOL,
         },
         {
           id: "wrist_complaints",
@@ -649,10 +605,7 @@ export function validateHabitatIndicatorValue(
       if (typeof value !== "string" || value.trim().length === 0) {
         return "Expected non-empty text.";
       }
-      if (
-        valueType.maxLength !== undefined &&
-        value.length > valueType.maxLength
-      ) {
+      if (valueType.maxLength !== undefined && value.length > valueType.maxLength) {
         return `Expected text of at most ${valueType.maxLength} characters.`;
       }
       return null;
