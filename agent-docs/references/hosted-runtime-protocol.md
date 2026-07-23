@@ -946,7 +946,13 @@ Existing global file-type exclusions still apply regardless of directory.
 Detached `assistant.notification.requested` work remains output-only and cannot
 mutate resident conversation history or native provider resume state. Phone-call
 analysis therefore uses the dedicated `phone-call.resulted` system-mailbox event
-instead. At call start, Web stores the trusted initiating resident-session id
+instead. Before the hosted phone-call port delegates an external start, the
+runtime synchronously publishes an `assistant_runtime_commit` workspace
+checkpoint containing the exact initiating direct session. A rejected or failed
+checkpoint prevents Web and Retell from being called. Repeated preparation for
+the same session may coalesce only after a successful checkpoint in that runtime
+invocation; the continuing provider turn remains dirty for its ordinary final
+checkpoint. At call start, Web stores the trusted initiating resident-session id
 on the call row. Completion carries that exact id plus at most 4,000 UTF-8 bytes
 of untrusted context; it never re-resolves mutable notification routing. The
 runtime requires the referenced session to exist and remain direct, then appends

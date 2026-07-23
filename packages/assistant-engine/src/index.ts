@@ -33,6 +33,7 @@ export type {
   AssistantHostedGroupSharedReadRequest,
   AssistantHostedGroupSharedReadResponse,
   AssistantHostedGroupSharedRecord,
+  AssistantPhoneCallPort,
 } from './assistant/execution-context.js'
 export {
   flushPendingAssistantRuntimeIssueWrites,

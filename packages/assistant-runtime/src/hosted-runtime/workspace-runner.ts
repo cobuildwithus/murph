@@ -139,7 +139,7 @@ export interface HostedWorkspaceSnapshotCheckpointResult {
 
 type HostedWorkspaceSnapshotCheckpointMailboxReason = Exclude<
   HostedWorkspaceCheckpointReason,
-  "canonical_runtime_commit" | "idle_shutdown"
+  "assistant_runtime_commit" | "canonical_runtime_commit" | "idle_shutdown"
 >;
 
 type HostedWorkspaceSnapshotCheckpointMailboxInput =
@@ -151,7 +151,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
   (
     | HostedWorkspaceSnapshotCheckpointMailboxInput
     | {
-      reason: "idle_shutdown";
+      reason: "assistant_runtime_commit" | "idle_shutdown";
     }
   ) & {
     expectedWorkspaceVersion?: string;

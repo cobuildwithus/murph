@@ -28,8 +28,13 @@ import {
 } from "@murphai/contracts";
 import {
   readAssistantContextSnapshotState,
+  resolveAssistantSession,
+  saveAssistantSession,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import {
+  parseAssistantSessionRecord,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantProviderUsageDraft,
 } from "@murphai/assistant-engine/assistant-ask";
@@ -48,6 +53,7 @@ import {
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
+  restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
@@ -19881,6 +19887,136 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(checkpointRequests[1]?.nextWakeReason, null);
     } finally {
       await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("checkpoints a new phone-call origin before external start and restores it after a crash", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-phone-origin-checkpoint-"));
+    const restoredWorkspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-phone-origin-restore-"),
+    );
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const crashAfterExternalStart = new Error(
+      "Synthetic crash after external phone-call start.",
+    );
+    const originSessionId = "asst_phone_origin_restart_stable";
+    let checkpointBundle: Uint8Array | null = null;
+
+    try {
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 180_000,
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            const snapshot = await snapshotHostedAssistantRuntimeHotState({
+              vaultRoot,
+            });
+            checkpointBundle = snapshot.bundle;
+            const hash = sha256HostedBundleHex(snapshot.bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash,
+                key: "users/bundles/member-synthetic/phone-origin.bundle.json",
+                size: snapshot.bundle.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Phone-call origin checkpoint test has no mailbox items.");
+          },
+          platform: createPlatform({
+            events,
+            mailboxPort: createMailboxPort({
+              events,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: null,
+            }),
+          }),
+          async runAssistantPhase(phaseInput) {
+            await saveAssistantSession(vaultRoot, parseAssistantSessionRecord({
+              alias: null,
+              binding: {
+                actorId: "actor_phone_origin",
+                channel: "linq",
+                conversationKey: null,
+                delivery: {
+                  kind: "thread",
+                  target: "linq_chat_phone_origin",
+                },
+                identityId: "identity_phone_origin",
+                threadId: "thread_phone_origin",
+                threadIsDirect: true,
+              },
+              createdAt: TEST_NOW,
+              lastTurnAt: null,
+              resumeState: null,
+              schema: "murph.assistant-session.v1",
+              sessionId: originSessionId,
+              target: {
+                adapter: "codex-cli",
+                approvalPolicy: "never",
+                codexCommand: null,
+                codexHome: null,
+                model: "gpt-5.6-terra",
+                modelProvider: "vercel-ai-gateway",
+                oss: false,
+                profile: null,
+                reasoningEffort: "medium",
+                sandbox: "danger-full-access",
+              },
+              turnCount: 0,
+              updatedAt: TEST_NOW,
+            }));
+            events.push("origin:created");
+            await phaseInput.beforePhoneCallStart?.(originSessionId);
+            await phaseInput.beforePhoneCallStart?.(originSessionId);
+            events.push("phone:start");
+            throw crashAfterExternalStart;
+          },
+          vaultRoot,
+        },
+      )).rejects.toBe(crashAfterExternalStart);
+
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "assistant_runtime_commit",
+      ]);
+      assert.ok(
+        requireEventIndex(events, "origin:created")
+          < requireEventIndex(events, "snapshot:assistant_runtime_commit"),
+      );
+      assert.ok(
+        requireEventIndex(events, "snapshot:assistant_runtime_commit")
+          < requireEventIndex(events, "workspace.checkpoint"),
+      );
+      assert.ok(
+        requireEventIndex(events, "workspace.checkpoint")
+          < requireEventIndex(events, "phone:start"),
+      );
+      assert.ok(checkpointBundle);
+
+      const restored = await restoreHostedExecutionContext({
+        bundle: checkpointBundle,
+        workspaceRoot: restoredWorkspaceRoot,
+      });
+      const resolved = await resolveAssistantSession({
+        createIfMissing: false,
+        sessionId: originSessionId,
+        vault: restored.vaultRoot,
+      });
+      assert.equal(resolved.session.sessionId, originSessionId);
+      assert.equal(resolved.session.binding.threadIsDirect, true);
+    } finally {
+      await removeTempRoot(vaultRoot);
+      await removeTempRoot(restoredWorkspaceRoot);
     }
   });
 
