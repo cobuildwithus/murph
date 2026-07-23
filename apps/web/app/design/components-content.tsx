@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
+import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
   DeviceSyncCompletionDialog,
   DeviceSyncSetupGuideDialog,
@@ -210,6 +212,34 @@ const DESIGN_LEGAL_DOCUMENTS: HostedConsentStatus["documents"] = [
 
 const DESIGN_LEGAL_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(0, 3);
 const DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(3);
+const DESIGN_AVAILABLE_CONNECT_SOURCES: ConnectSource[] = [
+  {
+    connectProvider: "oura",
+    connectTarget: "oura",
+    description: "Smart ring. Sleep, readiness, temperature, and recovery.",
+    id: "oura",
+    logo: {
+      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      height: 30,
+      src: "/brand-logos/connect/oura.png",
+      width: 96,
+    },
+    name: "Oura",
+  },
+  {
+    connectProvider: "junction",
+    connectTarget: "junction:garmin",
+    description: "Workouts, sleep, stress, heart rate, and body battery.",
+    id: "garmin",
+    logo: {
+      className: "size-11 object-contain",
+      height: 44,
+      src: "/brand-logos/connect/garmin.png",
+      width: 44,
+    },
+    name: "Garmin",
+  },
+];
 const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
   documents: DESIGN_LEGAL_DOCUMENTS,
   generatedAt: "2026-07-23T12:00:00.000Z",
@@ -295,10 +325,42 @@ export function ComponentsContent() {
         <Separator />
 
         <Section title="Dashboard legal update">
-          <div className="rounded-2xl border border-border bg-background px-5 py-4 sm:px-8">
+          <div
+            className="rounded-2xl border border-border bg-background px-5 py-4 sm:px-8"
+            data-design-dashboard-legal-composition="true"
+          >
             <DashboardLegalConsentGate
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
             />
+            <div className="border-t border-border py-8">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+                Requested dashboard content remains available
+              </p>
+              <div className="mt-3 flex items-end justify-between gap-4">
+                <div>
+                  <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+                    Connect devices
+                  </h2>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Stale legal consent does not block configured device connections.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                {DESIGN_AVAILABLE_CONNECT_SOURCES.map((source) => (
+                  <SourceCard
+                    authenticated
+                    errorMessage={null}
+                    key={source.id}
+                    onDisconnectTargetChange={() => {}}
+                    onStartConnection={() => Promise.resolve()}
+                    pending={false}
+                    pendingDisconnect={false}
+                    source={source}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         </Section>
 
