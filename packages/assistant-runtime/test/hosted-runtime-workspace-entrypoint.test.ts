@@ -20442,6 +20442,157 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("preserves the active pass wake across a direct-session checkpoint response", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-direct-session-active-wake-"),
+    );
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let activeWakeAt: string | null = null;
+    let assistantPhaseCalls = 0;
+    let mailboxWakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_direct_session_active_wake",
+              idleCheckpointDelayMs: 2_000,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `direct-session-active-wake-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                checkpointWorkspace(request) {
+                  return createWorkspaceState({
+                    nextWakeAt:
+                      checkpointRequests.length === 1
+                        ? null
+                        : request.nextWakeAt ?? null,
+                    nextWakeReason:
+                      checkpointRequests.length === 1
+                        ? null
+                        : request.nextWakeReason ?? null,
+                    redactedStatus:
+                      checkpointRequests.length === 1
+                        ? null
+                        : request.redactedStatus ?? null,
+                    snapshotRef: request.snapshotRef,
+                    version: String(BigInt(request.expectedWorkspaceVersion) + 1n),
+                  });
+                },
+                events,
+                workspace: createWorkspaceState({
+                  version: "0",
+                }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(phaseInput) {
+              assistantPhaseCalls += 1;
+              if (assistantPhaseCalls === 1) {
+                activeWakeAt = new Date(Date.now() + 150).toISOString();
+                mailboxWakeTimer = setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    id: "mailbox_item_direct_session_active_wake",
+                    laneSeq: "1",
+                    occurredAt: TEST_NOW,
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 25);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  invocationLocalAssistantWakeAt: activeWakeAt,
+                  nextWakeAt: activeWakeAt,
+                  nextWakeReason: "assistant",
+                  progressed: true,
+                  redactedStatus: {
+                    activePassStatePreserved: true,
+                    projectedWakeServiced: false,
+                  },
+                };
+              }
+              if (assistantPhaseCalls === 2) {
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [],
+                  directUserActionSession: {
+                    sessionId: "asst_direct_session_active_wake",
+                  },
+                });
+                return { progressed: false };
+              }
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                nextWakeAt: null,
+                nextWakeReason: null,
+                progressed: true,
+                redactedStatus: {
+                  activePassStatePreserved: true,
+                  projectedWakeServiced: true,
+                },
+              };
+            },
+            vaultRoot,
+          },
+        ),
+        10_000,
+        () => events.join(","),
+      );
+
+      assert.equal(assistantPhaseCalls, 3);
+      assert.ok(activeWakeAt);
+      assert.deepEqual(checkpointRequests.map((request) => [
+        request.reason,
+        request.nextWakeAt,
+        request.nextWakeReason,
+      ]), [
+        ["idle_shutdown", activeWakeAt, "assistant"],
+        ["idle_shutdown", null, null],
+      ]);
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.activePassStatePreserved,
+        true,
+      );
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.projectedWakeServiced,
+        true,
+      );
+      assert.equal(result.nextWakeAt, null);
+      assert.equal(result.nextWakeReason ?? null, null);
+      assert.equal(result.status, "idle");
+    } finally {
+      if (mailboxWakeTimer !== null) {
+        clearTimeout(mailboxWakeTimer);
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not republish a direct session already present in the restored snapshot", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-restored-direct-session-"),

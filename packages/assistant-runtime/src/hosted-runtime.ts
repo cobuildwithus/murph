@@ -2187,7 +2187,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           vaultRoot: restored.vaultRoot,
           workspacePort: foregroundWorkspacePort,
         });
-        rebaseCommittedWorkspace(checkpoint.workspace);
+        // This checkpoint runs inside the active foreground pass. Advance the
+        // durable workspace reference without rebasing invocation-local wake
+        // projection or status state that the pass still owns.
+        committedWorkspace = checkpoint.workspace;
         durablyCheckpointedDirectAssistantSessionIds.add(sessionId);
         // Provider work continues after this boundary and mutates the same
         // workspace. Keep the ordinary final checkpoint armed for those later
