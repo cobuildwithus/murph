@@ -51,7 +51,7 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'When calorie or macro tracking is explicitly active, always load automatic-meal-capture alongside food-journal on eligible interactive nutrition turns and check recent unresolved device meals; import itself does not start a model turn.',
+      'Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.',
     )
   })
 
@@ -111,7 +111,9 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('late import gets one dated catch-up')
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
-    expect(skill).toContain('Keep it qualitative\n   by default')
+    expect(skill).toContain(
+      'Include supported\n   calorie and macro totals by default',
+    )
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')
@@ -120,7 +122,7 @@ describe('assistant automatic meal capture skill', () => {
       'Do not run `meal add` for a captured photo that already has a meal id.',
     )
     expect(skill).toContain(
-      "Treat calorie or macro tracking as active only when the member's request,\ncurrent plan, or durable context makes that focus explicit.",
+      'Estimate calories and macros by default when enriching a captured meal.',
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md',

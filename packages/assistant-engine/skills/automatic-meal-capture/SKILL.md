@@ -17,10 +17,9 @@ meal store or a duplicate meal record. Read
 `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition
 or interpreting meal patterns. A successful automatic import ensures one
 private 9pm managed closeout for that member; there is no separate automation
-opt-in. When calorie or macro tracking is explicitly active, load this skill
-alongside `food-journal` on every eligible interactive nutrition turn and check
-recent unresolved device meals. Use `nutrition-strategy` for forward-looking
-decisions about what to eat.
+opt-in. Load this skill alongside `food-journal` on every eligible interactive
+meal turn and check recent unresolved device meals. Use `nutrition-strategy` for
+forward-looking decisions about what to eat.
 
 ## Set up the iPhone app
 
@@ -75,11 +74,10 @@ credential may require renewal by opening Murph.
 
 Automatic capture does not itself require a chat reply and its import does not
 start a model turn. If the member asks whether a photo arrived, verify the meal
-record instead of using conversation silence as evidence of failure. When
-calorie or macro tracking is explicitly active, inspect and enrich unresolved
-device meals on the next eligible interactive turn. The 9pm closeout handles
-the same unresolved work independently. Do not claim enrichment happened at
-import time.
+record instead of using conversation silence as evidence of failure. Inspect and
+enrich unresolved device meals on the next eligible interactive turn. The 9pm
+closeout handles the same unresolved work independently. Do not claim enrichment
+happened at import time.
 
 ## Verify an import
 
@@ -106,13 +104,13 @@ reads. Suggest resending only after later evidence shows the upload failed. Also
 distinguish a pending import from a candidate that is still local in Review and
 cannot yet be visible to Murph.
 
-## Enrich calorie or macro tracking
+## Enrich calorie and macro tracking by default
 
-Treat calorie or macro tracking as active only when the member's request,
-current plan, or durable context makes that focus explicit. Do not infer it from
-a generic health or weight goal.
+Estimate calories and macros by default when enriching a captured meal. Skip
+estimation only for intuitive-eating contexts, eating-disorder risk, or
+number-sensitive members.
 
-When this skill is loaded for a calorie-tracking turn:
+When enriching a captured meal:
 
 1. List recent meals and find photo-backed device meals with missing nutrition.
 2. Before editing, compare nearby canonical meals for a likely manual,
@@ -137,15 +135,15 @@ When this skill is loaded for a calorie-tracking turn:
 6. Read the edited meal back before claiming it was logged.
 
 Do not run `meal add` for a captured photo that already has a meal id. The
-automatic import is the meal log; `meal edit` adds the useful structure. A
-standing calorie-tracking focus is enough to save a bounded photo estimate
-without asking for confirmation on every meal, but the estimate must retain
-provenance and uncertainty. If the photo cannot support a meaningful estimate,
-leave the photo-only meal intact and ask one narrow portion or identity question
-only when the member is present and the answer would materially help.
+automatic import is the meal log; `meal edit` adds the useful structure. By
+default, save a bounded photo estimate without asking for confirmation on every
+meal, but the estimate must retain provenance and uncertainty. If the photo
+cannot support a meaningful estimate, leave the photo-only meal intact and ask
+one narrow portion or identity question only when the member is present and the
+answer would materially help.
 
-Do not surface unsolicited calorie numbers for simple meal logging,
-intuitive-eating contexts, eating-disorder risk, or number-sensitive members.
+Do not surface calorie numbers for intuitive-eating contexts, eating-disorder
+risk, or number-sensitive members.
 
 ## Run the automatic 9pm closeout
 
@@ -176,11 +174,9 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. Send one compact closeout covering the selected dates. Keep it qualitative
-   by default. Include supported calorie and macro totals only when the
-   member's request, current plan, or durable context explicitly establishes
-   calorie or macro tracking; label partial totals as partial. Never surface
-   numbers in intuitive-eating, eating-disorder-risk, or number-sensitive
+6. Send one compact closeout covering the selected dates. Include supported
+   calorie and macro totals by default; label partial totals as partial. Never
+   surface numbers in intuitive-eating, eating-disorder-risk, or number-sensitive
    context, and never attach the photos. Suppress the message only when neither
    a retained photo nor a same-occurrence removal revision is selected.
 
