@@ -22,6 +22,10 @@ import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
 import {
+  HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER,
+  HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
+} from "./runner-conversation-warmth.ts";
+import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
@@ -82,6 +86,7 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
 ]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
+const MIN_RUNNER_LIFECYCLE_REEVALUATION_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
@@ -324,6 +329,21 @@ interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
 }
 
+interface RunnerContainerStorageLike {
+  delete(key: string): Promise<boolean>;
+  get<T>(key: string): Promise<T | undefined>;
+  put<T>(key: string, value: T): Promise<void>;
+}
+
+interface RunnerContainerHealth {
+  activeJobCount: number;
+  conversationWarmActivityCompletedAtEpochMs: number | null;
+}
+
+type RunnerConversationWarmLeaseRead =
+  | { kind: "available"; warmUntilEpochMs: number | null }
+  | { kind: "unavailable"; warmUntilEpochMs: null };
+
 interface RunnerActiveOperationRecord {
   attemptId: string;
   leaseGeneration: string;
@@ -388,6 +408,7 @@ export class RunnerContainer extends Container {
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
   protected readonly environment: RunnerContainerEnvironmentSource;
+  private readonly storage: RunnerContainerStorageLike;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private containerStartedAtMs: number | null = null;
@@ -405,17 +426,22 @@ export class RunnerContainer extends Container {
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
   private workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
   private workspaceInvocationAbortEndpointReady = false;
+  private containerInteractionGeneration = 0;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
+    this.storage = (state as { storage: RunnerContainerStorageLike }).storage;
     this.envVars = buildRunnerContainerEnvVars();
-    this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
+    this.sleepAfter = formatRunnerSleepAfter(
+      readRunnerContainerLifecycleReevaluationMs(env),
+    );
   }
 
   async invoke(
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
+    this.noteContainerInteraction();
     const input = parseHostedExecutionContainerInvokeInput(payload);
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
@@ -423,15 +449,21 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
+    this.noteContainerInteraction();
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
     await this.withLifecycleLock(async () => {
-      await this.stopWarmContainer({
-        reason: "destroy-instance",
-      });
+      try {
+        await this.stopWarmContainer({
+          reason: "destroy-instance",
+        });
+      } finally {
+        await this.deleteConversationWarmUntilBestEffort();
+      }
     });
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     if (!active) {
       const status = await readRunnerContainerStatus(this);
@@ -464,6 +496,7 @@ export class RunnerContainer extends Container {
   async ensureReadyForProcessing(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
@@ -489,6 +522,7 @@ export class RunnerContainer extends Container {
     leaseGeneration: string;
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     const abortController = this.workspaceInvocationAbortController;
     if (!active || !abortController) {
@@ -529,6 +563,7 @@ export class RunnerContainer extends Container {
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
+    this.noteContainerInteraction();
     assertRunnerContainerEnsureProcessingUserIds(input);
     let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
     if (input.activeRuntime) {
@@ -581,6 +616,7 @@ export class RunnerContainer extends Container {
   }
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     if (
       active
@@ -708,6 +744,7 @@ export class RunnerContainer extends Container {
   }
 
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
+    this.noteContainerInteraction();
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
       let smokeStartAttempted = false;
@@ -896,7 +933,14 @@ export class RunnerContainer extends Container {
   }
 
   override async onActivityExpired(): Promise<void> {
+    const interactionGenerationAtExpiry = this.containerInteractionGeneration;
     await this.withLifecycleLock(async () => {
+      if (
+        this.lifecycleLockPendingCount > 1
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        return;
+      }
       const activeOperation = this.workspaceInvocationActiveOperation;
       if (activeOperation) {
         this.lastActivityExpiryAtMs = Date.now();
@@ -920,7 +964,7 @@ export class RunnerContainer extends Container {
       if (
         lastActivityObservedAtMs !== null
         && Date.now() - lastActivityObservedAtMs
-          < readRunnerContainerIdleTtlMs(this.environment)
+          < readRunnerContainerLifecycleReevaluationMs(this.environment)
       ) {
         this.lastActivityExpiryAtMs = Date.now();
         if (this.renewPlatformActivityTimeout()) {
@@ -940,6 +984,61 @@ export class RunnerContainer extends Container {
       }
 
       this.lastActivityExpiryAtMs = Date.now();
+      const warmLease = await this.readConversationWarmUntilForCleanup(
+        this.lastActivityExpiryAtMs,
+      );
+      if (warmLease.kind === "unavailable" || warmLease.warmUntilEpochMs !== null) {
+        return;
+      }
+
+      let status: string | null;
+      try {
+        status = await readRunnerContainerStatusWithTimeout(
+          this,
+          RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+        );
+      } catch (error) {
+        this.logConversationWarmthFailure(
+          "Hosted execution container could not verify lifecycle state during activity expiry.",
+          error,
+        );
+        return;
+      }
+      if (isRunnerContainerStopped(status)) {
+        return;
+      }
+
+      let health: RunnerContainerHealth;
+      try {
+        health = await this.readWorkspaceInvocationHealth();
+      } catch (error) {
+        this.logConversationWarmthFailure(
+          "Hosted execution container could not verify runner health during activity expiry.",
+          error,
+        );
+        return;
+      }
+      if (
+        health.activeJobCount > 0
+        || this.lifecycleLockPendingCount > 1
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        return;
+      }
+      const recoveredLease =
+        await this.recordConversationWarmActivityBestEffort(
+          health.conversationWarmActivityCompletedAtEpochMs,
+          { fallbackOnMissing: false },
+        );
+      if (
+        recoveredLease.kind === "unavailable"
+        || recoveredLease.warmUntilEpochMs !== null
+        || this.lifecycleLockPendingCount > 1
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        return;
+      }
+
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -951,9 +1050,11 @@ export class RunnerContainer extends Container {
         userId: this.currentLogContext?.userId,
       });
       await this.stopWarmContainer({
+        expectedInteractionGeneration: interactionGenerationAtExpiry,
         failClosed: false,
         reason: "activity-expired",
       });
+      await this.deleteConversationWarmUntilBestEffort();
     });
   }
 
@@ -1139,6 +1240,7 @@ export class RunnerContainer extends Container {
         void stoppedContainer.catch(() => undefined);
       }
       this.noteRunnerActivity("runner-response-received");
+      await this.recordConversationWarmActivityFromResponseBestEffort(response);
 
       if (!response.ok) {
         const runnerError = await classifyHostedRunnerContainerErrorResponse(response);
@@ -1256,6 +1358,10 @@ export class RunnerContainer extends Container {
   }
 
   private async readWorkspaceInvocationActiveFromHealth(): Promise<boolean> {
+    return (await this.readWorkspaceInvocationHealth()).activeJobCount > 0;
+  }
+
+  private async readWorkspaceInvocationHealth(): Promise<RunnerContainerHealth> {
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS);
     const response = await this.containerFetch(RUNNER_HEALTH_URL, {
       method: "GET",
@@ -1272,7 +1378,24 @@ export class RunnerContainer extends Container {
     ) {
       throw new Error("Hosted runner container health did not include a valid active job count.");
     }
-    return payload.activeJobCount > 0;
+    const conversationWarmActivityCompletedAtEpochMs =
+      payload.conversationWarmActivityCompletedAtEpochMs;
+    if (
+      conversationWarmActivityCompletedAtEpochMs !== null
+      && (
+        typeof conversationWarmActivityCompletedAtEpochMs !== "number"
+        || !Number.isSafeInteger(conversationWarmActivityCompletedAtEpochMs)
+        || conversationWarmActivityCompletedAtEpochMs < 0
+      )
+    ) {
+      throw new Error(
+        "Hosted runner container health did not include a valid conversation warm activity watermark.",
+      );
+    }
+    return {
+      activeJobCount: payload.activeJobCount,
+      conversationWarmActivityCompletedAtEpochMs,
+    };
   }
 
   private async readPreservedWorkspaceInvocationActiveFromContainer(): Promise<boolean> {
@@ -1589,6 +1712,7 @@ export class RunnerContainer extends Container {
   }
 
   private async destroyIfRunning(input: {
+    expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
@@ -1620,6 +1744,13 @@ export class RunnerContainer extends Container {
       return false;
     }
 
+    if (
+      input.expectedInteractionGeneration !== undefined
+      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
+    ) {
+      return true;
+    }
+
     const destroyStartedAt = Date.now();
     const stopGenerationBeforeDestroy = this.stopGeneration;
     this.lastDestroyRequest = {
@@ -1641,6 +1772,12 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
 
+    if (
+      input.expectedInteractionGeneration !== undefined
+      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
+    ) {
+      return true;
+    }
     const destroyRequest = this.destroy().then(
       () => ({ kind: "destroy-resolved" as const }),
       (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
@@ -1813,6 +1950,7 @@ export class RunnerContainer extends Container {
   }
 
   private async stopWarmContainer(input?: {
+    expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
@@ -1821,7 +1959,13 @@ export class RunnerContainer extends Container {
     const reason = input?.reason ?? "destroy-instance";
     let destroyed: boolean;
     try {
-      destroyed = await this.destroyIfRunning({ failClosed, reason });
+      destroyed = await this.destroyIfRunning({
+        ...(input?.expectedInteractionGeneration === undefined
+          ? {}
+          : { expectedInteractionGeneration: input.expectedInteractionGeneration }),
+        failClosed,
+        reason,
+      });
     } catch (error) {
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
@@ -1873,8 +2017,11 @@ export class RunnerContainer extends Container {
   }
 
   private startRunnerActivityRenewal(): () => void {
-    const idleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
-    const intervalMs = computeRunnerActivityRenewIntervalMs(idleTtlMs);
+    const lifecycleReevaluationMs =
+      readRunnerContainerLifecycleReevaluationMs(this.environment);
+    const intervalMs = computeRunnerActivityRenewIntervalMs(
+      lifecycleReevaluationMs,
+    );
     const interval = setInterval(() => {
       this.noteRunnerActivity("invoke-heartbeat");
     }, intervalMs);
@@ -1933,6 +2080,143 @@ export class RunnerContainer extends Container {
   private recordContainerActivityObserved(stage: string): void {
     this.lastActivityObservedAtMs = Date.now();
     this.lastActivityObservedStage = stage;
+  }
+
+  private noteContainerInteraction(): void {
+    this.containerInteractionGeneration += 1;
+  }
+
+  private async recordConversationWarmActivityFromResponseBestEffort(
+    response: Response,
+  ): Promise<void> {
+    const raw = response.headers.get(HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER);
+    if (raw === "none") {
+      return;
+    }
+    const parsed = raw !== null && /^[0-9]+$/u.test(raw)
+      ? Number(raw)
+      : null;
+    const completedAtEpochMs =
+      typeof parsed === "number"
+      && Number.isSafeInteger(parsed)
+      && parsed >= 0
+        ? parsed
+        : null;
+    await this.recordConversationWarmActivityBestEffort(
+      completedAtEpochMs,
+      { fallbackOnMissing: true },
+    );
+  }
+
+  private async recordConversationWarmActivityBestEffort(
+    completedAtEpochMs: number | null,
+    options: { fallbackOnMissing: boolean },
+  ): Promise<RunnerConversationWarmLeaseRead> {
+    if (completedAtEpochMs === null && !options.fallbackOnMissing) {
+      return { kind: "available", warmUntilEpochMs: null };
+    }
+    const nowMs = Date.now();
+    const existing = await this.readConversationWarmUntilForCleanup(nowMs);
+    if (existing.kind === "unavailable") {
+      return existing;
+    }
+    const conversationActivityAtMs = Math.min(
+      completedAtEpochMs ?? nowMs,
+      nowMs,
+    );
+    const conversationWarmTtlMs = readRunnerContainerIdleTtlMs(this.environment);
+    const candidateWarmUntilEpochMs = Math.min(
+      nowMs + conversationWarmTtlMs,
+      conversationActivityAtMs + conversationWarmTtlMs,
+    );
+    const warmUntilEpochMs = Math.max(
+      existing.warmUntilEpochMs ?? 0,
+      candidateWarmUntilEpochMs,
+    );
+    if (warmUntilEpochMs <= nowMs) {
+      return { kind: "available", warmUntilEpochMs: null };
+    }
+    try {
+      await this.storage.put(
+        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
+        warmUntilEpochMs,
+      );
+      return { kind: "available", warmUntilEpochMs };
+    } catch (error) {
+      this.logConversationWarmthFailure(
+        "Hosted execution container could not persist conversation warmth.",
+        error,
+      );
+      return { kind: "unavailable", warmUntilEpochMs: null };
+    }
+  }
+
+  private async readConversationWarmUntilForCleanup(
+    nowMs: number,
+  ): Promise<RunnerConversationWarmLeaseRead> {
+    let stored: unknown;
+    try {
+      stored = await this.storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY);
+    } catch (error) {
+      this.logConversationWarmthFailure(
+        "Hosted execution container could not read conversation warmth.",
+        error,
+      );
+      return { kind: "unavailable", warmUntilEpochMs: null };
+    }
+    if (stored === undefined) {
+      return { kind: "available", warmUntilEpochMs: null };
+    }
+    if (
+      typeof stored !== "number"
+      || !Number.isSafeInteger(stored)
+      || stored <= nowMs
+    ) {
+      await this.deleteConversationWarmUntilBestEffort();
+      return { kind: "available", warmUntilEpochMs: null };
+    }
+    const maximumWarmUntilEpochMs =
+      nowMs + readRunnerContainerIdleTtlMs(this.environment);
+    if (stored <= maximumWarmUntilEpochMs) {
+      return { kind: "available", warmUntilEpochMs: stored };
+    }
+    try {
+      await this.storage.put(
+        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
+        maximumWarmUntilEpochMs,
+      );
+    } catch (error) {
+      this.logConversationWarmthFailure(
+        "Hosted execution container could not clamp conversation warmth.",
+        error,
+      );
+    }
+    return {
+      kind: "available",
+      warmUntilEpochMs: maximumWarmUntilEpochMs,
+    };
+  }
+
+  private async deleteConversationWarmUntilBestEffort(): Promise<void> {
+    try {
+      await this.storage.delete(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY);
+    } catch (error) {
+      this.logConversationWarmthFailure(
+        "Hosted execution container could not clear conversation warmth.",
+        error,
+      );
+    }
+  }
+
+  private logConversationWarmthFailure(message: string, error: unknown): void {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "warn",
+      message,
+      phase: "container.ready",
+      userId: this.currentLogContext?.userId,
+    });
   }
 
   private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
@@ -3203,6 +3487,31 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
     );
   }
 
+  return parsed;
+}
+
+function readRunnerContainerLifecycleReevaluationMs(
+  source: RunnerContainerEnvironmentSource,
+): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS;
+  if (raw === undefined || raw === null || raw === "") {
+    return readRunnerContainerIdleTtlMs(source);
+  }
+  if (typeof raw !== "string") {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS must be a string when configured.",
+    );
+  }
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (
+    !Number.isSafeInteger(parsed)
+    || parsed < MIN_RUNNER_LIFECYCLE_REEVALUATION_MS
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS must be an integer "
+      + `greater than or equal to ${MIN_RUNNER_LIFECYCLE_REEVALUATION_MS}.`,
+    );
+  }
   return parsed;
 }
 

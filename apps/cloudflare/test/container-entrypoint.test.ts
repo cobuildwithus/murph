@@ -1,4 +1,8 @@
-import { request as httpRequest, type ClientRequest } from "node:http";
+import {
+  request as httpRequest,
+  type ClientRequest,
+  type IncomingHttpHeaders,
+} from "node:http";
 import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -99,6 +103,7 @@ import {
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
+import { HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER } from "../src/runner-conversation-warmth.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -153,7 +158,7 @@ async function sendHostedContainerJsonRequest(input: {
   headers?: Record<string, string>;
   path: string;
   port: number;
-}): Promise<{ json: unknown; status: number }> {
+}): Promise<{ headers: IncomingHttpHeaders; json: unknown; status: number }> {
   return await new Promise((resolve, reject) => {
     const request = httpRequest({
       headers: {
@@ -174,6 +179,7 @@ async function sendHostedContainerJsonRequest(input: {
       response.on("end", () => {
         const bodyText = Buffer.concat(chunks).toString("utf8");
         resolve({
+          headers: response.headers,
           json: bodyText.length > 0 ? JSON.parse(bodyText) : null,
           status: response.statusCode ?? 0,
         });
@@ -384,11 +390,74 @@ describe("startHostedContainerEntrypoint", () => {
     });
     expect(response.json).toMatchObject({
       activeJobCount: 0,
+      conversationWarmActivityCompletedAtEpochMs: null,
       hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
       ok: true,
       poisoned: false,
       service: "cloudflare-hosted-runner-node",
     });
+  });
+
+  it("publishes settled conversation warmth in invocation headers and health", async () => {
+    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+      options.onConversationActivityObserved?.();
+      return buildWorkspaceRunnerResult();
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    const completedAtEpochMs = Number(
+      invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER],
+    );
+    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
+
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(health.json).toMatchObject({
+      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
+    });
+
+    const maintenance = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(maintenance.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER])
+      .toBe(String(completedAtEpochMs));
+  });
+
+  it("settles conversation warmth when the invocation fails after observation", async () => {
+    mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
+      options.onConversationActivityObserved?.();
+      throw new Error("synthetic invocation failure");
+    });
+    const server = await startHostedContainerEntrypoint({ port: 0 });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const invocation = await sendHostedContainerJsonRequest({
+      body: JSON.stringify(buildWorkspaceJobBody()),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+    expect(invocation.status).toBe(500);
+    expect(Number.isSafeInteger(Number(
+      invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER],
+    ))).toBe(true);
   });
 
   it("drains deferred usage completions before clean shutdown exit", async () => {

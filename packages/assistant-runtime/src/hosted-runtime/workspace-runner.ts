@@ -325,6 +325,7 @@ const HOSTED_PRE_AUTO_REPLY_SYSTEM_IMPORT_MAX_PAGES = 4;
 
 export interface HostedWorkspaceRunnerMailboxImportContext {
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: (() => void) | null;
   runtimeAttemptId?: string | null;
   signal?: AbortSignal | null;

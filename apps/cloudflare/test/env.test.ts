@@ -243,6 +243,7 @@ describe("readHostedExecutionEnvironment", () => {
       HOSTED_EXECUTION_RETRY_DELAY_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS: "30000abc",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "300000abc",
+      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000abc",
       HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000abc",
       HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS: "30000abc",
     } as const;
@@ -260,6 +261,17 @@ describe("readHostedExecutionEnvironment", () => {
     const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv());
 
     expect(environment.runnerIdleTtlMs).toBe(300_000);
+    expect(environment.runnerLifecycleReevaluationMs).toBe(300_000);
+  });
+
+  it("reads an independent runner lifecycle reevaluation cadence", () => {
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
+    }));
+
+    expect(environment.runnerIdleTtlMs).toBe(1_200_000);
+    expect(environment.runnerLifecycleReevaluationMs).toBe(60_000);
   });
 
   it("reads optional runner-secret allowlist extensions", () => {

@@ -1192,8 +1192,17 @@ The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
 idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
-RunnerContainer never records
-pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
+RunnerContainer never records pending checkpoint intent. Activity expiry is
+cleanup-only and uses two clocks: `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS`
+controls how often an idle shell is reconsidered, while
+`HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` is the post-completion conversation warm
+lease. The assistant runtime observes only fresh staged conversation input or
+recovered conversation input admitted to the provider. The container process
+publishes that observation as a private completion watermark, and RunnerContainer
+persists the derived bounded lease in Durable Object storage so DO reconstruction
+cannot shorten it. Replay, system-lane work, device sync, and generic maintenance
+do not mint or slide the lease. Cleanup fails closed when lease storage, child
+health, or the wake-versus-destroy race cannot be resolved. Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
 and attachment projection status are logged, and their artifacts remain

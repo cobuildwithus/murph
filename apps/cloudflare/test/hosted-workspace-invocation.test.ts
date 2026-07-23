@@ -136,6 +136,7 @@ describe("runHostedWorkspaceInvocation", () => {
     const capturedInvocationInputs: Record<string, unknown>[] = [];
     const wakeResultsDuringInvocation: boolean[] = [];
     const onRuntimeWakeReady = vi.fn();
+    const onConversationActivityObserved = vi.fn();
     mocks.runPackageHostedWorkspaceInvocation.mockImplementation(
       async (input: Record<string, unknown>) => {
         capturedInvocationInputs.push(input);
@@ -188,6 +189,7 @@ describe("runHostedWorkspaceInvocation", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(runHostedWorkspaceInvocation(job, {
+      onConversationActivityObserved,
       onRuntimeWakeReady,
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
       signal: abortController.signal,
@@ -210,6 +212,12 @@ describe("runHostedWorkspaceInvocation", () => {
     });
     expect(capturedInput.vaultRoot).toBe(expectedVaultRoot);
     expect(capturedInput.mailboxPayloadDecoder).toBeTruthy();
+    const capturedConversationActivity = capturedInput.onConversationActivityObserved;
+    if (typeof capturedConversationActivity !== "function") {
+      throw new Error("Expected direct invocation to forward conversation activity.");
+    }
+    capturedConversationActivity();
+    expect(onConversationActivityObserved).toHaveBeenCalledOnce();
     expect(capturedInput.latencyMilestones).toEqual({
       runnerJobAcceptedAt: "2026-04-26T00:00:01.000Z",
     });
