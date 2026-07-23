@@ -54,6 +54,12 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedPersonalUsageCreditOfferCodes: vi.fn(async () => [
+    "usage_5_usd",
+  ]),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.routerRefresh,
@@ -252,7 +258,7 @@ describe("HostedBillingSettings", () => {
       usageCreditBalanceUsdMicros: balanceUsdMicros,
       usageStatus: buildUsageStatus({
         remainingPercent: 0,
-        status: "exhausted",
+        status: "active",
         usedPercent: 100,
       }),
       usageTopUpOffers: [{
@@ -267,6 +273,61 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /included usage and any usage credit/);
     assert.doesNotMatch(markup, /Add usage to continue/);
     assert.doesNotMatch(markup, /pauses new usage/);
+  });
+
+  test("renders credit-backed continuation from the production usage projection", async () => {
+    const {
+      projectHostedPersonalAiUsageStatus,
+    } = await import("@/src/lib/hosted-execution/usage-status");
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    const periodStart = new Date("2026-07-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-08-01T00:00:00.000Z");
+    const memberId = "member_credit_backed";
+    const usageStatus = await projectHostedPersonalAiUsageStatus({
+      decision: {
+        allowed: true,
+        allowanceSource: "direct_paid_member_plan",
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        memberId,
+        periodEnd,
+        periodStart,
+        remainingUsdMicros: 3_000_000n,
+        spentUsdMicros: 10_000_000n,
+        usageCreditBalanceUsdMicros: 3_000_000n,
+        usageCreditLedgerVersion: 4n,
+      },
+      memberId,
+      now: "2026-07-10T12:00:00.000Z",
+      prisma: {
+        hostedAiUsage: {
+          findFirst: vi.fn(async () => null),
+        },
+      } as never,
+      publicBaseUrl: null,
+    });
+
+    assert.equal(usageStatus.status, "active");
+    assert.equal(usageStatus.usedPercent, 100);
+    assert.equal(usageStatus.remainingPercent, 0);
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      usageCreditBalanceUsdMicros: "3000000",
+      usageStatus,
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+    }));
+
+    assert.match(markup, /Murph will use your remaining usage credit/);
+    assert.doesNotMatch(markup, /\$3\.00/);
+    assert.doesNotMatch(markup, /usage credit remaining/);
+    assert.match(markup, /Add usage/);
   });
 
   test("keeps included usage and top-up actions clear without showing an exact credit balance", async () => {

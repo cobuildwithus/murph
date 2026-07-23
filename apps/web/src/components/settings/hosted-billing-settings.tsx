@@ -301,6 +301,8 @@ function PlanUsageBand(props: {
   const hasUsageCredit = hasPositiveUsageCreditBalance(
     props.usageCreditBalanceUsdMicros,
   );
+  const willUseUsageCredit =
+    status.remainingPercent === 0 && hasUsageCredit;
   const usageTopUpDialog = (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
@@ -340,11 +342,14 @@ function PlanUsageBand(props: {
               {` · ${status.remainingPercent}% remaining`}
             </span>
           </p>
-          {status.status === "exhausted" ? (
+          {willUseUsageCredit ? (
             <p className="text-sm text-pretty text-muted-foreground">
-              {hasUsageCredit
-                ? "You've used this period's included usage. Murph will use your remaining usage credit."
-                : props.usageTopUpOffers.length > 0
+              You&apos;ve used this period&apos;s included usage. Murph will use
+              your remaining usage credit.
+            </p>
+          ) : status.status === "exhausted" ? (
+            <p className="text-sm text-pretty text-muted-foreground">
+              {props.usageTopUpOffers.length > 0
                 ? "You've used this period's included usage and any usage credit. Add usage to continue."
                 : "You've used this period's available usage. Murph pauses new usage until more capacity is available."}
             </p>

@@ -34,6 +34,11 @@ const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 100,
 };
 
+const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...DESIGN_EXHAUSTED_USAGE_STATUS,
+  status: "active",
+};
+
 function GroupUsageFundingStudy() {
   return (
     <div
@@ -78,7 +83,7 @@ function PersonalUsageCreditOwnerStudy() {
         balanceUsdMicros="8429999"
         label="Included usage exhausted, credit remains"
         state="exhausted-with-credit"
-        usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
+        usageStatus={DESIGN_CREDIT_BACKED_USAGE_STATUS}
       />
       <PersonalUsageCreditState
         label="Included usage and credit exhausted"
