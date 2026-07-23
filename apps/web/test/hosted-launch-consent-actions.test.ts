@@ -17,11 +17,10 @@ afterEach(async () => {
 test("launch consent exposes a clear decline action beside the affirmative flow", async () => {
   const onDecline = vi.fn();
   const { cleanup, container, window } = await renderClientComponent(
-    createElement(
-      HostedLaunchConsentActions,
-      { onDecline },
-      createElement("button", { type: "button" }, "Agree, consent & continue"),
-    ),
+    createElement(HostedLaunchConsentActions, {
+      children: createElement("button", { type: "button" }, "Agree, consent & continue"),
+      onDecline,
+    }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
@@ -42,11 +41,11 @@ test("launch consent exposes a clear decline action beside the affirmative flow"
 
 test("launch consent disables the decline action while decline is pending", async () => {
   const { cleanup, container } = await renderClientComponent(
-    createElement(
-      HostedLaunchConsentActions,
-      { declinePending: true, onDecline: () => {} },
-      createElement("div", null, "Consent prompt"),
-    ),
+    createElement(HostedLaunchConsentActions, {
+      children: createElement("div", null, "Consent prompt"),
+      declinePending: true,
+      onDecline: () => {},
+    }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
