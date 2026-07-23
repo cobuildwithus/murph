@@ -1,6 +1,6 @@
 # Hosted Group Join Confirmation
 
-Last verified: 2026-07-13
+Last verified: 2026-07-23
 Status: Implemented
 
 ## User behavior
@@ -35,15 +35,16 @@ member's sharing edit does not create another confirmation.
   closed.
 - Inbound home-route decisions and every home mutation use the durable member
   row as their single per-member owner and read routing only after taking it.
-  There is no separate member-route advisory lock and no global recipient-pool
-  lock: active-member targets are advisory, while proactive daily capacity is
-  claimed atomically on the selected line row. An existing member first
-  classified as inactive takes that row and rechecks access after any activation
-  ahead of it commits. Ordinary active messages take the same row through the
-  route boundary before their mailbox insert, so the mailbox foreign key,
-  activation, and invite issuance share one PostgreSQL ownership graph.
-  Operations that also mutate chat ownership take the existing chat lock after
-  the member row.
+  Linq route owners use `FOR NO KEY UPDATE`, which conflicts with activation and
+  other route owners but not with the mailbox foreign key's `KEY SHARE`.
+  Therefore Telegram, Linq, and other mailbox producers may update their columns
+  on the shared routing row and append mailbox work without creating a
+  routing-row/member-row cycle. There is no separate member-route advisory lock
+  and no global recipient-pool lock: active-member targets are advisory, while
+  proactive daily capacity is claimed atomically on the selected line row. An
+  existing member first classified as inactive takes the stronger member lock
+  and rechecks access after any activation ahead of it commits. Operations that
+  also mutate chat ownership take the existing chat lock after the member row.
 - Family invite acceptance resolves and binds its Linq home route only after
   locking the accepted member row. The accepted route is written once inside
   that lock boundary before the invite claim. Replaying an already accepted

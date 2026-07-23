@@ -925,7 +925,12 @@ Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable
 `HostedLinqLine`'s UTC-day proactive-conversation counter, selects the preferred
 line or a lower-volume fallback, and conditionally claims one slot before
-appending activation work. Active-member targets guide selection but are
+appending activation work. Linq route owners take that member row `FOR NO KEY
+UPDATE`: this still serializes them with activation and each other, while
+remaining compatible with the foreign-key `KEY SHARE` taken when Linq, Telegram,
+or another channel appends mailbox work after changing the shared routing row.
+This avoids a second lock namespace and avoids a routing-row/member-row
+cross-channel deadlock. Active-member targets guide selection but are
 advisory: when every line is at its target, the preferred or least-loaded
 daily-eligible line remains assignable and concurrent requests may create a
 small overshoot. The

@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -9,11 +13,23 @@ import {
 import { appendHostedMailboxItemTx } from "@/src/lib/hosted-mailbox/store";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
+  lookupHostedMemberRoutingByHomeLinqChatId,
+  resolveHostedMemberRoutingByTelegramUserId,
+  upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
+  upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
+import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
+import {
+  buildHostedTelegramMessagePayload,
+  buildHostedTelegramWebhookEventId,
+  parseHostedTelegramWebhookUpdate,
+} from "@/src/lib/hosted-onboarding/telegram";
+import { planHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
+import { planHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -406,6 +422,244 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await disconnectClients([observer, owner, contender]);
       }
     });
+
+    it.each([
+      "telegram-first",
+      "linq-first",
+    ] as const)(
+      "keeps Telegram and Linq planner mailbox writes deadlock-free with %s routing",
+      async (startOrder) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const telegramBase = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const linqBase = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const memberId = `hbm_cross_channel_route_${randomUUID()}`;
+        const linqChatId = `linq-cross-channel-${randomUUID()}`;
+        const linqEventId = `linq-cross-channel-event-${randomUUID()}`;
+        const telegramIdSeed = Number.parseInt(
+          randomUUID().replaceAll("-", "").slice(0, 12),
+          16,
+        );
+        const telegramUpdate = parseHostedTelegramWebhookUpdate(JSON.stringify({
+          message: {
+            chat: {
+              id: telegramIdSeed,
+              type: "private",
+            },
+            date: 1_784_764_800,
+            from: {
+              first_name: "Test",
+              id: telegramIdSeed,
+            },
+            message_id: telegramIdSeed,
+            text: "hello",
+          },
+          update_id: telegramIdSeed,
+        }));
+        const telegramUserId = String(telegramIdSeed);
+        const telegramEventId = buildHostedTelegramWebhookEventId(telegramUpdate);
+        const telegramThreadId =
+          buildHostedTelegramMessagePayload(telegramUpdate)?.threadId;
+        const participantContact = createHostedLinqParticipantContact({
+          kind: "phone",
+          value: "+15551234567",
+        });
+        const linqEvent = parseHostedLinqWebhookEvent(JSON.stringify({
+          api_version: "v3",
+          created_at: "2026-07-23T12:00:00.000Z",
+          data: {
+            chat: {
+              id: linqChatId,
+              is_group: false,
+              owner_handle: {
+                handle: "+15550000000",
+                id: "owner-handle",
+                is_me: true,
+                service: "sms",
+              },
+            },
+            direction: "inbound",
+            id: `linq-message-${randomUUID()}`,
+            parts: [{ type: "text", value: "hello" }],
+            sender_handle: {
+              handle: "+15551234567",
+              id: "sender-handle",
+              service: "sms",
+            },
+            sent_at: "2026-07-23T12:00:00.000Z",
+            service: "sms",
+          },
+          event_id: linqEventId,
+          event_type: "message.received",
+          webhook_version: "2026-02-03",
+        }));
+        if (!participantContact || !telegramThreadId) {
+          throw new Error("Expected valid dual-channel test routing inputs.");
+        }
+
+        const telegramRouteUpserted = createDeferred();
+        const releaseTelegramUpsert = createDeferred();
+        const linqRouteUpsertReached = createDeferred();
+        const releaseLinqUpsert = createDeferred();
+        const telegramPlanFinished = createDeferred();
+        const releaseTelegramCommit = createDeferred();
+        const linqPid = createDeferred<number>();
+        const telegramClient = telegramBase.$extends({
+          query: {
+            hostedMemberRouting: {
+              async upsert({ args, query }) {
+                const result = await query(args);
+                if (startOrder === "telegram-first") {
+                  telegramRouteUpserted.resolve();
+                  await releaseTelegramUpsert.promise;
+                }
+                return result;
+              },
+            },
+          },
+        });
+        const linqClient = linqBase.$extends({
+          query: {
+            hostedMemberRouting: {
+              async upsert({ args, query }) {
+                if (startOrder === "linq-first") {
+                  linqRouteUpsertReached.resolve();
+                  await releaseLinqUpsert.promise;
+                }
+                return query(args);
+              },
+            },
+          },
+        });
+        let memberCreated = false;
+        let telegramTransaction = Promise.resolve<string | undefined>(undefined);
+        let linqTransaction = Promise.resolve<string | undefined>(undefined);
+
+        try {
+          await observer.hostedMember.create({
+            data: {
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+          memberCreated = true;
+          await observer.$transaction(async (tx) => {
+            await upsertHostedMemberHomeLinqBindingTx({
+              clearPending: true,
+              homeLineAssignedAt: new Date("2026-07-23T11:00:00.000Z"),
+              linqChatId,
+              memberId,
+              participantContact,
+              prisma: tx,
+              recipientPhone: "+15550000000",
+            });
+            await upsertHostedMemberTelegramRoutingBindingTx({
+              memberId,
+              prisma: tx,
+              telegramThreadId,
+              telegramUserId,
+            });
+          }, transactionOptions);
+
+          const runTelegram = () => {
+            telegramTransaction = telegramClient.$transaction(async (tx) => {
+              // Prisma's query extension preserves the transaction client's
+              // runtime surface but widens only its generated generic metadata.
+              const prisma = tx as Prisma.TransactionClient;
+              const plan = await planHostedOnboardingTelegramWebhook({
+                prisma,
+                update: telegramUpdate,
+              });
+              telegramPlanFinished.resolve();
+              if (startOrder === "linq-first") {
+                await releaseTelegramCommit.promise;
+              }
+              return plan.response.reason;
+            }, transactionOptions);
+          };
+          const runLinq = () => {
+            linqTransaction = linqClient.$transaction(async (tx) => {
+              // Keep production planners on their ordinary transaction type;
+              // the extension changes only this test's routing-upsert timing.
+              const prisma = tx as Prisma.TransactionClient;
+              linqPid.resolve(await readBackendPid(prisma));
+              const plan = await planHostedOnboardingLinqWebhook({
+                event: linqEvent,
+                prisma,
+              });
+              return plan.response.reason;
+            }, transactionOptions);
+          };
+
+          if (startOrder === "telegram-first") {
+            runTelegram();
+            await telegramRouteUpserted.promise;
+            runLinq();
+            await waitForBlockedBackend({
+              observer,
+              pid: await linqPid.promise,
+            });
+            releaseTelegramUpsert.resolve();
+          } else {
+            runLinq();
+            await linqRouteUpsertReached.promise;
+            runTelegram();
+            await telegramPlanFinished.promise;
+            releaseLinqUpsert.resolve();
+            await waitForBlockedBackend({
+              observer,
+              pid: await linqPid.promise,
+            });
+            releaseTelegramCommit.resolve();
+          }
+
+          await expect(
+            Promise.all([telegramTransaction, linqTransaction]),
+          ).resolves.toEqual([
+            "wake-appended-active-member",
+            "wake-appended-active-member",
+          ]);
+          await expect(observer.hostedMailboxItem.findMany({
+            orderBy: { dedupeKey: "asc" },
+            select: { dedupeKey: true },
+            where: {
+              dedupeKey: { in: [linqEventId, telegramEventId] },
+              userId: memberId,
+            },
+          })).resolves.toEqual(
+            [linqEventId, telegramEventId]
+              .sort()
+              .map((dedupeKey) => ({ dedupeKey })),
+          );
+          await expect(lookupHostedMemberRoutingByHomeLinqChatId({
+            linqChatId,
+            prisma: observer,
+          })).resolves.toMatchObject({
+            core: { id: memberId },
+          });
+          await expect(resolveHostedMemberRoutingByTelegramUserId({
+            prisma: observer,
+            telegramUserId,
+          })).resolves.toMatchObject({
+            lookup: { core: { id: memberId } },
+            status: "found",
+          });
+        } finally {
+          releaseTelegramUpsert.resolve();
+          releaseLinqUpsert.resolve();
+          releaseTelegramCommit.resolve();
+          await Promise.allSettled([telegramTransaction, linqTransaction]);
+          if (memberCreated) {
+            await observer.hostedMailboxItem.deleteMany({
+              where: { userId: memberId },
+            });
+            await observer.hostedMember.deleteMany({
+              where: { id: memberId },
+            });
+          }
+          await disconnectClients([observer, telegramBase, linqBase]);
+        }
+      },
+    );
   },
 );
 

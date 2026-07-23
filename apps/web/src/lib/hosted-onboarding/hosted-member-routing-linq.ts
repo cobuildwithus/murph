@@ -21,7 +21,6 @@ import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs"
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
 import {
-  lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
 import {
@@ -458,10 +457,16 @@ export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  // The durable member row is the sole per-member route owner. Reusing it
-  // keeps route, activation, invite, and mailbox foreign-key writes on one
-  // PostgreSQL lock graph without a second advisory-lock namespace.
-  await lockHostedMemberRow(input.prisma, input.memberId);
+  // The durable member row is the sole per-member route owner. NO KEY UPDATE
+  // still serializes route owners with each other and with activation's UPDATE
+  // lock, while remaining compatible with mailbox foreign-key KEY SHARE locks
+  // from Telegram and other channels.
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
+    FOR NO KEY UPDATE
+  `;
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
@@ -1005,7 +1010,7 @@ async function tryAcquireHostedMemberHomeLinqRouteLockTx(input: {
     SELECT "id"
     FROM "hosted_member"
     WHERE "id" = ${memberId}
-    FOR UPDATE SKIP LOCKED
+    FOR NO KEY UPDATE SKIP LOCKED
   `;
   return rows[0]?.id === memberId;
 }
