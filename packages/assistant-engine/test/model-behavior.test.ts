@@ -104,6 +104,33 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupPrompt).toContain(
+      'It does not withdraw an answer already completed in that turn; that answer still sends.',
+    )
+    expect(groupPrompt).toContain(
+      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+    )
+    expect(groupPrompt).toContain(
+      'Make it stand alone and carry forward anything still worth saying.',
+    )
+    expect(directPrompt).not.toContain(
+      'that answer still sends',
+    )
+    expect(directPrompt).not.toContain(
+      'that response replaces the earlier answer',
+    )
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({

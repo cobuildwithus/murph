@@ -1552,6 +1552,186 @@ describe('assistant automation scanner', () => {
     )
   })
 
+  it('extends the group hold and includes a late arrival when the input source refreshes', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const first = createCaptureSummary({
+      captureId: 'capture-group-burst-first',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const second = createCaptureSummary({
+      captureId: 'capture-group-burst-second',
+      createdAt: new Date(burstStartedAt + 3_000).toISOString(),
+      occurredAt: new Date(burstStartedAt + 3_000).toISOString(),
+      receivedAt: new Date(burstStartedAt + 3_000).toISOString(),
+      threadIsDirect: false,
+    })
+    const captures = [first]
+    const inputSource = createAssistantInputSourceForCaptures(captures)
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    let now = burstStartedAt + 1_000
+    const sleep = vi.fn(async (delayMs: number) => {
+      if (sleep.mock.calls.length === 1) {
+        captures.push(second)
+      }
+      now += delayMs
+    })
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => now,
+      sleep,
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(sleep.mock.calls).toEqual([
+      [4_000, undefined],
+      [3_000, undefined],
+    ])
+    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(3)
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputCount: 2,
+          inputIds: [
+            assistantInputCandidateFromInboxCapture(first).event.inputId,
+            assistantInputCandidateFromInboxCapture(second).event.inputId,
+          ],
+        }),
+      }),
+    )
+  })
+
+  it('parks only the held channel until its residual group hold expires', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const heldGroupInput = createCaptureSummary({
+      captureId: 'capture-held-linq-group',
+      source: 'linq',
+      externalId: 'linq:held-group',
+      threadId: 'thread-held-group',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const readyOtherChannelInput = createCaptureSummary({
+      captureId: 'capture-ready-telegram',
+      source: 'telegram',
+      threadId: 'thread-ready-telegram',
+      createdAt: new Date(burstStartedAt + 1_000).toISOString(),
+      occurredAt: new Date(burstStartedAt + 1_000).toISOString(),
+      receivedAt: new Date(burstStartedAt - 10_000).toISOString(),
+    })
+    const laterSameChannelInput = createCaptureSummary({
+      captureId: 'capture-later-linq',
+      source: 'linq',
+      externalId: 'linq:later-input',
+      threadId: 'thread-later-linq',
+      createdAt: new Date(burstStartedAt + 2_000).toISOString(),
+      occurredAt: new Date(burstStartedAt + 2_000).toISOString(),
+      receivedAt: new Date(burstStartedAt - 10_000).toISOString(),
+    })
+    const captures = [
+      heldGroupInput,
+      readyOtherChannelInput,
+      laterSameChannelInput,
+    ]
+    const inputSource = createAssistantInputSourceForCaptures(captures)
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    const stateUpdates: AssistantAutomationState[] = []
+    let now = burstStartedAt + 1_000
+    const sleep = vi.fn(async (delayMs: number) => {
+      expect(scannerReplyMocks.processAssistantAutoReplyGroup)
+        .toHaveBeenCalledOnce()
+      expect(scannerReplyMocks.processAssistantAutoReplyGroup)
+        .toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            context: expect.objectContaining({
+              inputIds: [
+                assistantInputCandidateFromInboxCapture(
+                  readyOtherChannelInput,
+                ).event.inputId,
+              ],
+            }),
+          }),
+        )
+      const parkedState =
+        stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
+      expect(readAutoReplyCursor(parkedState, 'linq')).toBeNull()
+      expect(readAutoReplyCursor(parkedState, 'telegram')).toEqual(
+        assistantInputCandidateFromInboxCapture(
+          readyOtherChannelInput,
+        ).event.cursor,
+      )
+      now += delayMs
+    })
+
+    await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => now,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: next.autoReply.map((entry) => ({ ...entry })),
+        })
+      },
+      sleep,
+      state: createAutomationState({
+        autoReplyChannels: ['linq', 'telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(sleep).toHaveBeenCalledWith(4_000, undefined)
+    expect(
+      scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls.map(
+        ([call]) => call.context.inputIds,
+      ),
+    ).toEqual([
+      [
+        assistantInputCandidateFromInboxCapture(
+          readyOtherChannelInput,
+        ).event.inputId,
+      ],
+      [
+        assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
+      ],
+      [
+        assistantInputCandidateFromInboxCapture(
+          laterSameChannelInput,
+        ).event.inputId,
+      ],
+    ])
+    const finalState =
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
+    expect(readAutoReplyCursor(finalState, 'linq')).toEqual(
+      assistantInputCandidateFromInboxCapture(laterSameChannelInput).event.cursor,
+    )
+  })
+
   it('shares one history reader across every group in an automation pass', async () => {
     const first = createCaptureSummary({
       captureId: 'capture-history-first',

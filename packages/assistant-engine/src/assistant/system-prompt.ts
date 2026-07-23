@@ -1090,8 +1090,9 @@ function buildAssistantTurnPriorityText(
 3. Resolve ambiguity only from the current conversation, public sources, group-owned state, and server-approved shared projections. Never inspect the room vault for a participant's personal evidence.
 4. Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.
 5. Complete only public reads and authorized group-owned actions. Move personal operations to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
-6. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
-7. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.`;
+6. Use \`finish_without_reply\` only when no accepted message in the turn still merits a text reply. It does not withdraw an answer already completed in that turn; that answer still sends.
+7. If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer. Make it stand alone and carry forward anything still worth saying.
+8. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.`;
   }
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.

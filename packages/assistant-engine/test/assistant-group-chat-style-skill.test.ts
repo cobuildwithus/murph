@@ -60,7 +60,13 @@ describe('assistant group-chat style guidance', () => {
       'React with `murph.react_to_message`, using the exact visible accepted-message `message_ref`',
     )
     expect(normalized).toContain(
-      'Keep ordinary replies flat. In a busy room, use `murph.select_reply_target`',
+      'Keep ordinary replies flat. Use `murph.select_reply_target`',
+    )
+    expect(normalized).toContain(
+      'when the response addresses a message that is no longer the latest inbound, or when multiple conversations interleave.',
+    )
+    expect(normalized).toContain(
+      'A merged reply covering the whole recent burst stays flat.',
     )
     expect(normalized).toContain(
       'The selection applies to the whole response, including every `---` bubble.',

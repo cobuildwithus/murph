@@ -26,6 +26,9 @@ import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
+  decideAssistantGroupBurstHold,
+} from './group-burst-hold.js'
+import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyHistoryReader,
@@ -39,6 +42,7 @@ import {
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
   type AssistantRunEvent,
+  waitForAbortOrTimeout,
 } from './shared.js'
 
 interface AssistantAutomationCandidate {
@@ -62,11 +66,13 @@ export async function scanAssistantAutomationOnce(input: {
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
   ) => Promise<void> | void
+  now?: () => number
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
   requestId?: string | null
   signal?: AbortSignal
+  sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply'>
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -104,7 +110,7 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
-  const candidates = await listAssistantReplyCandidates({
+  let candidates = await listAssistantReplyCandidates({
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
@@ -127,44 +133,14 @@ export async function scanAssistantAutomationOnce(input: {
   const historyReader = createAssistantAutoReplyHistoryReader({
     vault: input.vault,
   })
-  const inputSummaries = candidates.map((candidate) => candidate.summary)
-  const candidatesByInputId = new Map(
-    candidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
-  )
-  const inputCandidatesByInputId = new Map(
-    candidates.map((candidate) => [
-      candidate.summary.inputId,
-      candidate.inputCandidate,
-    ] as const),
-  )
-  for (let index = 0; index < candidates.length; index += 1) {
-    if (input.signal?.aborted) {
-      break
-    }
-
-    const candidate = candidates[index]
-    if (!candidate) {
-      continue
-    }
-
-    const group = await collectAssistantAutoReplyGroup({
-      inputSummaries,
-      inputCandidatesByInputId,
-      startIndex: index,
-      vault: input.vault,
-    })
-    index = group.endIndex
-    const groupItems = group.items.map((item) => ({
-      ...item,
-      inputCandidate:
-        candidatesByInputId.get(item.summary.inputId)?.inputCandidate ??
-        item.inputCandidate ??
-        null,
-    }))
-
+  const processGroupItems = async (
+    groupItems: Awaited<
+      ReturnType<typeof collectAssistantAutoReplyGroup>
+    >['items'],
+  ): Promise<boolean> => {
     const context = createAssistantAutoReplyGroupContext(groupItems)
     if (!context) {
-      continue
+      return false
     }
 
     replies.considered += context.inputCount
@@ -233,8 +209,140 @@ export async function scanAssistantAutomationOnce(input: {
       stepElapsedMs: elapsedSince(scanStatePersistStartedAt),
     })
 
+    return stopReplyScan
+  }
+
+  const parkedChannelResumeAt = new Map<string, number>()
+  let stopReplyScan = false
+  let candidateIndex = indexAssistantAutomationCandidates(candidates)
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (input.signal?.aborted) {
+      break
+    }
+
+    const candidate = candidates[index]
+    if (!candidate) {
+      continue
+    }
+    const channel = candidate.summary.source
+    if (parkedChannelResumeAt.has(channel)) {
+      continue
+    }
+
+    const group = await collectAssistantAutoReplyGroup({
+      inputSummaries: candidateIndex.inputSummaries,
+      inputCandidatesByInputId: candidateIndex.inputCandidatesByInputId,
+      startIndex: index,
+      vault: input.vault,
+    })
+    const groupItems = hydrateAssistantAutoReplyGroupItems({
+      candidatesByInputId: candidateIndex.candidatesByInputId,
+      items: group.items,
+    })
+    index = group.endIndex
+    const holdDecision = decideAssistantGroupBurstHoldForItems({
+      items: groupItems,
+      now: input.now?.() ?? Date.now(),
+    })
+    if (!holdDecision.ready) {
+      parkedChannelResumeAt.set(channel, holdDecision.resumeAt)
+      continue
+    }
+
+    stopReplyScan = await processGroupItems(groupItems)
     if (stopReplyScan) {
       break
+    }
+  }
+
+  while (
+    !stopReplyScan &&
+    parkedChannelResumeAt.size > 0 &&
+    input.signal?.aborted !== true
+  ) {
+    const now = input.now?.() ?? Date.now()
+    let earliestParkedChannel: string | null = null
+    let earliestResumeAt = Number.POSITIVE_INFINITY
+    for (const [channel, resumeAt] of parkedChannelResumeAt) {
+      if (resumeAt < earliestResumeAt) {
+        earliestParkedChannel = channel
+        earliestResumeAt = resumeAt
+      }
+    }
+    if (earliestParkedChannel === null) {
+      break
+    }
+
+    await (input.sleep ?? sleepForAssistantGroupBurstHold)(
+      Math.max(0, earliestResumeAt - now),
+      input.signal,
+    )
+    if (input.signal?.aborted) {
+      break
+    }
+
+    candidates = await listAssistantReplyCandidates({
+      autoReply: applyCanonicalWrites
+        ? scanState.autoReply.filter(
+            (entry) => entry.channel === earliestParkedChannel,
+          )
+        : [],
+      inputSource: input.inputSource,
+      limit: normalizeScanLimit(input.maxPerScan),
+      signal: input.signal,
+      vault: input.vault,
+    })
+    candidateIndex = indexAssistantAutomationCandidates(candidates)
+    const phaseChannels = new Set([earliestParkedChannel])
+    const blockedChannels = new Set<string>()
+    const seenChannels = new Set<string>()
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (input.signal?.aborted) {
+        break
+      }
+
+      const candidate = candidates[index]
+      if (!candidate) {
+        continue
+      }
+      const channel = candidate.summary.source
+      if (!phaseChannels.has(channel) || blockedChannels.has(channel)) {
+        continue
+      }
+      seenChannels.add(channel)
+
+      const group = await collectAssistantAutoReplyGroup({
+        inputSummaries: candidateIndex.inputSummaries,
+        inputCandidatesByInputId: candidateIndex.inputCandidatesByInputId,
+        startIndex: index,
+        vault: input.vault,
+      })
+      const groupItems = hydrateAssistantAutoReplyGroupItems({
+        candidatesByInputId: candidateIndex.candidatesByInputId,
+        items: group.items,
+      })
+      index = group.endIndex
+      const holdDecision = decideAssistantGroupBurstHoldForItems({
+        items: groupItems,
+        now: input.now?.() ?? Date.now(),
+      })
+      if (!holdDecision.ready) {
+        parkedChannelResumeAt.set(channel, holdDecision.resumeAt)
+        blockedChannels.add(channel)
+        continue
+      }
+
+      parkedChannelResumeAt.delete(channel)
+      stopReplyScan = await processGroupItems(groupItems)
+      if (stopReplyScan) {
+        break
+      }
+    }
+
+    for (const channel of phaseChannels) {
+      if (!seenChannels.has(channel)) {
+        parkedChannelResumeAt.delete(channel)
+      }
     }
   }
 
@@ -243,6 +351,73 @@ export async function scanAssistantAutomationOnce(input: {
     replies,
     routing,
   }
+}
+
+function decideAssistantGroupBurstHoldForItems(input: {
+  items: Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items']
+  now: number
+}): ReturnType<typeof decideAssistantGroupBurstHold> {
+  return decideAssistantGroupBurstHold({
+    items: input.items.map((item) => ({
+      ...(item.inputCandidate?.event.groupParticipantAdded === true
+        ? { groupParticipantAdded: true as const }
+        : {}),
+      sourceRef: item.inputCandidate?.event.sourceRef ?? null,
+      summary: item.summary,
+    })),
+    now: input.now,
+  })
+}
+
+function indexAssistantAutomationCandidates(
+  candidates: readonly AssistantAutomationCandidate[],
+): {
+  candidatesByInputId: ReadonlyMap<string, AssistantAutomationCandidate>
+  inputCandidatesByInputId: ReadonlyMap<string, AssistantInputCandidate>
+  inputSummaries: AssistantAutomationInputSummary[]
+} {
+  return {
+    candidatesByInputId: new Map(
+      candidates.map((candidate) => [
+        candidate.summary.inputId,
+        candidate,
+      ] as const),
+    ),
+    inputCandidatesByInputId: new Map(
+      candidates.map((candidate) => [
+        candidate.summary.inputId,
+        candidate.inputCandidate,
+      ] as const),
+    ),
+    inputSummaries: candidates.map((candidate) => candidate.summary),
+  }
+}
+
+function hydrateAssistantAutoReplyGroupItems(input: {
+  candidatesByInputId: ReadonlyMap<string, AssistantAutomationCandidate>
+  items: Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items']
+}): Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items'] {
+  return input.items.map((item) => ({
+    ...item,
+    inputCandidate:
+      input.candidatesByInputId.get(item.summary.inputId)?.inputCandidate ??
+      item.inputCandidate ??
+      null,
+  }))
+}
+
+async function sleepForAssistantGroupBurstHold(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal) {
+    await waitForAbortOrTimeout(signal, delayMs)
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, delayMs)
+  })
 }
 
 export async function hasPendingAssistantAutoReplyInput(input: {

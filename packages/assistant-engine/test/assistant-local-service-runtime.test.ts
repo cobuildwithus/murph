@@ -643,7 +643,7 @@ test('sendAssistantMessageLocal clears rejected resume state after a terminal fa
   expect(mocks.saveAssistantSession).not.toHaveBeenCalled()
 })
 
-test('sendAssistantMessageLocal delivers pre-steer final answers before the final reply and persists them', async () => {
+test('sendAssistantMessageLocal drops superseded pre-steer finals from group delivery and transcripts', async () => {
   const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
@@ -683,55 +683,21 @@ test('sendAssistantMessageLocal delivers pre-steer final answers before the fina
     vault: '/vaults/test',
   })
 
-  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
-  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
-    .toEqual([
-      {
-        deliveryContext: expect.objectContaining({
-          deliveryIdempotencyKey: undefined,
-          deliveryReplyToMessageId: undefined,
-          deliverySource: null,
-          deliveryTarget: undefined,
-          hostedDeliveryIdempotency: null,
-        }),
-        response: 'Answer one.',
-        media: [
-          {
-            kind: 'image',
-            url: 'https://cdn.example.test/assistant/answer-one.png',
-            alt: 'Answer one image',
-            source: null,
-          },
-        ],
-      },
-      {
-        deliveryContext: expect.objectContaining({
-          deliveryIdempotencyKey: undefined,
-          deliveryReplyToMessageId: undefined,
-          deliverySource: null,
-          deliveryTarget: undefined,
-          hostedDeliveryIdempotency: null,
-        }),
-        response: 'Answer two.',
-        media: [],
-      },
-    ])
+  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
     .toBe('Answer three.')
-  // Preceding answers must go out before the final reply.
-  expect(
-    mocks.deliverAssistantPrecedingReplies.mock.invocationCallOrder[0],
-  ).toBeLessThan(mocks.dispatchAssistantReply.mock.invocationCallOrder[0] ?? 0)
-  expect(
-    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
-      ?.precedingAssistantTranscriptTexts,
-  ).toEqual(['Answer one.', 'Answer two.'])
+  expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
+    .toMatchObject({
+      assistantTranscriptText: 'Answer three.',
+      precedingAssistantTranscriptTexts: [],
+    })
 })
 
 test('sendAssistantMessageLocal strips reply bubble delimiters from bubble-capable persisted and returned text', async () => {
   const session = createAssistantSession()
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -901,7 +867,10 @@ test('sendAssistantMessageLocal preserves email delimiter lines in delivery, tra
 })
 
 test('sendAssistantMessageLocal preserves real same-text preceding answers', async () => {
-  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule({
+      plan: createDirectSharedPlan(),
+    })
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
     kind: 'succeeded',
@@ -944,7 +913,7 @@ test('sendAssistantMessageLocal preserves real same-text preceding answers', asy
     ])
 })
 
-test('sendAssistantMessageLocal resolves preceding and retained final delivery contexts from accepted input ordinals', async () => {
+test('sendAssistantMessageLocal drops group preceding replies and resolves the retained final delivery context', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -1117,56 +1086,15 @@ test('sendAssistantMessageLocal resolves preceding and retained final delivery c
   expect(initialResult.response).toBe('Retained answer.')
   expect(steeredResult.response).toBe('Retained answer.')
   expect(secondSteeredResult.response).toBe('Retained answer.')
-  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledTimes(1)
-  const precedingDeliveryInput =
-    mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]
-  assert.ok(precedingDeliveryInput)
-  const precedingSegments = precedingDeliveryInput.segments
-  assert.ok(precedingSegments)
+  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
   expect(
-    precedingSegments.map((segment) => ({
-      response: segment.response,
-      deliveryDispatchMode: segment.deliveryContext?.deliveryDispatchMode,
-      deliveryIdempotencyKey: segment.deliveryContext?.deliveryIdempotencyKey,
-      deliveryReplyToMessageId: segment.deliveryContext?.deliveryReplyToMessageId,
-      deliverySource: segment.deliveryContext?.deliverySource,
-      deliverySubject: segment.deliveryContext?.deliverySubject,
-      deliveryTarget: segment.deliveryContext?.deliveryTarget,
-      hostedDeliveryIdempotency: segment.deliveryContext?.hostedDeliveryIdempotency,
-    })),
-  ).toEqual([
-    {
-      response: 'Answer one.',
-      deliveryDispatchMode: 'queue-only',
-      deliveryIdempotencyKey: 'delivery-one',
-      deliveryReplyToMessageId: 'message-one',
-      deliverySource: {
-        kind: 'linq',
-        fromPhoneNumber: '+15550000001',
-      },
-      deliverySubject: 'subject-one',
-      deliveryTarget: 'thread-one',
-      hostedDeliveryIdempotency: {
-        assistantTurnOrdinal: 'assistant-reply:1',
-        conversationId: 'conversation-one',
-        inboundMailboxItemIds: ['mailbox-one'],
-        recipientKey: 'recipient-one',
-      },
-    },
-  ])
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]
+      ?.precedingAssistantTranscriptTexts,
+  ).toEqual([])
   expect(mocks.recordAssistantDiagnosticEvent.mock.calls.map((call) => call[0]))
-    .toContainEqual(
+    .not.toContainEqual(
       expect.objectContaining({
-        code: 'ASSISTANT_DELIVERY_CONTEXT_ORDINAL_INVALID',
-        data: {
-          contextCount: 3,
-          deliveryContextOrdinal: 99,
-          segmentOrdinal: 1,
-        },
         kind: 'delivery.preceding-reply.delivery-context-ordinal-invalid',
-        level: 'warn',
-        sessionId: session.sessionId,
-        turnId: 'turn-1',
       }),
     )
   expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.input).toMatchObject({
@@ -1707,7 +1635,10 @@ test('sendAssistantMessageLocal carries the provider reaction patch into the no-
 })
 
 test('sendAssistantMessageLocal records a diagnostic when a preceding answer fails and still sends the final reply', async () => {
-  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule({
+      plan: createDirectSharedPlan(),
+    })
 
   const sessionAfterPreceding = createAssistantSession({
     sessionId: 'session-after-preceding',
@@ -1771,7 +1702,10 @@ test('sendAssistantMessageLocal records a diagnostic when a preceding answer fai
 })
 
 test('sendAssistantMessageLocal still sends the final reply when preceding delivery throws', async () => {
-  const { mocks, sendAssistantMessageLocal, session } = await loadLocalServiceModule()
+  const { mocks, sendAssistantMessageLocal, session } =
+    await loadLocalServiceModule({
+      plan: createDirectSharedPlan(),
+    })
 
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async () => ({
     kind: 'succeeded',
@@ -1861,6 +1795,7 @@ test('sendAssistantMessageLocal reports preceding delivery failure when no final
         stop: stopTyping,
       })),
     },
+    plan: createDirectSharedPlan(),
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -1936,6 +1871,7 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
         stop: stopTyping,
       })),
     },
+    plan: createDirectSharedPlan(),
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -2000,7 +1936,7 @@ test('sendAssistantMessageLocal reports preceding queued delivery when no final 
   })
 })
 
-test('sendAssistantMessageLocal stops typing when only a different-target preceding delivery is queued', async () => {
+test('sendAssistantMessageLocal promotes one completed group answer when a steer ends without a final reply', async () => {
   const session = createAssistantSession({
     binding: {
       actorId: null,
@@ -2054,29 +1990,24 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
           {
             deliveryContextOrdinal: 1,
             response: 'Answer for the later target.',
-            media: [],
+            media: [
+              {
+                kind: 'image',
+                url: 'https://cdn.example.test/assistant/promoted-answer.png',
+                alt: 'Promoted answer image',
+                source: null,
+              },
+            ],
+            targetInputId: 'accepted-later-target',
           },
         ],
         response: '',
-        responseDeliveryContextOrdinal: 1,
+        responseDeliveryContextOrdinal: 0,
         transcriptResponse: null,
         session,
       },
     }
   })
-  mocks.deliverAssistantPrecedingReplies.mockResolvedValueOnce([
-    {
-      error: {
-        code: 'ASSISTANT_DELIVERY_DEFERRED',
-        message: 'preceding delivery queued',
-      },
-      intentId: 'intent-preceding-queued-different-target',
-      kind: 'queued',
-      media: [],
-      session,
-    },
-  ])
-
   const initialResultPromise = sendAssistantMessageLocal({
     deliverResponse: true,
     deliveryDispatchMode: 'queue-only',
@@ -2109,20 +2040,148 @@ test('sendAssistantMessageLocal stops typing when only a different-target preced
     steeredResultPromise,
   ])
 
-  expect(initialResult.deliveryDeferred).toBe(true)
-  expect(steeredResult.deliveryDeferred).toBe(true)
-  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
-  expect(mocks.deliverAssistantPrecedingReplies.mock.calls[0]?.[0]?.segments)
-    .toEqual([
-      expect.objectContaining({
-        deliveryContext: expect.objectContaining({
-          deliveryTarget: 'thread-two',
-        }),
-      }),
-    ])
-  expect(stopTyping).toHaveBeenCalledWith({
-    providerStop: true,
+  expect(initialResult).toMatchObject({
+    deliveryDeferred: false,
+    response: 'Answer for the later target.',
   })
+  expect(steeredResult).toMatchObject({
+    deliveryDeferred: false,
+    response: 'Answer for the later target.',
+  })
+  expect(initialResult.responseDisposition).toBeUndefined()
+  expect(steeredResult.responseDisposition).toBeUndefined()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]).toMatchObject({
+    input: {
+      deliveryDispatchMode: 'queue-only',
+      deliveryNativeReplyRequested: true,
+      deliveryReplyToMessageId: 'provider-message-target',
+      deliveryTarget: 'thread-two',
+    },
+    media: [
+      {
+        kind: 'image',
+        url: 'https://cdn.example.test/assistant/promoted-answer.png',
+        alt: 'Promoted answer image',
+        source: null,
+      },
+    ],
+    response: 'Answer for the later target.',
+  })
+  expect(mocks.resolveAssistantAcceptedMessageTarget).toHaveBeenCalledWith(
+    expect.objectContaining({
+      action: 'native-reply',
+      messageRef: 'accepted-later-target',
+    }),
+  )
+  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
+    .toMatchObject({
+      assistantTranscriptText: 'Answer for the later target.',
+      precedingAssistantTranscriptTexts: [],
+    })
+})
+
+test('sendAssistantMessageLocal promotes only the last completed group answer after no-reply', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        finalAction: {
+          kind: 'none',
+        },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'Superseded answer.',
+            media: [],
+          },
+          {
+            deliveryContextOrdinal: 0,
+            response: 'Last completed answer.',
+          },
+        ],
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [
+          {
+            kind: 'image',
+            url: 'https://cdn.example.test/assistant/must-not-inherit.png',
+            alt: 'Must not inherit',
+            source: null,
+          },
+        ],
+        targetInputId: 'must-not-inherit',
+        transcriptResponse: null,
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Follow-up question',
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe('Last completed answer.')
+  expect(mocks.deliverAssistantPrecedingReplies).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]).toMatchObject({
+    media: [],
+    response: 'Last completed answer.',
+  })
+  expect(mocks.resolveAssistantAcceptedMessageTarget).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
+    .toMatchObject({
+      assistantTranscriptText: 'Last completed answer.',
+      precedingAssistantTranscriptTexts: [],
+    })
+})
+
+test('sendAssistantMessageLocal promotes a completed group answer when the provider has no final response', async () => {
+  const session = createAssistantSession()
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    providerOutcome: {
+      kind: 'succeeded',
+      providerTurn: {
+        onboardingGuidanceInjected: false,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        precedingResponseSegments: [
+          {
+            deliveryContextOrdinal: 0,
+            response: 'Completed fallback answer.',
+            media: [],
+          },
+        ],
+        response: '',
+        responseDeliveryContextOrdinal: 0,
+        transcriptResponse: null,
+        session,
+      },
+    },
+    session,
+  })
+
+  const result = await sendAssistantMessageLocal({
+    deliverResponse: true,
+    prompt: 'Follow-up question',
+    vault: '/vaults/test',
+  })
+
+  expect(result.response).toBe('Completed fallback answer.')
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response)
+    .toBe('Completed fallback answer.')
+  expect(mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0])
+    .toMatchObject({
+      assistantTranscriptText: 'Completed fallback answer.',
+      precedingAssistantTranscriptTexts: [],
+    })
 })
 
 test('sendAssistantMessageLocal reports thrown preceding delivery when no final reply exists', async () => {
@@ -2130,6 +2189,7 @@ test('sendAssistantMessageLocal reports thrown preceding delivery when no final 
     sessionId: 'session-no-reply-preceding-throw',
   })
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: createDirectSharedPlan(),
     providerOutcome: {
       kind: 'succeeded',
       providerTurn: {
@@ -8614,6 +8674,21 @@ function createSharedPlan(): AssistantTurnSharedPlan {
     operatorAuthority: 'direct-operator',
     persistUserPromptOnFailure: true,
     requestedWorkingDirectory: '/workspace',
+  }
+}
+
+function createDirectSharedPlan(): AssistantTurnSharedPlan {
+  const plan = createSharedPlan()
+  return {
+    ...plan,
+    conversationPolicy: {
+      ...plan.conversationPolicy,
+      audience: {
+        ...plan.conversationPolicy.audience,
+        effectiveThreadIsDirect: true,
+        threadIsDirect: true,
+      },
+    },
   }
 }
 
