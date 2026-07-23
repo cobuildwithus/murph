@@ -6,9 +6,13 @@ import { describe, expect, it } from "vitest";
 import {
   claimHostedLinqProactiveConversationCapacityTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
+import { appendHostedMailboxItemTx } from "@/src/lib/hosted-mailbox/store";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
+  upsertHostedMemberPendingLinqBindingTx,
+  upsertHostedMemberPendingLinqParticipantContactTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
 import { createPrismaClient } from "@/src/lib/prisma";
 
@@ -164,7 +168,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       ["activation", "first-contact"],
       ["first-contact", "activation"],
     ] as const)(
-      "keeps %s then %s on one member-row-to-route-lock order",
+      "serializes %s then %s through the member-row owner",
       async (ownerRole, contenderRole) => {
         const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
         const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -177,6 +181,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         let ownerTransaction: Promise<string> | null = null;
         let memberCreated = false;
 
+        const lockRole = (
+          tx: Prisma.TransactionClient,
+          role: typeof ownerRole | typeof contenderRole,
+        ) => role === "activation"
+          ? lockHostedMemberRow(tx, memberId)
+          : acquireHostedMemberHomeLinqRouteLockTx({
+              memberId,
+              prisma: tx,
+            });
+
         try {
           await observer.hostedMember.create({
             data: { id: memberId },
@@ -184,11 +198,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           memberCreated = true;
 
           ownerTransaction = owner.$transaction(async (tx) => {
-            await lockHostedMemberRow(tx, memberId);
-            await acquireHostedMemberHomeLinqRouteLockTx({
-              memberId,
-              prisma: tx,
-            });
+            await lockRole(tx, ownerRole);
             ownerLocked.resolve();
             await releaseOwner.promise;
             return ownerRole;
@@ -197,11 +207,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
           contenderTransaction = contender.$transaction(async (tx) => {
             contenderPid.resolve(await readBackendPid(tx));
-            await lockHostedMemberRow(tx, memberId);
-            await acquireHostedMemberHomeLinqRouteLockTx({
-              memberId,
-              prisma: tx,
-            });
+            await lockRole(tx, contenderRole);
             return contenderRole;
           }, transactionOptions);
           await waitForBlockedBackend({
@@ -230,6 +236,176 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       },
     );
+
+    it.each([
+      ["reclassified-message", "active-message"],
+      ["active-message", "reclassified-message"],
+    ] as const)(
+      "serializes %s then %s through the member row before mailbox append",
+      async (ownerRole, contenderRole) => {
+        const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const memberId = `hbm_linq_route_mailbox_${randomUUID()}`;
+        const ownerLocked = createDeferred();
+        const contenderPid = createDeferred<number>();
+        const releaseOwner = createDeferred();
+        let ownerTransaction: Promise<string> | null = null;
+        let contenderTransaction: Promise<string> | null = null;
+        let memberCreated = false;
+
+        const runMessage = async (
+          tx: Prisma.TransactionClient,
+          role: typeof ownerRole | typeof contenderRole,
+        ): Promise<string> => {
+          if (role === "reclassified-message") {
+            await lockHostedMemberRow(tx, memberId);
+          }
+          await acquireHostedMemberHomeLinqRouteLockTx({
+            memberId,
+            prisma: tx,
+          });
+          await appendHostedMailboxItemTx({
+            dedupeKey: `linq-route-mailbox:${role}:${randomUUID()}`,
+            kind: "conversation.message",
+            lane: "conversation",
+            occurredAt: new Date(),
+            payloadSerializedJson: JSON.stringify({ kind: "lock-proof" }),
+            tx,
+            userId: memberId,
+          });
+          return role;
+        };
+
+        try {
+          await observer.hostedMember.create({
+            data: { id: memberId },
+          });
+          memberCreated = true;
+
+          ownerTransaction = owner.$transaction(async (tx) => {
+            const result = await runMessage(tx, ownerRole);
+            ownerLocked.resolve();
+            await releaseOwner.promise;
+            return result;
+          }, transactionOptions);
+          await ownerLocked.promise;
+
+          contenderTransaction = contender.$transaction(async (tx) => {
+            contenderPid.resolve(await readBackendPid(tx));
+            return runMessage(tx, contenderRole);
+          }, transactionOptions);
+          await waitForBlockedBackend({
+            observer,
+            pid: await contenderPid.promise,
+          });
+
+          releaseOwner.resolve();
+          await expect(
+            Promise.all([ownerTransaction, contenderTransaction]),
+          ).resolves.toEqual([ownerRole, contenderRole]);
+        } finally {
+          releaseOwner.resolve();
+          await Promise.allSettled(
+            [ownerTransaction, contenderTransaction].filter(
+              (transaction): transaction is Promise<string> =>
+                transaction !== null,
+            ),
+          );
+          if (memberCreated) {
+            await observer.hostedMailboxItem.deleteMany({
+              where: { userId: memberId },
+            });
+            await observer.hostedMember.deleteMany({
+              where: { id: memberId },
+            });
+          }
+          await disconnectClients([observer, owner, contender]);
+        }
+      },
+    );
+
+    it("takes the member owner before a participant-contact routing claim", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const memberId = `hbm_linq_participant_order_${randomUUID()}`;
+      const contact = createHostedLinqParticipantContact({
+        kind: "email",
+        value: `${randomUUID()}@example.test`,
+      });
+      if (!contact) {
+        throw new Error("Expected the participant contact to normalize.");
+      }
+      const ownerLocked = createDeferred();
+      const contenderPid = createDeferred<number>();
+      const releaseOwner = createDeferred();
+      let ownerTransaction: Promise<void> | null = null;
+      let contenderTransaction: Promise<void> | null = null;
+      let memberCreated = false;
+
+      try {
+        await observer.hostedMember.create({
+          data: { id: memberId },
+        });
+        memberCreated = true;
+
+        ownerTransaction = owner.$transaction(async (tx) => {
+          await acquireHostedMemberHomeLinqRouteLockTx({
+            memberId,
+            prisma: tx,
+          });
+          ownerLocked.resolve();
+          await releaseOwner.promise;
+          await upsertHostedMemberPendingLinqBindingTx({
+            homeLineAssignedAt: new Date(),
+            linqChatId: `linq-participant-order-${randomUUID()}`,
+            memberId,
+            participantContact: contact,
+            participantContactObservedAt: new Date(),
+            prisma: tx,
+            recipientPhone: "+15550100001",
+          });
+        }, transactionOptions);
+        await ownerLocked.promise;
+
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          await upsertHostedMemberPendingLinqParticipantContactTx({
+            contact,
+            memberId,
+            observedAt: new Date(),
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await contenderPid.promise,
+        });
+
+        releaseOwner.resolve();
+        await expect(
+          Promise.all([ownerTransaction, contenderTransaction]),
+        ).resolves.toEqual([undefined, undefined]);
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled(
+          [ownerTransaction, contenderTransaction].filter(
+            (transaction): transaction is Promise<void> =>
+              transaction !== null,
+          ),
+        );
+        if (memberCreated) {
+          await observer.hostedMemberRouting.deleteMany({
+            where: { memberId },
+          });
+          await observer.hostedMember.deleteMany({
+            where: { id: memberId },
+          });
+        }
+        await disconnectClients([observer, owner, contender]);
+      }
+    });
   },
 );
 

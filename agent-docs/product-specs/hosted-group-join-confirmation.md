@@ -33,16 +33,17 @@ member's sharing edit does not create another confirmation.
   owner takes precedence over any provisional pending-contact claim; a
   verified identity that conflicts with the canonical home owner still fails
   closed.
-- Inbound home-route decisions and every home mutation share the same
-  transaction-scoped per-member lock and read durable routing only after taking
-  it. There is no global recipient-pool lock: active-member targets are advisory,
-  while proactive daily capacity is claimed atomically on the selected line row.
-  An existing member first classified as inactive takes the member row lock and
-  rechecks access before the route lock, matching activation and invite issuance
-  on one member-row-to-route order without adding that row lock to ordinary
-  active-member messages.
+- Inbound home-route decisions and every home mutation use the durable member
+  row as their single per-member owner and read routing only after taking it.
+  There is no separate member-route advisory lock and no global recipient-pool
+  lock: active-member targets are advisory, while proactive daily capacity is
+  claimed atomically on the selected line row. An existing member first
+  classified as inactive takes that row and rechecks access after any activation
+  ahead of it commits. Ordinary active messages take the same row through the
+  route boundary before their mailbox insert, so the mailbox foreign key,
+  activation, and invite issuance share one PostgreSQL ownership graph.
   Operations that also mutate chat ownership take the existing chat lock after
-  the member route lock.
+  the member row.
 - Family invite acceptance resolves and binds its Linq home route only after
   locking the accepted member row. The accepted route is written once inside
   that lock boundary before the invite claim. Replaying an already accepted
@@ -52,15 +53,15 @@ member's sharing edit does not create another confirmation.
   pointer after validation so post-commit wake and confirmation reconciliation
   can be retried without repeating acceptance mutations. Telegram preserves an
   accepted explicit token through that same canonical replay path.
-- Replacing another member's provisional pending route takes that member's
-  route lock without waiting. A busy owner makes the inbound attempt retry
+- Replacing another member's provisional pending route tries that member's row
+  without waiting. A busy owner makes the inbound attempt retry
   instead of clearing concurrent state, and superseding pending state never
   clears the owner's assigned home line.
-- Canonical group demotion locks every affected member route in stable order
+- Canonical group demotion locks every affected member row in stable order
   before the chat lock, re-reads the owners, and clears the home participant
   authority together with the home chat. A newly appearing owner makes the
   demotion retry rather than mutating a route it did not lock.
-- A final home-route egress check takes the member route lock before the chat
+- A final home-route egress check takes the member row before the chat
   lock and records the provider-dispatch fence in that same transaction. A
   concurrent rehome therefore cannot revoke the checked chat between the
   authority read and dispatch claim. Participant delivery and external-thread

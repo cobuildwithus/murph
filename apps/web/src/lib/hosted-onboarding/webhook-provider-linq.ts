@@ -541,10 +541,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
   }
 
   if (existingMember && !existingMemberEffectiveActive) {
-    // Activation already owns the member row before taking the route lock.
-    // An inactive first contact may later issue an invite, which owns the same
-    // row, so establish that row -> route order here and reclassify after any
-    // activation that was ahead of us commits.
+    // The member row is also the home-route owner. Reclassify only after any
+    // activation ahead of this request commits, and keep invite or mailbox
+    // writes inside that same single-owner boundary.
     await lockHostedMemberRow(input.prisma, existingMember.id);
     existingMemberEffectiveActive = await readActiveHostedMemberAccess({
       memberId: existingMember.id,

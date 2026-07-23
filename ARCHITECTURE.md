@@ -922,7 +922,7 @@ chats, local guard rejects, deterministic URL/STOP-style spam, and other
 non-invite paths bypass the classifier.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
-serializes only the affected member's route, reads each healthy assignable
+serializes only the affected member's durable row, reads each healthy assignable
 `HostedLinqLine`'s UTC-day proactive-conversation counter, selects the preferred
 line or a lower-volume fallback, and conditionally claims one slot before
 appending activation work. Active-member targets guide selection but are

@@ -20,7 +20,10 @@ import {
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
-import { type HostedOnboardingReadClient } from "./shared";
+import {
+  lockHostedMemberRow,
+  type HostedOnboardingReadClient,
+} from "./shared";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
@@ -228,6 +231,10 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
     telegramUserId: null,
   });
 
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
     namespace: "participant-contact",
@@ -296,6 +303,10 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
     telegramUserId: null,
   });
 
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
     namespace: "participant-contact",
@@ -447,11 +458,10 @@ export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: input.memberId,
-    namespace: "home-member",
-    tx: input.prisma,
-  });
+  // The durable member row is the sole per-member route owner. Reusing it
+  // keeps route, activation, invite, and mailbox foreign-key writes on one
+  // PostgreSQL lock graph without a second advisory-lock namespace.
+  await lockHostedMemberRow(input.prisma, input.memberId);
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
@@ -597,12 +607,10 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (reservesHomeRecipient) {
-    await acquireHostedMemberHomeLinqRouteLockTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-  }
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 
   const lockedHomeRoute = reservesHomeRecipient
     ? await readHostedMemberHomeLinqRouteTx({
@@ -993,13 +1001,13 @@ async function tryAcquireHostedMemberHomeLinqRouteLockTx(input: {
     throw new TypeError("Hosted Linq member routing lock requires a non-empty member id.");
   }
 
-  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_xact_lock(
-      hashtext(${"hosted-linq-routing:home-member"}),
-      hashtext(${memberId})
-    ) AS locked
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${memberId}
+    FOR UPDATE SKIP LOCKED
   `;
-  return rows[0]?.locked === true;
+  return rows[0]?.id === memberId;
 }
 
 function buildHostedRecipientPhoneLookupEntries(
@@ -1041,7 +1049,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "home-member" | "participant-contact";
+  namespace: "chat" | "participant-contact";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
