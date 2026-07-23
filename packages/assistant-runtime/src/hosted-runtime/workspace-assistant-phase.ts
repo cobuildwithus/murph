@@ -32,6 +32,7 @@ import {
   GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   applyMurphManagedAutomations,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
@@ -5515,6 +5516,13 @@ async function stageHostedTerminalOutboxFailureInputs(input: {
 
   for (const outcome of terminalFailures) {
     const intent = await readAssistantOutboxIntent(input.vaultRoot, outcome.effectId);
+    if (
+      outcome.deliveryErrorCode === "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE"
+      && intent?.automationAuthority?.automationId
+        === MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID
+    ) {
+      continue;
+    }
     const occurredAt = readHostedTerminalOutboxFailureInputOccurredAt(intent);
     if (!occurredAt) {
       continue;

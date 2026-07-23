@@ -27,6 +27,7 @@ import {
 import {
   buildGroupNewsletterAutomationSaveRequest,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   type AssistantAutomationOperationScope,
 } from "@murphai/assistant-engine";
 import {
@@ -8099,6 +8100,118 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("does not turn stale automatic meal closeout authority into a replyable failure input", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-meal-closeout-stale-route-failure-input-",
+    ));
+    try {
+      const now = "2026-07-22T21:20:00.000Z";
+      const retryAt = "2026-07-22T21:20:30.000Z";
+      const intentCreatedAt = "2026-07-22T21:19:50.000Z";
+      const baseEffect = createDeliveryEffect();
+      const deliveryEffect = {
+        ...baseEffect,
+        effectId: "intent_meal_closeout_stale_route",
+        fingerprint: "fingerprint_meal_closeout_stale_route",
+        payload: {
+          ...baseEffect.payload,
+          channel: "telegram" as const,
+          idempotencyKey: "assistant-outbox:intent_meal_closeout_stale_route",
+        },
+      };
+      const terminalFailure = {
+        ...createFailedDeliveryOutcome({
+          deliveryChannel: "telegram",
+          deliveryErrorCode: "ASSISTANT_DIRECT_ROUTE_AUTHORITY_STALE",
+          effectId: deliveryEffect.effectId,
+        }),
+        deliveryStatus: "failed" as const,
+        effectFingerprint: deliveryEffect.fingerprint,
+        retryable: false,
+      };
+      mocks.readAssistantOutboxIntent.mockImplementation(async (
+        _vaultRoot: string,
+        intentId: string,
+      ) => intentId === deliveryEffect.effectId
+        ? createTerminalFailureOutboxIntent({
+          automationAuthority: {
+            automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+            expectedUpdatedAt: "2026-07-22T20:00:00.000Z",
+          },
+          bindingDeliveryTarget: "telegram_direct_stale",
+          channel: "telegram",
+          createdAt: intentCreatedAt,
+          effectId: deliveryEffect.effectId,
+          explicitTarget: null,
+          threadId: "telegram_direct_stale",
+          threadIsDirect: true,
+        })
+        : null);
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([
+        deliveryEffect,
+      ]);
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValue([
+        terminalFailure,
+      ]);
+      mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({
+        assistantAutomationCurrentTurnDeliveryIntentIds: [deliveryEffect.effectId],
+        assistantAutomationProgressed: true,
+        nextWakeAt: retryAt,
+        redactedLogEntries: [],
+      });
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = result.afterCheckpoint
+        ? await result.afterCheckpoint()
+        : result;
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_receipt",
+        nextWakeAt: retryAt,
+        nextWakeReason: "assistant",
+        redactedStatus: expect.objectContaining({
+          hostedAssistantNextWakeAt: retryAt,
+          hostedOutboxTerminalFailureInputsStaged: 0,
+          hostedOutboxTerminalizedSending: 1,
+        }),
+      }));
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([]);
+      mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (input) => {
+        expect(input.freshAssistantInputIds).toEqual([]);
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      });
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => retryAt,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace({
+          checkpointedAt: now,
+          createdAt: now,
+          nextWakeAt: retryAt,
+          updatedAt: now,
+        }),
+      }));
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("routes terminal delivery failure pending input to the explicit target when it overrides binding delivery", async () => {
     const vaultRoot = await mkdtemp(path.join(
       tmpdir(),
@@ -15238,6 +15351,7 @@ async function seedDirectLinqAssistantInputRoute(input: {
 function createTerminalFailureOutboxIntent(input: {
   actorId?: string | null;
   answeredMailboxItemIds?: readonly string[];
+  automationAuthority?: AssistantOutboxIntent["automationAuthority"];
   bindingDelivery?: { kind: "participant" | "thread"; target: string } | null;
   bindingDeliveryTarget?: string | null;
   channel?: string | null;
@@ -15273,6 +15387,7 @@ function createTerminalFailureOutboxIntent(input: {
   return {
     actorId,
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
+    automationAuthority: input.automationAuthority ?? null,
     bindingDelivery,
     channel,
     createdAt: input.createdAt,
