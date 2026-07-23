@@ -68,7 +68,7 @@ export function MurphContactActionButton({
         {actionLabel}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md p-6 md:p-7">
+        <DialogContent className="p-6 sm:max-w-md md:p-7">
           <DialogHeader className="pr-10">
             <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
               {actionLabel}

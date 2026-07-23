@@ -218,6 +218,31 @@ describe("hosted group funding page", () => {
     );
   });
 
+  it("keeps the funding surface without a contact action when the resolver fails", async () => {
+    mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+      new Error("contact context unavailable"),
+    );
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      searchParams: Promise.resolve({
+        usageCheckout: "success",
+        usagePurchase: PURCHASE_ID,
+      }),
+    }));
+
+    assert.match(markup, /Sunday sleep crew/u);
+    assert.match(markup, /top-up:group/u);
+    expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactOptions: [],
+        purchaseReturn: { kind: "success", purchaseId: PURCHASE_ID },
+        scope: "group",
+      }),
+      undefined,
+    );
+  });
+
   it("fails closed when the linked runtime has no group usage projection", async () => {
     mocks.readHostedGroupUsageStatus.mockResolvedValueOnce(null);
 
