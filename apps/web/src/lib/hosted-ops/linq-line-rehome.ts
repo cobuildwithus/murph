@@ -9,7 +9,6 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
@@ -137,9 +136,6 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
       memberId,
       prisma: tx,
     });
-    await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-      prisma: tx,
-    });
     await acquireHostedMemberHomeLinqRouteLockTx({
       memberId,
       prisma: tx,
@@ -193,7 +189,7 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
       throw hostedOnboardingError({
         code: "HOSTED_LINQ_REHOME_TARGET_AT_CAPACITY",
         httpStatus: 409,
-        message: "Hosted Linq rehome target line is at assignment capacity.",
+        message: "Hosted Linq rehome target line is at daily assignment capacity.",
         retryable: false,
       });
     }

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   acquireHostedMemberHomeLinqRouteLockTx: vi.fn(),
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx: vi.fn(),
   buildHostedLinqAffirmativeReactionMessageEvent: vi.fn(),
   claimHostedLinqOnboardingLinkNotice: vi.fn(),
   claimHostedLinqQuotaReplyNotice: vi.fn(),
@@ -112,8 +111,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRouteLockTx:
     mocks.acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx:
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone:
@@ -211,7 +208,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     mocks.verifyAndParseHostedLinqWebhookRequest.mockImplementation((input: { rawBody: string }) =>
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
-    mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx.mockResolvedValue(undefined);
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
@@ -1590,7 +1586,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma,
       userId: "member_123",
     });
-    expect(mocks.acquireHostedMemberHomeLinqRecipientAssignmentLockTx).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberRoutingState).not.toHaveBeenCalled();
     expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();

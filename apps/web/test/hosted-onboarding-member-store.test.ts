@@ -55,7 +55,6 @@ import {
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberIdByReplyAliasLookupKey,
   readHostedMemberRoutingState,
-  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -100,35 +99,6 @@ describe("hosted-member-store", () => {
     );
     clearHostedOnboardingEnvCache();
   });
-
-  it.each([
-    { databaseResult: true, expected: true },
-    { databaseResult: false, expected: false },
-  ])(
-    "returns $expected when the transaction-scoped recipient-assignment try-lock returns $databaseResult",
-    async ({ databaseResult, expected }) => {
-      const queryRaw = vi.fn().mockResolvedValue([{ locked: databaseResult }]);
-      const prisma = { $queryRaw: queryRaw } as never;
-
-      await expect(
-        tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({ prisma }),
-      ).resolves.toBe(expected);
-
-      expect(queryRaw).toHaveBeenCalledOnce();
-      const firstCall = queryRaw.mock.calls[0];
-      if (!firstCall) {
-        throw new Error("Expected the recipient-assignment try-lock query.");
-      }
-      const [strings, ...values] = firstCall;
-      expect(Array.from(strings as readonly string[]).join("")).toContain(
-        "pg_try_advisory_xact_lock",
-      );
-      expect(values).toEqual([
-        "hosted-linq-routing:recipient-assignment",
-        "home-line-pool",
-      ]);
-    },
-  );
 
   it("keeps identity, routing, and billing refs nested under their owning slices", () => {
     const core: HostedMemberCoreState = {

@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
+
 import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+  claimHostedLinqProactiveConversationCapacityTx,
+} from "@/src/lib/hosted-onboarding/linq-line-store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -38,53 +40,85 @@ function createDeferred<T = void>(): Deferred<T> {
 }
 
 describe.skipIf(!runPostgresConcurrencyProof)(
-  "hosted Linq home-line pool PostgreSQL concurrency",
+  "hosted Linq proactive capacity PostgreSQL concurrency",
   () => {
-    it("fails a concurrent try-lock immediately and releases ownership at commit", async () => {
+    it("admits only one concurrent claim for the final daily slot", async () => {
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
       const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
-      const ownerAcquired = createDeferred<boolean>();
+      const phoneNumberLookupKey =
+        `test:linq-proactive-capacity:${randomUUID()}`;
+      const dayUtc = new Date("2026-07-23T00:00:00.000Z");
+      const limit = 50;
+      const ownerClaimed = createDeferred<boolean>();
       const releaseOwner = createDeferred();
-      const ownerTransaction = owner.$transaction(async (tx) => {
-        const firstAcquisition =
-          await tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-            prisma: tx,
-          });
-        const reentrantAcquisition =
-          await tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-            prisma: tx,
-          });
-        ownerAcquired.resolve(firstAcquisition && reentrantAcquisition);
-        await releaseOwner.promise;
-        return firstAcquisition && reentrantAcquisition;
-      }, transactionOptions);
+      let contenderTransaction: Promise<boolean> | null = null;
+      let ownerTransaction: Promise<boolean> | null = null;
+      let rowCreated = false;
 
       try {
+        await owner.hostedLinqLine.create({
+          data: {
+            phoneNumberHint: "*** test",
+            phoneNumberLookupKey,
+            proactiveConversationCount: limit - 1,
+            proactiveConversationDayUtc: dayUtc,
+            source: "test",
+          },
+        });
+        rowCreated = true;
+
+        ownerTransaction = owner.$transaction(async (tx) => {
+          const claimed =
+            await claimHostedLinqProactiveConversationCapacityTx({
+              dayUtc,
+              limit,
+              phoneNumberLookupKey,
+              prisma: tx,
+            });
+          ownerClaimed.resolve(claimed);
+          await releaseOwner.promise;
+          return claimed;
+        }, transactionOptions);
+
         await expect(
-          Promise.race([ownerAcquired.promise, ownerTransaction]),
+          Promise.race([ownerClaimed.promise, ownerTransaction]),
         ).resolves.toBe(true);
 
-        await expect(contender.$transaction(
+        contenderTransaction = contender.$transaction(
           (tx) =>
-            tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
+            claimHostedLinqProactiveConversationCapacityTx({
+              dayUtc,
+              limit,
+              phoneNumberLookupKey,
               prisma: tx,
             }),
           transactionOptions,
-        )).resolves.toBe(false);
-
+        );
+        await new Promise<void>((resolve) => setImmediate(resolve));
         releaseOwner.resolve();
-        await expect(ownerTransaction).resolves.toBe(true);
 
-        await expect(contender.$transaction(
-          (tx) =>
-            tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-              prisma: tx,
-            }),
-          transactionOptions,
-        )).resolves.toBe(true);
+        await expect(
+          Promise.all([ownerTransaction, contenderTransaction]),
+        ).resolves.toEqual([true, false]);
+        await expect(owner.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey },
+          select: { proactiveConversationCount: true },
+        })).resolves.toEqual({
+          proactiveConversationCount: limit,
+        });
       } finally {
         releaseOwner.resolve();
-        await Promise.allSettled([ownerTransaction]);
+        await Promise.allSettled(
+          [ownerTransaction, contenderTransaction].filter(
+            (transaction): transaction is Promise<boolean> =>
+              transaction !== null,
+          ),
+        );
+        if (rowCreated) {
+          await owner.hostedLinqLine.deleteMany({
+            where: { phoneNumberLookupKey },
+          });
+        }
         await disconnectClients([owner, contender]);
       }
     });

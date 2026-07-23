@@ -443,28 +443,6 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   });
 }
 
-export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input: {
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: "home-line-pool",
-    namespace: "recipient-assignment",
-    tx: input.prisma,
-  });
-}
-
-export async function tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx(input: {
-  prisma: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_xact_lock(
-      hashtext(${"hosted-linq-routing:recipient-assignment"}),
-      hashtext(${"home-line-pool"})
-    ) AS locked
-  `;
-  return rows[0]?.locked === true;
-}
-
 export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -1116,7 +1094,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "home-member" | "participant-contact" | "recipient-assignment";
+  namespace: "chat" | "home-member" | "participant-contact";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";

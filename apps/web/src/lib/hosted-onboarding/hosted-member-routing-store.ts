@@ -25,7 +25,6 @@ import { type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
@@ -33,7 +32,6 @@ export {
   upsertHostedMemberHomeLinqRecipientPhoneTx,
   upsertHostedMemberPendingLinqBindingTx,
   upsertHostedMemberPendingLinqParticipantContactTx,
-  tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx,
   tryCreateHostedMemberPendingLinqParticipantContactTx,
 } from "./hosted-member-routing-linq";
 export {

@@ -34,9 +34,11 @@ member's sharing edit does not create another confirmation.
   verified identity that conflicts with the canonical home owner still fails
   closed.
 - Inbound home-route decisions and every home mutation share the same
-  transaction-scoped per-member lock. Operations that can assign line capacity
-  take locks in recipient-pool, member, then chat order and re-read durable
-  routing after the required locks before binding or redirecting.
+  transaction-scoped per-member lock and read durable routing only after taking
+  it. There is no global recipient-pool lock: active-member targets are advisory,
+  while proactive daily capacity is claimed atomically on the selected line row.
+  Operations that also mutate chat ownership take the existing chat lock after
+  the member route lock.
 - Family invite acceptance resolves and binds its Linq home route only after
   locking the accepted member row. The accepted route is written once inside
   that lock boundary before the invite claim. Replaying an already accepted
