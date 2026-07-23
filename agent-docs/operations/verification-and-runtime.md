@@ -175,7 +175,11 @@ For every user-facing `apps/web` UI diff, verification also includes
 `/design?tab=components` or a composed-section update on
 `/design?tab=sections`, and desktop and mobile screenshots from that catalog
 surface in the pull request. The pull-request workflow repeats the policy check
-against the final base-to-head diff and PR body.
+against the final base-to-head diff and PR body. Prefer an attached in-app
+Browser for this proof when available, then fall back to the repository-installed
+Playwright runtime against the local catalog when no tab is attached or the
+connection is unusable. Browser attachment alone must not block completion when
+Playwright can capture the required states.
 
 ## Scoped Verification Mode
 
