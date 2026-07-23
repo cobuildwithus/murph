@@ -167,14 +167,19 @@ for (const width of [768, 1280] as const) {
     const study = page.locator(
       '[data-design-study="personal-usage-credit-owner"]',
     );
-    const card = study.locator('[aria-label="Pulse included AI usage"]');
+    const activeState = study.locator(
+      '[data-design-state="active-with-credit"]',
+    );
+    const card = activeState.locator(
+      '[aria-label="Pulse included AI usage"]',
+    );
     const trigger = card.getByRole("button", { name: "Add usage" });
-    await expect(study.locator("[inert]")).toHaveCount(1);
+    await expect(study.locator("[inert]")).toHaveCount(3);
     await expect(trigger).toBeVisible();
 
     const layout = await page.evaluate(() => {
       const owner = document.querySelector(
-        '[aria-label="Pulse included AI usage"]',
+        '[data-design-state="active-with-credit"] [aria-label="Pulse included AI usage"]',
       );
       const button = Array.from(owner?.querySelectorAll("button") ?? []).find(
         (candidate) => candidate.textContent?.trim() === "Add usage",

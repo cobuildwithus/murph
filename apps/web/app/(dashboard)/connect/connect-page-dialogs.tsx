@@ -1,7 +1,6 @@
 import { AlertCircleIcon, MessageCircleIcon } from "lucide-react";
 import { defaultAssistantVoiceOptionId } from "@murphai/contracts";
 
-import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import {
   Dialog,
@@ -72,42 +71,6 @@ export function GarminHistoricalDataDialog({
             Continue to Garmin
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-export function ConnectConsentDialog({
-  source,
-  onAccepted,
-  onOpenChange,
-}: {
-  onAccepted: (source: ConnectSource) => Promise<void>;
-  onOpenChange: (open: boolean) => void;
-  source: ConnectSource | null;
-}) {
-  const open = Boolean(source);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-6 p-6 md:p-7">
-        <DialogHeader className="pr-10">
-          <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {source ? `Before you connect ${source.name}` : "Before you connect"}
-          </DialogTitle>
-          <DialogDescription>
-            Review Murph&apos;s current legal and health-data consent before continuing.
-          </DialogDescription>
-        </DialogHeader>
-        {source ? (
-          <HostedLegalConsentCard
-            mode="compact"
-            source="connect-page"
-            onAccepted={async () => {
-              await onAccepted(source);
-            }}
-          />
-        ) : null}
       </DialogContent>
     </Dialog>
   );

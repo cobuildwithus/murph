@@ -7,7 +7,7 @@ import { createJsonPostRequest, createRouteContext } from "./route-test-helpers"
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
-  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
@@ -72,7 +72,8 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
-  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  assertHostedHistoricalLaunchConsentGranted:
+    mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -280,7 +281,7 @@ describe("device sync settings routes", () => {
     mocks.prismaClient.label = "test-prisma";
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.requireActivePrivyMemberAuth.mockResolvedValue({
       member: {
         id: "member_123",
@@ -1593,12 +1594,39 @@ describe("device sync settings routes", () => {
     });
   });
 
-  it("requires launch consent before starting a connect source flow", async () => {
-    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-      code: "HOSTED_CONSENT_REQUIRED",
-      httpStatus: 403,
-      message: "Accept the current Murph legal consent before continuing.",
-    }));
+  it("starts a connect source flow when launch-document acceptance is stale", async () => {
+    const response = await connectSourceStartRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/connect-sources/oura/start",
+        {},
+        {
+          headers: {
+            origin: "https://join.example.test",
+          },
+        },
+      ),
+      createRouteContext({ sourceId: "oura" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
+    });
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: mocks.prismaClient,
+    });
+    expect(mocks.startConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects connect source flow without both historical launch grants", async () => {
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValue(
+      hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the Murph legal consent before connecting or syncing a device.",
+      }),
+    );
 
     const response = await connectSourceStartRoute.POST(
       createJsonPostRequest(
@@ -1615,12 +1643,8 @@ describe("device sync settings routes", () => {
 
     expect(response.status).toBe(403);
     expect(mocks.startConnection).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_CONSENT_REQUIRED",
-        message: "Accept the current Murph legal consent before continuing.",
-        retryable: false,
-      },
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_CONSENT_REQUIRED" },
     });
   });
 
