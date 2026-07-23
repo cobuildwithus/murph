@@ -476,7 +476,7 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
 });
 
 describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
-  it("returns the first healthy configured line that is not the chat's own", async () => {
+  it("reads the existing projection and returns the first healthy alternate without provider sync", async () => {
     linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
       {
         phoneNumber: "+15550000001",
@@ -497,22 +497,37 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
         providerStatus: "HEALTHY",
       },
     ]);
+    const providerFetch = vi.fn(() => {
+      throw new Error("Backup selection must not call Linq.");
+    });
+    vi.stubGlobal("fetch", providerFetch);
+    const prisma = {};
 
     await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: "+15550000001",
-      prisma: {} as never,
+      prisma: prisma as never,
     })).resolves.toBe("+15550000003");
+
+    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledOnce();
+    expect(linqLineStoreMocks.listHostedLinqContactCardLines).toHaveBeenCalledWith({
+      limit: 50,
+      prisma,
+    });
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it("fails soft to null when listing lines is unavailable", async () => {
-    runtimeMocks.getHostedOnboardingEnvironment.mockImplementation(() => {
-      throw new Error("env unavailable");
-    });
+  it("fails soft to null when the projection read is unavailable", async () => {
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockRejectedValue(
+      new Error("projection unavailable"),
+    );
 
     await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
       excludePhoneNumber: "+15550000001",
       prisma: {} as never,
     })).resolves.toBeNull();
+
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
   });
 });
 

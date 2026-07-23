@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type { HTMLAttributes, ReactNode } from "react";
-import { act, createElement } from "react";
+import { act, Children, createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
@@ -26,21 +26,57 @@ vi.mock("next/image", () => ({
   }),
 }));
 
-vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
-    open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
-  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", {
+vi.mock("@/src/components/ui/dialog", () => {
+  let activeOnOpenChange: ((open: boolean) => void) | undefined;
+
+  return {
+    Dialog: ({
+      children,
+      onOpenChange,
+      open,
+    }: {
+      children?: ReactNode;
+      onOpenChange?: (open: boolean) => void;
+      open?: boolean;
+    }) => {
+      if (!open) {
+        return null;
+      }
+      activeOnOpenChange = onOpenChange;
+      return createElement("div", { "data-dialog-open": "true" }, children);
+    },
+    DialogContent: ({
+      children,
       className,
-      "data-dialog-content": "true",
-    }, children),
-  DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
-    createElement("p", props),
-  DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
-  DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
-    createElement("h2", props),
-}));
+      showCloseButton,
+    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
+      createElement(
+        "div",
+        {
+          className,
+          "data-dialog-content": "true",
+        },
+        children,
+        showCloseButton
+          ? createElement(
+              "button",
+              {
+                "aria-label": "Close",
+                onClick: () => activeOnOpenChange?.(false),
+                type: "button",
+              },
+              "Close",
+            )
+          : null,
+      ),
+    DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+      createElement("p", props),
+    DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+      createElement("div", props),
+    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+      createElement("h2", props),
+  };
+});
 
 vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
   HostedLegalConsentCard: (props: {
@@ -68,6 +104,7 @@ const mocks = vi.hoisted(() => ({
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
+  resolveHostedMurphContactOptions: vi.fn(),
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
@@ -92,6 +129,7 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 
 vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
   resolveHostedMurphContactOption: mocks.resolveHostedMurphContactOption,
+  resolveHostedMurphContactOptions: mocks.resolveHostedMurphContactOptions,
 }));
 
 beforeEach(() => {
@@ -110,10 +148,10 @@ beforeEach(() => {
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.resolveHostedMurphContactOption.mockResolvedValue(null);
+  mocks.resolveHostedMurphContactOptions.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -137,6 +175,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
   assert.doesNotMatch(markup, /Health data source from the Just Cobuild priority catalog/u);
+  assert.deepEqual(mocks.resolveHostedMurphContactOptions.mock.calls[0]?.[0], {
+    message: {
+      body: "Help me finish setting up WHOOP through Apple Health.",
+    },
+  });
 
   const sources = [
     {
@@ -339,6 +382,59 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
 
   assert.doesNotMatch(markup, />St</);
   assert.doesNotMatch(markup, />Ap</);
+});
+
+test("ConnectPage maps the WHOOP setup Messages option at the server boundary", async () => {
+  mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+    {
+      href: "sms:+15550100001?body=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "text",
+      label: "Messages",
+    },
+  ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readWhoopSyncContactAction(page), {
+    href: "sms:+15550100001?body=Help%20me%20finish%20setting%20up%20WHOOP",
+    kind: "imessage",
+    label: "Text Murph",
+  });
+});
+
+test("ConnectPage preserves the WHOOP setup Telegram option at the server boundary", async () => {
+  mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+    {
+      href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "telegram",
+      label: "Telegram",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
+  ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readWhoopSyncContactAction(page), {
+    href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+    kind: "telegram",
+    label: "Text Murph",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  });
+});
+
+test("ConnectPage fails open when the WHOOP setup contact route cannot resolve", async () => {
+  mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+    new Error("contact routing unavailable"),
+  );
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.equal(readWhoopSyncContactAction(page), null);
 });
 
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
@@ -2078,7 +2174,6 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
     authenticated: false,
     authenticatedMember: null,
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
 
@@ -2521,7 +2616,7 @@ test("ConnectSourcesGrid shows a recovery dialog when a device connect intent is
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent reaches capacity", async () => {
+test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches capacity", async () => {
   const claim = "dc_12345678901234567890123456789012";
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
@@ -2563,24 +2658,22 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Whoop/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Connection link unavailable/);
-  assert.equal(
-    rendered.container.querySelector("input[aria-label='Search sources']"),
-    null,
+  assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
+  assert.match(
+    rendered.container.textContent ?? "",
+    /Two quick steps and Murph sees everything WHOOP tracks\./,
   );
   assert.match(
     rendered.container.textContent ?? "",
-    /the Murph app brings in your WHOOP data through Apple Health\./,
+    /Download Murph and sign in/,
   );
-  assert.match(
-    rendered.container.textContent ?? "",
-    /Download it, sign in, and it walks you through the rest\./,
-  );
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in WHOOP/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /full right now/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Junction/);
 
@@ -2601,25 +2694,29 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback when an intent re
   assert.equal(appStoreLink.rel, "noopener noreferrer");
   assert.equal(
     appStoreLink.getAttribute("aria-label"),
-    "Download Murph for iPhone (opens in a new tab)",
+    "Download App to sync WHOOP through Apple Health",
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
 
-  const viewOtherSourcesButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "View other sources");
-  assert.ok(viewOtherSourcesButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue with Murph"),
+    undefined,
+  );
+  const closeButton = rendered.container.querySelector('button[aria-label="Close"]');
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
 
   await act(async () => {
-    viewOtherSourcesButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    closeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
   assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Murph left you a message/);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Get your full sync/);
 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual start", async () => {
+test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
     _init?: RequestInit,
@@ -2653,6 +2750,13 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
         name: "Whoop",
       },
     ],
+    whoopSyncContactAction: {
+      href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "telegram",
+      label: "Text Murph",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
     whoopSyncVoiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
   }));
 
@@ -2661,7 +2765,7 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
   });
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Murph left you a message/);
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
   });
 
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
@@ -2671,6 +2775,77 @@ test("ConnectSourcesGrid shows the WHOOP Apple Health fallback for a manual star
     rendered.container.querySelector("audio[src='/audio/whoop-sync-memos/grandpa.mp3']"),
     "expected the member's picked-voice WHOOP sync memo",
   );
+  assert.match(rendered.container.textContent ?? "", /Download Murph and sign in/);
+  assert.match(rendered.container.textContent ?? "", /Turn on Apple Health in WHOOP/);
+
+  const continueLink = rendered.container.querySelector(
+    'a[aria-label="Continue with Murph in Telegram (opens in a new tab)"]',
+  );
+  assert.ok(continueLink instanceof rendered.window.HTMLAnchorElement);
+  assert.equal(continueLink.textContent, "Continue with Murph");
+  assert.equal(continueLink.target, "_blank");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid gives a no-route manual capacity dialog a truthful close control", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    }, { status: 409 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue with Murph"),
+    undefined,
+  );
+  const closeButton = rendered.container.querySelector('button[aria-label="Close"]');
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    closeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Get your full sync/);
 
   await rendered.cleanup();
 });
@@ -3897,6 +4072,19 @@ test("ConnectPage shows fallback callback errors with the original source label"
   assert.match(markup, /Unable to finish connection/);
   assert.match(markup, /We could not finish connecting Garmin\./);
 });
+
+function readWhoopSyncContactAction(page: ReactNode): unknown {
+  assert.ok(isValidElement<{ children?: ReactNode }>(page));
+  const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {
+    if (!isValidElement(child)) {
+      return false;
+    }
+    return "whoopSyncContactAction" in (child.props as Record<string, unknown>);
+  });
+
+  assert.ok(isValidElement(connectSourcesGrid));
+  return (connectSourcesGrid.props as Record<string, unknown>).whoopSyncContactAction;
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

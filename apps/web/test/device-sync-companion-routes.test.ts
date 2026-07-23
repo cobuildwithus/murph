@@ -32,7 +32,6 @@ const mocks = vi.hoisted(() => ({
     },
     label: "test-prisma",
   },
-  readHostedMemberCoreState: vi.fn(),
   runtimeEnv: {
     privyAppId: "cm_app_123" as string | null,
     privyAppSecret: null as string | null,
@@ -54,10 +53,6 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -101,9 +96,6 @@ const ACTIVE_MEMBER = {
 
 function mockVerifiedPrivyUser(): void {
   mocks.verifyIdentityToken.mockResolvedValue({
-    custom_metadata: {
-      murph_member_id: ACTIVE_MEMBER.id,
-    },
     id: "did:privy:user_123",
     linked_accounts: [
       {
@@ -113,10 +105,7 @@ function mockVerifiedPrivyUser(): void {
       },
     ],
   });
-  mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue({
-    core: ACTIVE_MEMBER,
-  });
-  mocks.readHostedMemberCoreState.mockResolvedValue(ACTIVE_MEMBER);
+  mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(ACTIVE_MEMBER);
   mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
     accountGroupMemberships: [],
     billingStatus: ACTIVE_MEMBER.billingStatus,
@@ -642,10 +631,7 @@ describe("device sync companion routes", () => {
         ...ACTIVE_MEMBER,
         suspendedAt: new Date("2026-06-01T00:00:00.000Z"),
       };
-      mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue({
-        core: suspendedMember,
-      });
-      mocks.readHostedMemberCoreState.mockResolvedValue(suspendedMember);
+      mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(suspendedMember);
       mocks.prismaClient.hostedMember.findUnique.mockResolvedValue({
         accountGroupMemberships: [],
         billingStatus: suspendedMember.billingStatus,

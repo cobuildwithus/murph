@@ -12,6 +12,27 @@ import {
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
 
+const privyManagementMocks = vi.hoisted(() => ({
+  clientConstructor: vi.fn(),
+  setCustomMetadata: vi.fn(),
+}));
+
+vi.mock("@privy-io/node", () => ({
+  APIError: class APIError extends Error {},
+  PrivyClient: class PrivyClient {
+    constructor(input: unknown) {
+      privyManagementMocks.clientConstructor(input);
+    }
+
+    users() {
+      return {
+        setCustomMetadata: privyManagementMocks.setCustomMetadata,
+      };
+    }
+  },
+  verifyIdentityToken: vi.fn(),
+}));
+
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
     contactPrivacyKeyring: {
@@ -27,6 +48,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
     privyAppId: "cm_app_123",
+    privyAppSecret: "privy-app-secret",
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
     stripeBillingMode: "payment",
@@ -618,6 +640,8 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
+    expect(privyManagementMocks.clientConstructor).not.toHaveBeenCalled();
+    expect(privyManagementMocks.setCustomMetadata).not.toHaveBeenCalled();
   });
 
   it("keeps public primary email binding in the member creation transaction", async () => {

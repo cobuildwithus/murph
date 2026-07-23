@@ -2812,6 +2812,12 @@ Updated: 2026-04-24
     expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
     expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
+    expect(repoToolsConfig).toContain('"PRODUCT.md"')
+    expect(repoToolsConfig).toContain('"DESIGN.md"')
+    expect(repoToolsConfig).toContain('"agent-docs/ARCHITECTURE_GUIDANCE.md"')
+    expect(repoToolsConfig).toContain('"agent-docs/FRONTEND.md"')
+    expect(repoToolsConfig).toContain('"agent-docs/PRODUCT_CONSTITUTION.md"')
+    expect(repoToolsConfig).toContain('"agent-docs/PRODUCT_SENSE.md"')
     expect(repoToolsConfig).toContain('"agent-docs/references/hosted-runtime-protocol.md"')
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
@@ -3116,6 +3122,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '1',
+        REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
       })
       expect(roundOne.result.status, roundOne.result.stderr).toBe(0)
       const roundOneMetadata = JSON.parse(
@@ -3154,7 +3161,20 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe('')
-      expect(listZipEntries(roundOne.zipPath)).toContain('.crabbox.yaml')
+      expect(listZipEntries(roundOne.zipPath)).toEqual(
+        expect.arrayContaining([
+          '.crabbox.yaml',
+          'review-gpt-pr-context/rendered-evidence/01-desktop.png',
+          'review-gpt-pr-context/rendered-evidence.txt',
+        ]),
+      )
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', roundOne.zipPath, 'review-gpt-pr-context/rendered-evidence.txt'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {
@@ -3278,6 +3298,12 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
+      expect(leanEntries).toContain('PRODUCT.md')
+      expect(leanEntries).toContain('DESIGN.md')
+      expect(leanEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
+      expect(leanEntries).toContain('agent-docs/FRONTEND.md')
+      expect(leanEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
+      expect(leanEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
@@ -3302,6 +3328,12 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(fullEntries).toContain('agent-docs/exec-plans/completed/README.md')
       expect(fullEntries).toContain('agent-docs/prompts/coverage-write.md')
       expect(fullEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
+      expect(fullEntries).toContain('PRODUCT.md')
+      expect(fullEntries).toContain('DESIGN.md')
+      expect(fullEntries).toContain('agent-docs/ARCHITECTURE_GUIDANCE.md')
+      expect(fullEntries).toContain('agent-docs/FRONTEND.md')
+      expect(fullEntries).toContain('agent-docs/PRODUCT_CONSTITUTION.md')
+      expect(fullEntries).toContain('agent-docs/PRODUCT_SENSE.md')
       expect(fullEntries).not.toContain('apps/web/public/design-assets/hero-02.png')
       expect(fullEntries).not.toContain('apps/web/public/hero.jpg')
       expect(fullEntries).not.toContain('apps/web/public/legal/privacy.pdf')
