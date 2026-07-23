@@ -85,13 +85,16 @@ test("footer ownership stays on explicit public surfaces", () => {
 
   assertOwnsFooter("app/page.tsx");
   assertOwnsFooter("app/security/page.tsx");
-  assertOwnsFooter("app/subprocessors/page.tsx");
   assertOwnsFooter("app/design/page.tsx");
   assertOwnsFooter("app/not-found.tsx");
   assertOwnsFooter("src/components/legal/legal-policy-page.tsx");
 
   const rootLayoutSource = readAppFile("app/layout.tsx");
+  const designPageSource = readAppFile("app/design/page.tsx");
+  const subprocessorsPageSource = readAppFile("app/subprocessors/page.tsx");
   assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
+  assert.doesNotMatch(designPageSource, /HostedPrivyBoundary/u);
+  assert.match(subprocessorsPageSource, /LegalPolicyPage/u);
   assert.equal(
     existsSync(
       new URL("../src/components/homepage/site-footer-slot.tsx", import.meta.url),

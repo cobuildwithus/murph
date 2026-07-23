@@ -35,9 +35,13 @@ export function DashboardLegalConsentGate({
         initialStatus={initialStatus}
         launchDescription="Review and accept both items to reopen your private dashboard."
         launchTitle="Current documents"
-        onAccepted={reloadCurrentHostedAuthDocument}
+        onAccepted={reloadDashboardAfterConsentHandoff}
         source="dashboard-legal-update"
       />
     </section>
   );
+}
+
+function reloadDashboardAfterConsentHandoff() {
+  window.setTimeout(reloadCurrentHostedAuthDocument, 100);
 }
