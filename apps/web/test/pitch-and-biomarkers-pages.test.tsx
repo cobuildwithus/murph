@@ -249,7 +249,18 @@ test("Biomarker result context follows explicit Health Commons entity mappings",
   const context = resolveLabBiomarkerContext("alt");
 
   assert.equal(context.displayName, "ALT");
+  assert.deepEqual(context.fallbackRanges, []);
   assert.match(context.summary ?? "", /^ALT measures alanine aminotransferase activity,/u);
+
+  const chlorideContext = resolveLabBiomarkerContext("chloride");
+  assert.deepEqual(chlorideContext.fallbackRanges, [{
+    applicability: "For published adult comparison on serum results from adults age 18 or older when the saved result uses this exact unit and has no range; this comparator is not the reporting laboratory's range, and source-laboratory flags and per-result ranges remain authoritative.",
+    eligibleSpecimenKinds: ["serum"],
+    label: "Mayo Clinic Laboratories adult serum reference interval",
+    lowerBound: { inclusive: true, value: 98 },
+    unit: "mmol/L",
+    upperBound: { inclusive: true, value: 107 },
+  }]);
 });
 
 test("legacy biomarker detail links back to the measured results page truthfully", () => {
@@ -286,6 +297,7 @@ function createBiomarkerRouteReplica(): BrowserVaultReplica {
       referenceRange: null,
       rowSchema: "murph.browser-vault.lab-result-row.v1",
       sourceLabel: "Lab result",
+      specimenKind: "serum",
       textValue: null,
       unit: "%",
       value: 5.4,

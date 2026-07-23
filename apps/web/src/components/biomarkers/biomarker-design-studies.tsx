@@ -395,10 +395,7 @@ export function BiomarkerDetailStudy() {
         </div>
 
         <div className="min-w-0 px-5 py-8 sm:px-8 sm:py-10">
-          <h4 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
-            Results over time
-          </h4>
-          <div className="mt-4 min-w-0">
+          <div className="min-w-0">
             <LabBiomarkerHistoryChart
               displayName="Illustrative hemoglobin"
               points={HEMOGLOBIN_HISTORY}
@@ -462,6 +459,57 @@ export function BiomarkerBoundaryResultStudy() {
         <span className="text-muted-foreground">Example laboratory</span>
       </div>
     </article>
+  );
+}
+
+export function BiomarkerReferenceContextStudy() {
+  return (
+    <div className="grid gap-6 lg:grid-cols-2" data-design-study="biomarker-reference-context">
+      <article className="min-w-0 rounded-xl border border-border/70 bg-card/70 p-5 sm:p-8">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Exact source limit
+        </p>
+        <h3 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-foreground">
+          HbA1c
+        </h3>
+        <div className="mt-6 min-w-0">
+          <LabBiomarkerHistoryChart
+            displayName="Illustrative HbA1c"
+            points={[
+              { date: "2025-02-17", id: "synthetic-a1c-2025", value: 5 },
+              { date: "2026-04-23", id: "synthetic-a1c-2026", value: 4.7 },
+            ]}
+            referenceRange={{ high: 5.7, low: null }}
+            referenceRangeLabel="<5.7%"
+            referenceRangeSourceLabel="Example laboratory"
+            unit="percent"
+          />
+        </div>
+      </article>
+
+      <article className="min-w-0 rounded-xl border border-border/70 bg-card/70 p-5 sm:p-8">
+        <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Missing source range
+        </p>
+        <h3 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-foreground">
+          Chloride
+        </h3>
+        <div className="mt-6 min-w-0">
+          <LabBiomarkerHistoryChart
+            displayName="Illustrative chloride"
+            points={[
+              { date: "2025-02-17", id: "synthetic-chloride-2025", value: 103 },
+              { date: "2026-04-23", id: "synthetic-chloride-2026", value: 101 },
+            ]}
+            referenceRange={{ high: 107, low: 98 }}
+            referenceRangeLabel="98 to 107 mmol/L"
+            referenceRangeSourceLabel="Mayo Clinic Laboratories adult serum reference interval · not the reporting lab's range"
+            referenceRangeTitle="Published adult comparator"
+            unit="mmol/L"
+          />
+        </div>
+      </article>
+    </div>
   );
 }
 

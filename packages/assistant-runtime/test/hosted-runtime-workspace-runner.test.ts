@@ -1719,7 +1719,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation imports pending system-lane work after fresh conversation input", async () => {
+  test("delivery preparation avoids a remote refetch after pre-assistant system catch-up", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedRoutes: string[] = [];
@@ -1790,9 +1790,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "1", lane: "system" },
         ],
-        [
-          { importedSeq: "2", lane: "system" },
-        ],
       ]);
       assert.deepEqual(importedRoutes, [
         "import-conversation-message",
@@ -1812,7 +1809,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation yields when a foreground wake arrives after observer stop", async () => {
+  test("delivery preparation does not use a remote system fetch as a foreground barrier", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const items: HostedMailboxItem[] = [];
     const fetchRequests: HostedMailboxFetchRequest[] = [];
@@ -1906,9 +1903,9 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         now: () => TEST_NOW,
       });
 
-      assert.equal(lateWakeInjected, true);
-      assert.deepEqual(yieldStates, [false, true]);
-      assert.deepEqual(providerEntries, []);
+      assert.equal(lateWakeInjected, false);
+      assert.deepEqual(yieldStates, [false, false]);
+      assert.deepEqual(providerEntries, ["auto-reply-provider-entry"]);
       assert.equal(result.assistantPhaseResult?.nextWakeAt, TEST_NOW);
       assert.equal(result.assistantPhaseResult?.nextWakeReason, "assistant");
       assert.deepEqual(fetchRequests.map((request) => request.lanes), [
@@ -1917,12 +1914,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         ],
         [
           { importedSeq: "0", lane: "system" },
-        ],
-        [
-          { importedSeq: "0", lane: "system" },
-        ],
-        [
-          { importedSeq: "0", lane: "conversation" },
         ],
       ]);
       assert.deepEqual(checkpointRequests, []);
@@ -1934,7 +1925,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation follows empty system pages with a higher high-water mark", async () => {
+  test("delivery preparation does not chase a remote system high-water page", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedRoutes: string[] = [];
@@ -2041,9 +2032,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "0", lane: "system" },
         ],
-        [
-          { importedSeq: "1", lane: "system" },
-        ],
       ]);
       assert.deepEqual(importedRoutes, [
         "import-conversation-message",
@@ -2065,7 +2053,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation uses the normal system import path", async () => {
+  test("delivery preparation leaves system import to the ordinary pre-assistant path", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedRoutes: string[] = [];
@@ -2138,9 +2126,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "0", lane: "system" },
         ],
-        [
-          { importedSeq: "1", lane: "system" },
-        ],
       ]);
       assert.equal(result.latestMailboxImport.state.watermarks.system, "1");
       assert.equal(result.runtimeStateDirty, true);
@@ -2152,7 +2137,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("pre-auto-reply delivery preparation returns a mailbox barrier after bounded system catch-up pages", async () => {
+  test("delivery preparation does not extend bounded pre-assistant system catch-up", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const fetchRequests: HostedMailboxFetchRequest[] = [];
     const importedRoutes: string[] = [];
@@ -2223,9 +2208,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         [
           { importedSeq: "3", lane: "system" },
         ],
-        [
-          { importedSeq: "4", lane: "system" },
-        ],
       ]);
       assert.deepEqual(importedRoutes, [
         "import-conversation-message",
@@ -2233,9 +2215,8 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
         "apply-member-channels-update",
         "apply-member-channels-update",
         "apply-member-channels-update",
-        "apply-member-channels-update",
       ]);
-      assert.equal(result.latestMailboxImport.state.watermarks.system, "5");
+      assert.equal(result.latestMailboxImport.state.watermarks.system, "4");
       assert.equal(result.mailboxRetryAt, TEST_NOW);
       assert.equal(result.runtimeStateDirty, true);
       assert.deepEqual(checkpointRequests, []);

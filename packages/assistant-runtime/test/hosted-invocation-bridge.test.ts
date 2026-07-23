@@ -1227,6 +1227,42 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       });
     }
   });
+
+  it("admits only joined-group asks on the dirty-window fast path", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const consentedWake = createConsentedMemberAssistantAskRequestedWake();
+    const consentedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: consentedWake,
+      }),
+      platform,
+      vaultRoot,
+    });
+
+    await expect(consentedOptions.importItem(
+      createAssistantAskMailboxImportItem(consentedWake),
+      { assistantAskRequestTargetKind: "joined_group" },
+    )).resolves.toEqual({
+      reasonCode: "assistant_ask.target_not_admitted",
+      status: "deferred",
+    });
+
+    const joinedWake = createAssistantAskRequestedWake();
+    const joinedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: joinedWake,
+      }),
+      platform,
+      vaultRoot,
+    });
+    await expect(joinedOptions.importItem(
+      createAssistantAskMailboxImportItem(joinedWake),
+      { assistantAskRequestTargetKind: "joined_group" },
+    )).resolves.toMatchObject({ status: "imported" });
+  });
 });
 
 function createBridgeOptions(input: {
@@ -1673,6 +1709,30 @@ function createAssistantAskRequestedWake(): HostedExecutionAssistantAskRequested
       },
     },
     eventId: "haask_request_bridge",
+    memberId: TEST_REQUEST.userId,
+    occurredAt: "2026-07-15T12:00:00.000Z",
+  });
+}
+
+function createConsentedMemberAssistantAskRequestedWake():
+HostedExecutionAssistantAskRequestedWake {
+  return buildHostedExecutionAssistantAskRequestedWake({
+    ask: {
+      expiresAt: "2026-07-15T12:10:00.000Z",
+      origin: {
+        assistantInputId: "ain_0123456789abcdef0123456789abcdef",
+        kind: "accepted_input",
+        sessionId: "session_private",
+      },
+      question: "What exercises are assigned today?",
+      target: {
+        grantId: "grant_bridge",
+        kind: "consented_member",
+        membershipId: "hgrpm_generation_bridge",
+        permissionDigest: "d".repeat(64),
+      },
+    },
+    eventId: "haask_consented_request_bridge",
     memberId: TEST_REQUEST.userId,
     occurredAt: "2026-07-15T12:00:00.000Z",
   });

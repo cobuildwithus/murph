@@ -101,6 +101,24 @@ web-owned rows; the model supplies only the question and an optional visible
 group label. Web rechecks membership before the group read and completion
 append. The paired mailbox rows are the only durable operation state, and the
 answer remains untrusted data when the private runtime composes its follow-up.
+A joined-group Ask request is safe to admit through the runtime's narrow
+pre-checkpoint system prefix because the detached read has no resident write or
+delivery authority. One shared import policy applies decoded target validation
+to every import in that pre-checkpoint pass, including follow-up imports and
+foreground reruns, so consented-member requests remain on the ordinary
+checkpoint path. This starts the separate read without publishing the routine
+idle snapshot early. When a joined-group completion predates pending personal
+input, it owns one foreground-causal assistant pass, queues Murph's natural
+response through the ordinary idempotent outbox, and leaves that personal input
+pending for the next pass. The cutoff uses the input's occurrence time from the
+bounded accepted-input batch already owned by a fresh turn. When no fresh batch
+exists, the cutoff reads the existing complete pending-input index; missing,
+incomplete, or invalid index evidence fails closed without repairing or
+compacting state on the reply path.
+That ordering ends at durable intent creation: the outbox retains its
+established same-turn predecessor boundary, so a cross-turn carrier retry does
+not freeze later live conversation. No Ask-specific coordinator, receipt state
+machine, or second queue owns this ordering.
 
 The reverse `consented_member` adapter lets an authenticated group Murph ask
 one current member's private Murph under a separate exact grant. Web/Postgres

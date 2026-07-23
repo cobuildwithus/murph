@@ -113,6 +113,8 @@ export interface BrowserVaultLabResultReferenceRange {
   text?: string;
 }
 
+export type BrowserVaultLabSpecimenKind = "plasma" | "serum";
+
 export interface BrowserVaultLabResultRow {
   analyte: string;
   biomarkerKey: string | null;
@@ -128,6 +130,7 @@ export interface BrowserVaultLabResultRow {
   referenceRange: BrowserVaultLabResultReferenceRange | null;
   rowSchema: "murph.browser-vault.lab-result-row.v1";
   sourceLabel: string | null;
+  specimenKind: BrowserVaultLabSpecimenKind | null;
   textValue: string | null;
   unit: string | null;
   value: number | null;
