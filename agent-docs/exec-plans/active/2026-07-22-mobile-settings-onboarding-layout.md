@@ -33,6 +33,8 @@ Updated: 2026-07-22
    Mitigation: hide time metadata only and continue rendering the unavailable label when playback fails.
 3. Risk: full-height sheets could place actions behind mobile browser chrome.
    Mitigation: use `dvh`, remove bottom-sheet top spacing/rounding, and retain safe-area-aware footer padding.
+4. Risk: long unbroken invite identifiers could recreate horizontal overflow in the card or desktop table.
+   Mitigation: allow the secondary identifier to break at arbitrary points and use fixed desktop table layout; prove containment at 320px, 390px, and the 768px breakpoint.
 
 ## Tasks
 
@@ -49,9 +51,12 @@ Updated: 2026-07-22
 - Keep the voice player's existing default everywhere else and add a narrow opt-out for this picker.
 - Preserve the already-landed left-alignment in both voice and personality headers without adding redundant layout code.
 - Add read-only Family and non-persisting Personality fixtures to the existing design component catalog, as required by the frontend design-proof gate.
+- Resolve the preliminary frontend finding with local content containment rather than restoring a page-level horizontal scroller.
 
 ## Verification
 
-- Commands to run: focused Vitest files for Family, voice player, style picker, contact-card picker, and personality picker; `pnpm test:diff`; responsive in-app browser checks; applicable completion review commands; PR CI and merge-tree proof.
-- Expected outcomes: mobile controls fit the viewport without horizontal scrolling or duration overflow; desktop presentation and all settings mutations remain unchanged; all required checks and reviews pass.
-- Current evidence gaps: no browser backend is attached to this session, so required design-page screenshots remain blocked; the Fable UI review was attempted and reported exhausted usage credits.
+- Focused Vitest: 5 files and 62 tests passed; the Family remediation file passes 20 tests. Scoped lint and web typecheck pass.
+- Canonical `pnpm test:diff`: passed workspace guards, typecheck, 490 test files with 6,142 tests, lint with zero errors, dev smoke, and production build.
+- Playwright: desktop and mobile design states passed; long Family label/email containment passed at 320px, 390px, and 768px with document and surface `scrollWidth <= clientWidth` and contained, enabled actions.
+- Product experience review: passed with no findings. Preliminary specialists returned one valid Family overflow finding; it is fixed and directly proven. Fable UI review was attempted and reported exhausted usage credits.
+- Current evidence gap: the GitHub design-proof check still needs hosted attachment URLs for the completed Playwright screenshots.

@@ -331,8 +331,9 @@ test("HostedFamilyManager presents rows as mobile cards without forcing horizont
           expiresAtIso: "2026-07-30T00:00:00.000Z",
           id: "inv_pending",
           planCode: "edge",
-          targetEmail: "family@example.test",
-          targetLabel: "Family member",
+          targetEmail: `${"a".repeat(60)}@example.test`,
+          targetLabel:
+            "A deliberately long synthetic family member label for responsive containment proof",
           targetPhoneHint: null,
           targetTelegramUsername: null,
           telegramInviteUrl: null,
@@ -346,6 +347,7 @@ test("HostedFamilyManager presents rows as mobile cards without forcing horizont
     const table = container.querySelector("table");
     assert.ok(table);
     assert.doesNotMatch(table.className, /min-w-/u);
+    assert.match(table.className, /md:table-fixed/u);
     assert.doesNotMatch(table.parentElement?.className ?? "", /overflow-x-auto/u);
 
     const body = table.querySelector("tbody");
@@ -361,6 +363,10 @@ test("HostedFamilyManager presents rows as mobile cards without forcing horizont
     }
     assert.match(body?.textContent ?? "", /Plan/u);
     assert.match(body?.textContent ?? "", /Status/u);
+    const inviteMetadata = Array.from(body?.querySelectorAll("span") ?? []).find((element) =>
+      element.textContent?.includes("@example.test"),
+    );
+    assert.match(inviteMetadata?.className ?? "", /break-all/u);
   } finally {
     await cleanup();
   }

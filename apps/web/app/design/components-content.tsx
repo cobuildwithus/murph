@@ -643,9 +643,10 @@ export function ComponentsContent() {
                   expiresAtIso: "2026-08-05T00:00:00.000Z",
                   id: "design-invite",
                   planCode: "edge",
-                  targetEmail: null,
-                  targetLabel: "Parent",
-                  targetPhoneHint: "•••• 1234",
+                  targetEmail: `${"a".repeat(60)}@example.test`,
+                  targetLabel:
+                    "A deliberately long synthetic family member label for responsive containment proof",
+                  targetPhoneHint: null,
                   targetTelegramUsername: null,
                   telegramInviteUrl: null,
                 },

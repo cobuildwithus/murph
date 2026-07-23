@@ -502,7 +502,7 @@ export function HostedFamilyManager(props: {
       </div>
 
       <div className="min-w-0">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm md:table-fixed">
           <thead className="sr-only">
             <tr>
               <th>Member</th>
@@ -601,7 +601,12 @@ export function HostedFamilyManager(props: {
                   {inviteDisplayName(invite)}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {secondary ? `${secondary} · ` : ""}Expires {formatFamilyDate(invite.expiresAtIso)}
+                  {secondary ? (
+                    <>
+                      <span className="break-all">{secondary}</span> ·{" "}
+                    </>
+                  ) : null}
+                  Expires {formatFamilyDate(invite.expiresAtIso)}
                 </div>
               </td>
               <td className="block align-top md:table-cell md:py-3 md:pr-3">
