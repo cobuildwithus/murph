@@ -1008,12 +1008,9 @@ export class RunnerContainer extends Container {
       }
       const conversationWarmActivityCompletedAtEpochMs =
         health.conversationWarmActivityCompletedAtEpochMs;
-      if (conversationWarmActivityCompletedAtEpochMs === undefined) {
-        this.renewPlatformActivityTimeout("activity-expired-old-child");
-        return;
-      }
       if (
         conversationWarmActivityCompletedAtEpochMs !== null
+        && conversationWarmActivityCompletedAtEpochMs !== undefined
         && conversationWarmActivityCompletedAtEpochMs
           > activityExpiryAtMs - readRunnerContainerIdleTtlMs(this.environment)
       ) {

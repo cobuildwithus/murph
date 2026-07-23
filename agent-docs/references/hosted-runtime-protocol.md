@@ -1204,8 +1204,10 @@ from that live child watermark, re-arms the platform timeout while the lease or
 active work remains, and destroys the shell after expiry. Durable Object
 reconstruction reads the same resident process; a replacement process starts
 without inherited warmth. Replay, system-lane work, device sync, and generic
-maintenance do not mint or slide the lease. Missing old-child metadata, child
-health failure, and the wake-versus-destroy race retain and re-arm fail closed.
+maintenance do not mint or slide the lease. An inactive old child missing the
+watermark has no current conversation lease and is cleanup-eligible; its active
+work count remains independently authoritative. Child health failure and the
+wake-versus-destroy race retain and re-arm fail closed.
 Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,

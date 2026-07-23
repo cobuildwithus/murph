@@ -5784,7 +5784,7 @@ describe("RunnerContainer", () => {
     expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
-  it("re-arms cleanup when a legacy child omits the optional warmth watermark", async () => {
+  it("destroys an idle legacy child that omits the optional warmth watermark", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
@@ -5801,8 +5801,8 @@ describe("RunnerContainer", () => {
 
     await container.onActivityExpired();
 
-    expect(destroy).not.toHaveBeenCalled();
-    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
   });
 
   it("re-arms cleanup when child health is unavailable", async () => {
@@ -5870,13 +5870,14 @@ describe("RunnerContainer", () => {
     await expect(storage.list()).resolves.toEqual(new Map());
   });
 
-  it("does not destroy reconstructed state while the child reports active work", async () => {
+  it("re-arms a field-less legacy child while it reports active work", async () => {
     const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
       containerFetch: vi.fn(async () => new Response(JSON.stringify({
-        ...createRunnerHealthResult(),
         activeJobCount: 1,
+        hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+        ok: true,
       }), {
         headers: { "content-type": "application/json; charset=utf-8" },
         status: 200,
