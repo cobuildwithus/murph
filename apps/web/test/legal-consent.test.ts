@@ -6,6 +6,7 @@ import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   buildCurrentHostedConsentDocumentVersions,
   buildHostedConsentStatus,
+  hasHostedHistoricalLaunchConsent,
   parseHostedConsentAcceptRequest,
   parseHostedConsentRevokeRequest,
   type HostedConsentGrantSnapshot,
@@ -17,9 +18,9 @@ describe("hosted legal consent registry", () => {
       "launch.legal",
     );
     expect(legalVersions).toEqual({
-      "health-ai-safety-disclosure": "2026-04-29",
-      "privacy-policy": "2026-06-24",
-      "terms-of-service": "2026-04-29",
+      "health-ai-safety-disclosure": "2026-07-23",
+      "privacy-policy": "2026-07-23",
+      "terms-of-service": "2026-07-23",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: legalVersions,
@@ -35,7 +36,7 @@ describe("hosted legal consent registry", () => {
       "launch.health-data",
     );
     expect(healthDataVersions).toEqual({
-      "consumer-health-data-notice": "2026-04-29",
+      "consumer-health-data-notice": "2026-07-23",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: healthDataVersions,
@@ -75,7 +76,7 @@ describe("hosted legal consent registry", () => {
   it("rejects accepted document versions outside the requested scope", () => {
     const acceptedDocumentVersions = {
       ...buildCurrentHostedConsentDocumentVersions("feature.health-ai"),
-      "terms-of-service": "2026-04-29",
+      "terms-of-service": "2026-07-23",
     };
 
     expect(() => parseHostedConsentAcceptRequest({
@@ -118,8 +119,8 @@ describe("hosted legal consent registry", () => {
   it("marks stale grants as not currently granted", () => {
     const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "privacy-policy": "2026-06-24",
-        "terms-of-service": "2026-04-29",
+        "privacy-policy": "2026-07-23",
+        "terms-of-service": "2026-07-23",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_legal",
@@ -131,7 +132,7 @@ describe("hosted legal consent registry", () => {
     };
     const healthDataGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "consumer-health-data-notice": "2026-04-29",
+        "consumer-health-data-notice": "2026-07-23",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_health",
@@ -157,6 +158,103 @@ describe("hosted legal consent registry", () => {
       current: false,
       granted: false,
     });
+  });
+
+  it("requires existing members on the previous document set to re-accept", () => {
+    const status = buildHostedConsentStatus({
+      grants: [
+        {
+          documentVersions: {
+            "health-ai-safety-disclosure": "2026-04-29",
+            "privacy-policy": "2026-06-24",
+            "terms-of-service": "2026-04-29",
+          },
+          grantedAt: "2026-06-24T00:00:00.000Z",
+          lastEventId: "hbce_previous_legal",
+          revokedAt: null,
+          scope: "launch.legal",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-06-24T00:00:00.000Z",
+        },
+        {
+          documentVersions: {
+            "consumer-health-data-notice": "2026-04-29",
+          },
+          grantedAt: "2026-04-29T00:00:00.000Z",
+          lastEventId: "hbce_previous_health",
+          revokedAt: null,
+          scope: "launch.health-data",
+          source: "hosted onboarding",
+          status: "granted",
+          updatedAt: "2026-04-29T00:00:00.000Z",
+        },
+      ],
+      now: new Date("2026-07-23T12:00:00.000Z"),
+    });
+
+    expect(status.launchGranted).toBe(false);
+    expect(hasHostedHistoricalLaunchConsent(status)).toBe(true);
+    expect(status.launchScopes).toEqual([
+      {
+        granted: false,
+        missingDocuments: expect.arrayContaining([
+          expect.objectContaining({ id: "terms-of-service" }),
+          expect.objectContaining({ id: "privacy-policy" }),
+          expect.objectContaining({ id: "health-ai-safety-disclosure" }),
+        ]),
+        scope: "launch.legal",
+      },
+      {
+        granted: false,
+        missingDocuments: [
+          expect.objectContaining({ id: "consumer-health-data-notice" }),
+        ],
+        scope: "launch.health-data",
+      },
+    ]);
+  });
+
+  it("distinguishes historical launch authorization from absent or partial consent", () => {
+    const legalGrant = createHistoricalLaunchGrant("launch.legal", {
+      "health-ai-safety-disclosure": "2026-04-29",
+      "privacy-policy": "2026-06-24",
+      "terms-of-service": "2026-04-29",
+    });
+    const healthDataGrant = createHistoricalLaunchGrant("launch.health-data", {
+      "consumer-health-data-notice": "2026-04-29",
+    });
+    const now = new Date("2026-07-23T12:00:00.000Z");
+
+    expect(hasHostedHistoricalLaunchConsent(buildHostedConsentStatus({
+      grants: [],
+      now,
+    }))).toBe(false);
+    expect(hasHostedHistoricalLaunchConsent(buildHostedConsentStatus({
+      grants: [legalGrant],
+      now,
+    }))).toBe(false);
+    expect(hasHostedHistoricalLaunchConsent(buildHostedConsentStatus({
+      grants: [healthDataGrant],
+      now,
+    }))).toBe(false);
+    expect(hasHostedHistoricalLaunchConsent(buildHostedConsentStatus({
+      grants: [legalGrant, healthDataGrant],
+      now,
+    }))).toBe(true);
+    expect(hasHostedHistoricalLaunchConsent(buildHostedConsentStatus({
+      grants: [
+        createHistoricalLaunchGrant(
+          "launch.legal",
+          buildCurrentHostedConsentDocumentVersions("launch.legal"),
+        ),
+        createHistoricalLaunchGrant(
+          "launch.health-data",
+          buildCurrentHostedConsentDocumentVersions("launch.health-data"),
+        ),
+      ],
+      now,
+    }))).toBe(true);
   });
 
   it("keeps current launch consent valid when a historical removed scope exists", () => {
@@ -209,3 +307,19 @@ describe("hosted legal consent registry", () => {
     })).toThrowError(HostedOnboardingError);
   });
 });
+
+function createHistoricalLaunchGrant(
+  scope: "launch.health-data" | "launch.legal",
+  documentVersions: Record<string, string>,
+): HostedConsentGrantSnapshot {
+  return {
+    documentVersions,
+    grantedAt: "2026-04-29T00:00:00.000Z",
+    lastEventId: `hbce_${scope.replace(".", "_")}`,
+    revokedAt: null,
+    scope,
+    source: "hosted onboarding",
+    status: "granted",
+    updatedAt: "2026-04-29T00:00:00.000Z",
+  };
+}

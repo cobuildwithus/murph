@@ -48,18 +48,9 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
     assert.equal(document.source.startsWith("apps/web/legal/"), true);
   }
 
-  const privacyPolicy = manifest.documents.find((document) =>
-    document.id === "privacy-policy");
-  assert.equal(privacyPolicy?.version, "2026-06-24");
-  assert.equal(privacyPolicy?.versions[0]?.path, "/legal/privacy-2026-06-24.pdf");
-
   for (const document of manifest.documents) {
-    if (document.id === "privacy-policy") {
-      continue;
-    }
-
-    assert.equal(document.version, "2026-04-29");
-    assert.match(document.versions[0]?.path ?? "", /^\/legal\/.+-2026-04-29\.pdf$/u);
+    assert.equal(document.version, "2026-07-23");
+    assert.match(document.versions[0]?.path ?? "", /^\/legal\/.+-2026-07-23\.pdf$/u);
   }
 
   const consumerHealthNotice = manifest.documents.find((document) =>
@@ -73,6 +64,6 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
   assert.equal(consumerHealthNotice?.latest.path, "/legal/consumer-health-data-notice.pdf");
   assert.equal(
     consumerHealthNotice?.versions[0]?.path,
-    "/legal/consumer-health-data-notice-2026-04-29.pdf",
+    "/legal/consumer-health-data-notice-2026-07-23.pdf",
   );
 });

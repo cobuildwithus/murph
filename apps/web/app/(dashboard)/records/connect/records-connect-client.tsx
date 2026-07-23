@@ -25,6 +25,7 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
@@ -119,7 +120,7 @@ export function RecordsConnectClient({ authenticated }: { authenticated: boolean
               acceptedPendingLabel="Opening records search"
               initialStatus={null}
               mode="compact"
-              onAccepted={() => setConsentRequired(false)}
+              onAccepted={reloadCurrentHostedAuthDocument}
               onRequirementChange={setConsentRequired}
               preferredScope="launch.legal"
               source="clinical-records-connect"

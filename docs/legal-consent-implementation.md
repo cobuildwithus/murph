@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-05-13
+Last verified: 2026-07-23
 
 ## Purpose
 
@@ -58,9 +58,18 @@ Server-only helpers in `apps/web/src/lib/legal/consent.ts` provide:
 - launch-required consent recording;
 - optional feature consent grant/revocation;
 - `assertHostedConsentScopeGranted`;
+- `assertHostedHistoricalLaunchConsentGranted`;
 - `assertHostedLaunchRequiredConsentGranted`.
 
-Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection setup requires current launch-required consent before starting a provider OAuth flow; the user's explicit connect action supplies the feature intent for that source, so the connect flow does not require a second connected-source consent grant. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond launch consent plus an explicit user action.
+Browser-vault session creation requires current launch-required consent before reading hosted vault state. Device-sync connection and reconnection setup require both historical launch grants but intentionally ignore launch-document freshness: the member must also have an active authenticated session, take an explicit connect action, and complete the source provider's authorization flow. Current companion device status, token exchange, and sync ingestion use the same historical-launch boundary, so an existing authorized member remains available when document acceptance becomes stale while a member with zero or partial launch consent remains fail-closed. These device paths do not require a second connected-source consent grant because the explicit source action and provider authorization supply the feature intent. Future feature gates should follow the same pattern at the boundary where hosted processing would otherwise begin and should introduce separate optional scopes only when they cover distinct data use beyond the explicit source authorization.
+
+## Document updates and existing members
+
+A grant is current only when its recorded document-version snapshot exactly matches every document required by that scope. Publishing a new required version therefore preserves the old append-only acceptance event as historical evidence but makes the corresponding current grant stale. Members do not lose their account, subscription, data, device connection, or container when that happens.
+
+The authenticated dashboard layout reads consent status before starting the browser-vault provider. A member with both historical launch grants and stale document versions sees the current legal card alongside the requested dashboard route; the reminder does not replace or block the device-connect page. Members with zero or partial launch consent do not receive update-specific copy. Accepting both launch scopes reloads that exact route and restores protected vault-backed features. If the reminder status cannot be read, the layout omits the reminder instead of taking device connection down. The public `/design` catalog injects an in-memory acceptance handler and inert handoff into the production component, so its interactive preview never calls the consent API or writes consent state.
+
+The ordinary Linq inbound webhook, mailbox ingestion, hosted container wake, and current-conversation reply path do not use launch consent as an admission gate. Configured non-Strava device connection/reconnection and current companion device sync require both historical launch grants but not current document versions. A stale document version therefore does not stop an existing authorized member from texting Murph, receiving a reply in that active conversation, connecting an available device, or continuing current device sync. A member with zero or partial launch consent cannot start or use those health-data device paths. Independently guarded browser-vault, clinical-record, export, billing, group-join, iMessage mini-app, meal-photo, and unrelated companion actions still fail closed with `HOSTED_CONSENT_REQUIRED` until the member accepts the current documents. Strava remains disabled for new connections and reconnect offers as a separate provider product gate.
 
 ## Privacy Notes
 
