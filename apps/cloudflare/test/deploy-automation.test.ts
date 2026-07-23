@@ -475,6 +475,15 @@ describe("hosted deploy automation helpers", () => {
       };
     };
 
+    const expectedDefaultInstanceType = {
+      disk_mb: 12000,
+      memory_mib: 6144,
+      vcpu: 2,
+    };
+    expect(generatedConfig.containers.map(({ instance_type }) => instance_type)).toEqual([
+      expectedDefaultInstanceType,
+      expectedDefaultInstanceType,
+    ]);
     expect(checkedInConfig.containers).toHaveLength(generatedConfig.containers.length);
     for (const [index, generatedContainer] of generatedConfig.containers.entries()) {
       expect(checkedInConfig.containers[index]).toMatchObject({

@@ -1,6 +1,6 @@
 # Upgrade Cloudflare containers to 2 vCPU
 
-Status: active
+Status: completed
 Created: 2026-07-22
 Updated: 2026-07-22
 
@@ -56,3 +56,14 @@ Updated: 2026-07-22
 - The current production GitHub environment has an explicit one-vCPU override;
   deployment must update that variable after merge because repository changes
   alone do not override environment configuration.
+- Focused Cloudflare verification passed with 106 Node test files / 1,856
+  tests, one Workers test, and the package typecheck.
+- The preliminary specialist review found one independent-default coverage gap;
+  the accepted test-only remediation pins both generated container classes to
+  the new default shape.
+- Full acceptance cleared repository guards, workspace typechecks, and the
+  Cloudflare package, but its unrelated assistant-runtime coverage lane was
+  blocked by an existing fixed temporary vault path containing a newer state
+  schema. The isolated failing test reproduced that shared-fixture mismatch;
+  this task does not mutate or delete state owned by another session.
+Completed: 2026-07-22
