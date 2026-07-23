@@ -1,7 +1,6 @@
 import {
   isAssistantConversationContextUnavailableError,
   recordAssistantConversationContext,
-  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
   emitHostedExecutionStructuredLog,
@@ -15,7 +14,6 @@ import {
 } from "./mailbox-outcome.ts";
 
 export async function executeHostedPhoneCallResultedWake(input: {
-  executionContext: AssistantExecutionContext;
   vaultRoot: string;
   wake: HostedExecutionPhoneCallResultedWake;
 }): Promise<HostedMailboxOutcome> {

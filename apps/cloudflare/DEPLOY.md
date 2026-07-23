@@ -157,16 +157,19 @@ safe because Web does not require the runner to consume the header.
 `phone-call.resulted` is a new system-mailbox kind and has no safe old-runner,
 new-web compatibility window. First apply the additive nullable
 `HostedPhoneCall.origin_session_id` migration and confirm that active calls from
-the prior producer have drained; those legacy rows intentionally have no safe
-session fallback. Deploy Cloudflare and the runner consumer next
+the prior producer have drained; legacy rows without an origin session persist
+their analysis result but skip the context append. Deploy Cloudflare and the
+runner consumer next
 with `container_rollout=immediate`, require managed-container smoke to report
 the expected runner-bundle fingerprint, and verify there are no hosted mailbox
 parse or quarantine failures. Only then deploy Web, which replaces the prior
 automatic result notification with the internal context event. The first
 compatible runner is the rollback floor while that Web producer is active or
-any result event can remain durable or imported. New runners remain compatible
-with older Web producers, although those older producers retain the prior
-automatic-message behavior.
+any result event can remain durable or imported. Phone-call starts fail closed
+during the runner-first window: the new runner sends `originSessionId`, which
+the old Web start endpoint rejects, so `create_phone_call` returns a start
+failure to the model until Web deploys. Keep that window short; old Web
+producers otherwise retain the prior automatic-message behavior.
 
 ## Consented Group Disclosure Rollout
 

@@ -40,7 +40,7 @@ interface HostedPhoneCallWebhookTx {
   appendResultContext(
     call: HostedPhoneCall,
     result?: HostedPhoneCallResult,
-  ): Promise<HostedPhoneCallResultContextAppend>;
+  ): Promise<RetellCallAnalyzedHandlingResult>;
   encryptResult(input: {
     callId: string;
     memberId: string;
@@ -89,11 +89,6 @@ interface HostedPhoneCallWebhookStore {
 export interface RetellCallAnalyzedHandlingResult {
   contextMailboxItemId: string | null;
   contextUserId: string | null;
-}
-
-interface HostedPhoneCallResultContextAppend {
-  contextMailboxItemId: string;
-  contextUserId: string;
 }
 
 const HOSTED_PHONE_CALL_RESULT_SUMMARY_MAX_LENGTH = 2_000;
@@ -235,12 +230,26 @@ export async function handleRetellCallAnalyzed(input: {
   });
 }
 
-async function appendPhoneCallResultContextTx(input: {
+export async function appendPhoneCallResultContextTx(input: {
   call: HostedPhoneCall;
   prisma: Prisma.TransactionClient;
   result?: HostedPhoneCallResult;
-}): Promise<HostedPhoneCallResultContextAppend> {
+}): Promise<RetellCallAnalyzedHandlingResult> {
   const call = input.call;
+  const originSessionId = call.originSessionId?.trim();
+  if (!originSessionId) {
+    // Calls reserved before the origin-session migration have no initiating
+    // session and never will; retrying cannot heal this, so keep the analysis
+    // result committed and skip the context append.
+    console.warn("Hosted phone call result context skipped without an origin session.", {
+      callId: call.id,
+    });
+    return {
+      contextMailboxItemId: null,
+      contextUserId: null,
+    };
+  }
+
   let result: HostedPhoneCallResult | null = input.result ?? null;
   if (!result) {
     try {
@@ -272,14 +281,6 @@ async function appendPhoneCallResultContextTx(input: {
     throw hostedPhoneCallResultContextError(
       "HOSTED_PHONE_CALL_BRIEF_INVALID",
       "Hosted phone call result context requires a valid stored brief.",
-    );
-  }
-
-  const originSessionId = call.originSessionId?.trim();
-  if (!originSessionId) {
-    throw hostedPhoneCallResultContextError(
-      "HOSTED_PHONE_CALL_ORIGIN_SESSION_REQUIRED",
-      "Hosted phone call result context requires its initiating session.",
     );
   }
 

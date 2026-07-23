@@ -517,7 +517,6 @@ describe("parseHostedExecutionEvent", () => {
       userId: "user-1",
     } as const;
 
-    expect(parseHostedExecutionEvent(value)).toEqual(value);
     expect(parseHostedExecutionWake({
       ...value,
       eventId: "phone-call.resulted:call-1",
@@ -539,15 +538,19 @@ describe("parseHostedExecutionEvent", () => {
       userId: "user-1",
     } as const;
 
-    expect(() => parseHostedExecutionEvent({
+    expect(() => parseHostedExecutionWake({
       ...value,
+      eventId: "phone-call.resulted:call-1",
+      occurredAt: "2026-07-22T16:24:46.000Z",
       phoneCall: {
         ...value.phoneCall,
         originSessionId: "",
       },
     })).toThrow(/non-empty string/u);
-    expect(() => parseHostedExecutionEvent({
+    expect(() => parseHostedExecutionWake({
       ...value,
+      eventId: "phone-call.resulted:call-1",
+      occurredAt: "2026-07-22T16:24:46.000Z",
       phoneCall: {
         ...value.phoneCall,
         context: "界".repeat(

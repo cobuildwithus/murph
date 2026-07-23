@@ -32,7 +32,6 @@ describe("hosted phone-call result context", () => {
   });
 
   it("records the result on the direct conversation without requesting delivery", async () => {
-    const executionContext = { hosted: null };
     const wake = buildHostedExecutionPhoneCallResultedWake({
       eventId: "phone-call.resulted:call-1",
       memberId: "member-1",
@@ -44,7 +43,6 @@ describe("hosted phone-call result context", () => {
     });
 
     const outcome = await executeHostedPhoneCallResultedWake({
-      executionContext,
       vaultRoot: "/vault",
       wake,
     });
@@ -92,7 +90,6 @@ describe("hosted phone-call result context", () => {
     });
 
     await expect(executeHostedPhoneCallResultedWake({
-      executionContext: { hosted: null },
       vaultRoot: "/vault",
       wake: firstWake,
     })).resolves.toMatchObject({
@@ -104,7 +101,6 @@ describe("hosted phone-call result context", () => {
       }],
     });
     await expect(executeHostedPhoneCallResultedWake({
-      executionContext: { hosted: null },
       vaultRoot: "/vault",
       wake: secondWake,
     })).resolves.toMatchObject({
@@ -127,7 +123,6 @@ describe("hosted phone-call result context", () => {
     });
 
     await expect(executeHostedPhoneCallResultedWake({
-      executionContext: { hosted: null },
       vaultRoot: "/vault",
       wake,
     })).rejects.toBe(transientError);

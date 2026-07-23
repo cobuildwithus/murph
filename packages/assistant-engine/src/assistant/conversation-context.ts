@@ -4,7 +4,10 @@ import {
   HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
 } from '@murphai/hosted-execution'
 
-import { normalizeNullableString } from './shared.js'
+import {
+  limitAssistantConversationHistoryTextBytes,
+  normalizeNullableString,
+} from './shared.js'
 import { appendAssistantConversationContextEntry } from './store.js'
 
 const ASSISTANT_CONVERSATION_CONTEXT_TRANSCRIPT_PREFIX =
@@ -60,10 +63,10 @@ export function readAssistantConversationContextTranscriptText(
   if (!ASSISTANT_CONVERSATION_CONTEXT_KEY_HASH_PATTERN.test(keyHash)) {
     return null
   }
-  const context = normalizeNullableString(text.slice(markerEnd + 1))
-  return context
-    ? truncateUtf8(context, HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES)
-    : null
+  return limitAssistantConversationHistoryTextBytes(
+    normalizeNullableString(text.slice(markerEnd + 1)),
+    HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
+  )
 }
 
 export async function recordAssistantConversationContextLocal(
@@ -79,27 +82,6 @@ export async function recordAssistantConversationContextLocal(
     text: buildAssistantConversationContextTranscriptText(input),
     vault: input.vault,
   })
-}
-
-function truncateUtf8(value: string, maxBytes: number): string {
-  if (Buffer.byteLength(value, 'utf8') <= maxBytes) {
-    return value
-  }
-  const codePoints = [...value]
-  let low = 0
-  let high = codePoints.length
-  let best = ''
-  while (low <= high) {
-    const middle = Math.floor((low + high) / 2)
-    const candidate = codePoints.slice(0, middle).join('')
-    if (Buffer.byteLength(candidate, 'utf8') <= maxBytes) {
-      best = candidate
-      low = middle + 1
-    } else {
-      high = middle - 1
-    }
-  }
-  return best
 }
 
 function normalizeRequiredConversationContextValue(

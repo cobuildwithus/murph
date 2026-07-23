@@ -63,7 +63,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
-  "phone-call.resulted",
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
@@ -245,12 +244,6 @@ export const HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS = 200
 export interface HostedExecutionPhoneCallResultedPayload {
   context: string;
   originSessionId: string;
-}
-
-export interface HostedExecutionPhoneCallResultedEvent
-  extends HostedExecutionBaseEvent {
-  kind: "phone-call.resulted";
-  phoneCall: HostedExecutionPhoneCallResultedPayload;
 }
 
 export const HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS = 1_200;
@@ -445,7 +438,6 @@ export type HostedExecutionEvent =
   | HostedExecutionMemberChannelsUpdatedEvent
   | HostedExecutionMemberPreferencesUpdatedEvent
   | HostedExecutionAssistantNotificationRequestedEvent
-  | HostedExecutionPhoneCallResultedEvent
   | HostedExecutionAssistantAskRequestedEvent
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent

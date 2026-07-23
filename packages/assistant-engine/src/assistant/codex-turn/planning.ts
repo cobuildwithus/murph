@@ -82,7 +82,11 @@ import type {
   AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
-import { normalizeNullableString } from '../shared.js'
+import {
+  assistantConversationHistoryUtf8Bytes,
+  limitAssistantConversationHistoryTextBytes,
+  normalizeNullableString,
+} from '../shared.js'
 import {
   resolveAssistantCurrentAudienceDeliveryFields,
 } from '../delivery-service.js'
@@ -190,7 +194,6 @@ const ASSISTANT_ROUTE_PLANNING_SPAN_STAGES: readonly {
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT = 24
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_MESSAGE_BYTES = 4_000
 const ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES = 12_000
-const assistantConversationHistoryTextEncoder = new TextEncoder()
 
 export interface AssistantRouteCodexResumePlan {
   codexThreadId: string
@@ -1023,37 +1026,6 @@ function limitAssistantConversationHistoryMessages(
   }
 
   return retained.reverse()
-}
-
-export function limitAssistantConversationHistoryTextBytes(
-  value: string | null,
-  maxBytes: number,
-): string | null {
-  if (!value) {
-    return null
-  }
-  if (assistantConversationHistoryUtf8Bytes(value) <= maxBytes) {
-    return value
-  }
-
-  const codePoints = Array.from(value)
-  let low = 0
-  let high = codePoints.length
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2)
-    const candidate = codePoints.slice(0, mid).join('').trimEnd()
-    if (assistantConversationHistoryUtf8Bytes(candidate) <= maxBytes) {
-      low = mid
-    } else {
-      high = mid - 1
-    }
-  }
-
-  return normalizeNullableString(codePoints.slice(0, low).join('').trimEnd())
-}
-
-export function assistantConversationHistoryUtf8Bytes(value: string): number {
-  return assistantConversationHistoryTextEncoder.encode(value).byteLength
 }
 
 async function measureRoutePlanningAsync<TResult>(

@@ -250,7 +250,6 @@ async function executeHostedSystemWake(input: {
       });
     case "phone-call.resulted":
       return executeHostedPhoneCallResultedWake({
-        executionContext: input.executionContext,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });

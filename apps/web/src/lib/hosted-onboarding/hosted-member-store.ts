@@ -181,11 +181,6 @@ export interface HostedMemberSnapshot extends HostedMemberBillingSnapshot {
   routing: HostedMemberRoutingStateSnapshot | null;
 }
 
-export interface HostedMemberAssistantNotificationState {
-  identity: Pick<HostedMemberIdentityState, "phoneLookupKey" | "phoneNumber"> | null;
-  routing: HostedMemberRoutingStateSnapshot | null;
-}
-
 export interface HostedMemberMessagingSetupState {
   identity: Pick<HostedMemberIdentityState, "phoneLookupKey"> | null;
   routing: Pick<
@@ -609,46 +604,6 @@ export async function readHostedMemberSnapshot(input: {
     identity,
     routing,
   });
-}
-
-export async function readHostedMemberAssistantNotificationState(input: {
-  memberId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<HostedMemberAssistantNotificationState | null> {
-  const memberRecord = await input.prisma.hostedMember.findUnique({
-    where: { id: input.memberId },
-    select: {
-      identity: {
-        select: {
-          memberId: true,
-          phoneLookupKey: true,
-          phoneNumberEncrypted: true,
-        },
-      },
-      routing: true,
-    },
-  });
-  if (!memberRecord) {
-    return null;
-  }
-
-  const [phoneNumber, routing] = await Promise.all([
-    memberRecord.identity
-      ? readHostedMemberIdentityPhoneNumber(memberRecord.identity, input.prisma)
-      : null,
-    memberRecord.routing
-      ? projectHostedMemberRoutingState(memberRecord.routing, input.prisma)
-      : null,
-  ]);
-  return {
-    identity: memberRecord.identity
-      ? {
-          phoneLookupKey: memberRecord.identity.phoneLookupKey,
-          phoneNumber,
-        }
-      : null,
-    routing,
-  };
 }
 
 export async function readHostedMemberMessagingSetupState(input: {

@@ -1146,20 +1146,6 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         ),
         userId,
       };
-    case "phone-call.resulted":
-      assertExactHostedExecutionKeys(record, [
-        "kind",
-        "phoneCall",
-        "userId",
-      ], "Hosted execution phone-call.resulted event");
-      return {
-        kind,
-        phoneCall: parseHostedExecutionPhoneCallResultedPayload(
-          record.phoneCall,
-          "Hosted execution phone-call.resulted event phoneCall",
-        ),
-        userId,
-      };
     case "assistant.ask.requested":
       assertExactHostedExecutionKeys(record, [
         "ask",

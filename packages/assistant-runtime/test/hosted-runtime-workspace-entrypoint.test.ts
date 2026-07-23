@@ -20511,7 +20511,6 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(resolved.session.sessionId, originSessionId);
       assert.equal(resolved.session.binding.threadIsDirect, true);
       const phoneResultOutcome = await executeHostedPhoneCallResultedWake({
-        executionContext: { hosted: null },
         vaultRoot: restored.vaultRoot,
         wake: buildHostedExecutionPhoneCallResultedWake({
           eventId: "phone-call.resulted:hpc_new_direct_restart_stable",
@@ -20670,12 +20669,22 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(activeWakeAt);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
-        request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", activeWakeAt, "assistant"],
-        ["idle_shutdown", null, null],
+        ["idle_shutdown", "assistant"],
+        ["idle_shutdown", null],
       ]);
+      // The mid-pass checkpoint arms an assistant wake no later than the
+      // active pass wake so a crash during provider work cannot leave the
+      // durable workspace dormant.
+      const midPassWakeAt = checkpointRequests[0]?.nextWakeAt ?? null;
+      const projectedWakeAt = activeWakeAt as string | null;
+      assert.ok(
+        midPassWakeAt !== null
+        && projectedWakeAt !== null
+        && midPassWakeAt <= projectedWakeAt,
+      );
+      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.activePassStatePreserved,
         true,
@@ -20691,6 +20700,82 @@ describe("hosted workspace runtime entrypoint", () => {
       if (mailboxWakeTimer !== null) {
         clearTimeout(mailboxWakeTimer);
       }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("arms an immediate assistant wake when a direct-session checkpoint has no pending wake", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-direct-session-null-wake-"),
+    );
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_direct_session_null_wake",
+              idleCheckpointDelayMs: 100,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: `${checkpointRequests.length + 1}`.repeat(64).slice(0, 64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `direct-session-null-wake-${checkpointRequests.length}.bundle.json`,
+                  size: 640,
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error("Null-wake checkpoint test has no mailbox items.");
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: [],
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  version: "0",
+                }),
+              }),
+            }),
+            runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+            async runAssistantPhase(phaseInput) {
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: [],
+                directUserActionSession: {
+                  sessionId: "asst_direct_session_null_wake",
+                },
+              });
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        ),
+        10_000,
+        () => events.join(","),
+      );
+
+      // A crash during provider work must find a re-armed wake in the durable
+      // workspace, never a dormant next_wake_at NULL with a consumed input.
+      const midPass = checkpointRequests[0];
+      assert.ok(midPass);
+      assert.equal(midPass.reason, "idle_shutdown");
+      assert.ok(midPass.nextWakeAt);
+      assert.equal(midPass.nextWakeReason, "assistant");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });

@@ -2173,6 +2173,21 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       try {
         await drainLocalWorkspaceMutationsBestEffort();
         assertRuntimeNotAborted();
+        // This checkpoint durably records the pass's consumed input while the
+        // reply is still unwritten, and pendingWake may be null mid-pass (due
+        // wakes are dropped at resolution). Arm an immediate assistant wake so
+        // a crash during the provider turn cannot leave the workspace dormant
+        // with a consumed, unreplied message.
+        const checkpointWake = selectEarliestHostedRuntimeWake([
+          {
+            at: pendingWake.nextWakeAt,
+            reason: pendingWake.nextWakeReason,
+          },
+          {
+            at: new Date().toISOString(),
+            reason: "assistant",
+          },
+        ]);
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
@@ -2180,8 +2195,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           inboxMediaRetentionWakeAt:
             committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
-          nextWakeAt: pendingWake.nextWakeAt,
-          nextWakeReason: pendingWake.nextWakeReason,
+          nextWakeAt: checkpointWake.nextWakeAt,
+          nextWakeReason: checkpointWake.nextWakeReason,
           redactedStatus,
           runtimeAbortSignal: runtimeAbortController.signal,
           vaultRoot: restored.vaultRoot,

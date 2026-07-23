@@ -24,6 +24,7 @@ import {
   getHostedPhoneCallForConsultation,
 } from "@/src/lib/phone-calls/consult";
 import {
+  appendPhoneCallResultContextTx,
   buildPhoneCallResultContext,
   buildPhoneCallResultContextWake,
   handleRetellCallAnalyzed,
@@ -765,6 +766,25 @@ describe("Retell phone-call result handling", () => {
     expect(JSON.stringify(wake)).not.toContain("responsePolicy");
     expect(JSON.stringify(wake)).not.toContain("deliveryIdempotencyKey");
     expect(JSON.stringify(wake)).not.toContain("require_send");
+  });
+
+  it("keeps analysis committed and skips context for legacy calls without an origin session", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(appendPhoneCallResultContextTx({
+        call: buildHostedPhoneCall({
+          analyzedAt: new Date("2026-06-25T00:05:00.000Z"),
+          originSessionId: null,
+        }),
+        prisma: {} as never,
+      })).resolves.toEqual({
+        contextMailboxItemId: null,
+        contextUserId: null,
+      });
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("keeps maximum multibyte result context inside one committed history message", () => {
