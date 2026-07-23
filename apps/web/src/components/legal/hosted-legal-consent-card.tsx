@@ -376,9 +376,6 @@ export function HostedLaunchConsentPrompt({
   const introduction = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2.5">
-        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          {copy.eyebrow}
-        </p>
         <p className="max-w-sm font-serif text-2xl font-semibold leading-[1.15] tracking-tight text-balance text-foreground">
           {copy.title}
         </p>
@@ -584,14 +581,12 @@ function resolveLaunchConsentVariant(
 function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
   actionLabel: string;
   description: string;
-  eyebrow: string;
   title: string;
 } {
   if (variant === "legal") {
     return {
       actionLabel: "Agree",
       description: "Review the updated terms and disclosures that govern your use of Murph.",
-      eyebrow: "Terms update",
       title: "Review Murph’s terms",
     };
   }
@@ -601,7 +596,6 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
       actionLabel: "Consent",
       description:
         "Murph and contracted AI providers use health data you add or connect to personalize your experience.",
-      eyebrow: "Health data consent",
       title: "Use your health data",
     };
   }
@@ -610,7 +604,6 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
     actionLabel: "Consent",
     description:
       "By selecting Consent, you agree to the Terms and let Murph and contracted AI providers use health data you add or connect to personalize your experience.",
-    eyebrow: "Health data consent",
     title: "Use your health data",
   };
 }

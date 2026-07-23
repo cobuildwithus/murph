@@ -121,6 +121,7 @@ test("launch consent renders one explicit decision without checkboxes", async ()
   expect(container.textContent).toContain("Privacy");
   expect(container.textContent).toContain("AI safety");
   expect(container.textContent).toContain("Health data");
+  expect(container.textContent).not.toContain("Health data consent");
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
 
   const continueButton = findButtonByText(container, /^Consent$/);
@@ -245,6 +246,7 @@ test("a legal-only update uses concise legal copy and records only that scope", 
 
   expect(container.textContent).not.toContain("contracted AI providers");
   expect(container.textContent).not.toContain("Health Data Notice");
+  expect(container.textContent).not.toContain("Terms update");
   const continueButton = findButtonByText(container, /^Agree$/);
   expect(continueButton.classList.contains("flex-1")).toBe(true);
   expect(continueButton.classList.contains("w-auto")).toBe(false);

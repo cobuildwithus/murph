@@ -48,7 +48,7 @@ Updated: 2026-07-23
 - Treat the supplied patch as behavioral intent because its blob context does not exactly match the current PR head.
 - Delete the single-purpose action wrapper and move decline ownership into the existing consent prompt.
 - Reset the existing auth-completion state on decline so clearing the consent gate returns to auth instead of exposing a stale finishing state.
-- Keep Decline as the quiet left action, shorten the affirmative label to `Consent`, and reduce card chrome so the consequential choice is immediately legible.
+- Keep Decline as the quiet left action, shorten the affirmative label to `Consent`, and remove the decorative consent eyebrow so the consequential choice is immediately legible.
 - Shorten the health-data heading and explanation to the essential consent terms, and let both `Consent` and `Agree` fill the available action width beside `Decline`.
 - Revoke the authoritative Murph app session before clearing a declined consent gate; keep refusal visible and retryable when logout cannot be confirmed.
 - Reuse `AuthDialog` for sidebar and changelog auth entry points so consent headings and dismissal policy have one owner.
