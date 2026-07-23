@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 
-import { HostedLaunchConsentActions } from "@/src/components/legal/hosted-launch-consent-actions";
 import { HostedLaunchConsentPrompt } from "@/src/components/legal/hosted-legal-consent-card";
 import { Separator } from "@/src/components/ui/separator";
 import type { HostedConsentScopeStatus } from "@/src/lib/legal/consent";
@@ -51,13 +50,13 @@ export function ConsentContent() {
   }
 
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-12 px-6 py-12 sm:px-10 lg:px-16">
+    <div className="mx-auto flex max-w-4xl flex-col gap-12 px-6 py-12 sm:px-10 lg:px-16">
       <div>
         <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
           Consent
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          One explicit launch action. Optional feature consent stays just in time.
+          One explicit decision, no checkboxes, and a clear way to decline.
         </p>
       </div>
 
@@ -67,50 +66,36 @@ export function ConsentContent() {
         <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
           Launch consent
         </h2>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <PreviewFrame label="Compact · onboarding dialog">
-            <HostedLaunchConsentActions onDecline={() => {}}>
+        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
+          <PreviewFrame label="Onboarding dialog">
+            <HostedLaunchConsentPrompt
+              documents={DESIGN_LAUNCH_DOCUMENTS}
+              onContinue={previewContinue}
+              onDecline={() => {}}
+              pending={interactivePending}
+            />
+          </PreviewFrame>
+
+          <div className="flex flex-col gap-6">
+            <div className="flex flex-col gap-3">
+              <PreviewLabel>Legal update</PreviewLabel>
+              <HostedLaunchConsentPrompt
+                documents={DESIGN_LEGAL_DOCUMENTS}
+                mode="panel"
+                onContinue={() => {}}
+                variant="legal"
+              />
+            </div>
+            <div className="flex flex-col gap-3">
+              <PreviewLabel>Retryable error</PreviewLabel>
               <HostedLaunchConsentPrompt
                 documents={DESIGN_LAUNCH_DOCUMENTS}
-                onContinue={previewContinue}
-                pending={interactivePending}
+                errorMessage="Could not record consent. Try again."
+                mode="panel"
+                onContinue={() => {}}
               />
-            </HostedLaunchConsentActions>
-          </PreviewFrame>
-
-          <div className="flex flex-col gap-3">
-            <PreviewLabel>Standalone · legal update</PreviewLabel>
-            <HostedLaunchConsentPrompt
-              documents={DESIGN_LEGAL_DOCUMENTS}
-              mode="panel"
-              onContinue={() => {}}
-              variant="legal"
-            />
+            </div>
           </div>
-        </div>
-      </section>
-
-      <Separator />
-
-      <section className="flex flex-col gap-6">
-        <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
-          States
-        </h2>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <PreviewFrame label="Saving">
-            <HostedLaunchConsentPrompt
-              documents={DESIGN_LAUNCH_DOCUMENTS}
-              onContinue={() => {}}
-              pending
-            />
-          </PreviewFrame>
-          <PreviewFrame label="Retryable error">
-            <HostedLaunchConsentPrompt
-              documents={DESIGN_LAUNCH_DOCUMENTS}
-              errorMessage="Could not record consent. Try again."
-              onContinue={() => {}}
-            />
-          </PreviewFrame>
         </div>
       </section>
     </div>
@@ -127,7 +112,7 @@ function PreviewFrame({
   return (
     <div className="flex flex-col gap-3">
       <PreviewLabel>{label}</PreviewLabel>
-      <div className="rounded-2xl bg-[#FAF8F4] p-6 shadow-[0_1px_2px_rgba(26,31,22,0.04)] ring-1 ring-[#1A1F16]/[0.06]">
+      <div className="rounded-3xl border border-border bg-card p-6">
         {children}
       </div>
     </div>

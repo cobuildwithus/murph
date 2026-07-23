@@ -10,6 +10,9 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+import { cn } from "@/src/lib/utils";
+
+import type { HostedAuthPanelView } from "./hosted-auth-panel";
 
 type HostedAuthPanelIslandComponent = typeof import(
   "@/src/components/hosted-onboarding/hosted-auth-panel-island"
@@ -115,6 +118,7 @@ export function AuthDialog({
       readLoadedHostedAuthPanelIsland(),
     );
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [panelView, setPanelView] = useState<HostedAuthPanelView>("auth");
 
   useEffect(() => {
     if (!open || AuthPanelIsland) {
@@ -145,19 +149,43 @@ export function AuthDialog({
     };
   }, [open, AuthPanelIsland]);
 
+  const resolvedTitle = panelView === "consent"
+    ? "Use your health data with Murph"
+    : panelView === "finishing"
+      ? "Setting things up"
+      : title;
+  const resolvedDescription = panelView === "consent"
+    ? "Review how Murph uses health data before continuing."
+    : panelView === "finishing"
+      ? "Murph is preparing your account."
+      : description;
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setPanelView("auth");
+    }
+    onOpenChange(nextOpen);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-md gap-6 p-6 md:p-7">
-        <DialogHeader className="pr-10">
+        <DialogHeader
+          className={cn({
+            "pr-10": panelView === "auth",
+            "sr-only": panelView !== "auth",
+          })}
+        >
           <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-            {title}
+            {resolvedTitle}
           </DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogDescription>{resolvedDescription}</DialogDescription>
         </DialogHeader>
         {AuthPanelIsland ? (
           <AuthPanelIsland
             methods={["phone", "telegram", "email"]}
             onCompleted={onCompleted}
+            onViewChange={setPanelView}
             requireLaunchConsentOnCompletion={requireLaunchConsentOnCompletion}
             showPassiveLegalNotice={showPassiveLegalNotice}
             size="compact"

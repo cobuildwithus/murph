@@ -59,7 +59,7 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   } else {
     if (!hasDesignPageItem(designProof)) {
       errors.push(
-        "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
+        "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
       );
     }
     if (!hasScreenshotItem(designProof, "Desktop screenshot")) {

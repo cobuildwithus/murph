@@ -1,12 +1,11 @@
 "use client";
 
 import { usePrivy, useUser } from "@privy-io/react-auth";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PhoneIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
-import { HostedLaunchConsentActions } from "@/src/components/legal/hosted-launch-consent-actions";
 import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
 import { readHostedPrivyClientSessionState } from "@/src/lib/hosted-onboarding/privy-client";
 import {
@@ -40,10 +39,13 @@ type HostedResumableAuth = {
   method: HostedResumableAuthMethod;
 };
 
+export type HostedAuthPanelView = "auth" | "consent" | "finishing";
+
 export function HostedAuthPanel({
   methods,
   onCompleted,
   onSignOut,
+  onViewChange,
   requireLaunchConsentOnCompletion,
   showPassiveLegalNotice,
   size,
@@ -51,6 +53,7 @@ export function HostedAuthPanel({
   methods: readonly HostedAuthMethod[];
   onCompleted?: (payload: HostedPrivyCompletionPayload) => Promise<void> | void;
   onSignOut?: () => Promise<void> | void;
+  onViewChange?: (view: HostedAuthPanelView) => void;
   requireLaunchConsentOnCompletion?: boolean;
   showPassiveLegalNotice?: boolean;
   size?: "default" | "compact";
@@ -82,6 +85,15 @@ export function HostedAuthPanel({
   const shouldRequireLaunchConsent = requireLaunchConsentOnCompletion ?? false;
   const shouldShowPassiveLegalNotice = showPassiveLegalNotice ?? false;
 
+  const view: HostedAuthPanelView = pendingAuthCompletion
+    ? "consent"
+    : completion.completingMethod
+      ? "finishing"
+      : "auth";
+  useEffect(() => {
+    onViewChange?.(view);
+  }, [onViewChange, view]);
+
   async function handleAuthCompleted(result: HostedAuthCompletionResult) {
     if (shouldGateHostedAuthCompletionWithLaunchConsent({
       result,
@@ -105,9 +117,9 @@ export function HostedAuthPanel({
     if (!result) return;
 
     if (onCompleted) {
+      await onCompleted(result.payload);
       pendingAuthCompletionRef.current = null;
       setPendingAuthCompletion(null);
-      await onCompleted(result.payload);
       return;
     }
 
@@ -116,12 +128,17 @@ export function HostedAuthPanel({
   }
 
   async function handleConsentDeclined() {
+    if (consentDeclinePending) return;
+
     setConsentDeclinePending(true);
     try {
       await logout();
       await onSignOut?.();
+    } catch {
+      // Declining must never record consent or leave the gate stuck.
     } finally {
       pendingAuthCompletionRef.current = null;
+      completion.resetCompletion();
       setPendingAuthCompletion(null);
       setConsentDeclinePending(false);
     }
@@ -142,22 +159,19 @@ export function HostedAuthPanel({
 
   if (pendingAuthCompletion) {
     return (
-      <HostedLaunchConsentActions
+      <HostedLegalConsentCard
         declinePending={consentDeclinePending}
+        mode="compact"
+        onAccepted={handleConsentSatisfied}
         onDecline={() => void handleConsentDeclined()}
-      >
-        <HostedLegalConsentCard
-          mode="compact"
-          onAccepted={handleConsentSatisfied}
-          onRequirementChange={(required) => {
-            if (!required) {
-              void handleConsentSatisfied();
-            }
-          }}
-          preferredScope="launch.legal"
-          source="homepage-auth-dialog"
-        />
-      </HostedLaunchConsentActions>
+        onRequirementChange={(required) => {
+          if (!required) {
+            void handleConsentSatisfied();
+          }
+        }}
+        preferredScope="launch.legal"
+        source="homepage-auth-dialog"
+      />
     );
   }
 

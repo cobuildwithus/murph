@@ -30,6 +30,7 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
         joinUrl: string;
         stage: "active" | "blocked" | "checkout";
       }) => Promise<void> | void;
+      onViewChange?: (view: "auth" | "consent" | "finishing") => void;
       requireLaunchConsentOnCompletion?: boolean;
       showPassiveLegalNotice?: boolean;
     }) {
@@ -87,6 +88,22 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", () => {
               }),
           },
           "Complete checkout auth",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => props.onViewChange?.("consent"),
+          },
+          "Show consent",
+        ),
+        createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => props.onViewChange?.("finishing"),
+          },
+          "Show finishing",
         ),
       );
     },
@@ -214,9 +231,49 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   );
   expect(authPanel).toBeTruthy();
   expect(authPanel?.getAttribute("data-hosted-auth-passive-legal-notice")).toBe(
-    "hidden",
+    "shown",
   );
   expect(window.document.body.textContent).toContain("Log in or sign up");
+});
+
+test("LandingAuthActions gives consent and finishing views matching dialog titles", async () => {
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(LandingAuthActions, {
+      authenticated: false,
+      context: "hero",
+      authLabel: "See what works for your body",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  await flushHostedAuthPanelIsland();
+
+  const consentButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Show consent",
+  );
+  await act(async () => {
+    consentButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const dialogHeader = container.querySelector("[data-dialog-content] > div");
+  expect(dialogHeader?.className).toContain("sr-only");
+  expect(container.textContent).toContain("Use your health data with Murph");
+  expect(container.textContent).toContain(
+    "Review how Murph uses health data before continuing.",
+  );
+
+  const finishingButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Show finishing",
+  );
+  await act(async () => {
+    finishingButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.textContent).toContain("Setting things up");
+  expect(container.textContent).toContain("Murph is preparing your account.");
 });
 
 test("LandingAuthActions sends completed homepage signups through the initial-visit home dialog", async () => {
@@ -459,7 +516,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="shown"]',
     ),
   ).toBeTruthy();
 
@@ -471,7 +528,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="shown"]',
     ),
   ).toBeTruthy();
 });

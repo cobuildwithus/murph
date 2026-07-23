@@ -49,16 +49,51 @@ test("HostedLegalConsentCard uses tokenized flat card styling while loading", ()
     }),
   );
 
-  expect(panelMarkup).toContain("rounded-2xl border border-border bg-card p-6");
+  expect(panelMarkup).toContain("rounded-xl border border-border bg-card p-5 sm:p-6");
   expect(compactMarkup).toContain("w-full");
   expect(panelMarkup).toContain('role="status"');
   expect(panelMarkup).toContain('aria-busy="true"');
   expect(panelMarkup).not.toContain("shadow-");
   expect(panelMarkup).not.toContain("#c4a882");
   expect(panelMarkup).not.toContain("#fefdf8");
+  expect(panelMarkup).not.toContain("sm:grid-cols-[minmax(0,1fr)_auto]");
 });
 
-test("launch consent renders one enabled affirmative action without checkboxes", async () => {
+test("launch consent keeps decline available while status is loading", async () => {
+  const statusRequest = createDeferred<HostedConsentStatus>();
+  const onDecline = vi.fn();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(statusRequest.promise);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      mode: "compact",
+      onDecline,
+      source: "homepage-signup-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  const declineButton = findButtonByText(container, /^Decline$/);
+  expect(declineButton.disabled).toBe(false);
+
+  await act(async () => {
+    declineButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onDecline).toHaveBeenCalledTimes(1);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    statusRequest.resolve(createConsentStatus({
+      connectedHealthGranted: false,
+      launchGranted: false,
+    }));
+    await statusRequest.promise;
+  });
+});
+
+test("launch consent renders one explicit decision without checkboxes", async () => {
   const initialStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
@@ -68,6 +103,7 @@ test("launch consent renders one enabled affirmative action without checkboxes",
     createElement(HostedLegalConsentCard, {
       initialStatus,
       mode: "compact",
+      onDecline: () => {},
       source: "join-invite-phone-verify",
     }),
     { requireButton: false },
@@ -81,12 +117,14 @@ test("launch consent renders one enabled affirmative action without checkboxes",
 
   expect(container.textContent).toContain("Terms");
   expect(container.textContent).toContain("Privacy");
-  expect(container.textContent).toContain("AI Safety");
-  expect(container.textContent).toContain("Health Data Notice");
+  expect(container.textContent).toContain("AI safety");
+  expect(container.textContent).toContain("Health data");
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
 
-  const continueButton = findButtonByText(container, /Agree, consent & continue/);
+  const continueButton = findButtonByText(container, /Consent & continue/);
+  const declineButton = findButtonByText(container, /^Decline$/);
   expect(continueButton.disabled).toBe(false);
+  expect(declineButton.disabled).toBe(false);
   expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
 });
 
@@ -125,7 +163,7 @@ test("launch consent records both launch scopes from one click", async () => {
   });
 
   expect(container.querySelector('input[type="checkbox"]')).toBeNull();
-  const continueButton = findButtonByText(container, /Agree, consent & continue/);
+  const continueButton = findButtonByText(container, /Consent & continue/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -312,13 +350,15 @@ test("launch consent shows a busy state while the second scope is recording", as
       initialStatus: currentStatus,
       mode: "compact",
       onAccepted: mocks.onAccepted,
+      onDecline: () => {},
       source: "join-invite-phone-verify",
     }),
     { requireButton: false },
   );
   cleanupRender = cleanup;
 
-  const continueButton = findButtonByText(container, /Agree, consent & continue/);
+  const continueButton = findButtonByText(container, /Consent & continue/);
+  const declineButton = findButtonByText(container, /^Decline$/);
 
   await act(async () => {
     continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
@@ -328,6 +368,7 @@ test("launch consent shows a busy state while the second scope is recording", as
     expect(continueButton.textContent).toContain("Saving...");
     expect(continueButton.getAttribute("aria-busy")).toBe("true");
     expect(continueButton.disabled).toBe(true);
+    expect(declineButton.disabled).toBe(true);
   });
 
   await act(async () => {
@@ -340,11 +381,127 @@ test("launch consent shows a busy state while the second scope is recording", as
   });
 });
 
-test("HostedLegalConsentCard keeps a retryable error visible when status loading fails", async () => {
+test("launch consent retries only the remaining scope after a partial failure", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockRejectedValueOnce(new Error("Health data consent unavailable."))
+    .mockResolvedValueOnce(acceptedStatus);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      initialStatus: currentStatus,
+      mode: "compact",
+      onAccepted: mocks.onAccepted,
+      source: "homepage-signup-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  const firstContinueButton = findButtonByText(container, /Consent & continue/);
+  await act(async () => {
+    firstContinueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Health data consent unavailable.");
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+
+  const retryButton = findButtonByText(container, /Consent & continue/);
+  await act(async () => {
+    retryButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(3);
+  expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload?.scope).toBe(
+    "launch.legal",
+  );
+  expect(mocks.requestHostedOnboardingJson.mock.calls[1]?.[0]?.payload?.scope).toBe(
+    "launch.health-data",
+  );
+  expect(mocks.requestHostedOnboardingJson.mock.calls[2]?.[0]?.payload?.scope).toBe(
+    "launch.health-data",
+  );
+});
+
+test("launch consent keeps the prompt visible when the accepted handoff fails", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: true,
+  });
+
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+  mocks.onAccepted
+    .mockRejectedValueOnce(new Error("Could not finish sign in."))
+    .mockResolvedValueOnce(undefined);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      initialStatus: currentStatus,
+      mode: "compact",
+      onAccepted: mocks.onAccepted,
+      source: "homepage-signup-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  const continueButton = findButtonByText(container, /Consent & continue/);
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Could not finish sign in.");
+  });
+  const retryButton = findButtonByText(container, /Consent & continue/);
+  expect(retryButton.disabled).toBe(false);
+
+  await act(async () => {
+    retryButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.onAccepted).toHaveBeenCalledTimes(2);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+});
+
+test("HostedLegalConsentCard keeps decline available when status loading fails", async () => {
   const recoveredStatus = createConsentStatus({
     connectedHealthGranted: false,
     launchGranted: false,
   });
+  const onDecline = vi.fn();
 
   mocks.requestHostedOnboardingJson
     .mockRejectedValueOnce(new Error("Consent status unavailable."))
@@ -353,6 +510,7 @@ test("HostedLegalConsentCard keeps a retryable error visible when status loading
   const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedLegalConsentCard, {
       mode: "compact",
+      onDecline,
       source: "homepage-signup-dialog",
     }),
     { requireButton: false },
@@ -365,6 +523,14 @@ test("HostedLegalConsentCard keeps a retryable error visible when status loading
   });
 
   const retryButton = findButtonByText(container, /Try again/);
+  const declineButton = findButtonByText(container, /^Decline$/);
+  expect(declineButton.disabled).toBe(false);
+
+  await act(async () => {
+    declineButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(onDecline).toHaveBeenCalledTimes(1);
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
 
   await act(async () => {
     retryButton.dispatchEvent(new window.Event("click", { bubbles: true }));

@@ -6,6 +6,7 @@ import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
+import { Skeleton } from "@/src/components/ui/skeleton";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -15,6 +16,7 @@ import type {
   HostedConsentScopeStatus,
   HostedConsentStatus,
 } from "@/src/lib/legal/consent";
+import { cn } from "@/src/lib/utils";
 
 type HostedLegalConsentCardMode = "compact" | "panel";
 type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
@@ -22,9 +24,11 @@ type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
   className?: string;
+  declinePending?: boolean;
   initialStatus?: HostedConsentStatus | null;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
+  onDecline?: () => void;
   onRequirementChange?: (required: boolean) => void;
   preferredScope?: HostedConsentScope;
   source: string;
@@ -33,11 +37,13 @@ interface HostedLegalConsentCardProps {
 interface HostedLaunchConsentPromptProps {
   acceptedPendingLabel?: string;
   className?: string;
+  declinePending?: boolean;
   documents: HostedConsentScopeStatus["documents"];
   errorMessage?: string | null;
   handoffPending?: boolean;
   mode?: HostedLegalConsentCardMode;
   onContinue: () => void;
+  onDecline?: () => void;
   pending?: boolean;
   variant?: HostedLaunchConsentVariant;
 }
@@ -54,25 +60,32 @@ export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
 function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
   className,
+  declinePending = false,
   initialStatus = null,
   mode = "panel",
   onAccepted,
+  onDecline,
   onRequirementChange,
   preferredScope = "launch.legal",
   source,
 }: HostedLegalConsentCardProps) {
   const [loadedStatus, setLoadedStatus] = useState<HostedConsentStatus | null>(null);
+  const [statusOverride, setStatusOverride] = useState<HostedConsentStatus | null>(null);
+  const [handoffStatus, setHandoffStatus] = useState<HostedConsentStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [featureAccepted, setFeatureAccepted] = useState(false);
-  const status = initialStatus ?? loadedStatus;
+  const status = statusOverride ?? initialStatus ?? loadedStatus;
 
   const loadStatus = useCallback(async () => {
+    setRetrying(true);
     setLoading(true);
     try {
       const nextStatus = await requestHostedLegalConsentStatus();
+      setStatusOverride(null);
       setLoadedStatus(nextStatus);
       setErrorMessage(null);
     } catch (error) {
@@ -81,6 +94,7 @@ function HostedLegalConsentCardState({
       );
     } finally {
       setLoading(false);
+      setRetrying(false);
     }
   }, []);
 
@@ -96,6 +110,7 @@ function HostedLegalConsentCardState({
           return;
         }
 
+        setStatusOverride(null);
         setLoadedStatus(nextStatus);
         setErrorMessage(null);
       })
@@ -158,23 +173,26 @@ function HostedLegalConsentCardState({
     setAcceptedHandoffPending(false);
     setErrorMessage(null);
 
+    let latestStatus = handoffStatus ?? status;
     try {
-      let latestStatus = status;
-      for (const scope of pendingScopes) {
-        const scopeStatus = findConsentScope(latestStatus, scope);
-        if (scopeStatus && !scopeStatus.granted) {
-          latestStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-            method: "POST",
-            payload: {
-              acceptedDocumentVersions: Object.fromEntries(
-                scopeStatus.documents.map((document) => [document.id, document.version]),
-              ),
-              scope,
-              source,
-            },
-            url: "/api/legal/consent/accept",
-          });
+      if (!handoffStatus) {
+        for (const scope of pendingScopes) {
+          const scopeStatus = findConsentScope(latestStatus, scope);
+          if (scopeStatus && !scopeStatus.granted) {
+            latestStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
+              method: "POST",
+              payload: {
+                acceptedDocumentVersions: Object.fromEntries(
+                  scopeStatus.documents.map((document) => [document.id, document.version]),
+                ),
+                scope,
+                source,
+              },
+              url: "/api/legal/consent/accept",
+            });
+          }
         }
+        setHandoffStatus(latestStatus);
       }
 
       setAcceptedHandoffPending(true);
@@ -182,6 +200,12 @@ function HostedLegalConsentCardState({
         await onAccepted(latestStatus);
       }
     } catch (error) {
+      const hasRemainingScope = pendingScopes.some(
+        (scope) => !findConsentScope(latestStatus, scope)?.granted,
+      );
+      if (hasRemainingScope && latestStatus !== status) {
+        setStatusOverride(latestStatus);
+      }
       setAcceptedHandoffPending(false);
       setErrorMessage(
         readConsentErrorMessage(error, "Could not record Murph legal consent right now."),
@@ -192,29 +216,55 @@ function HostedLegalConsentCardState({
   }
 
   if (!initialStatus && loading) {
+    const declineAction = onDecline ? (
+      <ConsentDeclineButton
+        busy={declinePending}
+        disabled={declinePending || retrying}
+        onDecline={onDecline}
+      />
+    ) : null;
+
     return (
       <div
         aria-busy="true"
         aria-live="polite"
         role="status"
-        className={joinClassNames(cardClassName(mode), className)}
+        className={cn(cardClassName(mode), className)}
       >
-        <ConsentSkeleton />
+        <ConsentSkeleton secondaryAction={declineAction} />
       </div>
     );
   }
 
   if (!status && errorMessage) {
     return (
-      <div className={joinClassNames(cardClassName(mode), className)}>
+      <div className={cn(cardClassName(mode), className)}>
         <div className="space-y-4">
           <Alert variant="destructive">
             <AlertTitle>Unable to load Murph legal consent</AlertTitle>
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
-          <Button type="button" onClick={loadStatus} variant="outline" size="lg">
-            Try again
-          </Button>
+          <div
+            className={cn({
+              "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": onDecline,
+            })}
+          >
+            <Button
+              disabled={declinePending || retrying}
+              onClick={loadStatus}
+              size="lg"
+              type="button"
+            >
+              {retrying ? "Trying again..." : "Try again"}
+            </Button>
+            {onDecline ? (
+              <ConsentDeclineButton
+                busy={declinePending}
+                disabled={declinePending || retrying}
+                onDecline={onDecline}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
     );
@@ -229,11 +279,13 @@ function HostedLegalConsentCardState({
       <HostedLaunchConsentPrompt
         acceptedPendingLabel={acceptedPendingLabel}
         className={className}
+        declinePending={declinePending}
         documents={launchDocuments}
         errorMessage={errorMessage}
         handoffPending={acceptedHandoffPending}
         mode={mode}
         onContinue={handleAccept}
+        onDecline={onDecline}
         pending={pending}
         variant={resolveLaunchConsentVariant(pendingScopes)}
       />
@@ -290,11 +342,11 @@ function HostedLegalConsentCardState({
   );
 
   if (mode === "compact") {
-    return <div className={joinClassNames("w-full", className)}>{content}</div>;
+    return <div className={cn("w-full", className)}>{content}</div>;
   }
 
   return (
-    <div className={joinClassNames(cardClassName(mode), className)}>
+    <div className={cn(cardClassName(mode), className)}>
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
           <ShieldCheckIcon className="size-4" aria-hidden />
@@ -308,65 +360,122 @@ function HostedLegalConsentCardState({
 export function HostedLaunchConsentPrompt({
   acceptedPendingLabel = "Continuing...",
   className,
+  declinePending = false,
   documents,
   errorMessage = null,
   handoffPending = false,
   mode = "compact",
   onContinue,
+  onDecline,
   pending = false,
   variant = "combined",
 }: HostedLaunchConsentPromptProps) {
   const copy = resolveLaunchConsentCopy(variant);
-  const actionPending = pending || handoffPending;
-  const content = (
-    <div className="space-y-6">
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <p className="font-serif text-xl font-normal tracking-tight text-foreground">
-            {copy.title}
-          </p>
-          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            {copy.description}
-          </p>
-        </div>
-        <LaunchDocumentLinks documents={documents} />
+  const accepting = pending || handoffPending;
+  const actionPending = accepting || declinePending;
+  const introduction = (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          {copy.eyebrow}
+        </p>
+        <p className="font-serif text-2xl font-semibold leading-tight tracking-tight text-foreground">
+          {copy.title}
+        </p>
+        <p className="max-w-xl text-sm leading-6 text-muted-foreground">
+          {copy.description}
+        </p>
       </div>
-      {errorMessage ? (
-        <Alert variant="destructive">
-          <AlertTitle>Unable to record consent</AlertTitle>
-          <AlertDescription>{errorMessage}</AlertDescription>
-        </Alert>
+      <LaunchDocumentLinks documents={documents} />
+    </div>
+  );
+  const error = errorMessage ? (
+    <Alert variant="destructive">
+      <AlertTitle>Unable to record consent</AlertTitle>
+      <AlertDescription>{errorMessage}</AlertDescription>
+    </Alert>
+  ) : null;
+  const primaryButton = (
+    <Button
+      aria-busy={accepting}
+      className={cn("w-full", {
+        "min-w-0 px-4": mode === "compact",
+        "sm:w-auto": mode === "panel",
+      })}
+      disabled={actionPending}
+      onClick={onContinue}
+      size="lg"
+      type="button"
+    >
+      {handoffPending
+        ? acceptedPendingLabel
+        : pending
+          ? "Saving..."
+          : copy.actionLabel}
+    </Button>
+  );
+  const actions = (
+    <div
+      className={cn({
+        "flex justify-end": !onDecline && mode === "panel",
+        "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": onDecline,
+      })}
+    >
+      {primaryButton}
+      {onDecline ? (
+        <ConsentDeclineButton
+          busy={declinePending}
+          disabled={actionPending}
+          onDecline={onDecline}
+        />
       ) : null}
-      <Button
-        aria-busy={actionPending}
-        className={mode === "compact" ? "w-full" : undefined}
-        disabled={actionPending}
-        onClick={onContinue}
-        size={mode === "compact" ? "xl" : "lg"}
-        type="button"
-      >
-        {handoffPending
-          ? acceptedPendingLabel
-          : pending
-            ? "Saving..."
-            : copy.actionLabel}
-      </Button>
     </div>
   );
 
   if (mode === "compact") {
-    return <div className={joinClassNames("w-full", className)}>{content}</div>;
+    return (
+      <div className={cn("flex w-full flex-col gap-5", className)}>
+        {introduction}
+        {error}
+        {actions}
+      </div>
+    );
   }
 
   return (
-    <div className={joinClassNames(cardClassName(mode), className)}>
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-border bg-card text-olive">
-          <ShieldCheckIcon className="size-4" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">{content}</div>
+    <div className={cn(cardClassName(mode), className)}>
+      <div className="flex flex-col gap-5">
+        <div className="flex min-w-0 flex-col gap-4">
+          {introduction}
+          {error}
+        </div>
+        {actions}
       </div>
     </div>
+  );
+}
+
+function ConsentDeclineButton({
+  busy,
+  disabled,
+  onDecline,
+}: {
+  busy: boolean;
+  disabled: boolean;
+  onDecline: () => void;
+}) {
+  return (
+    <Button
+      aria-busy={busy}
+      className="w-full px-4"
+      disabled={disabled}
+      onClick={onDecline}
+      size="lg"
+      type="button"
+      variant="outline"
+    >
+      {busy ? "Declining..." : "Decline"}
+    </Button>
   );
 }
 
@@ -401,19 +510,25 @@ function LaunchDocumentLinks({
   documents: HostedConsentScopeStatus["documents"];
 }) {
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs leading-relaxed text-muted-foreground">
-      {documents.map((document) => (
-        <a
-          className="font-medium text-foreground underline-offset-4 hover:underline"
-          href={document.href}
-          key={document.id}
-          rel="noreferrer"
-          target="_blank"
-        >
-          {shortDocumentTitle(document.title)}
-        </a>
+    <nav
+      aria-label="Consent documents"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-muted-foreground"
+    >
+      <span>Review</span>
+      {documents.map((document, index) => (
+        <span className="inline-flex items-center gap-2" key={document.id}>
+          {index > 0 ? <span aria-hidden>·</span> : null}
+          <a
+            className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+            href={document.href}
+            rel="noreferrer"
+            target="_blank"
+          >
+            {shortDocumentTitle(document.title)}
+          </a>
+        </span>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -471,20 +586,33 @@ function resolveLaunchConsentVariant(
 function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
   actionLabel: string;
   description: string;
+  eyebrow: string;
   title: string;
 } {
   if (variant === "legal") {
     return {
       actionLabel: "Agree & continue",
-      description: "We updated the terms and disclosures that govern your use of Murph.",
+      description: "Review the updated terms and disclosures that govern your use of Murph.",
+      eyebrow: "Terms update",
       title: "Review Murph’s terms",
     };
   }
 
+  if (variant === "health-data") {
+    return {
+      actionLabel: "Consent & continue",
+      description:
+        "Murph uses health data you add or connect—including through contracted AI providers—to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+      eyebrow: "Health data consent",
+      title: "Use your health data with Murph",
+    };
+  }
+
   return {
-    actionLabel: variant === "combined" ? "Agree, consent & continue" : "Consent & continue",
+    actionLabel: "Consent & continue",
     description:
-      "Murph uses health data you add or connect to personalize your experience, including through contracted AI providers. We don’t sell it, use it for ads, or train general-purpose AI models with it.",
+      "By continuing, you agree to the Terms and consent to Murph using health data you add or connect—including through contracted AI providers—to personalize your experience. We don’t sell health data, use it for ads, or train general-purpose AI models with it.",
+    eyebrow: "Health data consent",
     title: "Use your health data with Murph",
   };
 }
@@ -496,9 +624,9 @@ function shortDocumentTitle(title: string): string {
     case "Murph Privacy Policy":
       return "Privacy";
     case "Murph Consumer Health Data Notice":
-      return "Health Data Notice";
+      return "Health data";
     case "Murph Health AI Safety Disclosure":
-      return "AI Safety";
+      return "AI safety";
     default:
       return title.replace(/^Murph\s+/u, "");
   }
@@ -554,29 +682,37 @@ function readConsentErrorMessage(error: unknown, fallback: string): string {
 function cardClassName(mode: HostedLegalConsentCardMode): string {
   return mode === "compact"
     ? "w-full"
-    : "rounded-2xl border border-border bg-card p-6";
+    : "rounded-xl border border-border bg-card p-5 sm:p-6";
 }
 
-function joinClassNames(...values: Array<string | null | undefined>): string {
-  return values.filter(Boolean).join(" ");
-}
-
-export function ConsentSkeleton() {
+export function ConsentSkeleton({
+  secondaryAction = null,
+}: {
+  secondaryAction?: React.ReactNode;
+} = {}) {
   return (
-    <div className="w-full animate-pulse space-y-6">
-      <div className="space-y-3">
-        <div className="h-5 w-56 rounded-full bg-muted" />
-        <div className="space-y-2.5">
-          <div className="h-4 w-full rounded-full bg-muted" />
-          <div className="h-4 w-4/5 rounded-full bg-muted" />
+    <div className="flex w-full flex-col gap-5">
+      <div className="flex flex-col gap-3.5">
+        <Skeleton className="h-2.5 w-28 rounded-full" />
+        <Skeleton className="h-6 w-64 max-w-full rounded-full" />
+        <div className="flex flex-col gap-2.5">
+          <Skeleton className="h-4 w-full rounded-full" />
+          <Skeleton className="h-4 w-4/5 rounded-full" />
         </div>
-        <div className="flex gap-3">
-          <div className="h-3.5 w-14 rounded-full bg-muted" />
-          <div className="h-3.5 w-14 rounded-full bg-muted" />
-          <div className="h-3.5 w-24 rounded-full bg-muted" />
+        <div className="flex gap-2.5">
+          <Skeleton className="h-3 w-12 rounded-full" />
+          <Skeleton className="h-3 w-16 rounded-full" />
+          <Skeleton className="h-3 w-20 rounded-full" />
         </div>
       </div>
-      <div className="h-14 w-full rounded-2xl bg-muted" />
+      <div
+        className={cn({
+          "grid grid-cols-[minmax(0,1fr)_7rem] gap-3": secondaryAction,
+        })}
+      >
+        <Skeleton className="h-11 rounded-2xl" />
+        {secondaryAction}
+      </div>
     </div>
   );
 }

@@ -23,8 +23,10 @@ const mocks = vi.hoisted(() => ({
   loginWithCode: vi.fn(),
   loginWithTelegram: vi.fn(),
   legalConsentCardProps: null as {
+    declinePending?: boolean;
     mode?: string;
     onAccepted?: () => Promise<void> | void;
+    onDecline?: () => void;
     onRequirementChange?: (required: boolean) => void;
     preferredScope?: string;
     source?: string;
@@ -61,7 +63,9 @@ vi.mock("@/src/components/hosted-onboarding/hosted-auth-completion", () => ({
 
 vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
   HostedLegalConsentCard(props: {
+    declinePending?: boolean;
     onAccepted?: () => Promise<void> | void;
+    onDecline?: () => void;
     onRequirementChange?: (required: boolean) => void;
     source: string;
   }) {
@@ -78,6 +82,17 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
         },
         "Continue",
       ),
+      props.onDecline
+        ? createElement(
+            "button",
+            {
+              disabled: props.declinePending,
+              type: "button",
+              onClick: props.onDecline,
+            },
+            props.declinePending ? "Declining..." : "Decline",
+          )
+        : null,
     );
   },
 }));
@@ -434,6 +449,49 @@ test("HostedAuthPanel can require launch consent after homepage login completion
   });
 });
 
+test("HostedAuthPanel returns to auth without recording consent when launch consent is declined", async () => {
+  const logout = vi.fn().mockResolvedValue(undefined);
+  const onViewChange = vi.fn();
+  mocks.usePrivy.mockReturnValue({
+    authenticated: false,
+    logout,
+    ready: true,
+  });
+
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onViewChange,
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const telegramButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Telegram"),
+  );
+  await act(async () => {
+    telegramButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  const declineButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Decline",
+  );
+  expect(declineButton).toBeTruthy();
+
+  await act(async () => {
+    declineButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(logout).toHaveBeenCalledTimes(1);
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
+  await vi.waitFor(() => {
+    expect(onViewChange).toHaveBeenLastCalledWith("auth");
+  });
+});
+
 test("HostedAuthPanel skips launch consent handoff when completion says launch consent is already granted", async () => {
   mocks.completeHostedPrivyAuth.mockResolvedValueOnce({
     payload: {
@@ -572,6 +630,51 @@ test("HostedAuthPanel phone signup completion pauses on launch consent before re
 
   expect(onCompleted).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+});
+
+test("HostedAuthPanel keeps consent mounted until downstream completion succeeds", async () => {
+  const onCompleted = vi.fn()
+    .mockRejectedValueOnce(new Error("Could not finish sign in."))
+    .mockResolvedValueOnce(undefined);
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onCompleted,
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
+      payload: {
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
+  });
+
+  await act(async () => {
+    try {
+      await mocks.legalConsentCardProps?.onAccepted?.();
+    } catch {
+      // The real consent card converts this rejection into its retryable error.
+    }
+  });
+
+  expect(onCompleted).toHaveBeenCalledTimes(1);
+  expect(container.textContent).toContain("Hosted legal consent card");
+
+  await act(async () => {
+    await mocks.legalConsentCardProps?.onAccepted?.();
+  });
+
+  expect(onCompleted).toHaveBeenCalledTimes(2);
+  expect(container.textContent).not.toContain("Hosted legal consent card");
+  expect(container.querySelector('[data-hosted-phone-auth="mounted"]')).toBeTruthy();
 });
 
 function setInputValue(
