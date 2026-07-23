@@ -175,6 +175,53 @@ test("dashboard layout keeps pages usable while showing stale legal acceptance",
   });
 });
 
+test.each([
+  {
+    grants: [],
+    label: "no historical launch grants",
+  },
+  {
+    grants: [
+      createStoredLaunchConsentGrant("launch.legal", {
+        "health-ai-safety-disclosure": "2026-07-23",
+        "privacy-policy": "2026-07-23",
+        "terms-of-service": "2026-07-23",
+      }),
+    ],
+    label: "one historical launch grant",
+  },
+])("dashboard layout keeps generic consent recovery visible with $label", async ({
+  grants,
+}) => {
+  mocks.getHostedDashboardLayoutAuthSnapshot.mockResolvedValueOnce({
+    pageAuth: {
+      authenticatedMember: { id: "member_recovery" },
+    },
+    sidebarAuth: {
+      authenticated: true,
+      label: null,
+    },
+    status: "ready",
+  });
+  mocks.hostedConsentGrantFindMany.mockResolvedValueOnce(grants);
+
+  const markup = renderToStaticMarkup(
+    await DashboardLayout({
+      children: createElement(
+        "div",
+        { "data-dashboard-child": "true" },
+        "dashboard child",
+      ),
+    }),
+  );
+
+  assert.match(markup, /data-dashboard-legal-consent-gate="true"/);
+  assert.match(markup, /Finish your consent/u);
+  assert.match(markup, /Required documents/u);
+  assert.doesNotMatch(markup, /Review what changed/u);
+  assert.match(markup, /data-dashboard-child="true"/);
+});
+
 test("dashboard layout keeps pages usable when the consent reminder cannot load", async () => {
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   mocks.getHostedDashboardLayoutAuthSnapshot.mockResolvedValueOnce({

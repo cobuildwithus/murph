@@ -11,11 +11,15 @@ export function DashboardLegalConsentGate({
   acceptScope,
   initialStatus,
   onAccepted = reloadDashboardAfterConsentHandoff,
+  variant = "update",
 }: {
   acceptScope?: HostedLegalConsentAcceptScope;
   initialStatus: HostedConsentStatus;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
+  variant?: "initial" | "update";
 }) {
+  const isUpdate = variant === "update";
+
   return (
     <section
       aria-labelledby="dashboard-legal-consent-title"
@@ -23,28 +27,41 @@ export function DashboardLegalConsentGate({
       data-dashboard-legal-consent-gate="true"
     >
       <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-        Updated legal documents
+        {isUpdate ? "Updated legal documents" : "Consent required"}
       </p>
       <h1
         className="mt-3 font-serif text-3xl font-semibold leading-tight tracking-tight text-foreground"
         id="dashboard-legal-consent-title"
       >
-        Review what changed
+        {isUpdate ? "Review what changed" : "Finish your consent"}
       </h1>
       <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
-        We updated Murph&apos;s terms, privacy disclosures, health data notice,
-        and AI safety boundaries. You can still connect and sync devices now.
-        Accept the current documents to restore protected dashboard features.
+        {isUpdate ? (
+          <>
+            We updated Murph&apos;s terms, privacy disclosures, health data notice,
+            and AI safety boundaries. You can still connect and sync devices now.
+            Accept the current documents to restore protected dashboard features.
+          </>
+        ) : (
+          <>
+            Review and accept the remaining current documents to connect health
+            sources and use protected dashboard features.
+          </>
+        )}
       </p>
       <HostedLegalConsentCard
         acceptedPendingLabel="Refreshing your dashboard"
         acceptScope={acceptScope}
         className="mt-7"
         initialStatus={initialStatus}
-        launchDescription="Review and accept both items to restore protected dashboard features."
-        launchTitle="Current documents"
+        launchDescription={
+          isUpdate
+            ? "Review and accept both items to restore protected dashboard features."
+            : "Review and accept each remaining item to continue."
+        }
+        launchTitle={isUpdate ? "Current documents" : "Required documents"}
         onAccepted={onAccepted}
-        source="dashboard-legal-update"
+        source={isUpdate ? "dashboard-legal-update" : "dashboard-legal-recovery"}
       />
     </section>
   );

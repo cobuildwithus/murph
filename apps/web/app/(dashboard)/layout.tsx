@@ -35,10 +35,15 @@ export default async function DashboardLayout({
       initialMemberId={auth.pageAuth.authenticatedMember?.id ?? null}
     >
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
-        {consentStatus
-          && hasHostedHistoricalLaunchConsent(consentStatus)
-          && !consentStatus.launchGranted ? (
-          <DashboardLegalConsentGate initialStatus={consentStatus} />
+        {consentStatus && !consentStatus.launchGranted ? (
+          <DashboardLegalConsentGate
+            initialStatus={consentStatus}
+            variant={
+              hasHostedHistoricalLaunchConsent(consentStatus)
+                ? "update"
+                : "initial"
+            }
+          />
         ) : null}
         {children}
       </DashboardShell>

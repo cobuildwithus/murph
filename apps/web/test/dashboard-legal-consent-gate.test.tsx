@@ -171,6 +171,73 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
+test("persisted partial consent submits only the missing scope and reloads the exact route", async () => {
+  const partialStatus = createLaunchConsentStatus({
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+    launchLegalGranted: true,
+  });
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce(acceptedStatus);
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      initialStatus: partialStatus,
+      variant: "initial",
+    }),
+    {
+      location: {
+        hash: "#garmin",
+        href: "https://app.example.test/connect?source=garmin#garmin",
+        origin: "https://app.example.test",
+        pathname: "/connect",
+        search: "?source=garmin",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(rendered.container.textContent).toContain("Finish your consent");
+  expect(rendered.container.textContent).not.toContain("Review what changed");
+  const checkboxes = [
+    ...rendered.container.querySelectorAll('input[type="checkbox"]'),
+  ] as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(1);
+
+  await act(async () => {
+    const healthDataCheckbox = checkboxes[0]!;
+    healthDataCheckbox.checked = true;
+    healthDataCheckbox.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true, cancelable: true }),
+    );
+    healthDataCheckbox.dispatchEvent(
+      new rendered.window.Event("input", { bubbles: true }),
+    );
+    healthDataCheckbox.dispatchEvent(
+      new rendered.window.Event("change", { bubbles: true }),
+    );
+  });
+
+  const continueButton = findButton(rendered.container, "Continue");
+  await act(async () => {
+    continueButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  expect(readRequestedConsentScopes()).toEqual(["launch.health-data"]);
+  expect(rendered.replaceState).toHaveBeenCalledWith(
+    rendered.window.history.state,
+    "",
+    "https://app.example.test/connect?source=garmin#garmin",
+  );
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+});
+
 test("a consent preview uses only its injected in-memory acceptance owner", async () => {
   const currentStatus = createLaunchConsentStatus();
   const legalAcceptedStatus = createLaunchConsentStatus({
