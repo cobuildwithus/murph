@@ -109,20 +109,24 @@ Updated: 2026-07-23
   suppresses exact, stable-resource, and high-overlap mirrors, and applies
   additive versus maximum reducers per metric rather than selecting one
   source-origin aggregate.
-- Direct query reads and stored projection recomposition were compared across
-  19,000 generated multi-source cases with no user-visible value, confidence,
-  provenance, or source-health divergence.
-- Stored current-generation summary rows carry bounded privacy-safe
-  reconciliation evidence and consistency fingerprints; malformed, hybrid,
-  incomplete, and cross-generation evidence fails closed while legacy rows
-  retain their legacy behavior.
+- Stored current-generation activity rows carry one atomic, strictly validated,
+  privacy-safe evidence object. Complete pre-ranking metric candidates and
+  session evidence are retained because neither provider selection nor
+  cross-provider session reconciliation is associative.
+- Current-generation rows with absent or malformed activity evidence fail
+  closed and rebuild through the projection schema/generation bump. There is no
+  legacy reconstruction path for this unshipped stored format.
+- Focused direct-versus-stored parity cases cover resource specificity,
+  cross-provider agreement, Junction/direct source context, equal-valued
+  attribution ties, duplicate counters, and mirrored workout sessions.
 - A focused end-to-end synthetic case proved that two distinct sessions are
   added, a cross-provider mirror is suppressed, direct and stored summaries
   agree, internal evidence remains private, and the open local day is excluded
   from settled group-weekly statistics.
-- The complete query package passed 648 tests. Focused importer, health-metric,
-  hosted-execution, assistant-runtime, assistant-engine, and Web regressions
-  also passed with their package typechecks.
+- The compact owner-level suites cover canonical workout reducers, stored
+  projection parity/privacy/fail-closed behavior, group date coverage, provider
+  normalization, and assistant policy ownership without scripted expected
+  answers.
 - `pnpm test:scenario-integrity` passed for all registered scenarios, sample
   inputs, and golden-output directories.
 - Canonical diff verification passed every package in the changed data and
@@ -133,18 +137,9 @@ Updated: 2026-07-23
 - Canonical `pnpm verify:acceptance` passed in a fresh secret-free Testbox,
   including all workspace typechecks, coverage suites, app builds, security and
   dependency guards, and Cloudflare Worker tests.
-- A real Codex app-server turn against the scripted local provider consumed a
-  canonical combined current-day workout result, returned the distinct workout
-  count and combined duration with a "so far" qualifier, and made no unsupported
-  sync or import claim.
-- A second real app-server turn called the production `murph.group read_shared`
-  tool under the current-chat newsletter execution contract, computed settled
-  comparisons from completed days only, and kept open-day values in a separate
-  "today so far" aside.
 - Local product-experience review found no high, material, or
-  experience-collapse issue. The two requested assistant-output proof gaps are
-  covered by those focused app-server turns; no rendered UI proof applies
-  because no production UI changed.
+  experience-collapse issue; no rendered UI proof applies because no
+  production UI changed.
 - A post-rebase range-diff audit confirmed that current group-message behavior
   from `main` remains intact alongside the new semantic gates, additive
   workout-day rollup, provisional-day handling, and non-causal diagnostic

@@ -226,145 +226,25 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('answers workout totals and shared activity facts without selection or sync guesses', async () => {
-    const dailyActivity = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'daily-activity',
-    )
-    const groupChat = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'group-chat',
-    )
-    const groupChallenge = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'group-challenge',
-    )
-    const groupNewsletter = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'group-newsletter',
-    )
-    expect(dailyActivity).toBeTruthy()
-    expect(groupChat).toBeTruthy()
-    expect(groupChallenge).toBeTruthy()
-    expect(groupNewsletter).toBeTruthy()
-    if (!dailyActivity || !groupChat || !groupChallenge || !groupNewsletter) {
-      return
+  it('keeps private and shared activity interpretation in their owners', async () => {
+    const load = async (slug: string) => {
+      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
+      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
+      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
     }
+    const [daily, shared] = await Promise.all([
+      load('daily-activity'),
+      load('group-chat'),
+    ])
 
-    expect(dailyActivity.triggerHint).toContain(
-      'all workouts, or total workout time for a date',
+    expect(daily).toMatch(
+      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
     )
-    const dailyRaw = await readSkillFile(dailyActivity)
-    expect(dailyRaw).toContain(
-      'Factual wearable day and workout reads',
-    )
-    expect(dailyRaw).toContain(
-      '`vault-cli wearables day <date> --format json`',
-    )
-    expect(dailyRaw).toContain(
-      '`vault-cli wearables activity list --date <date> --format json`',
-    )
-    expect(dailyRaw).toContain(
-      '`vault-cli event list --kind activity_session --from <date> --to <date> --format json`',
-    )
-    expect(dailyRaw).toContain('do not manually deduplicate or sum provider records')
-    expect(dailyRaw).toContain('Raw records never')
-    expect(dailyRaw).toContain('Do not force')
-    expect(dailyRaw).toContain(
-      'changeable totals for the current local calendar day as provisional',
-    )
-    expect(dailyRaw).toContain(
-      'completed individual workout may still be described as',
-    )
-    expect(dailyRaw).toContain(
-      "does not make the day's combined count",
-    )
-    expect(dailyRaw).toContain('Distinct workouts on the same day are additive')
-    expect(dailyRaw).toContain('rather than replacing one with another')
-    expect(dailyRaw).toContain(
-      'not proof that the provider failed to sync or that a',
-    )
-
-    const groupRaw = await readSkillFile(groupChat)
-    expect(groupRaw).toContain('## Shared fact limits')
-    expect(groupRaw).toMatch(
-      /It\s+does not prove that the member's private\s+Murph lacks the workout/u,
-    )
-    expect(groupRaw).toContain('its cause is unverified')
-    expect(groupRaw).toMatch(
-      /Never use device status to explain why a metric\s+is absent/u,
-    )
-    expect(groupRaw).toContain(
-      '`data.metricSemantics` is exactly `"broad-movement"`',
-    )
-    expect(groupRaw).toContain(
-      '`data.metricSemantics` is exactly `"canonical-workout-day"`',
-    )
-    expect(groupRaw).toContain('ambiguous and unusable')
-    expect(groupRaw).toContain(
-      'current local calendar day as provisional',
-    )
-    expect(groupRaw).toContain(
-      'Never "correct" a day by replacing',
-    )
-
-    const challengeRaw = await readSkillFile(groupChallenge)
-    expect(challengeRaw).toMatch(
-      /label a\s+current-day score provisional/u,
-    )
-    expect(challengeRaw).toContain(
-      'A provisional current-day value may appear in clearly labeled live',
-    )
-    expect(challengeRaw).toContain(
-      '`data.metricSemantics` exactly `"broad-movement"`',
-    )
-    expect(challengeRaw).toContain(
-      '`data.metricSemantics` exactly `"canonical-workout-day"`',
-    )
-    expect(challengeRaw).toContain(
-      'its cause is unverified regardless of',
-    )
-    expect(challengeRaw).toContain(
-      'Never connect that status to the',
-    )
-
-    const newsletterRaw = await readSkillFile(groupNewsletter)
-    const newsletterCompact = newsletterRaw.replace(/\s+/gu, ' ')
-    expect(newsletterCompact).toContain(
-      'Follow the semantic owner supplied by the returned fact',
-    )
-    expect(newsletterCompact).toContain(
-      '`data.metricSemantics` is exactly `"broad-movement"`',
-    )
-    expect(newsletterCompact).toContain(
-      '`data.metricSemantics` is exactly `"canonical-workout-day"`',
-    )
-    expect(newsletterCompact).toContain(
-      'legacy or ambiguous result does not establish which concept it owns',
-    )
-    expect(newsletterCompact).toContain(
-      'Distinct workouts on one day add together',
-    )
-    expect(newsletterCompact).toContain(
-      '`observedDayCount`, `observedDates`,',
-    )
-    expect(newsletterCompact).toContain(
-      'never infer that unobserved',
-    )
-    expect(newsletterCompact).toContain(
-      'identical `observedDates` array',
-    )
-    expect(newsletterCompact).toContain(
-      'coverage differs, scope each average to its own dates and avoid a crown',
-    )
-    expect(newsletterCompact).toContain(
-      'current local calendar day as provisional',
-    )
-    expect(newsletterCompact).toContain(
-      'brief current-day "so far" qualifier is allowed',
-    )
-    expect(newsletterCompact).toContain(
-      'exclude every record whose date is the current local calendar day',
-    )
-    expect(newsletterCompact).toContain(
-      'must never affect the weekly average',
-    )
+    expect(daily).toContain('current-local-day totals as provisional and say "so far."')
+    expect(daily).toContain('not proof of failed provider sync or import')
+    expect(shared).toContain('its cause is unverified')
+    expect(shared).toMatch(/"broad-movement".+"canonical-workout-day"/u)
+    expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
@@ -1006,7 +886,14 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Use only `members`')
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
-    expect(raw).toContain('never as a daily or weekly exercise total')
+    expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
+    expect(raw).toContain('current local Monday through yesterday')
+    expect(raw).toMatch(/Exclude earlier\s+rolling-window dates and today/u)
+    expect(raw).toMatch(/only when every compared date\s+set is identical/u)
+    expect(raw).toMatch(
+      /When coverage differs, report scoped values or an unranked\s+pattern\./u,
+    )
+    expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
     expect(raw).toContain('Keep them separate')
     expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')

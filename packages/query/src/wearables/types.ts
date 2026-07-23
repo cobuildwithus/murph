@@ -137,15 +137,13 @@ export type WearableActivityMetricResourceClass =
   | "none";
 
 /**
- * Projection-internal, privacy-safe activity candidate evidence. Stored
- * provider rows retain every pre-ranking candidate because provider-local
- * winner selection is not associative across providers.
+ * Projection-internal, privacy-safe activity candidate evidence. Opaque
+ * candidate and exact-partition tokens retain ranking and dedupe semantics
+ * without persisting provider resource or canonical record identifiers.
  */
-export interface WearableActivityMetricEvidence {
-  /** Opaque token whose lexical order matches the private candidate id. */
+export interface WearableActivityMetricCandidateEvidence {
   candidateKey: string;
   date: string;
-  /** Safe exact-partition token; never a provider resource or record id. */
   exactKey: string;
   hasDayStrainFacet: boolean;
   metric: WearableMetricKey;
@@ -161,6 +159,7 @@ export interface WearableActivityMetricEvidence {
   resourceClass: WearableActivityMetricResourceClass;
   sourceFamily: WearableCandidateSourceFamily;
   sourceKind: string;
+  title: string | null;
   unit: string | null;
   value: number;
 }
@@ -173,16 +172,63 @@ export interface WearableHeartRateZoneAggregate {
   zone?: number;
 }
 
-export interface WearableActivitySessionMetricValues {
-  activeCalories?: number;
-  distanceKm?: number;
-  maxHeartRate?: number;
-  totalElevationGainMeters?: number;
-  workoutStrain?: number;
-}
+export const ACTIVITY_SESSION_WORKOUT_METRIC_SPECS = [
+  {
+    dailyReducer: "lower-bound",
+    metric: "activeCalories",
+    reducer: "additive",
+    unit: "kcal",
+  },
+  {
+    dailyReducer: "lower-bound",
+    metric: "distanceKm",
+    reducer: "additive",
+    unit: "km",
+  },
+  {
+    dailyReducer: "lower-bound",
+    metric: "totalElevationGainMeters",
+    reducer: "additive",
+    unit: "meter",
+  },
+  {
+    dailyReducer: "nested-maximum",
+    metric: "maxHeartRate",
+    reducer: "maximum",
+    unit: "bpm",
+  },
+  {
+    dailyReducer: "maximum",
+    metric: "workoutStrain",
+    reducer: "maximum",
+    unit: "strain",
+  },
+] as const satisfies readonly {
+  dailyReducer: "lower-bound" | "maximum" | "nested-maximum";
+  metric: WearableMetricKey;
+  reducer: "additive" | "maximum";
+  unit: string;
+}[];
+
+export type WearableActivitySessionWorkoutMetricKey =
+  (typeof ACTIVITY_SESSION_WORKOUT_METRIC_SPECS)[number]["metric"];
+
+export type WearableDailyCumulativeMetric = Extract<
+  (typeof ACTIVITY_SESSION_WORKOUT_METRIC_SPECS)[number],
+  { dailyReducer: "lower-bound" }
+>["metric"];
+
+export type WearableDailyMaximumMetric = Extract<
+  (typeof ACTIVITY_SESSION_WORKOUT_METRIC_SPECS)[number],
+  { reducer: "maximum" }
+>["metric"];
+
+export type WearableActivitySessionMetricValues = Partial<
+  Record<WearableActivitySessionWorkoutMetricKey, number>
+>;
 
 export type WearableActivitySessionMetricContributors = Partial<
-  Record<keyof WearableActivitySessionMetricValues, string[]>
+  Record<WearableActivitySessionWorkoutMetricKey, string[]>
 >;
 
 export interface WearableSleepNight {
@@ -572,19 +618,19 @@ export interface WearableActivitySessionAggregate {
   provider: string;
   recordedAt: string | null;
   recordIds: string[];
-  sessionContributors?: string[];
+  sessionContributors: string[];
   sessionCount: number;
   sessionMinutes: number;
-  sourceKind?: "activity-session-aggregate" | "activity-session-day-rollup";
-  workoutMetricContributors?: WearableActivitySessionMetricContributors;
-  workoutMetricValues?: WearableActivitySessionMetricValues;
+  sourceKind: "activity-session-aggregate" | "activity-session-day-rollup";
+  workoutMetricContributors: WearableActivitySessionMetricContributors;
+  workoutMetricValues: WearableActivitySessionMetricValues;
   workoutMetricKeys: string[];
 }
 
 export interface WearableDataset {
-  activitySessionCandidates?: readonly WearableMetricCandidate[];
+  activitySessionCandidates: readonly WearableMetricCandidate[];
   activitySessionAggregates: readonly WearableActivitySessionAggregate[];
-  activitySessionDayRollups?: readonly WearableActivitySessionAggregate[];
+  activitySessionDayRollups: readonly WearableActivitySessionAggregate[];
   metricSuppressionEvidence: readonly WearableMetricSuppressionEvidence[];
   metricCandidates: readonly WearableMetricCandidate[];
   provenanceDiagnostics: readonly WearableProvenanceDiagnostic[];
@@ -691,16 +737,17 @@ export const ACTIVITY_METRIC_KEYS = new Set<WearableMetricKey>([
   "workoutStrain",
 ]);
 
-export const DAILY_CUMULATIVE_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set([
-  "activeCalories",
-  "distanceKm",
-  "totalElevationGainMeters",
-]);
+export const DAILY_CUMULATIVE_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set(
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS
+    .filter(({ dailyReducer }) => dailyReducer === "lower-bound")
+    .map(({ metric }) => metric),
+);
 
 // Daily cumulative totals and maximum heart rate contain overlapping summary
 // and session branches. Workout strain intentionally remains cross-branch
 // conflict evidence even though its selected value also uses a maximum reducer.
-export const ACTIVITY_BRANCH_SCOPED_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set([
-  ...DAILY_CUMULATIVE_METRIC_KEYS,
-  "maxHeartRate",
-]);
+export const ACTIVITY_BRANCH_SCOPED_METRIC_KEYS: ReadonlySet<WearableMetricKey> = new Set(
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS
+    .filter(({ dailyReducer }) => dailyReducer !== "maximum")
+    .map(({ metric }) => metric),
+);

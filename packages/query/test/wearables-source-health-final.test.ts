@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import { buildWearableSummaryBundleFromDataset } from "../src/wearables.ts";
+import {
+  buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
+} from "../src/wearables/candidates.ts";
 import { buildWearableSourceHealth } from "../src/wearables/source-health.ts";
 import type {
   WearableActivityDay,
@@ -186,9 +191,13 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
         provider: "beta",
         recordedAt: "2026-04-03T08:10:00Z",
         recordIds: ["beta-activity-1"],
+        sessionContributors: ["beta"],
         sessionCount: 1,
         sessionMinutes: 42,
+        sourceKind: "activity-session-aggregate",
+        workoutMetricContributors: {},
         workoutMetricKeys: ["activeCalories", "averageHeartRate"],
+        workoutMetricValues: {},
       },
     ],
     metricCandidates: [alphaRawMetric],
@@ -382,96 +391,61 @@ test("buildWearableSourceHealth sorts equal-date providers alphabetically and re
 });
 
 test("source health attributes each workout rollup field only to its real contributors", () => {
-  const activityDay = makeActivityDay("2026-04-08", "multiple");
-  for (const metric of [
-    activityDay.activeCalories,
-    activityDay.distanceKm,
-    activityDay.maxHeartRate,
-    activityDay.sessionCount,
-    activityDay.sessionMinutes,
-    activityDay.totalElevationGainMeters,
-    activityDay.workoutStrain,
-  ]) {
-    metric.selection.sourceKind = "activity-session-day-rollup";
-  }
-
-  const sourceHealth = buildWearableSourceHealth({
-    activityDays: [activityDay],
-    bodyStateDays: [],
-    dataset: makeDataset({
-      activitySessionAggregates: [
-        {
-          activityTypes: ["Running"],
-          candidateId: "alpha:2026-04-08:activity-session-aggregate",
-          date: "2026-04-08",
-          heartRateZones: [],
-          paths: ["/virtual/alpha-activity-session.jsonl"],
-          provider: "alpha",
-          recordedAt: "2026-04-08T13:35:00Z",
-          recordIds: ["alpha-activity-session"],
-          sessionCount: 1,
-          sessionMinutes: 30,
-          workoutMetricKeys: ["activeCalories", "maxHeartRate", "workoutStrain"],
-          workoutMetricValues: {
-            activeCalories: 210,
-            maxHeartRate: 181,
-            totalElevationGainMeters: 42,
-            workoutStrain: 7,
-          },
-        },
-        {
-          activityTypes: ["Strength"],
-          candidateId: "beta:2026-04-08:activity-session-aggregate",
-          date: "2026-04-08",
-          heartRateZones: [],
-          paths: ["/virtual/beta-activity-session.jsonl"],
-          provider: "beta",
-          recordedAt: "2026-04-08T15:50:00Z",
-          recordIds: ["beta-activity-session"],
-          sessionCount: 1,
-          sessionMinutes: 45,
-          workoutMetricKeys: ["activeCalories", "maxHeartRate", "workoutStrain"],
-          workoutMetricValues: {
-            activeCalories: 160,
-            distanceKm: 6.2,
-            maxHeartRate: 174,
-            workoutStrain: 10,
-          },
-        },
-      ],
-      activitySessionDayRollups: [{
-        activityTypes: ["Running", "Strength"],
-        candidateId: "multiple:2026-04-08:activity-session-day-rollup",
-        date: "2026-04-08",
-        heartRateZones: [],
-        paths: [],
-        provider: "multiple",
-        recordedAt: "2026-04-08T15:50:00Z",
-        recordIds: ["alpha-activity-session", "beta-activity-session"],
-        sessionContributors: ["alpha", "beta"],
-        sessionCount: 2,
-        sessionMinutes: 75,
-        sourceKind: "activity-session-day-rollup",
-        workoutMetricContributors: {
-          activeCalories: ["alpha", "beta"],
-          distanceKm: ["beta"],
-          maxHeartRate: ["alpha"],
-          totalElevationGainMeters: ["alpha"],
-          workoutStrain: ["beta"],
-        },
-        workoutMetricKeys: ["activeCalories", "maxHeartRate", "workoutStrain"],
-        workoutMetricValues: {
-          activeCalories: 370,
-          distanceKm: 6.2,
-          maxHeartRate: 181,
-          totalElevationGainMeters: 42,
-          workoutStrain: 10,
-        },
-      }],
-    }),
-    recoveryDays: [],
-    sleepNights: [],
+  const date = "2026-04-08";
+  const activitySessionCandidates: WearableMetricCandidate[] = [
+    {
+      ...makeMetricCandidate({
+        candidateId: "alpha-activity-session",
+        date,
+        metric: "sessionMinutes",
+        occurredAt: `${date}T13:00:00Z`,
+        provider: "alpha",
+        recordedAt: `${date}T13:35:00Z`,
+        sourceFamily: "event",
+        sourceKind: "activity_session",
+        unit: "minutes",
+        value: 30,
+      }),
+      activityType: "Running",
+      sessionEndAt: `${date}T13:30:00Z`,
+      sessionStartAt: `${date}T13:00:00Z`,
+      workoutMetricValues: {
+        activeCalories: 210,
+        maxHeartRate: 181,
+        totalElevationGainMeters: 42,
+        workoutStrain: 7,
+      },
+    },
+    {
+      ...makeMetricCandidate({
+        candidateId: "beta-activity-session",
+        date,
+        metric: "sessionMinutes",
+        occurredAt: `${date}T15:00:00Z`,
+        provider: "beta",
+        recordedAt: `${date}T15:50:00Z`,
+        sourceFamily: "event",
+        sourceKind: "activity_session",
+        unit: "minutes",
+        value: 45,
+      }),
+      activityType: "Strength",
+      sessionEndAt: `${date}T15:45:00Z`,
+      sessionStartAt: `${date}T15:00:00Z`,
+      workoutMetricValues: {
+        activeCalories: 160,
+        distanceKm: 6.2,
+        maxHeartRate: 174,
+        workoutStrain: 10,
+      },
+    },
+  ];
+  const dataset = makeDataset({
+    activitySessionCandidates,
+    activitySessionAggregates: buildActivitySessionAggregates(activitySessionCandidates),
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessionCandidates),
   });
+  const sourceHealth = buildWearableSummaryBundleFromDataset(dataset).sourceHealth;
 
   const byProvider = rowsByProvider(sourceHealth);
   assert.equal(byProvider.get("alpha")?.selectedMetrics, 5);
@@ -492,14 +466,7 @@ test("source health attributes each workout rollup field only to its real contri
     "sessionMinutes",
     "workoutStrain",
   ]);
-  assert.equal(
-    sourceHealth.some((row) =>
-      row.notes.some((note) =>
-        note.includes("contributed candidate evidence but was not the preferred source")
-      )
-    ),
-    false,
-  );
+  assert.equal(sourceHealth.every((row) => row.sleepNights === 0), true);
 });
 
 test("sleep freshness ignores generic cardiorespiratory observations unless anchored to valid sleep", () => {

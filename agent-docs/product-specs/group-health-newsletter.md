@@ -222,12 +222,13 @@ and `throughDate`; scope the claim to those observed completed days, and do not
 infer that unobserved days were zero or that the full week is represented.
 A settled cross-person leader, winner, or crown for a metric requires identical
 `observedDates` across every compared member. When coverage differs, scope each
-average to its own dates and avoid a crown. A current-chat direct shared read
-may still return a value for the current local day. The composer must exclude
-that record before calculating any weekly average or comparison. It may use the
-value only as a separate, explicit "today so far" aside, never as input to a
-weekly leader, crown, or challenge. This group-level qualifier is not a
-member-specific missing-data callout.
+average to its own dates and avoid a crown. For current-chat raw records, derive
+the equivalent sorted usable date set from the current local Monday through
+yesterday after semantic validation. Exclude both the current local day and
+older records from the rolling read window. Apply the same identical-date rule.
+A current-day value may appear only as a separate, explicit "today so far"
+aside, never as input to a weekly leader, crown, or challenge. This group-level
+qualifier is not a member-specific missing-data callout.
 
 Neither weekly payload supports an inferred weekly total, so never multiply an
 average into a weekly sum. The current `workout-count` average omits

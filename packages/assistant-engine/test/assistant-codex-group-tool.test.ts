@@ -190,18 +190,6 @@ describe("murph.group dynamic tool", () => {
       .toContain("When these actions are available for the current connected group-chat turn");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("whether each participant already uses Murph");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("A missing metric means only that this current read lacks it");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("its cause is unverified");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("never an explanation for why a metric is absent");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain('activity-days.v0 is usable as movement only with data.metricSemantics="broad-movement"');
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain('workout-days.v0 is usable as a canonical combined day only with data.metricSemantics="canonical-workout-day"');
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Treat every same-local-day value as provisional");
     expect(MURPH_GROUP_TOOL.description).not.toContain("their own Murph");
   });
 
@@ -215,16 +203,6 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("A missing metric means only that this current read lacks it");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("never an explanation for why a metric is absent");
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain('activity-days.v0 is usable as movement only with data.metricSemantics="broad-movement"');
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain('workout-days.v0 is usable as a canonical combined day only with data.metricSemantics="canonical-workout-day"');
-    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
-      .toContain("Treat every same-local-day value as provisional");
 
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,

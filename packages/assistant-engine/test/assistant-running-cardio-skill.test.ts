@@ -54,9 +54,6 @@ describe('assistant running cardio skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy',
-    )
-    expect(prompt).toContain(
       'running-cardio and strength-training own programming',
     )
     expect(prompt).toContain(

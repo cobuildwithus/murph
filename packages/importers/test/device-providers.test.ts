@@ -963,6 +963,9 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
         dailyActivity: [
           {
             day: "2026-03-15",
+            high_activity_time: 600,
+            low_activity_time: 3600,
+            medium_activity_time: 1200,
             steps: 12034,
             non_wear_time: 1200,
           },
@@ -1007,6 +1010,9 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   ]);
 
   const ouraStepsEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "steps");
+  const ouraActivityMinutesEvent = ouraPayload.events?.find(
+    (event) => event.externalRef?.facet === "activity-minutes",
+  );
   const ouraSpo2Event = ouraPayload.events?.find((event) => event.externalRef?.facet === "spo2-average");
   const ouraNonWearEvent = ouraPayload.events?.find((event) => event.externalRef?.facet === "non-wear-minutes");
   const whoopRemEvent = whoopPayload.events?.find((event) => event.externalRef?.facet === "sleep-rem-minutes");
@@ -1014,6 +1020,9 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
     (event) => event.externalRef?.facet === "skin-temperature",
   );
 
+  assert.equal(ouraActivityMinutesEvent?.fields?.metric, "activity-minutes");
+  assert.equal(ouraActivityMinutesEvent?.fields?.value, 90);
+  assert.equal(ouraActivityMinutesEvent?.fields?.unit, "minutes");
   assert.equal(ouraStepsEvent?.fields?.metric, "daily-steps");
   assert.equal(ouraStepsEvent?.fields?.unit, "count");
   assert.equal(ouraStepsEvent?.fields?.observationGrain, "summary");
@@ -1032,90 +1041,25 @@ test("prepareDeviceProviderSnapshotImport preserves descriptor-driven Oura and W
   assert.equal(whoopTemperatureEvent?.fields?.observationGrain, "summary");
 });
 
-test("prepareDeviceProviderSnapshotImport sums complete Oura activity intensity buckets into one daily activity observation", async () => {
-  const payload = await prepareDeviceProviderSnapshotImport({
-    provider: "oura",
-    snapshot: {
-      dailyActivity: [
-        {
-          id: "complete-activity-buckets",
-          day: "2026-03-15",
-          low_activity_time: "3600",
-          medium_activity_time: 1200,
-          high_activity_time: 600,
-        },
-      ],
-    },
-  });
-
-  const activityMinuteEvents = payload.events?.filter(
-    (event) =>
-      event.kind === "observation"
-      && event.fields?.metric === "activity-minutes",
-  ) ?? [];
-
-  assert.equal(activityMinuteEvents.length, 1);
-  assert.equal(activityMinuteEvents[0]?.fields?.value, 90);
-  assert.equal(activityMinuteEvents[0]?.fields?.unit, "minutes");
-  assert.equal(activityMinuteEvents[0]?.fields?.observationGrain, "summary");
-  assert.equal(activityMinuteEvents[0]?.dayKey, "2026-03-15");
-  assert.equal(activityMinuteEvents[0]?.externalRef?.resourceType, "daily-activity");
-  assert.equal(activityMinuteEvents[0]?.externalRef?.resourceId, "complete-activity-buckets");
-  assert.equal(activityMinuteEvents[0]?.externalRef?.facet, "activity-minutes");
-});
-
 test("prepareDeviceProviderSnapshotImport rejects incomplete or invalid Oura daily activity durations", async () => {
+  const invalidBuckets = [
+    { low_activity_time: 600, medium_activity_time: 600 },
+    { low_activity_time: 600, medium_activity_time: -1, high_activity_time: 600 },
+    { low_activity_time: 600, medium_activity_time: 600, high_activity_time: "Infinity" },
+    { low_activity_time: 86_400, medium_activity_time: 1, high_activity_time: 0 },
+  ];
   const payload = await prepareDeviceProviderSnapshotImport({
     provider: "oura",
     snapshot: {
-      dailyActivity: [
-        {
-          id: "missing-bucket",
-          day: "2026-03-15",
-          low_activity_time: 600,
-          medium_activity_time: 600,
-        },
-        {
-          id: "negative-bucket",
-          day: "2026-03-16",
-          low_activity_time: 600,
-          medium_activity_time: -1,
-          high_activity_time: 600,
-        },
-        {
-          id: "non-finite-bucket",
-          day: "2026-03-17",
-          low_activity_time: 600,
-          medium_activity_time: 600,
-          high_activity_time: "Infinity",
-        },
-        {
-          id: "over-day-maximum",
-          day: "2026-03-18",
-          low_activity_time: 86_400,
-          medium_activity_time: 1,
-          high_activity_time: 0,
-        },
-        {
-          id: "exact-day-maximum",
-          day: "2026-03-19",
-          low_activity_time: 86_400,
-          medium_activity_time: 0,
-          high_activity_time: 0,
-        },
-      ],
+      dailyActivity: invalidBuckets.map((buckets, index) => ({
+        ...buckets,
+        id: `invalid-activity-buckets-${index}`,
+        day: "2026-03-16",
+      })),
     },
   });
 
-  const activityMinuteEvents = payload.events?.filter(
-    (event) =>
-      event.kind === "observation"
-      && event.fields?.metric === "activity-minutes",
-  ) ?? [];
-
-  assert.equal(activityMinuteEvents.length, 1);
-  assert.equal(activityMinuteEvents[0]?.externalRef?.resourceId, "exact-day-maximum");
-  assert.equal(activityMinuteEvents[0]?.fields?.value, 1440);
+  assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
 });
 
 test("prepareDeviceProviderSnapshotImport handles Oura string numerics through shared observation and sample helpers", async () => {

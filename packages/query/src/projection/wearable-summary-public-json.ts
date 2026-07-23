@@ -12,13 +12,8 @@ import {
 } from "./schema.ts";
 
 const WEARABLE_SUMMARY_PROVENANCE_KEYS = new Set([
-  "activityMetricRankingEvidence",
-  "activityMetricRankingEvidenceCount",
-  "activityMetricRankingEvidenceFingerprint",
+  "activityEvidence",
   "activitySessions",
-  "activitySessionReconciliationEvidence",
-  "activitySessionReconciliationEvidenceCount",
-  "activitySessionReconciliationEvidenceFingerprint",
   "candidateId",
   "dataOrigin",
   "externalRef",

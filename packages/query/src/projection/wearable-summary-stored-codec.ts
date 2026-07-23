@@ -1,15 +1,14 @@
+import { z } from "zod";
+
 import { resolveMetric } from "../wearables/selection.ts";
 import {
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
-  type WearableActivityMetricEvidence,
-  type WearableActivityMetricResourceClass,
+  type WearableActivityMetricCandidateEvidence,
   type WearableActivitySessionEvidence,
-  type WearableActivitySessionMetricValues,
-  type WearableCandidateSourceFamily,
-  type WearableHeartRateZoneAggregate,
   type WearableMetricKey,
 } from "../wearables/types.ts";
 import { parseJsonValue } from "./schema.ts";
@@ -48,39 +47,15 @@ import type { QueryWearableSummaryKind } from "./wearable-summary-store.ts";
 
 export type StoredWearableMetricSummaryKind = Exclude<QueryWearableSummaryKind, "source_health">;
 
-export const STORED_ACTIVITY_METRIC_EVIDENCE_KEY = "activityMetricRankingEvidence";
-export const STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY =
-  "activityMetricRankingEvidenceCount";
-export const STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY =
-  "activityMetricRankingEvidenceFingerprint";
-export const STORED_ACTIVITY_SESSION_EVIDENCE_KEY = "activitySessionReconciliationEvidence";
-export const STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY =
-  "activitySessionReconciliationEvidenceCount";
-export const STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY =
-  "activitySessionReconciliationEvidenceFingerprint";
-
-export type StoredWearableActivityMetricEvidenceParseResult =
-  | { status: "absent" }
-  | { status: "invalid" }
-  | { status: "valid"; evidence: WearableActivityMetricEvidence[] };
-
-export type StoredWearableActivitySessionEvidenceParseResult =
-  | { status: "absent" }
-  | { status: "invalid"; reason: "empty" | "malformed" }
-  | { status: "valid"; evidence: WearableActivitySessionEvidence[] };
+export const STORED_ACTIVITY_EVIDENCE_KEY = "activityEvidence";
 
 interface StoredWearableProjectionSummaryOptions {
-  /**
-   * Complete provider/day pre-ranking activity candidates. Keeping only a
-   * provider-local winner changes cross-provider agreement and recency ranks.
-   */
-  activityMetricEvidence?: readonly WearableActivityMetricEvidence[];
-  /**
-   * Complete provider/day session evidence is retained because truncating it
-   * before cross-provider dedupe would silently corrupt composed totals. The
-   * enclosing projection row is already bounded to one provider and one day.
-   */
-  activitySessionEvidence?: readonly WearableActivitySessionEvidence[];
+  activityEvidence?: {
+    /** Ranking is not associative, so provider-local winners are insufficient. */
+    metricCandidates: readonly WearableActivityMetricCandidateEvidence[];
+    /** Session overlap reduction is likewise not associative across providers. */
+    sessions: readonly WearableActivitySessionEvidence[];
+  };
 }
 
 const WEARABLE_SUMMARY_METRIC_KEYS: Record<StoredWearableMetricSummaryKind, ReadonlySet<WearableMetricKey>> = {
@@ -118,39 +93,24 @@ export function stringifyStoredWearableProjectionSummary(
   }
 
   const publicStored = stringifyPublicWearableProjectionSummary(stored);
+  if (summaryKind !== "activity") {
+    return publicStored;
+  }
   if (
-    summaryKind !== "activity"
+    options.activityEvidence === undefined
     || (
-      options.activityMetricEvidence === undefined
-      && options.activitySessionEvidence === undefined
+      options.activityEvidence.metricCandidates.length === 0
+      && options.activityEvidence.sessions.length === 0
     )
   ) {
-    return publicStored;
+    throw new Error("Stored activity rows require source evidence.");
   }
 
   const storedWithEvidence = parseJsonValue<Record<string, unknown> | null>(publicStored, null);
   if (!storedWithEvidence) {
     return publicStored;
   }
-  if (options.activityMetricEvidence !== undefined) {
-    storedWithEvidence[STORED_ACTIVITY_METRIC_EVIDENCE_KEY] = options.activityMetricEvidence;
-    storedWithEvidence[STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY] =
-      options.activityMetricEvidence.length;
-    storedWithEvidence[STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY] =
-      storedEvidenceFingerprint(options.activityMetricEvidence);
-  }
-  if (
-    options.activitySessionEvidence !== undefined
-  ) {
-    storedWithEvidence[STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY] =
-      options.activitySessionEvidence.length;
-    storedWithEvidence[STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY] =
-      storedEvidenceFingerprint(options.activitySessionEvidence);
-    if (options.activitySessionEvidence.length > 0) {
-      storedWithEvidence[STORED_ACTIVITY_SESSION_EVIDENCE_KEY] =
-        options.activitySessionEvidence;
-    }
-  }
+  storedWithEvidence[STORED_ACTIVITY_EVIDENCE_KEY] = options.activityEvidence;
   return JSON.stringify(storedWithEvidence);
 }
 
@@ -166,487 +126,129 @@ export function parseStoredWearableSummary<TSummary>(
   }
 
   delete summary.activitySessions;
-  delete summary[STORED_ACTIVITY_METRIC_EVIDENCE_KEY];
-  delete summary[STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY];
-  delete summary[STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY];
-  delete summary[STORED_ACTIVITY_SESSION_EVIDENCE_KEY];
-  delete summary[STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY];
-  delete summary[STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY];
+  delete summary[STORED_ACTIVITY_EVIDENCE_KEY];
   restoreStoredWearableMetricEnvelopes(summaryKind, summary);
   return summary;
 }
 
-export function parseStoredWearableActivityMetricEvidence(
+export function parseStoredWearableActivityRow<TSummary>(
   summaryJson: string,
-): StoredWearableActivityMetricEvidenceParseResult {
-  const stored = parseJsonValue<Record<string, unknown> | null>(summaryJson, null);
-  if (!isJsonObject(stored)) {
-    return { status: "invalid" };
+): {
+  summary: TSummary;
+  metricCandidates: WearableActivityMetricCandidateEvidence[];
+  sessions: WearableActivitySessionEvidence[];
+} | null {
+  const summary = parseJsonValue<TSummary | null>(summaryJson, null);
+  if (!isJsonObject(summary)) {
+    return null;
   }
-  const hasEvidence = Object.hasOwn(stored, STORED_ACTIVITY_METRIC_EVIDENCE_KEY);
-  const hasEvidenceCount = Object.hasOwn(
-    stored,
-    STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+  const evidence = storedActivityEvidenceSchema.safeParse(
+    summary[STORED_ACTIVITY_EVIDENCE_KEY],
   );
-  const hasEvidenceFingerprint = Object.hasOwn(
-    stored,
-    STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
-  );
-  if (!hasEvidence && !hasEvidenceCount && !hasEvidenceFingerprint) {
-    return { status: "absent" };
+  if (!evidence.success) {
+    return null;
   }
 
-  const rawEvidence = stored[STORED_ACTIVITY_METRIC_EVIDENCE_KEY];
-  const rawEvidenceCount = stored[STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY];
-  const rawEvidenceFingerprint =
-    stored[STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY];
-  if (
-    !Array.isArray(rawEvidence)
-    || !isStoredEvidenceCount(rawEvidenceCount)
-    || rawEvidenceCount !== rawEvidence.length
-    || !isStoredEvidenceFingerprint(rawEvidenceFingerprint)
-    || rawEvidenceFingerprint !== storedEvidenceFingerprint(rawEvidence)
-  ) {
-    return { status: "invalid" };
-  }
-
-  const evidence: WearableActivityMetricEvidence[] = [];
-  for (const rawCandidate of rawEvidence) {
-    const parsed = parseStoredActivityMetricEvidence(rawCandidate);
-    if (!parsed) {
-      return { status: "invalid" };
-    }
-    evidence.push(parsed);
-  }
-  return { status: "valid", evidence };
+  delete summary.activitySessions;
+  delete summary[STORED_ACTIVITY_EVIDENCE_KEY];
+  restoreStoredWearableMetricEnvelopes("activity", summary);
+  return { summary, ...evidence.data };
 }
 
-function parseStoredActivityMetricEvidence(
-  value: unknown,
-): WearableActivityMetricEvidence | null {
-  if (
-    !isJsonObject(value)
-    || !isJsonObject(value.origin)
-    || !hasExactObjectKeys(value, STORED_ACTIVITY_METRIC_EVIDENCE_KEYS)
-    || !hasExactObjectKeys(value.origin, STORED_ACTIVITY_METRIC_ORIGIN_KEYS)
-  ) {
-    return null;
-  }
-
-  const metric = [...ACTIVITY_METRIC_KEYS].find((candidate) => candidate === value.metric);
-  const resourceClass = [...ACTIVITY_METRIC_RESOURCE_CLASSES].find(
-    (candidate) => candidate === value.resourceClass,
-  );
-  const sourceFamily = [...WEARABLE_CANDIDATE_SOURCE_FAMILIES].find(
-    (candidate) => candidate === value.sourceFamily,
-  );
-  const occurredAt = nullableParseableTimestamp(value.occurredAt);
-  const recordedAt = nullableParseableTimestamp(value.recordedAt);
-  const unit = nullableBoundedString(value.unit, 80);
-  const aggregatorProvider = nullableStoredToken(value.origin.aggregatorProvider);
-  const sourceProviderSlug = nullableStoredToken(value.origin.sourceProviderSlug);
-  const sourceType = nullableStoredToken(value.origin.sourceType);
-  if (
-    !metric
-    || !resourceClass
-    || !sourceFamily
-    || typeof value.candidateKey !== "string"
-    || !STORED_ACTIVITY_METRIC_CANDIDATE_KEY_PATTERN.test(value.candidateKey)
-    || !isIsoDateString(value.date)
-    || typeof value.exactKey !== "string"
-    || !STORED_ACTIVITY_METRIC_EXACT_KEY_PATTERN.test(value.exactKey)
-    || typeof value.hasDayStrainFacet !== "boolean"
-    || occurredAt === undefined
-    || aggregatorProvider === undefined
-    || sourceProviderSlug === undefined
-    || sourceType === undefined
-    || !isStoredToken(value.provider)
-    || !isStoredToken(value.publicProvider)
-    || recordedAt === undefined
-    || !isStoredToken(value.sourceKind)
-    || unit === undefined
-    || !isFiniteNumber(value.value)
-  ) {
-    return null;
-  }
-
-  return {
-    candidateKey: value.candidateKey,
-    date: value.date,
-    exactKey: value.exactKey,
-    hasDayStrainFacet: value.hasDayStrainFacet,
-    metric,
-    occurredAt,
-    origin: {
-      aggregatorProvider,
-      sourceProviderSlug,
-      sourceType,
-    },
-    provider: value.provider,
-    publicProvider: value.publicProvider,
-    recordedAt,
-    resourceClass,
-    sourceFamily,
-    sourceKind: value.sourceKind,
-    unit,
-    value: value.value,
-  };
-}
-
-export function parseStoredWearableActivitySessionEvidence(
-  summaryJson: string,
-): StoredWearableActivitySessionEvidenceParseResult {
-  const stored = parseJsonValue<Record<string, unknown> | null>(summaryJson, null);
-  if (!isJsonObject(stored)) {
-    return { status: "invalid", reason: "malformed" };
-  }
-  const hasEvidence = Object.hasOwn(stored, STORED_ACTIVITY_SESSION_EVIDENCE_KEY);
-  const hasEvidenceCount = Object.hasOwn(
-    stored,
-    STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
-  );
-  const hasEvidenceFingerprint = Object.hasOwn(
-    stored,
-    STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
-  );
-  if (!hasEvidence && !hasEvidenceCount && !hasEvidenceFingerprint) {
-    return { status: "absent" };
-  }
-
-  const rawEvidence = stored[STORED_ACTIVITY_SESSION_EVIDENCE_KEY];
-  const rawEvidenceCount = stored[STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY];
-  const rawEvidenceFingerprint =
-    stored[STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY];
-  if (
-    !hasEvidence
-    && isStoredEvidenceCount(rawEvidenceCount)
-    && rawEvidenceCount === 0
-    && isStoredEvidenceFingerprint(rawEvidenceFingerprint)
-    && rawEvidenceFingerprint === storedEvidenceFingerprint([])
-  ) {
-    return { status: "valid", evidence: [] };
-  }
-  if (
-    !Array.isArray(rawEvidence)
-    || !isStoredEvidenceCount(rawEvidenceCount)
-    || rawEvidenceCount !== rawEvidence.length
-    || !isStoredEvidenceFingerprint(rawEvidenceFingerprint)
-    || rawEvidenceFingerprint !== storedEvidenceFingerprint(rawEvidence)
-  ) {
-    return { status: "invalid", reason: "malformed" };
-  }
-  if (rawEvidence.length === 0) {
-    return { status: "invalid", reason: "empty" };
-  }
-
-  const evidence: WearableActivitySessionEvidence[] = [];
-  for (const rawSession of rawEvidence) {
-    const parsed = parseStoredActivitySessionEvidence(rawSession);
-    if (!parsed) {
-      return { status: "invalid", reason: "malformed" };
-    }
-    evidence.push(parsed);
-  }
-  return { status: "valid", evidence };
-}
-
-function parseStoredActivitySessionEvidence(
-  value: unknown,
-): WearableActivitySessionEvidence | null {
-  if (!isJsonObject(value)) {
-    return null;
-  }
-
-  const activityType = nullableString(value.activityType);
-  const durationMinutes = isFiniteNumber(value.durationMinutes)
-    ? value.durationMinutes
-    : null;
-  const endedAt = nullableParseableTimestamp(value.endedAt);
-  const reconciliationExactKey =
-    typeof value.reconciliationExactKey === "string"
-    && STORED_ACTIVITY_SESSION_EXACT_KEY_PATTERN.test(value.reconciliationExactKey)
-      ? value.reconciliationExactKey
-      : undefined;
-  const reconciliationResourceKey = value.reconciliationResourceKey === null
-    ? null
-    : (
-        typeof value.reconciliationResourceKey === "string"
-        && STORED_ACTIVITY_SESSION_RESOURCE_KEY_PATTERN.test(value.reconciliationResourceKey)
-          ? value.reconciliationResourceKey
-          : undefined
-      );
-  const recordedAt = nullableParseableTimestamp(value.recordedAt);
-  const startedAt = nullableParseableTimestamp(value.startedAt);
-  const heartRateZones = parseStoredHeartRateZones(value.heartRateZones);
-  const workoutMetricKeys = stringArray(value.workoutMetricKeys);
-  const workoutMetricValues = parseStoredWorkoutMetricValues(value.workoutMetricValues);
-  if (
-    activityType === undefined
-    || !isIsoDateString(value.date)
-    || durationMinutes === null
-    || durationMinutes <= 0
-    || typeof value.durationConsistent !== "boolean"
-    || endedAt === undefined
-    || heartRateZones === null
-    || typeof value.provider !== "string"
-    || value.provider.length === 0
-    || reconciliationExactKey === undefined
-    || reconciliationResourceKey === undefined
-    || recordedAt === undefined
-    || startedAt === undefined
-    || workoutMetricKeys === null
-    || workoutMetricValues === null
-    || (startedAt === null && endedAt !== null)
-    || (
-      startedAt !== null
-      && endedAt !== null
-      && Date.parse(endedAt) <= Date.parse(startedAt)
-    )
-  ) {
-    return null;
-  }
-
-  return {
-    activityType,
-    date: value.date,
-    durationMinutes,
-    durationConsistent: value.durationConsistent,
-    endedAt,
-    heartRateZones,
-    provider: value.provider,
-    reconciliationExactKey,
-    reconciliationResourceKey,
-    recordedAt,
-    startedAt,
-    workoutMetricKeys,
-    workoutMetricValues,
-  };
-}
-
-function parseStoredHeartRateZones(value: unknown): WearableHeartRateZoneAggregate[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-
-  const zones: WearableHeartRateZoneAggregate[] = [];
-  for (const rawZone of value) {
-    if (!isJsonObject(rawZone) || !isFiniteNumber(rawZone.durationMinutes)) {
-      return null;
+const storedTokenSchema = z.string().max(120).regex(
+  /^[a-z0-9]+(?:[ ._:/-][a-z0-9]+)*$/u,
+);
+const storedTimestampSchema = z.iso.datetime({ offset: true }).nullable();
+const storedActivityMetricSchema = z.custom<WearableMetricKey>(
+  (value) =>
+    typeof value === "string"
+    && ACTIVITY_METRIC_KEYS.has(value as WearableMetricKey),
+);
+const storedActivityMetricCandidateEvidenceSchema:
+  z.ZodType<WearableActivityMetricCandidateEvidence> = z.strictObject({
+    candidateKey: z.string().regex(/^activity-metric-candidate:\d{10}$/u),
+    date: z.iso.date(),
+    exactKey: z.string().regex(/^activity-metric-exact:\d{10}$/u),
+    hasDayStrainFacet: z.boolean(),
+    metric: storedActivityMetricSchema,
+    occurredAt: storedTimestampSchema,
+    origin: z.strictObject({
+      aggregatorProvider: storedTokenSchema.nullable(),
+      sourceProviderSlug: storedTokenSchema.nullable(),
+      sourceType: storedTokenSchema.nullable(),
+    }),
+    provider: storedTokenSchema,
+    publicProvider: storedTokenSchema,
+    recordedAt: storedTimestampSchema,
+    resourceClass: z.enum(["activity", "cycle", "generic", "none"]),
+    sourceFamily: z.enum(["canonical", "event", "sample", "derived"]),
+    sourceKind: storedTokenSchema,
+    title: boundedStoredStringSchema(240).nullable(),
+    unit: boundedStoredStringSchema(80).nullable(),
+    value: z.number(),
+  });
+const storedHeartRateZoneSchema = z.strictObject({
+  durationMinutes: z.number(),
+  label: z.string().optional(),
+  maxHeartRate: z.number().optional(),
+  minHeartRate: z.number().optional(),
+  zone: z.number().optional(),
+});
+const storedWorkoutMetricValuesSchema = z.partialRecord(
+  z.enum(ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.map(({ metric }) => metric)),
+  z.number(),
+);
+const storedActivitySessionEvidenceSchema:
+  z.ZodType<WearableActivitySessionEvidence> = z.strictObject({
+    activityType: z.string().nullable(),
+    date: z.iso.date(),
+    durationMinutes: z.number().positive(),
+    durationConsistent: z.boolean(),
+    endedAt: storedTimestampSchema,
+    heartRateZones: z.array(storedHeartRateZoneSchema),
+    provider: z.string().min(1),
+    reconciliationExactKey: z.string().regex(
+      /^activity-session-exact:\d{10}$/u,
+    ),
+    reconciliationResourceKey: z.string().regex(
+      /^activity-session-resource:\d{10}$/u,
+    ).nullable(),
+    recordedAt: storedTimestampSchema,
+    startedAt: storedTimestampSchema,
+    workoutMetricKeys: z.array(z.string()),
+    workoutMetricValues: storedWorkoutMetricValuesSchema,
+  }).superRefine((session, context) => {
+    if (session.startedAt === null && session.endedAt !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "endedAt requires startedAt",
+      });
     }
     if (
-      !isOptionalString(rawZone.label)
-      || !isOptionalFiniteNumber(rawZone.maxHeartRate)
-      || !isOptionalFiniteNumber(rawZone.minHeartRate)
-      || !isOptionalFiniteNumber(rawZone.zone)
+      session.startedAt !== null
+      && session.endedAt !== null
+      && Date.parse(session.endedAt) <= Date.parse(session.startedAt)
     ) {
-      return null;
+      context.addIssue({
+        code: "custom",
+        message: "endedAt must follow startedAt",
+      });
     }
-    zones.push({
-      durationMinutes: rawZone.durationMinutes,
-      ...(rawZone.label === undefined ? {} : { label: rawZone.label }),
-      ...(rawZone.maxHeartRate === undefined ? {} : { maxHeartRate: rawZone.maxHeartRate }),
-      ...(rawZone.minHeartRate === undefined ? {} : { minHeartRate: rawZone.minHeartRate }),
-      ...(rawZone.zone === undefined ? {} : { zone: rawZone.zone }),
-    });
-  }
-  return zones;
-}
+  });
+const storedActivityEvidenceSchema = z.strictObject({
+  metricCandidates: z.array(storedActivityMetricCandidateEvidenceSchema),
+  sessions: z.array(storedActivitySessionEvidenceSchema),
+}).refine(
+  (evidence) =>
+    evidence.metricCandidates.length > 0 || evidence.sessions.length > 0,
+);
 
-function parseStoredWorkoutMetricValues(
-  value: unknown,
-): WearableActivitySessionMetricValues | null {
-  if (!isJsonObject(value)) {
-    return null;
-  }
-
-  const keys = [
-    "activeCalories",
-    "distanceKm",
-    "maxHeartRate",
-    "totalElevationGainMeters",
-    "workoutStrain",
-  ] as const satisfies readonly (keyof WearableActivitySessionMetricValues)[];
-  const parsed: WearableActivitySessionMetricValues = {};
-  for (const key of keys) {
-    const metricValue = value[key];
-    if (!isOptionalFiniteNumber(metricValue)) {
-      return null;
-    }
-    if (metricValue !== undefined) {
-      parsed[key] = metricValue;
-    }
-  }
-  return parsed;
-}
-
-function nullableString(value: unknown): string | null | undefined {
-  return value === null || typeof value === "string" ? value : undefined;
-}
-
-function nullableParseableTimestamp(value: unknown): string | null | undefined {
-  return value === null
-    ? null
-    : (
-        typeof value === "string"
-        && ISO_TIMESTAMP_PATTERN.test(value)
-        && isIsoDateString(value.slice(0, 10))
-        && Number.isFinite(Date.parse(value))
-          ? value
-          : undefined
-      );
-}
-
-function nullableBoundedString(
-  value: unknown,
-  maxLength: number,
-): string | null | undefined {
-  return value === null
-    ? null
-    : (
-        typeof value === "string"
-        && value.length > 0
-        && value.length <= maxLength
-        && value.trim() === value
-        && !CONTROL_CHARACTER_PATTERN.test(value)
-          ? value
-          : undefined
-      );
-}
-
-function nullableStoredToken(value: unknown): string | null | undefined {
-  return value === null ? null : isStoredToken(value) ? value : undefined;
-}
-
-function isStoredToken(value: unknown): value is string {
-  return typeof value === "string"
-    && value.length <= 120
-    && STORED_TOKEN_PATTERN.test(value);
-}
-
-function isIsoDateString(value: unknown): value is string {
-  if (typeof value !== "string" || !ISO_DATE_PATTERN.test(value)) {
-    return false;
-  }
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(parsed.getTime())
-    && parsed.toISOString().slice(0, 10) === value;
-}
-
-function stringArray(value: unknown): string[] | null {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string")
-    ? [...value]
-    : null;
-}
-
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
-function isStoredEvidenceCount(value: unknown): value is number {
-  return typeof value === "number"
-    && Number.isSafeInteger(value)
-    && value >= 0;
-}
-
-function isStoredEvidenceFingerprint(value: unknown): value is string {
-  return typeof value === "string"
-    && STORED_EVIDENCE_FINGERPRINT_PATTERN.test(value);
-}
-
-function storedEvidenceFingerprint(value: unknown): string {
-  return `fnv1a64:${fnv1a64Hex(
-    stableJsonStringify(JSON.parse(JSON.stringify(value))),
-  )}`;
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (
-    value === null
-    || typeof value === "boolean"
-    || typeof value === "number"
-    || typeof value === "string"
-  ) {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-      .join(",")}}`;
-  }
-  throw new TypeError("Stored activity evidence must be JSON-serializable.");
-}
-
-function isOptionalFiniteNumber(value: unknown): value is number | undefined {
-  return value === undefined || isFiniteNumber(value);
-}
-
-function isOptionalString(value: unknown): value is string | undefined {
-  return value === undefined || typeof value === "string";
-}
-
-const ACTIVITY_METRIC_RESOURCE_CLASSES = new Set<WearableActivityMetricResourceClass>([
-  "activity",
-  "cycle",
-  "generic",
-  "none",
-]);
-const WEARABLE_CANDIDATE_SOURCE_FAMILIES = new Set<WearableCandidateSourceFamily>([
-  "canonical",
-  "derived",
-  "event",
-  "sample",
-]);
-const STORED_ACTIVITY_METRIC_EVIDENCE_KEYS = new Set([
-  "candidateKey",
-  "date",
-  "exactKey",
-  "hasDayStrainFacet",
-  "metric",
-  "occurredAt",
-  "origin",
-  "provider",
-  "publicProvider",
-  "recordedAt",
-  "resourceClass",
-  "sourceFamily",
-  "sourceKind",
-  "unit",
-  "value",
-]);
-const STORED_ACTIVITY_METRIC_ORIGIN_KEYS = new Set([
-  "aggregatorProvider",
-  "sourceProviderSlug",
-  "sourceType",
-]);
-const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/u;
-const STORED_TOKEN_PATTERN = /^[a-z0-9]+(?:[ ._:/-][a-z0-9]+)*$/u;
-const STORED_ACTIVITY_METRIC_CANDIDATE_KEY_PATTERN =
-  /^activity-metric-candidate:\d{10}$/u;
-const STORED_ACTIVITY_METRIC_EXACT_KEY_PATTERN =
-  /^activity-metric-exact:\d{10}$/u;
-const STORED_ACTIVITY_SESSION_EXACT_KEY_PATTERN =
-  /^activity-session-exact:\d{10}$/u;
-const STORED_ACTIVITY_SESSION_RESOURCE_KEY_PATTERN =
-  /^activity-session-resource:\d{10}$/u;
-const STORED_EVIDENCE_FINGERPRINT_PATTERN = /^fnv1a64:[a-f0-9]{16}$/u;
-const FNV_64_OFFSET_BASIS = 0xcbf29ce484222325n;
-const FNV_64_PRIME = 0x100000001b3n;
-const FNV_64_MASK = 0xffffffffffffffffn;
-
-function fnv1a64Hex(value: string): string {
-  let hash = FNV_64_OFFSET_BASIS;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= BigInt(value.charCodeAt(index));
-    hash = (hash * FNV_64_PRIME) & FNV_64_MASK;
-  }
-  return hash.toString(16).padStart(16, "0");
+function boundedStoredStringSchema(maxLength: number) {
+  return z.string().min(1).max(maxLength).refine(
+    (value) =>
+      value.trim() === value
+      && !/[\u0000-\u001f\u007f]/u.test(value),
+  );
 }
 
 function restoreStoredWearableMetricEnvelopes(
@@ -792,13 +394,4 @@ function isCompactStoredEnvelope(stored: Record<string, unknown>): boolean {
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function hasExactObjectKeys(
-  value: Record<string, unknown>,
-  expectedKeys: ReadonlySet<string>,
-): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expectedKeys.size
-    && keys.every((key) => expectedKeys.has(key));
 }

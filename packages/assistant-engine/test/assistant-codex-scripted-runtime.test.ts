@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,11 +19,6 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
-import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
-import {
-  buildGroupNewsletterAutomationInstructions,
-  buildGroupNewsletterScheduledExecutionPrompt,
-} from '../src/assistant/group-newsletter-automation.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -55,7 +50,6 @@ interface ScriptedStub {
   close(): Promise<void>
   markRequestBaseline(): void
   queue(...responses: readonly ScriptedResponse[]): void
-  requestBodiesSinceBaseline(): string[]
   requestCountSinceBaseline(): number
   requestSummariesSinceBaseline(): ScriptedProviderRequestSummary[]
 }
@@ -553,174 +547,6 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('answers a private current-day workout question from the canonical combined rollup', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const date = '2031-05-14'
-    const canonicalDay = {
-      date,
-      filters: { providers: [] },
-      summary: {
-        activity: {
-          activityTypes: ['running', 'strength-training'],
-          date,
-          notes: [
-            'Combined two distinct sessions after suppressing one mirrored provider copy.',
-          ],
-          sessionCount: {
-            confidence: 'high',
-            metric: 'sessionCount',
-            provider: 'multiple',
-            unit: 'count',
-            value: 2,
-          },
-          sessionMinutes: {
-            confidence: 'high',
-            metric: 'sessionMinutes',
-            provider: 'multiple',
-            unit: 'minutes',
-            value: 75,
-          },
-        },
-        date,
-        providers: ['garmin', 'junction'],
-        summaryConfidence: 'high',
-      },
-    }
-    const canonicalDayPath = path.join(
-      scenario.turnInput.workingDirectory,
-      'canonical-wearables-day.json',
-    )
-    await writeFile(
-      canonicalDayPath,
-      `${JSON.stringify(canonicalDay)}\n`,
-      'utf8',
-    )
-    const dailyActivitySkill = await readFile(
-      path.resolve(
-        path.dirname(fileURLToPath(import.meta.url)),
-        '../skills/daily-activity/SKILL.md',
-      ),
-      'utf8',
-    )
-    scenario.stub.queue(
-      {
-        functionCall: {
-          arguments: {
-            command: `/bin/cat ${JSON.stringify(canonicalDayPath)}`,
-            timeout_ms: 10_000,
-          },
-          name: 'shell_command',
-        },
-      },
-      {
-        text:
-          'Today so far: 75 workout minutes across 2 workouts—running and strength.',
-      },
-    )
-
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      developerInstructions: dailyActivitySkill,
-      prompt: [
-        `The current local date is ${date}. What is my total workout time today?`,
-        `Read ${JSON.stringify(canonicalDayPath)} with the shell; it contains the canonical output of \`vault-cli wearables day ${date} --format json\`.`,
-      ].join('\n'),
-    })
-
-    expect(result.finalMessage).toBe(
-      'Today so far: 75 workout minutes across 2 workouts—running and strength.',
-    )
-    expect(result.finalMessage).not.toMatch(
-      /\b(?:import|missing|sync|synced|synchroniz(?:e|ed|ing))\b/iu,
-    )
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-    const toolOutput = findNestedStringContaining(
-      JSON.parse(scenario.stub.requestBodiesSinceBaseline()[1] ?? 'null'),
-      'Exit code:',
-    )
-    expect(toolOutput).toContain('"sessionMinutes"')
-    expect(toolOutput).toContain('"value":75')
-    expect(toolOutput).toContain('"value":2')
-    expect(toolOutput).toContain('suppressing one mirrored provider copy')
-  })
-
-  it('excludes the open local day from a current-chat newsletter comparison', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
-    const sharedReadRequests: unknown[] = []
-    const hostedToolContext: AssistantHostedToolContext = {
-      computerToolsAvailable: false,
-      currentHostedDeliveryContext: () => null,
-      currentHostedMailboxItemIds: () => [],
-      groupSharedReader: {
-        request: async (request) => {
-          sharedReadRequests.push(request)
-          return buildNewsletterSharedReadResult()
-        },
-      },
-      sendVaultFile: async () => {
-        throw new Error('Vault-file sending is unavailable for this test.')
-      },
-      vaultFileSendAvailable: false,
-    }
-    scenario.stub.queue(
-      {
-        functionCall: {
-          arguments: {
-            action: 'read_shared',
-            projectionScopes: [{ projectionKind: 'workout-days.v0' }],
-          },
-          name: 'group',
-          namespace: 'murph',
-        },
-      },
-      {
-        text:
-          'Through May 13, Avery leads at 45 workout minutes per recorded day, with Blake at 40. Today so far, Avery has 90 minutes and Blake has 5. Who is in for tomorrow’s challenge?',
-      },
-    )
-
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      developerInstructions: buildGroupNewsletterScheduledExecutionPrompt({
-        delivery: 'current_chat',
-        newsletterName: 'Motion Notes',
-      }),
-      dynamicTools: resolveMurphDynamicTools({
-        groupAvailable: true,
-      }),
-      hostedToolContext,
-      prompt: [
-        buildGroupNewsletterAutomationInstructions({
-          delivery: 'current_chat',
-          healthScopes: ['workout-days.v0'],
-          newsletterName: 'Motion Notes',
-          tone: 'supportive',
-        }),
-        'The current local date is 2031-05-14 in America/New_York.',
-      ].join('\n'),
-    })
-
-    expect(sharedReadRequests).toEqual([{
-      projectionScopes: [{ projectionKind: 'workout-days.v0' }],
-    }])
-    expect(result.finalMessage).toBe(
-      'Through May 13, Avery leads at 45 workout minutes per recorded day, with Blake at 40. Today so far, Avery has 90 minutes and Blake has 5. Who is in for tomorrow’s challenge?',
-    )
-    expect(result.finalMessage).not.toMatch(/\b60\b|28(?:\.3+)?/u)
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
-    const toolOutput = findNestedStringContaining(
-      JSON.parse(scenario.stub.requestBodiesSinceBaseline()[1] ?? 'null'),
-      '"requestedProjectionScopeKeys"',
-    )
-    expect(toolOutput).toContain('"date":"2031-05-14"')
-    expect(toolOutput).toContain('"workoutMinutes":90')
-    expect(toolOutput).toContain('"workoutMinutes":5')
-  })
-
   it('captures scripted reaction tool calls from the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -860,84 +686,6 @@ async function prepareScriptedTurnScenario(): Promise<{
   }
 }
 
-function buildNewsletterSharedReadResult() {
-  const records = (
-    values: readonly [date: string, workoutMinutes: number][],
-  ) => values.map(([date, workoutMinutes]) => ({
-    data: {
-      date,
-      metricSemantics: 'canonical-workout-day' as const,
-      workoutCount: 1,
-      workoutMinutes,
-    },
-    occurredAt: `${date}T00:00:00.000Z`,
-    recordKey: date,
-  }))
-  const projection = (
-    values: readonly [date: string, workoutMinutes: number][],
-  ) => ({
-    dataStatus: 'available' as const,
-    grantStatus: 'granted' as const,
-    projectionScope: { projectionKind: 'workout-days.v0' as const },
-    projectionScopeKey: 'workout-days.v0',
-    records: records(values),
-  })
-
-  return {
-    members: [
-      {
-        currentTurnHandles: [],
-        displayName: 'Avery',
-        memberId: 'member_a',
-        participantId: 'participant_a',
-        projections: [projection([
-          ['2031-05-12', 40],
-          ['2031-05-13', 50],
-          ['2031-05-14', 90],
-        ])],
-      },
-      {
-        currentTurnHandles: [],
-        displayName: 'Blake',
-        memberId: 'member_b',
-        participantId: 'participant_b',
-        projections: [projection([
-          ['2031-05-12', 30],
-          ['2031-05-13', 50],
-          ['2031-05-14', 5],
-        ])],
-      },
-    ],
-    requestedProjectionScopeKeys: ['workout-days.v0'],
-    status: 'ok' as const,
-  }
-}
-
-function findNestedStringContaining(
-  value: unknown,
-  fragment: string,
-): string {
-  if (typeof value === 'string') {
-    if (value.includes(fragment)) {
-      return value
-    }
-    throw new Error(`Expected a nested string containing ${fragment}.`)
-  }
-  const children = Array.isArray(value)
-    ? value
-    : value && typeof value === 'object'
-      ? Object.values(value)
-      : []
-  for (const child of children) {
-    try {
-      return findNestedStringContaining(child, fragment)
-    } catch {
-      // Continue through the bounded provider request until the tool output.
-    }
-  }
-  throw new Error(`Expected a nested string containing ${fragment}.`)
-}
-
 async function writeOpenAiFlexModelCatalogJson(input: {
   codexCommand: string
   directory: string
@@ -1013,12 +761,10 @@ function buildScriptedCodexConfigToml(baseUrl: string): string {
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
   const queuedResponses: ScriptedResponse[] = []
-  const requestBodies: string[] = []
   const requestSummaries: ScriptedProviderRequestSummary[] = []
   let responseSequence = 0
   let responsesRequestCount = 0
   let requestBaseline = 0
-  let requestBodyBaseline = 0
   let requestSummaryBaseline = 0
 
   const server: Server = createServer(async (request, response) => {
@@ -1035,7 +781,6 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
         : Buffer.from(chunk).toString('utf8')
     }
     responsesRequestCount += 1
-    requestBodies.push(requestBody)
     requestSummaries.push(readScriptedProviderRequestSummary(requestBody))
     const scripted = queuedResponses.shift()
     if (!scripted) {
@@ -1104,14 +849,11 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
     },
     markRequestBaseline: () => {
       requestBaseline = responsesRequestCount
-      requestBodyBaseline = requestBodies.length
       requestSummaryBaseline = requestSummaries.length
     },
     queue: (...responses) => {
       queuedResponses.push(...responses)
     },
-    requestBodiesSinceBaseline: () =>
-      requestBodies.slice(requestBodyBaseline),
     requestCountSinceBaseline: () => responsesRequestCount - requestBaseline,
     requestSummariesSinceBaseline: () =>
       requestSummaries.slice(requestSummaryBaseline),

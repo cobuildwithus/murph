@@ -1,10 +1,5 @@
 import {
-  addDaysToIsoDate,
-  formatTimeZoneDateTimeParts,
-} from "@murphai/contracts";
-
-import {
-  buildOverviewWeeklyStatsFromDailySampleSummaries,
+  buildOverviewWeeklyStatDetailsFromDailySampleSummaries,
   type OverviewWeeklySampleSummary,
 } from "./overview-weekly-stats.ts";
 
@@ -84,117 +79,32 @@ export function buildSharedGroupWeeklyMembers(input: {
   referenceAt: Date | string;
   timeZone: string;
 }): SharedGroupWeeklyMember[] {
-  const window = resolveSharedGroupWeeklyWindow(
-    input.referenceAt,
-    input.timeZone,
-  );
-
-  return input.members.map((member) => {
-    const completedDailySummaries = readDailySampleSummaries(member)
-      .filter((summary) => summary.date < window.currentDay);
-    const coverageByStat = buildSharedGroupWeeklyCoverage(
-      completedDailySummaries,
-      window.currentWeekStart,
-      window.currentDay,
-    );
-
-    return {
-      displayName: member.displayName,
-      memberId: member.memberId,
-      weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
-        completedDailySummaries,
-        input.timeZone,
-        input.referenceAt,
-      ).flatMap((stat) => {
-        if (stat.currentWeekAvg === null) {
-          return [];
-        }
-        const coverage = coverageByStat.get(
-          buildSharedGroupWeeklyStatKey(stat.stream, stat.unit),
-        );
-        if (!coverage) {
-          return [];
-        }
-        const observedDates = [...coverage]
-          .sort((left, right) => left.localeCompare(right));
-        const throughDate = observedDates.at(-1);
-        return throughDate
-          ? [{
-              currentWeekAvg: stat.currentWeekAvg,
-              observedDayCount: observedDates.length,
-              observedDates,
-              stream: stat.stream,
-              throughDate,
-              unit: stat.unit,
-            }]
-          : [];
-      }),
-    };
-  });
-}
-
-function buildSharedGroupWeeklyCoverage(
-  summaries: readonly OverviewWeeklySampleSummary[],
-  currentWeekStart: string,
-  currentDay: string,
-): Map<string, Set<string>> {
-  const coverageByStat = new Map<string, Set<string>>();
-
-  for (const summary of summaries) {
-    if (
-      summary.sumValue === null
-      || summary.numericSampleCount <= 0
-      || summary.date < currentWeekStart
-      || summary.date >= currentDay
-    ) {
-      continue;
-    }
-
-    const key = buildSharedGroupWeeklyStatKey(summary.stream, summary.unit);
-    const existing = coverageByStat.get(key);
-    if (existing) {
-      existing.add(summary.date);
-      continue;
-    }
-
-    coverageByStat.set(key, new Set([summary.date]));
-  }
-
-  return coverageByStat;
-}
-
-function resolveSharedGroupWeeklyWindow(
-  referenceAt: Date | string,
-  timeZone: string,
-): { currentDay: string; currentWeekStart: string } {
-  const referenceDate = referenceAt instanceof Date
-    ? referenceAt
-    : new Date(referenceAt);
-  if (Number.isNaN(referenceDate.valueOf())) {
-    throw new TypeError(
-      "Shared group weekly referenceAt must be a valid datetime.",
-    );
-  }
-
-  const currentDay = formatTimeZoneDateTimeParts(
-    referenceDate,
-    timeZone,
-  );
-  const mondayOffset = currentDay.dayOfWeek === 0
-    ? 6
-    : currentDay.dayOfWeek - 1;
-
-  return {
-    currentDay: currentDay.dayKey,
-    currentWeekStart: addDaysToIsoDate(currentDay.dayKey, -mondayOffset),
-  };
-}
-
-function buildSharedGroupWeeklyStatKey(
-  stream: string,
-  unit: string | null,
-): string {
-  return `${stream}:${unit ?? ""}`;
+  return input.members.map((member) => ({
+    displayName: member.displayName,
+    memberId: member.memberId,
+    weeklyStats: buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
+      readDailySampleSummaries(member),
+      input.timeZone,
+      input.referenceAt,
+      { includeCurrentDay: false },
+    ).flatMap((stat) => {
+      if (stat.currentWeekAvg === null) {
+        return [];
+      }
+      const observedDates = stat.currentWeekObservedDates;
+      const throughDate = observedDates.at(-1);
+      return throughDate
+        ? [{
+            currentWeekAvg: stat.currentWeekAvg,
+            observedDayCount: observedDates.length,
+            observedDates,
+            stream: stat.stream,
+            throughDate,
+            unit: stat.unit,
+          }]
+        : [];
+    }),
+  }));
 }
 
 function readDailySampleSummaries(

@@ -45,32 +45,22 @@ actions create the hosted group record as part of the existing flow.
 ## Shared fact limits
 
 Say only what the current `read_shared` result proves. A granted projection
-with no usable record means only that the current shared read lacks that
-metric; its cause is unverified. It does not prove that the member's private
-Murph lacks the workout, that a provider has not synced it, that import failed,
-or that a share refresh failed. Separately granted
-`device-sync-status.v0` evidence permits only the literal status and timestamp
-meanings the result supplies. Never use device status to explain why a metric
-is absent. A record timestamp does not prove that a projection contains every
-source record.
+with no usable record means the shared read lacks that metric; its cause is
+unverified. Do not infer anything about private records, provider sync, import,
+or share refresh. Separately granted `device-sync-status.v0` evidence permits
+only its literal status and timestamp meanings, never an explanation for an
+absent metric. A record timestamp does not prove projection completeness.
 
-An `activity-days.v0` record is usable as broad movement only when its
-`data.metricSemantics` is exactly `"broad-movement"`. A missing or different
-marker makes that record ambiguous and unusable for totals, averages,
-standings, or movement language; it is not zero. Likewise, a
-`workout-days.v0` record is usable as the canonical combined workout day only
-when its `data.metricSemantics` is exactly `"canonical-workout-day"`;
-otherwise its workout count and minutes are ambiguous and unusable, not zero.
+Use `activity-days.v0` as broad movement only when `data.metricSemantics` is
+exactly `"broad-movement"`, and `workout-days.v0` as a canonical combined
+workout day only when it is exactly `"canonical-workout-day"`. A missing or
+different marker makes the record ambiguous and unusable, not zero.
 
-Treat every value for the current local calendar day as provisional. Describe
-it as "so far" and do not use it to declare a settled daily winner, crown,
-challenge result, or complete total. This is a data-quality qualifier, not a
-reason to expose someone's missing data.
+Treat every current-local-day value as provisional: say "so far" and do not
+use it for a settled winner, crown, challenge result, or complete total.
 
-Within one day, distinct workouts add together. Use a returned canonical
-combined workout-day value when available. Never "correct" a day by replacing
-one workout's duration with another's; a separate run and strength session both
-belong in the day total, while mirrored copies of one workout count once.
+Use a returned canonical combined workout-day value as-is; do not rebuild it
+from raw records.
 
 ## Creating a hosted group
 

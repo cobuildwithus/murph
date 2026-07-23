@@ -73,6 +73,8 @@ import type {
   WearableBodyStateSummary,
   WearableCandidateSourceFamily,
   WearableConfidenceLevel,
+  WearableDailyCumulativeMetric,
+  WearableDailyMaximumMetric,
   WearableDataset,
   WearableDaySummary,
   WearableDriftSummary,
@@ -116,6 +118,7 @@ import type {
   ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
 import {
+  ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
@@ -186,24 +189,17 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     dataset.metricCandidates.filter((candidate) => metricSetHas(ACTIVITY_METRIC_KEYS, candidate.metric)),
   );
   const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
-    dataset.activitySessionDayRollups ?? [],
-  );
-  const activitySessionAggregatesByDate = groupActivitySessionAggregatesByDate(
-    dataset.activitySessionAggregates,
+    dataset.activitySessionDayRollups,
   );
   const dates = collectSortedDatesDesc([
     ...metricCandidatesByDate.keys(),
-    ...activitySessionAggregatesByDate.keys(),
     ...activitySessionDayRollupsByDate.keys(),
   ]);
 
   return dates.map((date) => {
     const dateCandidates = metricCandidatesByDate.get(date) ?? [];
     const explicitDateCandidates = dateCandidates;
-    const aggregates =
-      activitySessionDayRollupsByDate.get(date)
-      ?? activitySessionAggregatesByDate.get(date)
-      ?? [];
+    const aggregates = activitySessionDayRollupsByDate.get(date) ?? [];
     const workoutMetricCandidates = aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates);
     const steps = resolveMetric("steps", selectMetricCandidates(explicitDateCandidates, "steps"), { metricFamily: "activity" });
     const activeCalories = resolveDailyCumulativeMetric(
@@ -321,13 +317,8 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
   });
 }
 
-type DailyCumulativeMetric =
-  | "activeCalories"
-  | "distanceKm"
-  | "totalElevationGainMeters";
-
 function resolveDailyCumulativeMetric(
-  metric: DailyCumulativeMetric,
+  metric: WearableDailyCumulativeMetric,
   explicitDateCandidates: readonly WearableMetricCandidate[],
   workoutMetricCandidates: readonly WearableMetricCandidate[],
 ): WearableResolvedMetric {
@@ -362,10 +353,10 @@ function formatDailyReducerValue(selection: WearableMetricSelection): string {
 }
 
 function resolveDailyMaximumMetric(
-  metric: "maxHeartRate" | "workoutStrain",
+  metric: WearableDailyMaximumMetric,
   candidates: readonly WearableMetricCandidate[],
 ): WearableResolvedMetric {
-  if (metric === "maxHeartRate") {
+  if (ACTIVITY_BRANCH_SCOPED_METRIC_KEYS.has(metric)) {
     const explicitMaximum = resolveMaximumKnownMetric(
       metric,
       candidates.filter((candidate) => !isActivitySessionRollupMetricCandidate(candidate)),
@@ -398,7 +389,7 @@ function isActivitySessionRollupMetricCandidate(candidate: WearableMetricCandida
 function resolveOverlappingDailyMetricBranches(input: {
   explicit: WearableResolvedMetric;
   explicitLabel: string;
-  metric: DailyCumulativeMetric | "maxHeartRate";
+  metric: WearableDailyCumulativeMetric | WearableDailyMaximumMetric;
   reducerLabel: string;
   relationship: string;
   workout: WearableResolvedMetric;
@@ -447,7 +438,7 @@ function resolveOverlappingDailyMetricBranches(input: {
 }
 
 function resolveMaximumKnownMetric(
-  metric: DailyCumulativeMetric | "maxHeartRate" | "workoutStrain",
+  metric: WearableDailyCumulativeMetric | WearableDailyMaximumMetric,
   candidates: readonly WearableMetricCandidate[],
   reducerLabel: string,
 ): WearableResolvedMetric {

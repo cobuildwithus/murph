@@ -227,8 +227,6 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     ["actigraphy-counts", "activity-counts"],
     ["active-minutes", "activity-minutes"],
     ["activeMinutes", "activity-minutes"],
-    ["session-minutes", "workout-minutes"],
-    ["workoutDuration", "workout-minutes"],
     ["workouts", "workout-count"],
     ["resting-hr", "resting-heart-rate"],
     ["sleep-hours", "total-sleep-minutes"],

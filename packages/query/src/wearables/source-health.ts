@@ -5,25 +5,25 @@ import { resolveWearablePublicSourceProvider } from "./origin.ts";
 import { formatProviderName } from "./provider-policy.ts";
 import { buildActivitySessionMetricCandidate, buildSleepWindowMetricCandidate } from "./candidates.ts";
 import { buildCandidateExactKey } from "./dedupe.ts";
-import type {
-  WearableActivityDay,
-  WearableActivitySessionAggregate,
-  WearableActivitySessionMetricValues,
-  WearableBodyStateDay,
-  WearableDataset,
-  WearableMetricCandidate,
-  WearableMetricKey,
-  WearableRecoveryDay,
-  WearableResolvedMetric,
-  WearableSleepNight,
-  WearableSleepWindowCandidate,
-  WearableSourceHealth,
-} from "./types.ts";
 import {
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
+  type WearableActivityDay,
+  type WearableActivitySessionAggregate,
+  type WearableActivitySessionMetricValues,
+  type WearableActivitySessionWorkoutMetricKey,
+  type WearableBodyStateDay,
+  type WearableDataset,
+  type WearableMetricCandidate,
+  type WearableMetricKey,
+  type WearableRecoveryDay,
+  type WearableResolvedMetric,
+  type WearableSleepNight,
+  type WearableSleepWindowCandidate,
+  type WearableSourceHealth,
 } from "./types.ts";
 
 const UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS = new Set<WearableMetricKey>([
@@ -42,13 +42,9 @@ const UNAMBIGUOUS_SLEEP_FRESHNESS_METRICS = new Set<WearableMetricKey>([
   "totalSleepMinutes",
 ]);
 
-const PROJECTED_WORKOUT_METRIC_KEYS = [
-  "activeCalories",
-  "distanceKm",
-  "maxHeartRate",
-  "totalElevationGainMeters",
-  "workoutStrain",
-] as const satisfies readonly (keyof WearableActivitySessionMetricValues)[];
+const PROJECTED_WORKOUT_METRIC_KEYS = ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.map(
+  ({ metric }) => metric,
+);
 
 export function buildWearableSourceHealth(input: {
   activityDays: readonly WearableActivityDay[];
@@ -89,7 +85,7 @@ export function buildWearableSourceHealth(input: {
     ...input.dataset.sleepWindows.map((window) => buildSleepWindowMetricCandidate(window)),
   ]);
 
-  const selectedMetrics = [
+  const selectedMetricsByProvider = countSelectedMetricsByProvider([
     ...input.activityDays.flatMap((day) => [
       day.steps,
       day.activeCalories,
@@ -147,15 +143,10 @@ export function buildWearableSourceHealth(input: {
       day.temperature,
       day.waistCircumference,
     ]),
-  ];
-  const selectedMetricsByProvider = countSelectedMetricsByProvider(
-    selectedMetrics.filter((metric) =>
-      metric.selection.sourceKind !== "activity-session-day-rollup"
-    ),
-  );
+  ]);
   attributeSelectedActivityRollupMetricsToContributingProviders(
     input.activityDays,
-    input.dataset.activitySessionDayRollups ?? [],
+    input.dataset.activitySessionDayRollups,
     selectedMetricsByProvider,
   );
 
@@ -246,7 +237,7 @@ export function buildWearableSourceHealth(input: {
       ).sort();
       const providerWorkoutMetricKeys = uniqueStrings(
         providerActivitySessionAggregates.flatMap((aggregate) => [
-          ...(aggregate.workoutMetricKeys ?? []),
+          ...aggregate.workoutMetricKeys,
           ...definedWorkoutMetricKeys(aggregate.workoutMetricValues),
         ]),
       ).sort();
@@ -308,17 +299,9 @@ export function buildWearableSourceHealth(input: {
         );
       }
 
-      if (providerProjectedWorkoutMetricKeys.length > 0) {
+      if (providerWorkoutMetricKeys.length > 0) {
         notes.push(
-          `${formatProviderName(provider)} contributes workout detail metrics to daily activity summaries (${providerProjectedWorkoutMetricKeys.join(", ")}).`,
-        );
-      }
-      const providerSessionOnlyWorkoutMetricKeys = providerWorkoutMetricKeys.filter(
-        (metric) => !providerProjectedWorkoutMetricKeys.includes(metric),
-      );
-      if (providerSessionOnlyWorkoutMetricKeys.length > 0) {
-        notes.push(
-          `${formatProviderName(provider)} has additional workout detail metrics on activity sessions (${providerSessionOnlyWorkoutMetricKeys.join(", ")}); these remain session-level evidence.`,
+          `${formatProviderName(provider)} has workout detail metrics on activity sessions (${providerWorkoutMetricKeys.join(", ")}); supported fields contribute to daily activity summaries, while unsupported details remain session-level evidence.`,
         );
       }
 
@@ -494,7 +477,10 @@ function countSelectedMetricsByProvider(
 
   for (const metric of metrics) {
     const provider = metric.selection.provider;
-    if (!provider) {
+    if (
+      !provider
+      || metric.selection.sourceKind === "activity-session-day-rollup"
+    ) {
       continue;
     }
 
@@ -525,16 +511,22 @@ function attributeSelectedActivityRollupMetricsToContributingProviders(
     ];
 
     for (const metric of metrics) {
-      if (
-        metric.selection.sourceKind !== "activity-session-day-rollup"
-      ) {
+      if (metric.selection.sourceKind !== "activity-session-day-rollup") {
         continue;
       }
 
       const rollup = rollupsByDate.get(day.date);
-      const contributors = rollup
-        ? activityRollupMetricContributors(rollup, metric.metric)
-        : [];
+      let contributors: readonly string[] = [];
+      if (rollup && (metric.metric === "sessionMinutes" || metric.metric === "sessionCount")) {
+        contributors = rollup.sessionContributors;
+      } else if (rollup) {
+        for (const workoutMetric of PROJECTED_WORKOUT_METRIC_KEYS) {
+          if (metric.metric === workoutMetric) {
+            contributors = rollup.workoutMetricContributors?.[workoutMetric] ?? [];
+            break;
+          }
+        }
+      }
       const fallbackProvider = metric.selection.provider;
       const providers = contributors.length > 0
         ? contributors
@@ -549,37 +541,9 @@ function attributeSelectedActivityRollupMetricsToContributingProviders(
   }
 }
 
-function activityRollupMetricContributors(
-  rollup: WearableActivitySessionAggregate,
-  metric: string,
-): string[] {
-  if (metric === "sessionMinutes" || metric === "sessionCount") {
-    return rollup.sessionContributors ?? [];
-  }
-
-  switch (metric) {
-    case "activeCalories":
-      return rollup.workoutMetricContributors?.activeCalories ?? [];
-    case "distanceKm":
-      return rollup.workoutMetricContributors?.distanceKm ?? [];
-    case "maxHeartRate":
-      return rollup.workoutMetricContributors?.maxHeartRate ?? [];
-    case "totalElevationGainMeters":
-      return rollup.workoutMetricContributors?.totalElevationGainMeters ?? [];
-    case "workoutStrain":
-      return rollup.workoutMetricContributors?.workoutStrain ?? [];
-    default:
-      return [];
-  }
-}
-
 function definedWorkoutMetricKeys(
-  values: WearableActivitySessionMetricValues | undefined,
-): (keyof WearableActivitySessionMetricValues)[] {
-  if (!values) {
-    return [];
-  }
-
+  values: WearableActivitySessionMetricValues,
+): WearableActivitySessionWorkoutMetricKey[] {
   return PROJECTED_WORKOUT_METRIC_KEYS.filter((metric) =>
     values[metric] !== undefined
   );

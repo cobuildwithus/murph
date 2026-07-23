@@ -67,15 +67,7 @@ export const ACTIVITY_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: [
-      "session-minutes",
-      "session_minutes",
-      "sessionMinutes",
-      "workout-duration",
-      "workout_duration",
-      "workoutDuration",
-      "workout-minutes",
-    ],
+    aliases: ["session-minutes", "workout-duration"],
     biomarkerKey: null,
     canonicalUnit: "minutes",
     category: "activity",

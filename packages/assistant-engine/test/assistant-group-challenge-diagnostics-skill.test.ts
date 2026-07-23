@@ -127,6 +127,9 @@ describe('assistant group challenge diagnostics guidance', () => {
       )
     }
 
+    expect(challenge).toContain(
+      'Apply `group-chat`\'s **Shared fact limits** before scoring.',
+    )
     expect(challenge).toContain('more than two local calendar days old')
     expect(challenge).toContain('`needs-reconnect` and `disconnected`')
     expect(challenge).toContain(
@@ -135,12 +138,6 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain('`setting-up` means setup is not complete.')
     expect(challenge).toContain(
       '`connected` means only that the source is connected.',
-    )
-    expect(challenge).toContain(
-      'its cause is unverified regardless of device status.',
-    )
-    expect(challenge).toContain(
-      'Never connect that status to the metric absence.',
     )
     expect(challenge).toContain(
       'based on the literal status alone; do not claim reconnecting will restore the metric.',
@@ -161,7 +158,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Apple does not expose HealthKit read authorization',
     )
     expect(challenge).toContain(
-      'Do not guess about permissions, a disconnected device, source freshness, or whether the participant opened the app.',
+      'without guessing about permissions, a disconnected device, source freshness, or whether the participant opened the app.',
     )
     expect(challenge).toContain(
       '`connectionSyncJobCompletedAt` field is completion time for a connection-wide sync job',
@@ -171,17 +168,6 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(challenge).toContain(
       'only as the time Murph last completed a connection-wide sync job',
-    )
-    expect(challenge).toContain(
-      '`data.metricSemantics` is exactly `"broad-movement"`',
-    )
-    expect(challenge).toContain(
-      '`data.metricSemantics="canonical-workout-day"`',
-    )
-    expect(challenge).not.toContain('source problem')
-    expect(challenge).not.toContain('has not reached Murph')
-    expect(challenge).not.toContain(
-      'because connection status was not shared',
     )
   })
 
@@ -265,7 +251,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).not.toContain('gapState')
     expect(challenge).not.toContain('episodePublicGapDate')
     expect(challenge).toContain(
-      'state the current evidence-backed status, say that the cause of a missing usable metric is unverified, and give the smallest useful action.',
+      'state the evidence-backed status, and give the smallest useful action.',
     )
     expect(challenge).not.toContain('belong in the affected participant\'s private thread')
     expect(groupChat).toContain(

@@ -8,7 +8,6 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
-  buildGroupNewsletterScheduledExecutionPrompt,
   GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
   GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
   GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
@@ -21,47 +20,6 @@ import type {
 } from '../src/assistant/hosted-tool-context.js'
 
 describe('hosted domain dynamic tools', () => {
-  it('keeps scheduled newsletter composition on complete, semantically owned facts', () => {
-    const currentChatPrompt = buildGroupNewsletterScheduledExecutionPrompt({
-      delivery: 'current_chat',
-      newsletterName: 'Weekly check-in',
-    })
-    const emailPrompt = buildGroupNewsletterScheduledExecutionPrompt({
-      delivery: 'group_email',
-      newsletterName: 'Weekly check-in',
-    })
-
-    expect(currentChatPrompt).toContain(
-      'activity-days.v0 record is broad movement only when data.metricSemantics="broad-movement"',
-    )
-    expect(currentChatPrompt).toContain(
-      'workout-days.v0 record is a canonical combined workout day only when data.metricSemantics="canonical-workout-day"',
-    )
-    expect(currentChatPrompt).toContain('ambiguous and unusable, not zero')
-    expect(currentChatPrompt).toContain(
-      'exclude every record dated on the current local day',
-    )
-    expect(currentChatPrompt).toContain(
-      'current-day value may appear only as a separate "today so far" aside',
-    )
-    expect(currentChatPrompt).not.toContain('observedDayCount')
-    expect(emailPrompt).toContain(
-      'Use observedDayCount, observedDates, and throughDate to scope averages to observed completed days',
-    )
-    expect(emailPrompt).toContain('already excluded the open local day')
-    expect(emailPrompt).toContain('never treat unobserved days as zero')
-    expect(emailPrompt).toContain(
-      'only when every compared entry has an identical observedDates array',
-    )
-    expect(emailPrompt).toContain(
-      'When coverage differs, scope each average to its own dates and avoid a crown',
-    )
-    expect(currentChatPrompt).toContain('Distinct same-day workouts add together')
-    expect(currentChatPrompt).toContain(
-      'never repair or explain a total by replacing one workout with another',
-    )
-  })
-
   it('keeps device and automation default-off', () => {
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_DEVICE_TOOL)
     expect(resolveMurphDynamicTools({})).not.toContain(MURPH_AUTOMATION_TOOL)

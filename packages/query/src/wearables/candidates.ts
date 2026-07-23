@@ -45,21 +45,23 @@ import {
   readNumber,
   uniqueStrings,
 } from "./shared.ts";
-import type {
-  WearableActivitySessionAggregate,
-  WearableActivitySessionMetricContributors,
-  WearableActivitySessionMetricValues,
-  WearableCandidateSourceFamily,
-  WearableDataset,
-  WearableExternalRef,
-  WearableFilters,
-  WearableHeartRateZoneAggregate,
-  WearableMetricCandidate,
-  WearableMetricKey,
-  WearableMetricSuppressionEvidence,
-  WearableMetricSelection,
-  WearableProvenanceDiagnostic,
-  WearableSleepWindowCandidate,
+import {
+  ACTIVITY_SESSION_WORKOUT_METRIC_SPECS,
+  type WearableActivitySessionAggregate,
+  type WearableActivitySessionMetricContributors,
+  type WearableActivitySessionMetricValues,
+  type WearableActivitySessionWorkoutMetricKey,
+  type WearableCandidateSourceFamily,
+  type WearableDataset,
+  type WearableExternalRef,
+  type WearableFilters,
+  type WearableHeartRateZoneAggregate,
+  type WearableMetricCandidate,
+  type WearableMetricKey,
+  type WearableMetricSuppressionEvidence,
+  type WearableMetricSelection,
+  type WearableProvenanceDiagnostic,
+  type WearableSleepWindowCandidate,
 } from "./types.ts";
 
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
@@ -402,10 +404,10 @@ function aggregateActivitySessionCandidates(
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
       existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
       existing.heartRateZones = aggregateKind === "activity-session-day-rollup"
-        ? mergeActivitySessionDayHeartRateZoneAggregates([
+        ? mergeHeartRateZoneAggregates([
             ...existing.heartRateZones,
             ...heartRateZones,
-          ])
+          ], true)
         : mergeHeartRateZoneAggregates([
             ...existing.heartRateZones,
             ...heartRateZones,
@@ -413,7 +415,7 @@ function aggregateActivitySessionCandidates(
       existing.sessionMinutes += candidate.value;
       existing.sessionCount += 1;
       existing.sessionContributors = uniqueStrings([
-        ...(existing.sessionContributors ?? []),
+        ...existing.sessionContributors,
         candidateProvider,
       ]).sort();
       existing.workoutMetricKeys = uniqueStrings([
@@ -421,8 +423,8 @@ function aggregateActivitySessionCandidates(
         ...(candidate.workoutMetricKeys ?? []),
       ]).sort();
       const mergedWorkoutMetrics = mergeDistinctActivitySessionWorkoutMetricEvidence({
-        contributors: existing.workoutMetricContributors ?? {},
-        values: existing.workoutMetricValues ?? {},
+        contributors: existing.workoutMetricContributors,
+        values: existing.workoutMetricValues,
       }, candidateWorkoutMetrics);
       existing.workoutMetricContributors = mergedWorkoutMetrics.contributors;
       existing.workoutMetricValues = mergedWorkoutMetrics.values;
@@ -447,7 +449,7 @@ function aggregateActivitySessionCandidates(
       dataOrigin: candidate.dataOrigin ?? null,
       date: candidate.date,
       heartRateZones: aggregateKind === "activity-session-day-rollup"
-        ? mergeActivitySessionDayHeartRateZoneAggregates(heartRateZones)
+        ? mergeHeartRateZoneAggregates(heartRateZones, true)
         : mergeHeartRateZoneAggregates(heartRateZones),
       paths: [...candidate.paths],
       provider: candidate.provider,
@@ -776,54 +778,20 @@ function compareActivitySessionCandidateReconciliationEvidence(
   left: WearableMetricCandidate,
   right: WearableMetricCandidate,
 ): number {
-  const durationConsistencyDifference =
-    Number(activitySessionCandidateDurationIsConsistent(right))
-    - Number(activitySessionCandidateDurationIsConsistent(left));
-  if (durationConsistencyDifference !== 0) {
-    return durationConsistencyDifference;
-  }
-
-  const coverageDifference =
-    activitySessionCandidateCoverageDurationMs(right)
-    - activitySessionCandidateCoverageDurationMs(left);
-  if (coverageDifference !== 0) {
-    return coverageDifference;
-  }
-
-  const declaredDurationDifference = right.value - left.value;
-  if (declaredDurationDifference !== 0) {
-    return declaredDurationDifference;
-  }
-
-  const completenessDifference =
-    activitySessionCandidateCompletenessScore(right)
-    - activitySessionCandidateCompletenessScore(left);
-  if (completenessDifference !== 0) {
-    return completenessDifference;
-  }
-
-  const recordedAtDifference =
-    (parseIsoTimestampMs(right.recordedAt) ?? 0)
-    - (parseIsoTimestampMs(left.recordedAt) ?? 0);
-  if (recordedAtDifference !== 0) {
-    return recordedAtDifference;
-  }
-
-  const publicEvidenceDifference =
-    activitySessionCandidatePublicEvidenceSignature(left)
-      .localeCompare(activitySessionCandidatePublicEvidenceSignature(right));
-  if (publicEvidenceDifference !== 0) {
-    return publicEvidenceDifference;
-  }
-
-  const reconciliationExactKeyDifference =
-    activitySessionCandidateReconciliationExactKey(left)
-      .localeCompare(activitySessionCandidateReconciliationExactKey(right));
-  if (reconciliationExactKeyDifference !== 0) {
-    return reconciliationExactKeyDifference;
-  }
-
-  return left.candidateId.localeCompare(right.candidateId);
+  return Number(activitySessionCandidateDurationIsConsistent(right))
+    - Number(activitySessionCandidateDurationIsConsistent(left))
+    || activitySessionCandidateCoverageDurationMs(right)
+      - activitySessionCandidateCoverageDurationMs(left)
+    || right.value - left.value
+    || activitySessionCandidateCompletenessScore(right)
+      - activitySessionCandidateCompletenessScore(left)
+    || (parseIsoTimestampMs(right.recordedAt) ?? 0)
+      - (parseIsoTimestampMs(left.recordedAt) ?? 0)
+    || activitySessionCandidatePublicEvidenceSignature(left)
+      .localeCompare(activitySessionCandidatePublicEvidenceSignature(right))
+    || activitySessionCandidateReconciliationExactKey(left)
+      .localeCompare(activitySessionCandidateReconciliationExactKey(right))
+    || left.candidateId.localeCompare(right.candidateId);
 }
 
 function activitySessionCandidateReconciliationExactKey(
@@ -908,36 +876,23 @@ function selectPreferredActivitySessionType(
 function activitySessionCandidatePublicEvidenceSignature(
   candidate: WearableMetricCandidate,
 ): string {
-  const provider = resolveActivitySessionCandidatePublicProvider(candidate);
   const timestamps = activitySessionCandidateReconciliationTimestamps(candidate);
-  const heartRateZones = (candidate.heartRateZones ?? []).map((zone) => ({
-    durationMinutes: zone.durationMinutes,
-    label: zone.label ?? null,
-    maxHeartRate: zone.maxHeartRate ?? null,
-    minHeartRate: zone.minHeartRate ?? null,
-    zone: zone.zone ?? null,
-  }));
-  const workoutMetrics = activitySessionCandidateWorkoutMetricEvidence(candidate);
-
-  return JSON.stringify({
-    activityType: candidate.activityType ?? null,
-    date: candidate.date,
-    durationMinutes: candidate.value,
-    endedAt: timestamps.endedAt,
-    heartRateZones,
-    provider,
-    recordedAt: candidate.recordedAt,
-    startedAt: timestamps.startedAt,
-    workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
-    workoutMetricContributors: workoutMetrics.contributors,
-    workoutMetricValues: {
-      activeCalories: workoutMetrics.values.activeCalories ?? null,
-      distanceKm: workoutMetrics.values.distanceKm ?? null,
-      maxHeartRate: workoutMetrics.values.maxHeartRate ?? null,
-      totalElevationGainMeters: workoutMetrics.values.totalElevationGainMeters ?? null,
-      workoutStrain: workoutMetrics.values.workoutStrain ?? null,
-    },
-  });
+  return JSON.stringify([
+    resolveActivitySessionCandidatePublicProvider(candidate),
+    candidate.activityType ?? null,
+    timestamps.startedAt,
+    timestamps.endedAt,
+    mergeHeartRateZoneAggregates(candidate.heartRateZones ?? []).map((zone) => [
+      zone.zone ?? null,
+      zone.label ?? null,
+      zone.minHeartRate ?? null,
+      zone.maxHeartRate ?? null,
+      zone.durationMinutes,
+    ]),
+    ACTIVITY_SESSION_WORKOUT_METRIC_SPECS.map(({ metric }) =>
+      candidate.workoutMetricValues?.[metric] ?? null
+    ),
+  ]);
 }
 
 function mergeMirroredActivitySessionHeartRateZones(
@@ -955,26 +910,11 @@ function mergeMirroredActivitySessionHeartRateZones(
       continue;
     }
 
-    const preferredZone = merged[duplicateIndex]!;
-    merged[duplicateIndex] = {
-      durationMinutes: preferredZone.durationMinutes,
-      ...(preferredZone.label === undefined && secondaryZone.label !== undefined
-        ? { label: secondaryZone.label }
-        : preferredZone.label === undefined ? {} : { label: preferredZone.label }),
-      ...(preferredZone.maxHeartRate === undefined && secondaryZone.maxHeartRate !== undefined
-        ? { maxHeartRate: secondaryZone.maxHeartRate }
-        : preferredZone.maxHeartRate === undefined
-          ? {}
-          : { maxHeartRate: preferredZone.maxHeartRate }),
-      ...(preferredZone.minHeartRate === undefined && secondaryZone.minHeartRate !== undefined
-        ? { minHeartRate: secondaryZone.minHeartRate }
-        : preferredZone.minHeartRate === undefined
-          ? {}
-          : { minHeartRate: preferredZone.minHeartRate }),
-      ...(preferredZone.zone === undefined && secondaryZone.zone !== undefined
-        ? { zone: secondaryZone.zone }
-        : preferredZone.zone === undefined ? {} : { zone: preferredZone.zone }),
-    };
+    const mergedZone = merged[duplicateIndex]!;
+    mergedZone.label ??= secondaryZone.label;
+    mergedZone.maxHeartRate ??= secondaryZone.maxHeartRate;
+    mergedZone.minHeartRate ??= secondaryZone.minHeartRate;
+    mergedZone.zone ??= secondaryZone.zone;
   }
 
   return merged;
@@ -1012,124 +952,79 @@ interface SelectedActivitySessionWorkoutMetric {
   value: number | undefined;
 }
 
+type ActivitySessionWorkoutMetricMergeMode = "maximum" | "prefer-left" | "sum";
+
 function activitySessionCandidateWorkoutMetricEvidence(
   candidate: WearableMetricCandidate,
 ): ActivitySessionWorkoutMetricEvidence {
   const values = candidate.workoutMetricValues ?? {};
   const provider = resolveActivitySessionCandidatePublicProvider(candidate);
-  const contributorsFor = (
-    metric: keyof WearableActivitySessionMetricValues,
-  ): string[] => values[metric] === undefined
-    ? []
-    : uniqueStrings([
-        ...(candidate.workoutMetricContributors?.[metric] ?? []),
-        ...(candidate.workoutMetricContributors?.[metric]?.length ? [] : [provider]),
-      ]).sort();
-
-  return {
-    contributors: {
-      ...(values.activeCalories === undefined
-        ? {}
-        : { activeCalories: contributorsFor("activeCalories") }),
-      ...(values.distanceKm === undefined ? {} : { distanceKm: contributorsFor("distanceKm") }),
-      ...(values.maxHeartRate === undefined
-        ? {}
-        : { maxHeartRate: contributorsFor("maxHeartRate") }),
-      ...(values.totalElevationGainMeters === undefined
-        ? {}
-        : {
-            totalElevationGainMeters: contributorsFor("totalElevationGainMeters"),
-          }),
-      ...(values.workoutStrain === undefined
-        ? {}
-        : { workoutStrain: contributorsFor("workoutStrain") }),
-    },
+  const evidence: ActivitySessionWorkoutMetricEvidence = {
+    contributors: {},
     values: { ...values },
   };
+
+  for (const { metric } of ACTIVITY_SESSION_WORKOUT_METRIC_SPECS) {
+    if (values[metric] === undefined) {
+      continue;
+    }
+    const contributors = candidate.workoutMetricContributors?.[metric];
+    evidence.contributors[metric] = mergeWorkoutMetricContributors(
+      contributors?.length ? contributors : [provider],
+    );
+  }
+
+  return evidence;
 }
 
 function mergeMirroredActivitySessionWorkoutMetricEvidence(
   preferred: WearableMetricCandidate,
   secondary: WearableMetricCandidate,
 ): ActivitySessionWorkoutMetricEvidence {
-  const preferredEvidence = activitySessionCandidateWorkoutMetricEvidence(preferred);
-  const secondaryEvidence = activitySessionCandidateWorkoutMetricEvidence(secondary);
-
-  return buildActivitySessionWorkoutMetricEvidence({
-    activeCalories: selectPreferredMirroredWorkoutMetric(
-      "activeCalories",
-      preferredEvidence,
-      secondaryEvidence,
-    ),
-    distanceKm: selectPreferredMirroredWorkoutMetric(
-      "distanceKm",
-      preferredEvidence,
-      secondaryEvidence,
-    ),
-    maxHeartRate: selectMaximumWorkoutMetric(
-      "maxHeartRate",
-      preferredEvidence,
-      secondaryEvidence,
-    ),
-    totalElevationGainMeters: selectPreferredMirroredWorkoutMetric(
-      "totalElevationGainMeters",
-      preferredEvidence,
-      secondaryEvidence,
-    ),
-    workoutStrain: selectMaximumWorkoutMetric(
-      "workoutStrain",
-      preferredEvidence,
-      secondaryEvidence,
-    ),
-  });
+  return mergeActivitySessionWorkoutMetricEvidence(
+    activitySessionCandidateWorkoutMetricEvidence(preferred),
+    activitySessionCandidateWorkoutMetricEvidence(secondary),
+    "prefer-left",
+  );
 }
 
 function mergeDistinctActivitySessionWorkoutMetricEvidence(
   left: ActivitySessionWorkoutMetricEvidence,
   right: ActivitySessionWorkoutMetricEvidence,
 ): ActivitySessionWorkoutMetricEvidence {
-  return buildActivitySessionWorkoutMetricEvidence({
-    activeCalories: sumWorkoutMetric("activeCalories", left, right),
-    distanceKm: sumWorkoutMetric("distanceKm", left, right),
-    maxHeartRate: selectMaximumWorkoutMetric("maxHeartRate", left, right),
-    totalElevationGainMeters: sumWorkoutMetric(
-      "totalElevationGainMeters",
-      left,
-      right,
-    ),
-    workoutStrain: selectMaximumWorkoutMetric("workoutStrain", left, right),
-  });
+  return mergeActivitySessionWorkoutMetricEvidence(left, right, "sum");
 }
 
-function selectPreferredMirroredWorkoutMetric(
-  metric: keyof WearableActivitySessionMetricValues,
-  preferred: ActivitySessionWorkoutMetricEvidence,
-  secondary: ActivitySessionWorkoutMetricEvidence,
-): SelectedActivitySessionWorkoutMetric {
-  const preferredValue = preferred.values[metric];
-  const secondaryValue = secondary.values[metric];
-  if (preferredValue === undefined) {
-    return selectedWorkoutMetric(metric, secondary);
-  }
-  if (secondaryValue === undefined) {
-    return selectedWorkoutMetric(metric, preferred);
-  }
-
-  return {
-    contributors: preferredValue === secondaryValue
-      ? mergeWorkoutMetricContributors(
-          preferred.contributors[metric],
-          secondary.contributors[metric],
-        )
-      : mergeWorkoutMetricContributors(preferred.contributors[metric]),
-    value: preferredValue,
-  };
-}
-
-function selectMaximumWorkoutMetric(
-  metric: keyof WearableActivitySessionMetricValues,
+function mergeActivitySessionWorkoutMetricEvidence(
   left: ActivitySessionWorkoutMetricEvidence,
   right: ActivitySessionWorkoutMetricEvidence,
+  additiveMode: Exclude<ActivitySessionWorkoutMetricMergeMode, "maximum">,
+): ActivitySessionWorkoutMetricEvidence {
+  const merged: ActivitySessionWorkoutMetricEvidence = {
+    contributors: {},
+    values: {},
+  };
+  for (const spec of ACTIVITY_SESSION_WORKOUT_METRIC_SPECS) {
+    const { metric } = spec;
+    const selected = selectWorkoutMetric(
+      metric,
+      left,
+      right,
+      spec.reducer === "maximum" ? "maximum" : additiveMode,
+    );
+    if (selected.value !== undefined) {
+      merged.contributors[metric] = selected.contributors;
+      merged.values[metric] = selected.value;
+    }
+  }
+  return merged;
+}
+
+function selectWorkoutMetric(
+  metric: WearableActivitySessionWorkoutMetricKey,
+  left: ActivitySessionWorkoutMetricEvidence,
+  right: ActivitySessionWorkoutMetricEvidence,
+  mode: ActivitySessionWorkoutMetricMergeMode,
 ): SelectedActivitySessionWorkoutMetric {
   const leftValue = left.values[metric];
   const rightValue = right.values[metric];
@@ -1139,33 +1034,19 @@ function selectMaximumWorkoutMetric(
   if (rightValue === undefined) {
     return selectedWorkoutMetric(metric, left);
   }
-  if (leftValue === rightValue) {
+  if (mode === "sum") {
     return {
       contributors: mergeWorkoutMetricContributors(
         left.contributors[metric],
         right.contributors[metric],
       ),
-      value: leftValue,
+      value: leftValue + rightValue,
     };
   }
-
-  return leftValue > rightValue
-    ? selectedWorkoutMetric(metric, left)
-    : selectedWorkoutMetric(metric, right);
-}
-
-function sumWorkoutMetric(
-  metric: keyof WearableActivitySessionMetricValues,
-  left: ActivitySessionWorkoutMetricEvidence,
-  right: ActivitySessionWorkoutMetricEvidence,
-): SelectedActivitySessionWorkoutMetric {
-  const leftValue = left.values[metric];
-  const rightValue = right.values[metric];
-  if (leftValue === undefined) {
-    return selectedWorkoutMetric(metric, right);
-  }
-  if (rightValue === undefined) {
-    return selectedWorkoutMetric(metric, left);
+  if (leftValue !== rightValue) {
+    return mode === "maximum" && rightValue > leftValue
+      ? selectedWorkoutMetric(metric, right)
+      : selectedWorkoutMetric(metric, left);
   }
 
   return {
@@ -1173,12 +1054,12 @@ function sumWorkoutMetric(
       left.contributors[metric],
       right.contributors[metric],
     ),
-    value: leftValue + rightValue,
+    value: leftValue,
   };
 }
 
 function selectedWorkoutMetric(
-  metric: keyof WearableActivitySessionMetricValues,
+  metric: WearableActivitySessionWorkoutMetricKey,
   evidence: ActivitySessionWorkoutMetricEvidence,
 ): SelectedActivitySessionWorkoutMetric {
   return {
@@ -1191,51 +1072,6 @@ function mergeWorkoutMetricContributors(
   ...contributorLists: Array<readonly string[] | undefined>
 ): string[] {
   return uniqueStrings(contributorLists.flatMap((contributors) => contributors ?? [])).sort();
-}
-
-function buildActivitySessionWorkoutMetricEvidence(input: {
-  activeCalories: SelectedActivitySessionWorkoutMetric;
-  distanceKm: SelectedActivitySessionWorkoutMetric;
-  maxHeartRate: SelectedActivitySessionWorkoutMetric;
-  totalElevationGainMeters: SelectedActivitySessionWorkoutMetric;
-  workoutStrain: SelectedActivitySessionWorkoutMetric;
-}): ActivitySessionWorkoutMetricEvidence {
-  return {
-    contributors: {
-      ...(input.activeCalories.value === undefined
-        ? {}
-        : { activeCalories: input.activeCalories.contributors }),
-      ...(input.distanceKm.value === undefined
-        ? {}
-        : { distanceKm: input.distanceKm.contributors }),
-      ...(input.maxHeartRate.value === undefined
-        ? {}
-        : { maxHeartRate: input.maxHeartRate.contributors }),
-      ...(input.totalElevationGainMeters.value === undefined
-        ? {}
-        : {
-            totalElevationGainMeters: input.totalElevationGainMeters.contributors,
-          }),
-      ...(input.workoutStrain.value === undefined
-        ? {}
-        : { workoutStrain: input.workoutStrain.contributors }),
-    },
-    values: {
-      ...(input.activeCalories.value === undefined
-        ? {}
-        : { activeCalories: input.activeCalories.value }),
-      ...(input.distanceKm.value === undefined ? {} : { distanceKm: input.distanceKm.value }),
-      ...(input.maxHeartRate.value === undefined
-        ? {}
-        : { maxHeartRate: input.maxHeartRate.value }),
-      ...(input.totalElevationGainMeters.value === undefined
-        ? {}
-        : { totalElevationGainMeters: input.totalElevationGainMeters.value }),
-      ...(input.workoutStrain.value === undefined
-        ? {}
-        : { workoutStrain: input.workoutStrain.value }),
-    },
-  };
 }
 
 function cloneActivitySessionCandidate(
@@ -1263,39 +1099,29 @@ function cloneActivitySessionWorkoutMetricContributors(
     return undefined;
   }
 
-  return {
-    ...(contributors.activeCalories
-      ? { activeCalories: [...contributors.activeCalories] }
-      : {}),
-    ...(contributors.distanceKm ? { distanceKm: [...contributors.distanceKm] } : {}),
-    ...(contributors.maxHeartRate ? { maxHeartRate: [...contributors.maxHeartRate] } : {}),
-    ...(contributors.totalElevationGainMeters
-      ? { totalElevationGainMeters: [...contributors.totalElevationGainMeters] }
-      : {}),
-    ...(contributors.workoutStrain ? { workoutStrain: [...contributors.workoutStrain] } : {}),
-  };
+  const cloned: WearableActivitySessionMetricContributors = {};
+  for (const { metric } of ACTIVITY_SESSION_WORKOUT_METRIC_SPECS) {
+    const values = contributors[metric];
+    if (values) {
+      cloned[metric] = [...values];
+    }
+  }
+  return cloned;
 }
 
 function compareActivitySessionCandidate(
   left: WearableMetricCandidate,
   right: WearableMetricCandidate,
 ): number {
-  if (left.date !== right.date) {
-    return right.date.localeCompare(left.date);
-  }
-  const startDifference =
-    (
-      parseIsoTimestampMs(activitySessionCandidateReconciliationTimestamps(left).startedAt)
-      ?? Number.MAX_SAFE_INTEGER
-    )
-    - (
-      parseIsoTimestampMs(activitySessionCandidateReconciliationTimestamps(right).startedAt)
-      ?? Number.MAX_SAFE_INTEGER
-    );
-  if (startDifference !== 0) {
-    return startDifference;
-  }
-  return compareActivitySessionCandidateReconciliationEvidence(left, right);
+  const leftStart = parseIsoTimestampMs(
+    activitySessionCandidateReconciliationTimestamps(left).startedAt,
+  ) ?? Number.MAX_SAFE_INTEGER;
+  const rightStart = parseIsoTimestampMs(
+    activitySessionCandidateReconciliationTimestamps(right).startedAt,
+  ) ?? Number.MAX_SAFE_INTEGER;
+  return right.date.localeCompare(left.date)
+    || leftStart - rightStart
+    || compareActivitySessionCandidateReconciliationEvidence(left, right);
 }
 
 function projectActivitySessionDayRollupSource(
@@ -1522,7 +1348,7 @@ export function buildActivitySessionMetricCandidate(
     recordedAt: aggregate.recordedAt,
     recordIds: [...aggregate.recordIds],
     sourceFamily: "derived",
-    sourceKind: aggregate.sourceKind ?? "activity-session-aggregate",
+    sourceKind: aggregate.sourceKind,
     title: `${formatProviderName(provider)} activity sessions`,
     unit: metric === "sessionMinutes" ? "minutes" : "count",
     value: metric === "sessionMinutes" ? aggregate.sessionMinutes : aggregate.sessionCount,
@@ -1567,7 +1393,7 @@ export function buildActivitySessionWorkoutMetricCandidates(
       recordedAt: aggregate.recordedAt,
       recordIds: [...aggregate.recordIds],
       sourceFamily: "derived",
-      sourceKind: aggregate.sourceKind ?? "activity-session-aggregate",
+      sourceKind: aggregate.sourceKind,
       title: `${formatProviderName(provider)} activity sessions`,
       unit: spec.unit,
       value,
@@ -2017,17 +1843,6 @@ function mapScalarMetric(
     : null;
 }
 
-const ACTIVITY_SESSION_WORKOUT_METRIC_SPECS = [
-  { metric: "activeCalories", unit: "kcal" },
-  { metric: "distanceKm", unit: "km" },
-  { metric: "totalElevationGainMeters", unit: "meter" },
-  { metric: "maxHeartRate", unit: "bpm" },
-  { metric: "workoutStrain", unit: "strain" },
-] as const satisfies readonly {
-  metric: keyof WearableActivitySessionMetricValues;
-  unit: string;
-}[];
-
 const WORKOUT_METRIC_KEYS = [
   "activeCalories",
   "altitudeChangeMeters",
@@ -2154,40 +1969,19 @@ function normalizeWorkoutHeartRateZone(value: unknown): WearableHeartRateZoneAgg
 
 function mergeHeartRateZoneAggregates(
   zones: readonly WearableHeartRateZoneAggregate[],
+  collapseNumberedZones = false,
 ): WearableHeartRateZoneAggregate[] {
   const merged = new Map<string, WearableHeartRateZoneAggregate>();
 
   for (const zone of zones) {
-    const key = [
-      zone.zone ?? "",
-      zone.label ?? "",
-      zone.minHeartRate ?? "",
-      zone.maxHeartRate ?? "",
-    ].join("|");
-    const existing = merged.get(key);
-    if (existing) {
-      existing.durationMinutes += zone.durationMinutes;
-      continue;
-    }
-    merged.set(key, { ...zone });
-  }
-
-  return [...merged.values()].sort(compareHeartRateZoneAggregate);
-}
-
-function mergeActivitySessionDayHeartRateZoneAggregates(
-  zones: readonly WearableHeartRateZoneAggregate[],
-): WearableHeartRateZoneAggregate[] {
-  const merged = new Map<string, WearableHeartRateZoneAggregate>();
-
-  for (const zone of zones) {
-    const key = zone.zone === undefined
-      ? [
+    const key = collapseNumberedZones && zone.zone !== undefined
+      ? `zone:${zone.zone}`
+      : [
+          zone.zone ?? "",
           zone.label ?? "",
           zone.minHeartRate ?? "",
           zone.maxHeartRate ?? "",
-        ].join("|")
-      : `zone:${zone.zone}`;
+        ].join("|");
     const existing = merged.get(key);
     if (!existing) {
       merged.set(key, { ...zone });
@@ -2195,14 +1989,12 @@ function mergeActivitySessionDayHeartRateZoneAggregates(
     }
 
     existing.durationMinutes += zone.durationMinutes;
-    if (existing.label !== zone.label) {
-      delete existing.label;
-    }
-    if (existing.minHeartRate !== zone.minHeartRate) {
-      delete existing.minHeartRate;
-    }
-    if (existing.maxHeartRate !== zone.maxHeartRate) {
-      delete existing.maxHeartRate;
+    if (collapseNumberedZones && zone.zone !== undefined) {
+      for (const field of ["label", "minHeartRate", "maxHeartRate"] as const) {
+        if (existing[field] !== zone[field]) {
+          delete existing[field];
+        }
+      }
     }
   }
 

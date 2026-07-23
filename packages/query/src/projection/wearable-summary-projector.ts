@@ -17,7 +17,7 @@ import {
 } from "../wearables/origin.ts";
 import { normalizeLowercaseString } from "../wearables/shared.ts";
 import type {
-  WearableActivityMetricEvidence,
+  WearableActivityMetricCandidateEvidence,
   WearableActivityMetricResourceClass,
   WearableActivitySessionEvidence,
   WearableActivitySessionAggregate,
@@ -45,9 +45,14 @@ export function buildWearableSummaryProjection(vault: VaultReadModel): QueryWear
 export function buildWearableSummaryProjectionFromDataset(dataset: WearableDataset): QueryWearableSummaryRow[] {
   const datasetsByProvider = groupWearableDatasetByPublicProvider(dataset);
   const providers = normalizeWearableProviders([...datasetsByProvider.keys()]);
-  const activityMetricEvidenceKeys = buildActivityMetricEvidenceKeys(dataset.metricCandidates);
-  const activityMetricEvidence = buildStoredActivityMetricEvidence(
-    dataset.metricCandidates,
+  const activityCandidates = dataset.metricCandidates.filter((candidate) =>
+    [...ACTIVITY_METRIC_KEYS].some((metric) => metric === candidate.metric)
+  );
+  const activityMetricEvidenceKeys = buildActivityMetricEvidenceKeys(
+    activityCandidates,
+  );
+  const activityMetricCandidates = buildStoredActivityMetricCandidates(
+    activityCandidates,
     activityMetricEvidenceKeys,
   );
 
@@ -56,11 +61,13 @@ export function buildWearableSummaryProjectionFromDataset(dataset: WearableDatas
     return materializeWearableSummaryRows(
       provider,
       buildWearableSummaryBundleFromDataset(providerDataset),
-      groupActivityMetricEvidenceByDate(
-        activityMetricEvidence.filter((candidate) => candidate.publicProvider === provider),
+      groupActivityMetricCandidatesByDate(
+        activityMetricCandidates.filter(
+          (candidate) => candidate.publicProvider === provider,
+        ),
       ),
       groupActivitySessionEvidenceByDate(
-        buildStoredActivitySessionEvidence(providerDataset.activitySessionCandidates ?? []),
+        buildStoredActivitySessionEvidence(providerDataset.activitySessionCandidates),
       ),
     );
   });
@@ -74,7 +81,9 @@ interface ActivityMetricEvidenceKeys {
 function buildActivityMetricEvidenceKeys(
   candidates: readonly WearableMetricCandidate[],
 ): ActivityMetricEvidenceKeys {
-  const candidateIds = [...new Set(candidates.map((candidate) => candidate.candidateId))].sort();
+  const candidateIds = [...new Set(
+    candidates.map((candidate) => candidate.candidateId),
+  )].sort();
   const exactKeys = [...new Set(candidates.map(buildCandidateExactKey))].sort();
 
   return {
@@ -89,12 +98,14 @@ function buildActivityMetricEvidenceKeys(
   };
 }
 
-function buildStoredActivityMetricEvidence(
+function buildStoredActivityMetricCandidates(
   candidates: readonly WearableMetricCandidate[],
   keys: ActivityMetricEvidenceKeys,
-): WearableActivityMetricEvidence[] {
+): WearableActivityMetricCandidateEvidence[] {
   return candidates.flatMap((candidate) => {
-    const metric = [...ACTIVITY_METRIC_KEYS].find((key) => key === candidate.metric);
+    const metric = [...ACTIVITY_METRIC_KEYS].find(
+      (key) => key === candidate.metric,
+    );
     if (!metric) {
       return [];
     }
@@ -102,19 +113,12 @@ function buildStoredActivityMetricEvidence(
     const candidateKey = keys.candidateKeys.get(candidate.candidateId);
     const exactKey = keys.exactKeys.get(buildCandidateExactKey(candidate));
     if (!candidateKey || !exactKey) {
-      throw new Error("Activity metric ranking evidence key was not initialized.");
+      throw new Error("Activity metric evidence key was not initialized.");
     }
 
     const provider = normalizeLowercaseString(candidate.provider) ?? "unknown";
     const publicProvider = resolveMetricCandidatePublicProvider(candidate);
     const isJunction = provider === "junction";
-    const sourceProviderSlug =
-      normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceProviderSlug)
-      ?? (isJunction && publicProvider !== "unknown" ? publicProvider : null);
-    const aggregatorProvider =
-      normalizeWearableOriginSourceSlug(candidate.dataOrigin?.aggregatorProvider)
-      ?? (isJunction ? "junction" : null);
-
     return [{
       candidateKey,
       date: candidate.date,
@@ -124,9 +128,17 @@ function buildStoredActivityMetricEvidence(
       metric,
       occurredAt: candidate.occurredAt,
       origin: {
-        aggregatorProvider,
-        sourceProviderSlug,
-        sourceType: normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceType),
+        aggregatorProvider:
+          normalizeWearableOriginSourceSlug(
+            candidate.dataOrigin?.aggregatorProvider,
+          ) ?? (isJunction ? "junction" : null),
+        sourceProviderSlug:
+          normalizeWearableOriginSourceSlug(
+            candidate.dataOrigin?.sourceProviderSlug,
+          ) ?? (isJunction && publicProvider !== "unknown" ? publicProvider : null),
+        sourceType: normalizeWearableOriginSourceSlug(
+          candidate.dataOrigin?.sourceType,
+        ),
       },
       provider,
       publicProvider,
@@ -134,6 +146,7 @@ function buildStoredActivityMetricEvidence(
       resourceClass: activityMetricResourceClass(candidate),
       sourceFamily: candidate.sourceFamily,
       sourceKind: candidate.sourceKind,
+      title: candidate.title,
       unit: candidate.unit,
       value: candidate.value,
     }];
@@ -143,7 +156,9 @@ function buildStoredActivityMetricEvidence(
 function activityMetricResourceClass(
   candidate: WearableMetricCandidate,
 ): WearableActivityMetricResourceClass {
-  const resourceType = normalizeLowercaseString(candidate.externalRef?.resourceType);
+  const resourceType = normalizeLowercaseString(
+    candidate.externalRef?.resourceType,
+  );
   if (!resourceType) {
     return "none";
   }
@@ -160,10 +175,11 @@ function activityMetricResourceClass(
   return "generic";
 }
 
-function groupActivityMetricEvidenceByDate(
-  evidence: readonly WearableActivityMetricEvidence[],
-): Map<string, readonly WearableActivityMetricEvidence[]> {
-  const byDate = new Map<string, WearableActivityMetricEvidence[]>();
+function groupActivityMetricCandidatesByDate(
+  evidence: readonly WearableActivityMetricCandidateEvidence[],
+): Map<string, readonly WearableActivityMetricCandidateEvidence[]> {
+  const byDate =
+    new Map<string, WearableActivityMetricCandidateEvidence[]>();
   for (const candidate of evidence) {
     const candidates = byDate.get(candidate.date) ?? [];
     candidates.push(candidate);
@@ -171,7 +187,6 @@ function groupActivityMetricEvidenceByDate(
   }
   return byDate;
 }
-
 function buildStoredActivitySessionEvidence(
   candidates: readonly WearableMetricCandidate[],
 ): WearableActivitySessionEvidence[] {
@@ -246,7 +261,7 @@ type MutableWearableDataset = {
 function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<string, WearableDataset> {
   const grouped = new Map<string, MutableWearableDataset>();
   const activitySessionReconciliationKeys = buildActivitySessionReconciliationKeys(
-    dataset.activitySessionCandidates ?? [],
+    dataset.activitySessionCandidates,
   );
   const ensureProviderDataset = (provider: string): MutableWearableDataset => {
     const normalizedProvider = normalizeWearableProviders([provider])[0] ?? "unknown";
@@ -272,7 +287,7 @@ function groupWearableDatasetByPublicProvider(dataset: WearableDataset): Map<str
     const provider = resolveWearableDatasetItemPublicProvider(aggregate);
     ensureProviderDataset(provider).activitySessionAggregates.push(projectUnknownWearableAggregateProvider(aggregate, provider));
   }
-  for (const candidate of dataset.activitySessionCandidates ?? []) {
+  for (const candidate of dataset.activitySessionCandidates) {
     const provider = resolveMetricCandidatePublicProvider(candidate);
     const projectedCandidate = projectUnknownWearableMetricCandidateProvider(candidate, provider);
     const exactKey = candidate.reconciliationExactKey ?? buildCandidateExactKey(candidate);
@@ -423,9 +438,9 @@ function projectUnknownWearableDataOrigin(
 function materializeWearableSummaryRows(
   provider: string,
   bundle: WearableSummaryBundle,
-  activityMetricEvidenceByDate: ReadonlyMap<
+  activityMetricCandidatesByDate: ReadonlyMap<
     string,
-    readonly WearableActivityMetricEvidence[]
+    readonly WearableActivityMetricCandidateEvidence[]
   >,
   activitySessionEvidenceByDate: ReadonlyMap<
     string,
@@ -440,8 +455,8 @@ function materializeWearableSummaryRows(
     summaries: readonly TSummary[],
   ) => {
     summaries.forEach((summary, index) => {
-      const activityMetricEvidenceForDate = summaryKind === "activity"
-        ? activityMetricEvidenceByDate.get(summary.date) ?? []
+      const activityMetricCandidatesForDate = summaryKind === "activity"
+        ? activityMetricCandidatesByDate.get(summary.date) ?? []
         : [];
       const activityEvidenceForDate = summaryKind === "activity"
         ? activitySessionEvidenceByDate.get(summary.date) ?? []
@@ -457,8 +472,10 @@ function materializeWearableSummaryRows(
           summary,
           summaryKind === "activity"
               ? {
-                  activityMetricEvidence: activityMetricEvidenceForDate,
-                  activitySessionEvidence: activityEvidenceForDate,
+                  activityEvidence: {
+                    metricCandidates: activityMetricCandidatesForDate,
+                    sessions: activityEvidenceForDate,
+                  },
                 }
             : {},
         ),

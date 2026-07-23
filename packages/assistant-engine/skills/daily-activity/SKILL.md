@@ -24,19 +24,12 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Data First
 
-- For any date-specific wearable question, first run
-  `vault-cli wearables day <date> --format json`. For "all workouts," activity
-  types, session count, total workout time, or more normalized workout detail
-  on that date, next run
-  `vault-cli wearables activity list --date <date> --format json`.
-- Treat those normalized surfaces and their canonical workout-day rollup as
-  the answer owner. Do not stop at one selected activity in a general daily
-  summary, and do not manually deduplicate or sum provider records.
-- Use
-  `vault-cli event list --kind activity_session --from <date> --to <date> --format json`
-  only as last-resort diagnostics when the normalized surfaces materially
-  disagree or the user explicitly asks for raw evidence. Raw records never
-  become a model-owned reducer or deduplication path.
+- For date-specific facts, first run
+  `vault-cli wearables day <date> --format json`; for all workouts, types,
+  count, duration, or normalized detail, next run
+  `vault-cli wearables activity list --date <date> --format json`. Its canonical
+  workout-day rollup owns the answer; do not stop at one selected activity or
+  rebuild the rollup from provider records.
 - Check steps, sedentary time, active minutes, workout days, work schedule, commute, sleep, fatigue, and pain flags.
 - Use the user's baseline; a 2,000-step jump can be easy for one user and too much for another.
 - Look for long unbroken sitting blocks, not just daily step total.
@@ -57,17 +50,10 @@ Ask: "Do you want more total steps, fewer long sitting blocks, or a simple movem
 - Step count misses cycling, lifting, swimming, carrying, and intensity; do not overvalue it alone.
 - Active minutes algorithms vary by device; use trends rather than cross-device comparisons.
 - Daily movement can improve health even when formal workouts stay unchanged.
-- Treat changeable totals for the current local calendar day as provisional and
-  say "so far." A completed individual workout may still be described as
-  completed, but its duration does not make the day's combined count, duration,
-  steps, or movement total final.
-- Distinct workouts on the same day are additive: add their durations and count
-  each session rather than replacing one with another. Mirrored copies of the
-  same workout still count once.
-- A mismatch between a daily summary and an exact workout record is evidence
-  of a read mismatch, not proof that the provider failed to sync or that a
-  workout failed to import. State what each surface shows without inventing a
-  cause.
+- Treat changeable current-local-day totals as provisional and say "so far."
+  A completed workout does not make the day's combined totals final.
+- A summary/workout mismatch is a read mismatch, not proof of failed provider
+  sync or import. State what each surface shows without inventing a cause.
 
 ## Safety Boundaries
 
