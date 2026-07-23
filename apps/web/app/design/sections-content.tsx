@@ -5,6 +5,7 @@ import {
   BiomarkerPreparingStateStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { Separator } from "@/src/components/ui/separator";
+import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
   GroupUsageFundingStudy,
@@ -39,6 +40,12 @@ export function SectionsContent() {
 
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Connect source card actions">
+        <ConnectSourceCardStudy />
       </StudySection>
 
       <Separator />
