@@ -132,7 +132,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />27 of 27 sources</);
+  assert.match(markup, />28 of 28 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -173,6 +173,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       assetPath: "/brand-logos/connect/runkeeper.svg",
       description: "Runs, walks, routes, duration, pace, and training history from Runkeeper.",
       name: "Runkeeper",
+    },
+    {
+      assetPath: "/brand-logos/connect/strava.svg",
+      description: "Rides, runs, power, and training load.",
+      name: "Strava",
     },
     {
       assetPath: "/brand-logos/connect/tandem-source.svg",
@@ -276,7 +281,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 27);
+  assert.equal(sources.length, 28);
   assert.equal(markup.match(/data-connection-state="idle"/gu)?.length, sources.length);
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length, sources.length - 1);
   assert.match(markup, /disabled=""/);
@@ -297,12 +302,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />Contour BLE</u);
   assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
-  assert.doesNotMatch(markup, />Strava</u);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(sourceHeadingIndex(markup, "Apple Health") < sourceHeadingIndex(markup, "Garmin"));
   assert.ok(sourceHeadingIndex(markup, "Garmin") < sourceHeadingIndex(markup, "Fitbit"));
   assert.ok(sourceHeadingIndex(markup, "Fitbit") < sourceHeadingIndex(markup, "Google Fit"));
-  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Withings"));
+  assert.ok(sourceHeadingIndex(markup, "Google Fit") < sourceHeadingIndex(markup, "Strava"));
+  assert.ok(sourceHeadingIndex(markup, "Strava") < sourceHeadingIndex(markup, "Withings"));
   assert.ok(sourceHeadingIndex(markup, "Withings") < sourceHeadingIndex(markup, "Oura"));
   assert.ok(sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"));
   assert.ok(sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"));
@@ -480,7 +485,7 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
 });
 
-test("ConnectPage hides Strava when direct and Junction connection routes are configured", async () => {
+test("ConnectPage offers preferred direct Strava when direct and Junction routes are configured", async () => {
   vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
   vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -492,8 +497,8 @@ test("ConnectPage hides Strava when direct and Junction connection routes are co
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.doesNotMatch(markup, />Strava</u);
-  assert.doesNotMatch(markup, /Connect Strava/u);
+  assert.match(markup, />Strava</u);
+  assert.match(markup, /aria-label="Connect Strava"/u);
 });
 
 test("ConnectPage preserves an existing Strava connection for status and disconnect only", async () => {
@@ -521,7 +526,7 @@ test("ConnectPage preserves an existing Strava connection for status and disconn
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });
 
-test("ConnectPage does not offer Strava reconnection for an existing account needing access", async () => {
+test("ConnectPage offers Strava reconnection for an existing account needing access", async () => {
   vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
   vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
@@ -546,9 +551,9 @@ test("ConnectPage does not offer Strava reconnection for an existing account nee
   const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /Strava needs attention from the connected app/u);
-  assert.match(markup, /aria-label="Disconnect Strava"/u);
-  assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
+  assert.match(markup, /Please reconnect Strava to resume syncing\./u);
+  assert.match(markup, /aria-label="Reconnect Strava"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Strava"/u);
 });
 
 test("ConnectPage enables every Link source exposed by the shared Junction defaults", async () => {
@@ -566,7 +571,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
 
   assert.equal(
     markup.match(/>Connect<\/button>/gu)?.length,
-    JUNCTION_DEFAULT_PROVIDER_FILTER.filter((providerSlug) => providerSlug !== "strava").length,
+    JUNCTION_DEFAULT_PROVIDER_FILTER.length,
   );
   assert.equal(markup.match(/>Not available<\/button>/gu)?.length ?? 0, 0);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);

@@ -1084,6 +1084,15 @@ describe('assistant skill assets', () => {
       /purchase outcome remains ambiguous, stop and hand off instead of clicking\s+again/iu,
     )
     expect(raw).toMatch(
+      /User authorization\s+does not override the provider's restrictions/iu,
+    )
+    expect(raw).toMatch(
+      /For Function Health, do not automate login, portal navigation, record\s+extraction, downloads, or account actions unless a current written agreement\s+expressly authorizes Murph's automation/iu,
+    )
+    expect(raw).toMatch(
+      /Ask the user to use Function's own\s+export or sharing flow and upload the resulting records instead/iu,
+    )
+    expect(raw).toMatch(
       /\*\*CAPTCHA or bot check:\*\* first verify it is a real challenge rather than an\s+ordinary cookie banner, modal, or unfamiliar control\. If it is real, pause\s+for takeover\. Do not bypass it\./u,
     )
     expect(raw).toMatch(/refresh the\s+current page as a last resort/)

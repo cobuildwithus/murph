@@ -1,6 +1,6 @@
 # Land hardened launch legal and provider terms
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -56,18 +56,33 @@ Updated: 2026-07-23
 
 - `pnpm --dir apps/web legal:pdf` regenerated the six current 2026-07-23
   documents and was deterministic on a second run.
-- The 11 changed web test files pass locally (65 tests); the hosted web,
-  assistant-runtime, and device-syncd typechecks pass.
+- The focused web regression set passes locally (8 files, 142 tests), including
+  the stale-consent retry/exact-route handoff, provider-connect routes,
+  canonical legal pages, and the assertion that `/design` has no page-wide
+  Privy boundary. The hosted web and assistant-engine typechecks pass.
 - The focused assistant-runtime provider-offer suite passes (248 tests), and
-  Crabbox runs passed the changed assistant-engine, assistant-runtime, and
-  device-syncd owners. The broad dispatcher remains red on two unrelated
-  existing Testbox failures: the hosted-local-harness repeated-signal timeout
-  test and a vault-usecases fixture lookup for an ungenerated Health Commons
-  artifact.
-- Responsive proof covers the stale-consent gate and the provider register.
-  At 1440px the seven-column register fits its wide breakout; at 390px the
-  focused scroll region moves from `scrollLeft=0` to `40` with ArrowRight.
+  canonical `pnpm test:diff` Testbox passed the changed assistant-engine,
+  assistant-runtime, device-syncd, and web owners. The broad dispatcher remains
+  red only on two unrelated existing Testbox failures: the
+  hosted-local-harness repeated-signal timeout test and a vault-usecases fixture
+  lookup for an ungenerated Health Commons artifact.
+- `pnpm verify:acceptance` passed in Blacksmith Testbox
+  `tbx_01ky7084gnragverww8mv357rk`, including all workspace typechecks, builds,
+  guards, artifact checks, app verification, and Cloudflare Worker tests.
+- Responsive proof covers every stale-consent card state at 300px, 320px, and
+  390px without overflow, plus the provider register at desktop and mobile
+  widths. At 390px the focused table scroll region moves from `scrollLeft=0` to
+  `40` with ArrowRight.
 - Product-experience review accepted and verified two table-accessibility
   corrections, then returned `NO FINDINGS`.
 - The required Claude Code UI check stopped at explicit credit exhaustion.
-- Preliminary and final ReviewGPT/CI evidence remains pending.
+- Preliminary ReviewGPT found mobile handoff overflow, missing owner-boundary
+  continuation/retry coverage, and missing Function Health prompt regression
+  proof. The button now wraps within the card, direct dashboard tests cover
+  failure/retry and exact-path continuation, and the prompt test pins the
+  Function Health restriction; focused and full acceptance verification pass
+  with those corrections.
+- Parent final review found no remaining correctness, privacy, or
+  product-critical-flow issue in the completed diff.
+- Final ReviewGPT and PR CI evidence remain pending.
+Completed: 2026-07-23

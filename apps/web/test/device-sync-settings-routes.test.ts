@@ -1276,7 +1276,7 @@ describe("device sync settings routes", () => {
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
-  it("rejects Strava source starts even when direct and Junction credentials are configured", async () => {
+  it("starts Strava through the preferred direct route when direct and Junction are configured", async () => {
     vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -1298,15 +1298,20 @@ describe("device sync settings routes", () => {
       createRouteContext({ sourceId: "strava" }),
     );
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
-        message: "Hosted device connect source is not configured.",
-        retryable: false,
+    expect(response.status).toBe(200);
+    expect(mocks.startConnection).toHaveBeenCalledWith(
+      "member_123",
+      "strava",
+      "/device-sync/connect/complete?source=connect&connectSource=strava&connectTarget=strava",
+      {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        sourceProviderSlug: null,
       },
+    );
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl: "https://provider.example.test/oauth/start",
     });
-    expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
   it("starts a hosted connect source flow through Junction by source id", async () => {

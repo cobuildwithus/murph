@@ -243,7 +243,11 @@ function HostedLegalConsentCardState({
   const continueButton = (
     <Button
       aria-busy={actionPending}
-      className={mode === "compact" ? "w-full" : undefined}
+      className={
+        mode === "compact"
+          ? "w-full"
+          : "h-auto max-w-full shrink whitespace-normal px-4 py-3 leading-snug sm:px-6"
+      }
       type="button"
       onClick={handleAccept}
       disabled={!allChecked || actionPending}
