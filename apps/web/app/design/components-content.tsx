@@ -29,6 +29,9 @@ import { ActiveExperimentBanner } from "@/src/components/overview/active-experim
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import type {
+  HostedLegalConsentAcceptanceInput,
+} from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -330,7 +333,9 @@ export function ComponentsContent() {
             data-design-dashboard-legal-composition="true"
           >
             <DashboardLegalConsentGate
+              acceptScope={acceptDesignDashboardConsentScope}
               initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+              onAccepted={completeDesignDashboardConsentPreview}
             />
             <div className="border-t border-border py-8">
               <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
@@ -1325,4 +1330,48 @@ export function ComponentsContent() {
       </div>
     </TooltipProvider>
   );
+}
+
+async function acceptDesignDashboardConsentScope(
+  input: HostedLegalConsentAcceptanceInput,
+): Promise<HostedConsentStatus> {
+  const scopes = input.currentStatus.scopes.map((scopeStatus) => {
+    if (scopeStatus.scope !== input.scope) {
+      return scopeStatus;
+    }
+
+    return {
+      ...scopeStatus,
+      current: true,
+      grant: {
+        documentVersions: input.acceptedDocumentVersions,
+        grantedAt: input.currentStatus.generatedAt,
+        lastEventId: null,
+        revokedAt: null,
+        scope: input.scope,
+        source: "design-preview",
+        status: "granted" as const,
+        updatedAt: input.currentStatus.generatedAt,
+      },
+      granted: true,
+      missingDocuments: [],
+    };
+  });
+  const launchScopes = input.currentStatus.launchScopes.map((scopeStatus) => (
+    scopeStatus.scope === input.scope
+      ? { ...scopeStatus, granted: true, missingDocuments: [] }
+      : scopeStatus
+  ));
+
+  return {
+    ...input.currentStatus,
+    launchGranted: launchScopes.every((scopeStatus) => scopeStatus.granted),
+    launchScopes,
+    scopes,
+  };
+}
+
+function completeDesignDashboardConsentPreview(): void {
+  // The public component catalog demonstrates the accepted handoff state
+  // without invoking navigation or production consent authority.
 }

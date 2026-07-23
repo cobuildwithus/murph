@@ -144,6 +144,16 @@ test("dashboard layout keeps pages usable while showing stale legal acceptance",
     },
     status: "ready",
   });
+  mocks.hostedConsentGrantFindMany.mockResolvedValueOnce([
+    createStoredLaunchConsentGrant("launch.legal", {
+      "health-ai-safety-disclosure": "2026-04-29",
+      "privacy-policy": "2026-06-24",
+      "terms-of-service": "2026-04-29",
+    }),
+    createStoredLaunchConsentGrant("launch.health-data", {
+      "consumer-health-data-notice": "2026-04-29",
+    }),
+  ]);
 
   const markup = renderToStaticMarkup(
     await DashboardLayout({
@@ -198,3 +208,24 @@ test("dashboard layout keeps pages usable when the consent reminder cannot load"
   );
   warn.mockRestore();
 });
+
+function createStoredLaunchConsentGrant(
+  scope: "launch.health-data" | "launch.legal",
+  documentVersionsJson: Record<string, string>,
+) {
+  const recordedAt = new Date("2026-04-29T00:00:00.000Z");
+
+  return {
+    createdAt: recordedAt,
+    documentVersionsJson,
+    grantedAt: recordedAt,
+    id: `hbcg_${scope.replace(".", "_")}`,
+    lastEventId: `hbce_${scope.replace(".", "_")}`,
+    memberId: "member_current",
+    revokedAt: null,
+    scope,
+    source: "hosted onboarding",
+    status: "granted",
+    updatedAt: recordedAt,
+  };
+}

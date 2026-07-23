@@ -1,13 +1,20 @@
 "use client";
 
-import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-consent-card";
+import {
+  HostedLegalConsentCard,
+  type HostedLegalConsentAcceptScope,
+} from "@/src/components/legal/hosted-legal-consent-card";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 
 export function DashboardLegalConsentGate({
+  acceptScope,
   initialStatus,
+  onAccepted = reloadDashboardAfterConsentHandoff,
 }: {
+  acceptScope?: HostedLegalConsentAcceptScope;
   initialStatus: HostedConsentStatus;
+  onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
 }) {
   return (
     <section
@@ -31,11 +38,12 @@ export function DashboardLegalConsentGate({
       </p>
       <HostedLegalConsentCard
         acceptedPendingLabel="Refreshing your dashboard"
+        acceptScope={acceptScope}
         className="mt-7"
         initialStatus={initialStatus}
         launchDescription="Review and accept both items to restore protected dashboard features."
         launchTitle="Current documents"
-        onAccepted={reloadDashboardAfterConsentHandoff}
+        onAccepted={onAccepted}
         source="dashboard-legal-update"
       />
     </section>

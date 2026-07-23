@@ -171,6 +171,47 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
+test("a consent preview uses only its injected in-memory acceptance owner", async () => {
+  const currentStatus = createLaunchConsentStatus();
+  const legalAcceptedStatus = createLaunchConsentStatus({
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createLaunchConsentStatus({
+    launchHealthDataGranted: true,
+    launchLegalGranted: true,
+  });
+  const acceptScope = vi.fn()
+    .mockResolvedValueOnce(legalAcceptedStatus)
+    .mockResolvedValueOnce(acceptedStatus);
+  const onAccepted = vi.fn();
+
+  const rendered = await renderClientComponent(
+    createElement(DashboardLegalConsentGate, {
+      acceptScope,
+      initialStatus: currentStatus,
+      onAccepted,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await acceptBothLaunchScopes(rendered.container, rendered.window);
+  const continueButton = findButton(rendered.container, "Continue");
+  await act(async () => {
+    continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    await flushPromises();
+  });
+
+  expect(acceptScope).toHaveBeenCalledTimes(2);
+  expect(acceptScope.mock.calls.map(([input]) => input.scope)).toEqual([
+    "launch.legal",
+    "launch.health-data",
+  ]);
+  expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  expect(onAccepted).toHaveBeenCalledWith(acceptedStatus);
+  expect(rendered.reload).not.toHaveBeenCalled();
+});
+
 async function acceptBothLaunchScopes(
   container: HTMLElement,
   window: Window & typeof globalThis,

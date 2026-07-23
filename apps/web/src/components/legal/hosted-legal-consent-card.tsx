@@ -18,8 +18,20 @@ import type {
 
 type HostedLegalConsentCardMode = "compact" | "panel";
 
+export interface HostedLegalConsentAcceptanceInput {
+  acceptedDocumentVersions: Record<string, string>;
+  currentStatus: HostedConsentStatus;
+  scope: HostedConsentScope;
+  source: string;
+}
+
+export type HostedLegalConsentAcceptScope = (
+  input: HostedLegalConsentAcceptanceInput,
+) => Promise<HostedConsentStatus>;
+
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
+  acceptScope?: HostedLegalConsentAcceptScope;
   className?: string;
   initialStatus?: HostedConsentStatus | null;
   launchDescription?: string;
@@ -42,6 +54,7 @@ export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
 
 function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
+  acceptScope = requestHostedConsentAcceptance,
   className,
   initialStatus = null,
   launchDescription = "Please review and agree to the following.",
@@ -157,16 +170,13 @@ function HostedLegalConsentCardState({
       for (const scope of pendingScopes) {
         const scopeStatus = findConsentScope(latestStatus, scope);
         if (scopeStatus && !scopeStatus.granted) {
-          latestStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-            method: "POST",
-            payload: {
-              acceptedDocumentVersions: Object.fromEntries(
-                scopeStatus.documents.map((document) => [document.id, document.version]),
-              ),
-              scope,
-              source,
-            },
-            url: "/api/legal/consent/accept",
+          latestStatus = await acceptScope({
+            acceptedDocumentVersions: Object.fromEntries(
+              scopeStatus.documents.map((document) => [document.id, document.version]),
+            ),
+            currentStatus: latestStatus,
+            scope,
+            source,
           });
         }
       }
@@ -296,6 +306,20 @@ function HostedLegalConsentCardState({
       </div>
     </div>
   );
+}
+
+function requestHostedConsentAcceptance(
+  input: HostedLegalConsentAcceptanceInput,
+): Promise<HostedConsentStatus> {
+  return requestHostedOnboardingJson<HostedConsentStatus>({
+    method: "POST",
+    payload: {
+      acceptedDocumentVersions: input.acceptedDocumentVersions,
+      scope: input.scope,
+      source: input.source,
+    },
+    url: "/api/legal/consent/accept",
+  });
 }
 
 function LaunchConsentCheckboxes({

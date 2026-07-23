@@ -91,9 +91,22 @@ test("footer ownership stays on explicit public surfaces", () => {
 
   const rootLayoutSource = readAppFile("app/layout.tsx");
   const designPageSource = readAppFile("app/design/page.tsx");
+  const designComponentsSource = readAppFile("app/design/components-content.tsx");
   const subprocessorsPageSource = readAppFile("app/subprocessors/page.tsx");
   assert.doesNotMatch(rootLayoutSource, /SiteFooter/u);
   assert.doesNotMatch(designPageSource, /HostedPrivyBoundary/u);
+  assert.match(
+    designComponentsSource,
+    /acceptScope=\{acceptDesignDashboardConsentScope\}/u,
+  );
+  assert.match(
+    designComponentsSource,
+    /onAccepted=\{completeDesignDashboardConsentPreview\}/u,
+  );
+  assert.doesNotMatch(
+    designComponentsSource,
+    /requestHostedOnboardingJson|\/api\/legal\/consent\/accept/u,
+  );
   assert.match(subprocessorsPageSource, /LegalPolicyPage/u);
   assert.equal(
     existsSync(

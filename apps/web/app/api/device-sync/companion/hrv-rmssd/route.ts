@@ -6,6 +6,7 @@ import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-syn
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readJsonObject } from "@/src/lib/http";
 import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 const COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES = 512;
@@ -16,6 +17,10 @@ const COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES = 512;
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  await assertHostedHistoricalLaunchConsentGranted({
+    memberId: auth.member.id,
+    prisma,
+  });
 
   const acceptedAtDate = new Date();
   const observation = parseCompanionHrvRmssdObservationRequestBody(

@@ -7,7 +7,7 @@ function readSource(relativePath: string): string {
   return readFileSync(new URL(`../${relativePath}`, import.meta.url), "utf8");
 }
 
-test("stale launch-document acceptance does not stop device connection or current sync", () => {
+test("stale launch-document versions do not stop historically authorized device access", () => {
   const nonblockingDevicePaths = [
     "src/lib/device-sync/hosted-connect-start.ts",
     "app/api/device-sync/companion/sign-in-token/route.ts",
@@ -19,8 +19,13 @@ test("stale launch-document acceptance does not stop device connection or curren
   for (const relativePath of nonblockingDevicePaths) {
     assert.doesNotMatch(
       readSource(relativePath),
-      /assertHostedLaunchRequiredConsentGranted|HOSTED_CONSENT_REQUIRED/u,
+      /assertHostedLaunchRequiredConsentGranted/u,
       `${relativePath} must remain available when launch-document acceptance is stale`,
+    );
+    assert.match(
+      readSource(relativePath),
+      /assertHostedHistoricalLaunchConsentGranted/u,
+      `${relativePath} must retain historical launch authorization`,
     );
   }
 

@@ -5,7 +5,10 @@ import { DashboardShell } from "@/src/components/dashboard/dashboard-shell";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
 import { BrowserVaultProvider } from "@/src/lib/browser-vault/context";
 import { getHostedDashboardLayoutAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { readHostedConsentStatus } from "@/src/lib/legal/consent";
+import {
+  hasHostedHistoricalLaunchConsent,
+  readHostedConsentStatus,
+} from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 export default async function DashboardLayout({
@@ -32,7 +35,9 @@ export default async function DashboardLayout({
       initialMemberId={auth.pageAuth.authenticatedMember?.id ?? null}
     >
       <DashboardShell sidebarAuth={auth.sidebarAuth}>
-        {consentStatus && !consentStatus.launchGranted ? (
+        {consentStatus
+          && hasHostedHistoricalLaunchConsent(consentStatus)
+          && !consentStatus.launchGranted ? (
           <DashboardLegalConsentGate initialStatus={consentStatus} />
         ) : null}
         {children}

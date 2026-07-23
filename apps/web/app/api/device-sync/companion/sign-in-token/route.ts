@@ -6,6 +6,7 @@ import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-syn
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { requireActivePrivyMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
+import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 // Companion (iOS) sign-in token exchange. Auth is a bearer Privy identity token
@@ -17,6 +18,10 @@ import { getPrisma } from "@/src/lib/prisma";
 export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const auth = await requireActivePrivyMemberAuthFromBearerToken(request, prisma);
+  await assertHostedHistoricalLaunchConsentGranted({
+    memberId: auth.member.id,
+    prisma,
+  });
 
   // Installation metadata is validated and discarded; the spec's
   // `companion_installations` record is deferred until operationally needed.
