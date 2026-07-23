@@ -12,6 +12,7 @@ import {
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
@@ -78,6 +79,7 @@ export function HostedBillingSettings(props: {
   usageCreditBalanceUsdMicros?: string | null;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
@@ -199,6 +201,7 @@ export function HostedBillingSettings(props: {
         status={props.usageStatus}
         usageCreditBalanceUsdMicros={props.usageCreditBalanceUsdMicros}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+        usageTopUpContactOptions={props.usageTopUpContactOptions}
         usageTopUpInitialOpen={props.usageTopUpInitialOpen}
         usageTopUpOffers={usageTopUpOffers}
         usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
@@ -230,6 +233,7 @@ function PlanUsageBand(props: {
   status?: HostedPlanUsageStatus | null;
   usageCreditBalanceUsdMicros?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpInitialOpen?: boolean;
   usageTopUpOffers: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
@@ -240,6 +244,7 @@ function PlanUsageBand(props: {
     props.usageTopUpPurchaseReturn ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
+        contactOptions={props.usageTopUpContactOptions}
         initialOpen={props.usageTopUpInitialOpen}
         offers={[]}
         purchaseReturn={props.usageTopUpPurchaseReturn}
@@ -306,6 +311,7 @@ function PlanUsageBand(props: {
   const usageTopUpDialog = (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
+      contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
       offers={props.usageTopUpOffers}
       purchaseReturn={props.usageTopUpPurchaseReturn}

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { CircleAlertIcon } from "lucide-react";
 
+import { MurphContactActionButton } from "@/src/components/murph/murph-contact-action-button";
 import { Button } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
@@ -116,6 +117,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         targetConflict: purchase.targetConflict,
       })
     : null;
+  const contactOptions = props.contactOptions ?? [];
+  const showContactAction =
+    purchase !== null &&
+    purchase.status === "fulfilled" &&
+    !purchase.targetConflict &&
+    contactOptions.length > 0;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
     selection?.attempt.kind === "locked" ? selection.attempt.error : null;
@@ -254,6 +261,14 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   Check again
                 </Button>
+              ) : null}
+              {showContactAction ? (
+                <MurphContactActionButton
+                  actionLabel="Text Murph"
+                  className="w-full"
+                  options={contactOptions}
+                  pickerDescription="Pick how you want to text Murph."
+                />
               ) : null}
               <Button
                 type="button"

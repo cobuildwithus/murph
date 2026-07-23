@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupUsageFundingTargetByJoinCode: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedUsageCreditPurchaseStatus: vi.fn(),
+  resolveHostedMurphContactOptions: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -25,6 +26,10 @@ vi.mock("next/link", () => ({
 
 vi.mock("@/src/components/hosted-groups/group-funding-sign-in-button", () => ({
   GroupFundingSignInButton: () => React.createElement("button", null, "Sign in"),
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOptions: mocks.resolveHostedMurphContactOptions,
 }));
 
 vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
@@ -81,6 +86,12 @@ import GroupFundingPage from "@/app/groups/fund/[joinCode]/page";
 
 const PURCHASE_ID = "hucp_abcdefghijklmnop";
 
+const GROUP_TOP_UP_CONTACT_OPTION = {
+  href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage%20for%20the%20group.",
+  kind: "text" as const,
+  label: "Messages",
+};
+
 describe("hosted group funding page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -103,6 +114,9 @@ describe("hosted group funding page", () => {
       purchaseId: PURCHASE_ID,
       status: "fulfilled",
     });
+    mocks.resolveHostedMurphContactOptions.mockResolvedValue([
+      GROUP_TOP_UP_CONTACT_OPTION,
+    ]);
   });
 
   it("passes a checkout return only after payer and group beneficiary validation", async () => {
@@ -131,11 +145,17 @@ describe("hosted group funding page", () => {
     });
     expect(mocks.HostedUsageTopUpDialog).toHaveBeenCalledWith(
       expect.objectContaining({
+        contactOptions: [GROUP_TOP_UP_CONTACT_OPTION],
         purchaseReturn: { kind: "success", purchaseId: PURCHASE_ID },
         scope: "group",
       }),
       undefined,
     );
+    expect(mocks.resolveHostedMurphContactOptions).toHaveBeenCalledWith({
+      message: {
+        body: "Hey Murph, I just added more usage for the group.",
+      },
+    });
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
       serverApprovedPayableTargets: [{
         beneficiaryMemberId: "member_group_runtime",

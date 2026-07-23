@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { GroupFundingSignInButton } from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import {
   HostedUsageTopUpDialog,
@@ -77,7 +78,7 @@ export default async function GroupFundingPage({
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
-  const [usageStatus, activePurchase, purchaseReturnMatchesTarget] =
+  const [usageStatus, activePurchase, purchaseReturnMatchesTarget, contactOptions] =
     await Promise.all([
       readHostedGroupUsageStatus({
         prisma,
@@ -102,6 +103,13 @@ export default async function GroupFundingPage({
             purchaseId: requestedPurchaseReturn.purchaseId,
           }).then(() => true).catch(() => false)
         : Promise.resolve(false),
+      member
+        ? resolveHostedMurphContactOptions({
+            message: {
+              body: "Hey Murph, I just added more usage for the group.",
+            },
+          }).catch(() => [])
+        : Promise.resolve([]),
     ]);
   if (!usageStatus) {
     return <GroupFundingUnavailable />;
@@ -136,6 +144,7 @@ export default async function GroupFundingPage({
               <HostedUsageTopUpDialog
                 activePurchase={visibleActivePurchase}
                 checkoutUrl={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/usage-credit/checkout`}
+                contactOptions={contactOptions}
                 offers={offers}
                 purchaseReturn={purchaseReturn}
                 scope="group"

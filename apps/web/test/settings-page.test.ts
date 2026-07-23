@@ -944,6 +944,11 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     ownerSnapshot: familyOwner,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
+    usageTopUpContactOptions: [{
+      href: "sms:+15550100001?body=voice%20test",
+      kind: "text",
+      label: "Messages",
+    }],
     usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",
