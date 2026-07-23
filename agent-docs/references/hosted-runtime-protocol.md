@@ -1730,6 +1730,16 @@ and explicit no-child results. These fields are stamped onto the existing trace
 payload with no additional I/O. Prefer the same-call elapsed scalars when direct
 and Temporal retries may have contributed independently merged epoch
 timestamps.
+Fence-attempt diagnostics remain one coherent bundle across replacement races.
+When a replacement compare-and-swap loses, UserRunner drops the superseded
+fence's observation, active-wake, and replacement-clear leaves before probing
+the authoritative record returned by the store. The container entrypoint may
+then stamp accepted/finished evidence onto that clean pending wake. At the
+initial assistant-runtime import, the invocation-header seed owns overlapping
+orchestration leaves; pending-wake timing and non-overlapping caller context are
+still preserved. Web keeps the first populated trace leaves, so mixed-attempt
+bundles must be prevented at these producer boundaries rather than repaired
+after persistence.
 The hosted runtime also emits metadata-only phase boundary logs to stdout/stderr
 for supervisor correlation. Those phase logs carry fixed-vocabulary phase names
 and status plus bounded metadata-only correlation, count, and timing fields. The

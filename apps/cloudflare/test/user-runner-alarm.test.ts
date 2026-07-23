@@ -3244,13 +3244,19 @@ describe("HostedUserRunner execution coordination", () => {
         };
       },
     );
+    const priorRunnerContainerName = `${TEST_USER_ID}--v-prior`;
     const { invoke, runner, sql } = createRunnerHarness({
       ensureProcessing,
       invocationResults: [invocationResult.promise],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        CF_VERSION_METADATA: { id: "current" },
+      },
       workspace: createWorkspaceState({ version: "7" }),
     });
     await runner.bindUser(TEST_USER_ID);
     const replacedToken = writeRuntimeFenceForTest(sql, {
+      runnerContainerName: priorRunnerContainerName,
       startedAt: "2026-04-26T23:59:00.000Z",
       workspaceVersion: "7",
     });
@@ -3261,6 +3267,9 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await vi.waitFor(() => expect(ensureProcessing).toHaveBeenCalledOnce());
     const convergingReplacement = runner.ensureRuntimeProcessingForUser({
+      orchestration: {
+        triggeredByWebDirect: true,
+      },
       orchestrationAttemptId: "test-orchestration-attempt-current-fence-convergence",
       userId: TEST_USER_ID,
     });
@@ -3278,6 +3287,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
 
+    vi.setSystemTime(new Date(Date.parse(FIXED_NOW) + 250));
     secondWakeResult.resolve({
       kind: "start-required",
       reason: "no-active-child",
@@ -3291,6 +3301,33 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureProcessing).toHaveBeenCalledTimes(3);
+    const convergedWakeOrchestration =
+      ensureProcessing.mock.calls[2]?.[0].activeRuntime?.orchestration;
+    expect(convergedWakeOrchestration).toMatchObject({
+      activeFenceObservedAtEpochMs: Date.parse(FIXED_NOW) + 250,
+      activeFenceTargetWasPriorVersion: false,
+      activeWakeStartedAtEpochMs: Date.parse(FIXED_NOW) + 250,
+      triggeredByWebDirect: true,
+      userRunnerEnsureStartedAtEpochMs: expect.any(Number),
+    });
+    expect(convergedWakeOrchestration).not.toHaveProperty("activeWakeAccepted");
+    expect(convergedWakeOrchestration).not.toHaveProperty("activeWakeElapsedMs");
+    expect(convergedWakeOrchestration).not.toHaveProperty(
+      "activeWakeFinishedAtEpochMs",
+    );
+    expect(convergedWakeOrchestration).not.toHaveProperty(
+      "activeWakeFoundNoActiveChild",
+    );
+    expect(convergedWakeOrchestration).not.toHaveProperty(
+      "replacementFenceClearStartedAtEpochMs",
+    );
+    expect(convergedWakeOrchestration).not.toHaveProperty("replacedStaleFence");
+    expect(convergedWakeOrchestration).not.toHaveProperty(
+      "replacementFenceClearedAtEpochMs",
+    );
+    expect(convergedWakeOrchestration).not.toHaveProperty(
+      "replacementFenceClearElapsedMs",
+    );
     expect(invoke).toHaveBeenCalledOnce();
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: winner.kind === "runtime_processing_accepted"

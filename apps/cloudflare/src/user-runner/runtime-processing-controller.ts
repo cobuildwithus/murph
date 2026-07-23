@@ -110,6 +110,31 @@ function withRuntimeProcessingOrchestration(
   };
 }
 
+function withoutSupersededRuntimeFenceDiagnostics(
+  input: RuntimeProcessingInput,
+): RuntimeProcessingInput {
+  if (!input.orchestration) {
+    return input;
+  }
+
+  const orchestration = { ...input.orchestration };
+  delete orchestration.activeFenceObservedAtEpochMs;
+  delete orchestration.activeFenceTargetWasPriorVersion;
+  delete orchestration.activeWakeAccepted;
+  delete orchestration.activeWakeElapsedMs;
+  delete orchestration.activeWakeFinishedAtEpochMs;
+  delete orchestration.activeWakeFoundNoActiveChild;
+  delete orchestration.activeWakeStartedAtEpochMs;
+  delete orchestration.replacedStaleFence;
+  delete orchestration.replacementFenceClearElapsedMs;
+  delete orchestration.replacementFenceClearedAtEpochMs;
+  delete orchestration.replacementFenceClearStartedAtEpochMs;
+  return {
+    ...input,
+    orchestration,
+  };
+}
+
 export class RuntimeProcessingController {
   constructor(
     private readonly input: {
@@ -379,9 +404,14 @@ export class RuntimeProcessingController {
       userId: record.userId,
     });
     if (!cleared.cleared) {
+      const convergedInput = withoutSupersededRuntimeFenceDiagnostics(inputAtClearStart);
       return await this.ensureExistingRuntimeProcessing({
         commandBudget: input.commandBudget,
-        input: inputAtClearStart,
+        input: cleared.record.writeFence
+          ? withRuntimeProcessingOrchestration(convergedInput, {
+              activeFenceObservedAtEpochMs: Date.now(),
+            })
+          : convergedInput,
         record: cleared.record,
         runtimeWakeStartedAt: input.runtimeWakeStartedAt,
       });
