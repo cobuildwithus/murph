@@ -3906,6 +3906,9 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
+      for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
+        pushRuntimeIssueInput(runtimeIssueInput)
+      }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
       }

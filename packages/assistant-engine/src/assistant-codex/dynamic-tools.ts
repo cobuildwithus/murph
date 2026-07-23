@@ -98,6 +98,7 @@ import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from '../assistant/group-shared-read-limits.js'
+import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import type {
   AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
@@ -1818,6 +1819,9 @@ export interface MurphDynamicToolExecutionResult {
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   rpcResult: MurphDynamicToolRpcResult
+  // Specific runtime issues a tool wants recorded off-path via the assistant
+  // runtime's existing issue owner (e.g. a generated-image upload failure).
+  runtimeIssueInputs?: readonly AssistantRuntimeIssueInput[]
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
@@ -2943,6 +2947,9 @@ export async function executeMurphDynamicToolRequest(input: {
             },
           ],
         },
+        ...(result.runtimeIssue
+          ? { runtimeIssueInputs: [result.runtimeIssue] }
+          : {}),
         usageDraft: result.usageDraft ?? null,
       }
     }
