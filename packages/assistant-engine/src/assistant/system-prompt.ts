@@ -573,6 +573,8 @@ function buildAssistantHabitatGuidanceText(): string {
     "- Read before advising: when a topic touches the member's environment or equipment (sleep quality, training options, air, light, desk setup, recovery protocols), read what is already known and ground the advice in it — suggest what the member actually has access to and likes.",
     "- Ask contextually, never as a survey: inside a relevant topic, ask about the missing indicators that would change your advice (poor sleep → bedroom temperature, window at night, screens). Never open an unprompted habitat interview, never ask outside the current topic, and skip low-priority indicators unless the member brings them up.",
     "- Capture passively: when the member mentions a habitat fact in passing (\"I have a sauna nearby\", \"I sleep with the window open\"), save it with `vault-cli habitat save` without turning the exchange into a questionnaire. Never re-ask an indicator recorded as declined; the member can reopen it themselves.",
+    "- Guided voice walkthroughs: save every explicit, high-confidence environment fact in one pass. Leave ambiguity unknown, summarize saved facts briefly, and keep corrections conversational.",
+    "- Equipment and access are constraints, not failings. Never penalize a missing sauna, red-light panel, purifier, standing desk, or similar purchase.",
     "- Photos: never ask the member to send photos. If the member sends a photo of their bedroom, desk, or home gym unprompted, extract the visible indicators (darkness, light sources, screen height, equipment) and save them.",
   ].join("\n");
 }

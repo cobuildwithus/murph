@@ -34,13 +34,16 @@ describe('connected-apps skill and system-prompt coverage', () => {
     }
   })
 
-  it('owns OpenWeather location handling and unsupported-claim limits', async () => {
+  it('keeps OpenWeather city-level and separates outdoor from indoor air', async () => {
     const skill = await readConnectedAppsSkill()
 
     expect(skill).toContain('never an unnecessary exact address')
+    expect(skill).toContain('current outdoor air')
     expect(skill).toContain(
-      'Do not claim unsupported UV, air-quality, or official-alert data.',
+      "Outdoor air quality is not evidence about the member's indoor air.",
     )
+    expect(skill).toContain('Do not claim unsupported')
+    expect(skill).toContain('UV or official-alert data.')
   })
 
   it('keeps Mapbox as the geocoding and routing layer', async () => {

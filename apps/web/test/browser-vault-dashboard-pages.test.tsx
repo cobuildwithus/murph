@@ -13,7 +13,12 @@ import {
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
+  resolveHostedMurphContactOptions: vi.fn(),
   useBrowserVault: vi.fn(),
+}));
+
+vi.mock("@/src/components/murph/hosted-murph-contact-action", () => ({
+  resolveHostedMurphContactOptions: mocks.resolveHostedMurphContactOptions,
 }));
 
 vi.mock("@/src/lib/browser-vault/context", () => ({
@@ -40,6 +45,13 @@ const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
+  mocks.resolveHostedMurphContactOptions.mockResolvedValue([
+    {
+      href: "sms:+15555550100?body=I%20want%20to%20update%20my%20environment.",
+      kind: "text",
+      label: "Text Murph",
+    },
+  ]);
   mocks.useBrowserVault.mockReturnValue({
     client: clientFixture,
     dataVersion: clientFixture.replica.source.dataVersion,
@@ -74,7 +86,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
   );
 
   const environmentImage = {
-    alt: "My environment grade — Murph",
+    alt: "Map your environment with Murph",
     height: 630,
     type: "image/png",
     url: "/environment/opengraph-image",
@@ -198,18 +210,44 @@ test("HistoryPage renders recent timeline entries", () => {
   assert.doesNotMatch(markup, /history\/sample\/sample_1\.md/);
 });
 
-test("EnvironmentPage renders the habitat catalog mock", () => {
-  const markup = renderToStaticMarkup(createElement(EnvironmentPage));
+test("EnvironmentPage renders private habitat facts from Browser Vault", async () => {
+  const markup = renderToStaticMarkup(await EnvironmentPage());
 
   assert.match(markup, /Your environment/);
   assert.match(markup, /Environment grade/);
-  assert.match(markup, /Murph knows 42 of 48/);
+  assert.match(markup, /Murph knows 8 of 25/);
+  assert.match(markup, /Lisbon/);
+  assert.match(markup, /Not enough information for a fair grade/);
   assert.match(markup, /Air &amp; water/);
   assert.match(markup, /Night temperature/);
   assert.match(markup, /Recovery &amp; devices/);
   assert.match(markup, /group\/category/);
+  assert.doesNotMatch(markup, /fixture data|mock/i);
   assert.doesNotMatch(markup, /Overall picture/);
   assert.doesNotMatch(markup, /Target score/);
+});
+
+test("EnvironmentPage starts with a voice-first empty state in the member's available channel", async () => {
+  const emptyClient = await createFixtureClient({ includeHabitat: false });
+  mocks.useBrowserVault.mockReturnValue({
+    client: emptyClient,
+    dataVersion: emptyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: async () => {},
+    status: "ready",
+  });
+
+  const markup = renderToStaticMarkup(await EnvironmentPage());
+
+  assert.match(markup, /Your surroundings shape your health every day/);
+  assert.match(markup, /Tell Murph by voice/);
+  assert.match(markup, /Tell Murph in chat/);
+  assert.match(markup, /href="sms:\+15555550100\?body=/);
+  assert.doesNotMatch(markup, /t\.me|telegram/i);
+  assert.match(markup, /No questionnaire/);
+  assert.doesNotMatch(markup, /Environment grade/);
 });
 
 test("ExperimentsPage renders the public library with private browser-vault overlays", () => {
@@ -421,6 +459,7 @@ async function createFixtureClient(
   input: {
     experimentSlug?: string;
     extraEntities?: BrowserVaultEntity[];
+    includeHabitat?: boolean;
   } = {},
 ) {
   const replica = await createBrowserVaultReplica({
@@ -501,6 +540,7 @@ async function createFixtureClient(
           tags: ["cardio"],
           title: "Improve resting heart rate",
         }),
+        ...(input.includeHabitat === false ? [] : createHabitatEntities()),
         ...(input.extraEntities ?? []),
       ],
       metadata: {
@@ -519,6 +559,7 @@ function resolveRecordClass(
   switch (family) {
     case "experiment":
     case "goal":
+    case "habitat":
     case "regimen":
       return "bank";
     case "journal":
@@ -528,4 +569,42 @@ function resolveRecordClass(
     default:
       throw new Error(`Unsupported browser-vault test family: ${family}`);
   }
+}
+
+function createHabitatEntities(): BrowserVaultEntity[] {
+  return [
+    createEntity("habitat", "hab_home-location", {
+      attributes: {
+        aspect: "home-location",
+        domain: "environment",
+        indicators: {
+          area_type: "urban_center",
+          location: "Lisbon",
+        },
+      },
+      kind: "habitat",
+      path: "bank/habitat/home-location.md",
+      status: "active",
+      title: "Location & climate",
+    }),
+    createEntity("habitat", "hab_sleep-environment", {
+      attributes: {
+        aspect: "sleep-environment",
+        domain: "environment",
+        indicators: {
+          co2_meter: "aranet",
+          darkness: "blackout",
+          mattress_satisfaction: "good",
+          night_noise: "quiet",
+          night_temp_c: 20,
+          phone_by_bed: false,
+          tv_in_bedroom: false,
+        },
+      },
+      kind: "habitat",
+      path: "bank/habitat/sleep-environment.md",
+      status: "active",
+      title: "Bedroom & sleep",
+    }),
+  ];
 }

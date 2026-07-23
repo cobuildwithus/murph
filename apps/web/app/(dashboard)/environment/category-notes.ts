@@ -13,6 +13,7 @@ export type CategoryGrade = {
   pct: number | null;
   met: number;
   graded: number;
+  eligible: number;
 };
 
 export type FactRow = {
@@ -57,16 +58,15 @@ const TARGET_EVALUATORS: Readonly<Record<string, Evaluator>> = {
   night_temp_c: {
     met: (value) => typeof value === "number" && value >= 18 && value <= 22,
   },
-  temp_control: {
-    met: (value) => value !== "none",
-    goal: "AC / adjustable heating",
-  },
   co2_typical_ppm: {
     met: (value) => typeof value === "number" && value < 1_000,
   },
   darkness: { met: (value) => value === "blackout" },
   night_noise: { met: (value) => value === "quiet" },
-  humidity_known: { met: (value) => value !== "unmanaged" },
+  mattress_satisfaction: {
+    met: (value) => value === "good" || value === "acceptable",
+    goal: "comfortable and supportive",
+  },
   bedding_overheating: {
     met: (value) => value === "never",
     goal: "never",
@@ -79,32 +79,21 @@ const TARGET_EVALUATORS: Readonly<Record<string, Evaluator>> = {
     met: (value) => value === false,
     goal: "no TV",
   },
-  ventilation: {
-    met: (value) => value !== "windows_only",
-    goal: "mechanical / recuperation",
-  },
   damp_or_mold: {
     met: (value) => value === "none",
     goal: "no damp or mold",
   },
-  stove: { met: (value) => value === "induction" || value === "electric" },
   smoke_sources: {
     met: (value) => value === "none",
     goal: "no indoor smoke",
   },
-  radon_tested: { met: (value) => value === "tested_ok" },
   evening_light: { met: (value) => value === "warm_dim" },
   morning_light_access: { met: (value) => value !== "none" },
   daytime_light: {
     met: (value) => value !== "dim",
     goal: "bright daytime light",
   },
-  standing_desk: { met: (value) => value === "adjustable_used" },
   screen_at_eye_level: { met: (value) => value === true },
-  screen_setup: {
-    met: (value) => value !== "laptop_only",
-    goal: "external monitor",
-  },
   breaks: {
     met: (value) => value === "systematic",
     goal: "systematic breaks",
@@ -112,14 +101,6 @@ const TARGET_EVALUATORS: Readonly<Record<string, Evaluator>> = {
   wrist_complaints: {
     met: (value) => value === false,
     goal: "no wrist complaints",
-  },
-  chair: {
-    met: (value) => value === "ergonomic",
-    goal: "ergonomic chair",
-  },
-  external_keyboard: {
-    met: (value) => value === true,
-    showGoal: false,
   },
 };
 
@@ -187,23 +168,34 @@ function humanizeValue(
   return typeof value === "string" ? value.replaceAll("_", " ") : "";
 }
 
-function gradeFromCounts(met: number, graded: number): CategoryGrade {
-  if (graded === 0) {
-    return { letter: null, pct: null, met, graded };
+const MIN_GRADE_COVERAGE = 0.5;
+
+function gradeFromCounts(
+  met: number,
+  graded: number,
+  eligible: number,
+): CategoryGrade {
+  if (
+    graded === 0 ||
+    eligible === 0 ||
+    graded / eligible < MIN_GRADE_COVERAGE
+  ) {
+    return { letter: null, pct: null, met, graded, eligible };
   }
 
   const pct = Math.round((100 * met) / graded);
-  if (pct >= 90) return { letter: "A", pct, met, graded };
-  if (pct >= 75) return { letter: "B", pct, met, graded };
-  if (pct >= 55) return { letter: "C", pct, met, graded };
-  if (pct >= 35) return { letter: "D", pct, met, graded };
-  return { letter: "E", pct, met, graded };
+  if (pct >= 90) return { letter: "A", pct, met, graded, eligible };
+  if (pct >= 75) return { letter: "B", pct, met, graded, eligible };
+  if (pct >= 55) return { letter: "C", pct, met, graded, eligible };
+  if (pct >= 35) return { letter: "D", pct, met, graded, eligible };
+  return { letter: "E", pct, met, graded, eligible };
 }
 
 export function overallGrade(notes: readonly CategoryNote[]): CategoryGrade {
   return gradeFromCounts(
     notes.reduce((sum, note) => sum + note.grade.met, 0),
     notes.reduce((sum, note) => sum + note.grade.graded, 0),
+    notes.reduce((sum, note) => sum + note.grade.eligible, 0),
   );
 }
 
@@ -277,22 +269,43 @@ export function deriveCategoryNote(
   const unknown: Array<QuietFact & { rank: number; index: number }> = [];
   const skipped: Array<QuietFact & { rank: number; index: number }> = [];
   let known = 0;
+  let total = 0;
 
   for (const { aspectId, indicator, value, index } of indicators) {
     const label = displayLabel(aspectId, indicator);
     const rank = PRIORITY_RANK[indicator.priority];
+    const core = indicator.informational !== true;
+    if (core && value !== HABITAT_DECLINED_VALUE) {
+      total += 1;
+    }
 
     if (value === undefined || value === null) {
-      unknown.push({ indicatorId: indicator.id, label, rank, index });
+      if (core) {
+        unknown.push({ indicatorId: indicator.id, label, rank, index });
+      }
       continue;
     }
     if (value === HABITAT_DECLINED_VALUE) {
-      skipped.push({ indicatorId: indicator.id, label, rank, index });
+      if (core) {
+        skipped.push({ indicatorId: indicator.id, label, rank, index });
+      }
       continue;
     }
 
-    known += 1;
-    if (FOLDED_INTO[indicator.id]) continue;
+    if (core) {
+      known += 1;
+    }
+    const foldedParentId = FOLDED_INTO[indicator.id];
+    if (
+      foldedParentId &&
+      indicators.some(
+        (candidate) =>
+          candidate.indicator.id === foldedParentId &&
+          isKnownValue(candidate.value),
+      )
+    ) {
+      continue;
+    }
 
     const evaluator = TARGET_EVALUATORS[indicator.id];
     const met = evaluateIndicatorTarget(indicator.id, value);
@@ -304,15 +317,9 @@ export function deriveCategoryNote(
     rows.push({
       indicatorId: indicator.id,
       label,
-      value: mergedValue(
-        indicator.id,
-        humanizedValue,
-        knownFoldedValues,
-      ),
+      value: mergedValue(indicator.id, humanizedValue, knownFoldedValues),
       target:
-        target?.toLowerCase() === humanizedValue.toLowerCase()
-          ? null
-          : target,
+        target?.toLowerCase() === humanizedValue.toLowerCase() ? null : target,
       met,
       priority: indicator.priority,
       detail: mergedDetail(indicator.id, knownFoldedValues),
@@ -332,13 +339,19 @@ export function deriveCategoryNote(
 
   const met = rows.filter((row) => row.met === true).length;
   const graded = rows.filter((row) => row.met !== null).length;
+  const eligible = indicators.filter(
+    ({ indicator, value }) =>
+      indicator.informational !== true &&
+      value !== HABITAT_DECLINED_VALUE &&
+      TARGET_EVALUATORS[indicator.id] !== undefined,
+  ).length;
 
   return {
     id: category.id,
     title: category.title,
     known,
-    total: indicators.length,
-    grade: gradeFromCounts(met, graded),
+    total,
+    grade: gradeFromCounts(met, graded, eligible),
     rows: rows.map(
       ({
         indicatorId,

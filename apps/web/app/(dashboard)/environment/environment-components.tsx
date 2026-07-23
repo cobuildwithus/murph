@@ -140,9 +140,11 @@ function GradeDialog({
                 {title}
               </DialogTitle>
               <DialogDescription className="mt-1.5 text-sm leading-relaxed">
-                {grade.graded === 0
-                  ? "Informational facts only — this category isn't graded."
-                  : `${grade.met} of ${grade.graded} targets met. Fixing any flagged fact raises the grade.`}
+                {grade.eligible === 0
+                  ? "Informational facts only. This category isn't graded."
+                  : grade.letter === null
+                  ? `Murph knows ${grade.graded} of ${grade.eligible} scoreable conditions. At least half are needed for a fair grade.`
+                  : `${grade.met} of ${grade.graded} known conditions are within target. Unknown facts do not lower the grade.`}
               </DialogDescription>
             </div>
           </div>
@@ -205,9 +207,9 @@ function CategoryGradeButton({ note }: { note: CategoryNote }) {
           </ul>
         ) : (
           <p className="py-3 text-sm text-muted-foreground">
-            {note.grade.graded > 0
+            {note.grade.eligible > 0
               ? "Everything graded here is within target."
-              : "Nothing to fix — these facts are context, not targets."}
+              : "Nothing to fix. These facts are context, not targets."}
           </p>
         )}
       </GradeDialog>
@@ -237,9 +239,9 @@ function OverallGradeDialog({
         {notes.map((note) => {
           const thumbnail = CATEGORY_THUMBNAILS[note.id];
           const pct =
-            note.grade.graded === 0
+            note.grade.eligible === 0
               ? 0
-              : Math.round((100 * note.grade.met) / note.grade.graded);
+              : Math.round((100 * note.grade.graded) / note.grade.eligible);
           return (
             <li key={note.id} className="flex items-center gap-3.5 py-3">
               {thumbnail ? (
@@ -256,9 +258,13 @@ function OverallGradeDialog({
               <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                 {note.title}
               </span>
-              {note.grade.graded === 0 ? (
+              {note.grade.eligible === 0 ? (
                 <span className="text-xs text-muted-foreground">
                   not graded
+                </span>
+              ) : note.grade.letter === null ? (
+                <span className="text-xs text-muted-foreground">
+                  {note.grade.graded}/{note.grade.eligible} known
                 </span>
               ) : (
                 <>
@@ -290,7 +296,7 @@ export function ShareEnvironmentButton() {
 
   const share = async () => {
     const url = window.location.origin + window.location.pathname;
-    const title = "My environment, graded — Murph";
+    const title = "Map your environment with Murph";
     try {
       const response = await fetch("/environment/opengraph-image");
       const blob = await response.blob();
@@ -301,7 +307,7 @@ export function ShareEnvironmentButton() {
         await navigator.share({
           files: [file],
           title,
-          text: `What would yours score? ${url}`,
+          text: `Understand how the place you sleep, breathe and work supports your health. ${url}`,
         });
         return;
       }
@@ -381,7 +387,11 @@ export function EnvironmentHero({
             >
               Environment grade
             </p>
-            {grade.pct === null ? null : (
+            {grade.pct === null ? (
+              <p className="mt-1 max-w-xs text-sm font-medium leading-snug text-foreground">
+                Not enough information for a fair grade
+              </p>
+            ) : (
               <button
                 type="button"
                 onClick={() => setGradeOpen(true)}
@@ -459,7 +469,7 @@ export function CategoryCard({
 }: {
   category: ResolvedCategory;
   note: CategoryNote;
-  chatHref: string;
+  chatHref: string | null;
 }) {
   const headingId = `environment-category-${note.id}`;
   const coverage =
@@ -489,27 +499,35 @@ export function CategoryCard({
           </span>
           <CategoryGradeButton note={note} />
           <span className="w-12 shrink-0 sm:w-24">
-            <span className="flex items-baseline justify-between gap-1">
-              <span className="font-serif text-base font-semibold text-foreground sm:text-lg">
-                {coverage}%
+            {note.total === 0 ? (
+              <span className="block text-right text-xs text-muted-foreground">
+                Optional
               </span>
-              <span className="hidden text-[10px] text-muted-foreground sm:inline">
-                {note.known}/{note.total}
-              </span>
-            </span>
-            <span
-              className="mt-1 block h-1 overflow-hidden rounded-full bg-secondary/40"
-              role="progressbar"
-              aria-label={`${note.title} coverage`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={coverage}
-            >
-              <span
-                className="block h-full rounded-full bg-primary"
-                style={{ width: `${coverage}%` }}
-              />
-            </span>
+            ) : (
+              <>
+                <span className="flex items-baseline justify-between gap-1">
+                  <span className="font-serif text-base font-semibold text-foreground sm:text-lg">
+                    {coverage}%
+                  </span>
+                  <span className="hidden text-[10px] text-muted-foreground sm:inline">
+                    {note.known}/{note.total}
+                  </span>
+                </span>
+                <span
+                  className="mt-1 block h-1 overflow-hidden rounded-full bg-secondary/40"
+                  role="progressbar"
+                  aria-label={`${note.title} coverage`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={coverage}
+                >
+                  <span
+                    className="block h-full rounded-full bg-primary"
+                    style={{ width: `${coverage}%` }}
+                  />
+                </span>
+              </>
+            )}
           </span>
           <ChevronDown
             className="size-5 shrink-0 text-muted-foreground transition duration-200 group-open/category:rotate-180 motion-reduce:transition-none"
@@ -518,7 +536,11 @@ export function CategoryCard({
         </summary>
 
         <div className="border-t border-border px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-          <CategoryFactList category={category} note={note} chatHref={chatHref} />
+          <CategoryFactList
+            category={category}
+            note={note}
+            chatHref={chatHref}
+          />
         </div>
       </details>
     </article>
@@ -575,7 +597,10 @@ function FactIcon({
           ?
         </span>
       ) : kind === "skipped" ? (
-        <span className="font-mono text-sm text-muted-foreground" aria-hidden="true">
+        <span
+          className="font-mono text-sm text-muted-foreground"
+          aria-hidden="true"
+        >
           –
         </span>
       ) : (
@@ -665,18 +690,23 @@ function RowChevron() {
 function buildChatMessage(fact: SelectedFact): string {
   const topic = fact.label.toLowerCase();
   if (fact.kind === "unknown" || fact.kind === "skipped") {
-    return `Hey Murph — you don't know about my ${topic} yet. Let's fill it in.`;
+    return `Hey Murph, you don't know about my ${topic} yet. Let's fill it in.`;
   }
   if (fact.kind === "unmet") {
     const target = fact.target ? ` (target: ${fact.target})` : "";
-    return `Hey Murph — my ${topic} is "${fact.value}"${target}. Can you help me improve it?`;
+    return `Hey Murph, my ${topic} is "${fact.value}"${target}. Can you help me improve it?`;
   }
-  return `Hey Murph — can we talk about my ${topic}? Mine is "${fact.value}".`;
+  return `Hey Murph, can we talk about my ${topic}? Mine is "${fact.value}".`;
 }
 
 function buildChatHref(chatHref: string, fact: SelectedFact): string {
-  const query = new URLSearchParams({ text: buildChatMessage(fact) });
-  return `${chatHref}${chatHref.includes("?") ? "&" : "?"}${query}`;
+  const [base, rawQuery = ""] = chatHref.split("?", 2);
+  const query = new URLSearchParams(rawQuery);
+  query.set(
+    chatHref.startsWith("sms:") ? "body" : "text",
+    buildChatMessage(fact),
+  );
+  return `${base}?${query}`;
 }
 
 const DISMISSED_CHECKS_KEY = "murph-environment-dismissed-checks";
@@ -738,7 +768,7 @@ function FactDrawer({
 }: {
   fact: SelectedFact | null;
   sprite?: ObjectSpriteDefinition;
-  chatHref: string;
+  chatHref: string | null;
   onClose: () => void;
   onStep?: (delta: 1 | -1) => void;
   position?: { index: number; total: number };
@@ -801,8 +831,18 @@ function FactDrawer({
                     ?
                   </span>
                 ) : (
-                  <svg viewBox="0 0 64 64" className="size-18" aria-hidden="true">
-                    <ObjectSprite sprite={sprite} x={4} y={4} width={56} height={56} />
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="size-18"
+                    aria-hidden="true"
+                  >
+                    <ObjectSprite
+                      sprite={sprite}
+                      x={4}
+                      y={4}
+                      width={56}
+                      height={56}
+                    />
                   </svg>
                 )}
               </span>
@@ -824,7 +864,7 @@ function FactDrawer({
                   </p>
                 ) : fact.kind === "skipped" ? (
                   <p className="text-sm text-muted-foreground">
-                    You skipped this one — you can pick it up with Murph any
+                    You skipped this one. You can pick it up with Murph any
                     time.
                   </p>
                 ) : (
@@ -872,17 +912,19 @@ function FactDrawer({
               ))}
             </div>
 
-            <SheetFooter className="border-t border-border">
-              <a
-                href={buildChatHref(chatHref, fact)}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-              >
-                <MessageCircle className="size-4" aria-hidden="true" />
-                {quiet ? "Tell Murph about it" : "Talk to Murph about it"}
-              </a>
-            </SheetFooter>
+            {chatHref ? (
+              <SheetFooter className="border-t border-border">
+                <a
+                  href={buildChatHref(chatHref, fact)}
+                  target={chatHref.startsWith("sms:") ? undefined : "_blank"}
+                  rel={chatHref.startsWith("sms:") ? undefined : "noreferrer"}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  <MessageCircle className="size-4" aria-hidden="true" />
+                  {quiet ? "Tell Murph about it" : "Talk to Murph about it"}
+                </a>
+              </SheetFooter>
+            ) : null}
           </>
         ) : null}
       </SheetContent>
@@ -907,14 +949,21 @@ export function NextChecksStrip({
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
-    setDismissed(loadDismissedChecks());
+    const frame = window.requestAnimationFrame(() => {
+      setDismissed(loadDismissedChecks());
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   const remaining = items.filter(
     (item) => !dismissed.has(item.fact.indicatorId),
   );
   const unmet = remaining.filter((item) => item.fact.kind === "unmet");
-  const shown = [...unmet.slice(0, 2), ...remaining.filter((item) => item.fact.kind !== "unmet"), ...unmet.slice(2)].slice(0, 3);
+  const shown = [
+    ...unmet.slice(0, 2),
+    ...remaining.filter((item) => item.fact.kind !== "unmet"),
+    ...unmet.slice(2),
+  ].slice(0, 3);
   const dismissedCount = items.length - remaining.length;
   const selectedIndex = shown.findIndex(
     (item) => item.fact.indicatorId === selectedId,
@@ -953,77 +1002,77 @@ export function NextChecksStrip({
     <TooltipProvider delay={150}>
       <section aria-label="What to check next">
         <div className="flex items-baseline justify-between">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-          What to check next
-        </p>
-        {dismissedCount > 0 ? (
-          <button
-            type="button"
-            onClick={restore}
-            className="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-          >
-            Show dismissed ({dismissedCount})
-          </button>
-        ) : null}
-      </div>
-      {shown.length > 0 ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {shown.map((item) => (
-            <div key={item.fact.indicatorId} className="group/check relative">
-              <button
-                type="button"
-                onClick={() => open(item)}
-                className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-              >
-                <FactIcon kind={item.fact.kind} sprite={item.sprite} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-foreground">
-                    {item.fact.label}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {item.fact.kind === "unknown"
-                      ? `not known yet · ${item.categoryTitle}`
-                      : `${item.fact.value} · ${item.categoryTitle}`}
-                  </span>
-                </span>
-                {item.fact.kind === "unmet" ? (
-                  <span className="shrink-0 text-xs font-medium text-destructive">
-                    fix
-                  </span>
-                ) : (
-                  <span className="shrink-0 text-xs font-medium text-primary">
-                    fill in
-                  </span>
-                )}
-                <ChevronRight
-                  className="size-4 shrink-0 text-muted-foreground/50 transition-colors duration-150 group-hover/check:text-muted-foreground"
-                  aria-hidden="true"
-                />
-              </button>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      onClick={() => dismiss(item.fact.indicatorId)}
-                      className="absolute -right-1.5 -top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
-                      aria-label={`Don't suggest ${item.fact.label} again`}
-                    />
-                  }
-                >
-                  <X className="size-3" aria-hidden="true" />
-                </TooltipTrigger>
-                <TooltipContent>Don&apos;t suggest this again</TooltipContent>
-              </Tooltip>
-            </div>
-          ))}
+          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            What to check next
+          </p>
+          {dismissedCount > 0 ? (
+            <button
+              type="button"
+              onClick={restore}
+              className="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Show dismissed ({dismissedCount})
+            </button>
+          ) : null}
         </div>
-      ) : (
-        <p className="mt-3 text-sm text-muted-foreground">
-          Nothing left to suggest — you&apos;ve dismissed all current
-          suggestions.
-        </p>
-      )}
+        {shown.length > 0 ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map((item) => (
+              <div key={item.fact.indicatorId} className="group/check relative">
+                <button
+                  type="button"
+                  onClick={() => open(item)}
+                  className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+                >
+                  <FactIcon kind={item.fact.kind} sprite={item.sprite} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-foreground">
+                      {item.fact.label}
+                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {item.fact.kind === "unknown"
+                        ? `not known yet · ${item.categoryTitle}`
+                        : `${item.fact.value} · ${item.categoryTitle}`}
+                    </span>
+                  </span>
+                  {item.fact.kind === "unmet" ? (
+                    <span className="shrink-0 text-xs font-medium text-destructive">
+                      fix
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-xs font-medium text-primary">
+                      fill in
+                    </span>
+                  )}
+                  <ChevronRight
+                    className="size-4 shrink-0 text-muted-foreground/50 transition-colors duration-150 group-hover/check:text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        onClick={() => dismiss(item.fact.indicatorId)}
+                        className="absolute -right-1.5 -top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
+                        aria-label={`Hide ${item.fact.label}`}
+                      />
+                    }
+                  >
+                    <X className="size-3" aria-hidden="true" />
+                  </TooltipTrigger>
+                  <TooltipContent>Hide this suggestion</TooltipContent>
+                </Tooltip>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Nothing left to suggest. You&apos;ve hidden all current suggestions
+            on this device.
+          </p>
+        )}
 
         <FactDrawer
           fact={selected?.fact ?? null}
@@ -1074,7 +1123,7 @@ function CategoryFactList({
 }: {
   category: ResolvedCategory;
   note: CategoryNote;
-  chatHref: string;
+  chatHref: string | null;
 }) {
   const facts: SelectedFact[] = [
     ...note.rows.map(rowToSelected),
@@ -1098,17 +1147,6 @@ function CategoryFactList({
     if (next >= 0 && next < facts.length) openIndex(next);
   };
 
-  const hashTargets = facts.map((fact) => fact.indicatorId).join(",");
-  useEffect(() => {
-    const hash = window.location.hash.slice(1);
-    if (!hash) return;
-    const index = facts.findIndex((fact) => fact.indicatorId === hash);
-    if (index >= 0) {
-      setSelectedIndex(index);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hashTargets]);
-
   const spriteByIndicatorId = new Map(
     category.objects.flatMap((object) =>
       object.sprite && !object.decor
@@ -1123,85 +1161,90 @@ function CategoryFactList({
 
   return (
     <section aria-label={`${note.title} facts`} className="min-w-0">
-        {hasRows ? (
-          <div
-            className={`hidden ${FACT_ROW_GRID} mb-1 border-b border-border pb-1.5 sm:grid`}
-            aria-hidden="true"
-          >
-            <span />
-            <span className="text-xs text-muted-foreground">Yours</span>
-            {hasGoal ? (
-              <span className="text-xs text-muted-foreground">Target</span>
-            ) : null}
-          </div>
-        ) : null}
+      {hasRows ? (
+        <div
+          className={`hidden ${FACT_ROW_GRID} mb-1 border-b border-border pb-1.5 sm:grid`}
+          aria-hidden="true"
+        >
+          <span />
+          <span className="text-xs text-muted-foreground">Yours</span>
+          {hasGoal ? (
+            <span className="text-xs text-muted-foreground">Target</span>
+          ) : null}
+        </div>
+      ) : null}
 
-        {hasRows ? (
-          <ul className="-mx-3 divide-y divide-border" role="list">
-            {note.rows.map((row, index) => (
-              <FactRowButton
-                key={row.indicatorId}
-                onClick={() => openIndex(index)}
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <FactIcon
-                    kind={factStatusKind(row.met)}
-                    sprite={spriteFor(row.indicatorId)}
-                  />
-                  <span className="text-sm font-medium text-foreground">
-                    {row.label}
-                  </span>
+      {hasRows ? (
+        <ul className="-mx-3 divide-y divide-border" role="list">
+          {note.rows.map((row, index) => (
+            <FactRowButton
+              key={row.indicatorId}
+              onClick={() => openIndex(index)}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FactIcon
+                  kind={factStatusKind(row.met)}
+                  sprite={spriteFor(row.indicatorId)}
+                />
+                <span className="text-sm font-medium text-foreground">
+                  {row.label}
                 </span>
-                <span className="min-w-0 pl-13 sm:pl-0">
-                  <span className="sr-only">Yours: </span>
-                  <FactValue row={row} />
-                  {row.met === false ? <UnmetFlag /> : null}
-                </span>
-                <span className="pl-13 text-xs text-muted-foreground sm:pl-0">
-                  {row.target ? (
-                    <>
-                      <span className="sr-only">Target: </span>
-                      {row.target}
-                    </>
-                  ) : null}
-                </span>
-                <RowChevron />
-              </FactRowButton>
-            ))}
-            {note.unknownFacts.map((fact, index) => (
-              <FactRowButton
-                key={`unknown-${fact.indicatorId}`}
-                muted
-                onClick={() => openIndex(note.rows.length + index)}
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <FactIcon kind="unknown" />
-                  <span className="text-sm font-medium">{fact.label}</span>
-                </span>
-                <span className="pl-13 text-sm sm:pl-0">not known yet</span>
-                <span aria-hidden="true" />
-                <RowChevron />
-              </FactRowButton>
-            ))}
-            {note.skippedFacts.map((fact, index) => (
-              <FactRowButton
-                key={`skipped-${fact.indicatorId}`}
-                muted
-                onClick={() =>
-                  openIndex(note.rows.length + note.unknownFacts.length + index)
-                }
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <FactIcon kind="skipped" />
-                  <span className="text-sm font-medium">{fact.label}</span>
-                </span>
-                <span className="pl-13 text-sm sm:pl-0">skipped</span>
-                <span aria-hidden="true" />
-                <RowChevron />
-              </FactRowButton>
-            ))}
-          </ul>
-        ) : null}
+              </span>
+              <span className="min-w-0 pl-13 sm:pl-0">
+                <span className="sr-only">Yours: </span>
+                <FactValue row={row} />
+                {row.met === false ? <UnmetFlag /> : null}
+              </span>
+              <span className="pl-13 text-xs text-muted-foreground sm:pl-0">
+                {row.target ? (
+                  <>
+                    <span className="sr-only">Target: </span>
+                    {row.target}
+                  </>
+                ) : null}
+              </span>
+              <RowChevron />
+            </FactRowButton>
+          ))}
+          {note.unknownFacts.map((fact, index) => (
+            <FactRowButton
+              key={`unknown-${fact.indicatorId}`}
+              muted
+              onClick={() => openIndex(note.rows.length + index)}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FactIcon kind="unknown" />
+                <span className="text-sm font-medium">{fact.label}</span>
+              </span>
+              <span className="pl-13 text-sm sm:pl-0">not known yet</span>
+              <span aria-hidden="true" />
+              <RowChevron />
+            </FactRowButton>
+          ))}
+          {note.skippedFacts.map((fact, index) => (
+            <FactRowButton
+              key={`skipped-${fact.indicatorId}`}
+              muted
+              onClick={() =>
+                openIndex(note.rows.length + note.unknownFacts.length + index)
+              }
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <FactIcon kind="skipped" />
+                <span className="text-sm font-medium">{fact.label}</span>
+              </span>
+              <span className="pl-13 text-sm sm:pl-0">skipped</span>
+              <span aria-hidden="true" />
+              <RowChevron />
+            </FactRowButton>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Optional context appears here when you mention equipment or access to
+          Murph. None of it is required for a good grade.
+        </p>
+      )}
 
       <FactDrawer
         fact={selected}

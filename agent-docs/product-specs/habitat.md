@@ -1,6 +1,6 @@
 # Habitat: Progressive Member Life-Context
 
-Last verified: 2026-07-07
+Last verified: 2026-07-23
 
 ## Current State
 
@@ -15,6 +15,7 @@ Habitat is the umbrella for this knowledge: durable, structured facts about the 
 - Wearables and data integrations are not Habitat. `health-devices` covers only standalone devices without integrations (BP cuff, scale, thermometer).
 - Diet is explicitly out of scope for now.
 - No gamification, points, or streaks. Any grading is a research audit derived from indicators, with per-grade reasoning (see Environment Audit below).
+- Environment v1 describes one primary home. Multi-home and travel profiles are deliberately out of scope.
 
 ## Domains
 
@@ -70,9 +71,10 @@ Ordered by importance:
 1. **Opportunistic (primary).** When the member raises a topic ("sleeping badly"), Murph first reads what it already knows (mattress, temperature, CO2, screens…), uses it in the answer, and asks about a missing indicator only when the answer would improve the current help — the question is part of the advice, never a survey. When the value is not obvious, Murph explains the context dividend.
 2. **Photos as input.** During onboarding or gap-filling the member can send a photo of the bedroom, desk, home gym, or sauna; Murph extracts indicators from the image (darkness, LED sources, monitor height, equipment) and saves them like any other answer. This is an input mechanism for all aspects, not a separate feature.
 3. **UI handoff.** A web zone showing "unknown" (or a weak audit grade) offers "Fill this in with Murph": a deep link into the member's chosen channel (iMessage/Telegram) with a prefilled opener; the member writes freely and Murph parses and saves all indicators at once.
-4. **New-member onboarding.** Ask a Habitat question only when it supports the selected first thread or the member accepts the optional baseline review. Ask at most one or two; there is no universal environment checkpoint.
-5. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. An ordinary turn started by an authorized scheduled automation may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing.
-6. **Write-through.** Every answer saves immediately to `bank/habitat/<aspect>.md` via the habitat CLI command, with dates.
+4. **Voice walkthrough.** The Environment page can record one continuous memo while showing five short topic cards. The cards are prompts, not fields. The member shares the memo to Murph; the existing message transcription path extracts and immediately saves every explicit, high-confidence catalog fact. Ambiguous details stay unknown. Corrections happen in the normal Murph conversation.
+5. **New-member onboarding.** Ask a Habitat question only when it supports the selected first thread. Ask at most one; there is no universal environment checkpoint or Habitat survey.
+6. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. An ordinary turn started by an authorized scheduled automation may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
+7. **Write-through.** Every answer saves immediately to `bank/habitat/<aspect>.md` via the habitat CLI command, with dates.
 
 ## Environment v1 — Aspects and Indicators
 
@@ -171,7 +173,7 @@ Evidence anchors: top of screen at eye level, 50–75 cm viewing distance, desk 
 | `keyboard_wrists` | external keyboard/mouse with laptop; neutral vs bent wrists; complaints | M |
 | `breaks` | none / irregular / systematic (pomodoro, walks) | M |
 
-## Environment Audit (later phase)
+## Environment Audit
 
 Zone/aspect grades (A–E or `unknown`) render on the home visualization — specified now, built only after the foundation ships. Framing: research audit, not gamification — every grade traces to named indicators, ships with reasoning and a concrete "what to improve" list; no points, streaks, or celebratory copy. Grading rubrics live in the catalog (versioned product spec), evidence-anchored per aspect. All thresholds below are tunable defaults.
 
@@ -179,15 +181,19 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 
 **Levels (all derived, never stored):**
 
-1. Indicator status: each indicator evaluates against its catalog rule to on-target / off-target / unknown / declined. Informational indicators (e.g. co-sleepers) inform advice but never grade.
-2. Topic status: small derivations combine indicators so there are many valid ways to pass, e.g. "bedroom CO2 addressed" = mechanical ventilation OR window open at night OR meter < 1000 ppm.
-3. Zone grade: weighted over the zone's gradeable indicators (high = 3, medium = 2, low = 1). Coverage = known weight ÷ gradeable weight; below 50% the zone is `unknown`. Score = on-target weight ÷ known weight, mapped ≥90% A · ≥75% B · ≥55% C · ≥35% D · else E. `declined` is excluded from the denominator — declining is respected, never penalized.
-4. Domain/home grade: same formula over all gradeable indicators of the domain, always displayed with its coverage ("graded on 70% of what matters") so confident grades and thin-data grades never look alike.
+1. Indicator status: each gradeable condition evaluates against its catalog rule to on-target / off-target / unknown / declined. Informational indicators and equipment/access facts inform advice but never grade.
+2. Equipment and access status: facts such as sauna access, red-light panels, air purifiers, and standing desks are informational. They can tailor advice or unlock a bonus capability, but `none`, missing, and declined never count as off-target.
+3. Zone grade: coverage = known gradeable conditions ÷ all gradeable conditions; below 50% the zone is `unknown`. Score = on-target ÷ known, mapped ≥90% A · ≥75% B · ≥55% C · ≥35% D · else E. `declined` is excluded from the denominator — declining is respected, never penalized.
+4. Domain/home grade: the same formula runs over all gradeable conditions in the domain and is always displayed with its coverage so confident grades and thin-data grades never look alike.
 
-## UI Direction (later phase)
+## Environment UI
 
-- An illustrated home/apartment map on the dashboard: zones (bedroom, desk, air, light, recovery) showing known / skipped / unknown and, later, audit grades.
-- Each zone offers the "Fill this in with Murph" channel handoff.
+- `/environment` reads the private Browser Vault replica. Production UI never substitutes fixtures for missing member data.
+- Zero-data members see a benefit-led empty state with voice and chat entry points. Sparse and nearly complete records use the same voice walkthrough to fill important gaps; there are no edit forms.
+- The page shows derived A–E grades only after at least 50% of gradeable conditions are known. Missing and declined data never lower the grade. Purchases and optional access can tailor advice or provide a positive capability, but their absence is neutral.
+- Each zone offers a conversational handoff. A hidden suggestion is only a local presentation preference; it is not a health fact and does not affect grading.
+- Current outdoor weather and air quality derive transiently from the member-stated city through a server-owned provider key. The browser sends only that city to the authenticated same-origin endpoint; results are not persisted as Habitat facts and outdoor air is never presented as indoor air.
+- Public sharing and Open Graph previews remain generic. They never render private Habitat facts or imply a personal grade without a private data-aware export path.
 - The existing `/context` ("What Murph knows") page becomes the umbrella; domains grow their own pages.
 
 ## Phasing
@@ -206,3 +212,7 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 - 2026-07-07 — Declined answers are recorded with a date and respected permanently (member can reopen).
 - 2026-07-07 — Audit grades: specified now, built after the foundation; research-audit framing to stay inside the no-gamification boundary.
 - 2026-07-07 — Photos are a general input mechanism for all aspects, not a standalone ergonomics-assessment feature.
+- 2026-07-23 — Environment v1 supports one primary home; travel and multiple-home profiles stay out of scope.
+- 2026-07-23 — Habitat is not added as a universal onboarding survey. Collection is opportunistic, conversational, or a user-started voice walkthrough.
+- 2026-07-23 — Grades measure known conditions and habits. Optional equipment and access are neutral when absent; missing and declined facts are excluded until coverage is sufficient.
+- 2026-07-23 — Live weather and outdoor air quality are transient city-level context, not stored member truth.

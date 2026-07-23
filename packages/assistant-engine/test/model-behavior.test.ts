@@ -2816,6 +2816,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Health record ingestion invariant:')
     expect(prompt).toContain('Habitat life-context:')
     expect(prompt).toContain('vault-cli habitat save')
+    expect(prompt).toContain('Guided voice walkthroughs:')
+    expect(prompt).toContain('Equipment and access are constraints, not failings.')
     expect(prompt).not.toContain('agentApproved: true')
     expect(prompt).not.toContain('event_duration_minutes')
     expect(prompt).not.toContain('do not retry the create call')

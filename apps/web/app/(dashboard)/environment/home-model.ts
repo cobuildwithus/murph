@@ -7,6 +7,11 @@ import {
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
 
+export type HabitatValues = Record<
+  string,
+  Record<string, HabitatIndicatorValue>
+>;
+
 export interface ObjectSprite {
   src: string;
   w: number;
@@ -280,9 +285,7 @@ function isKnownIndicatorValue(
   );
 }
 
-export function resolveHabitatScene(
-  values: Record<string, Record<string, HabitatIndicatorValue>>,
-): HabitatScene {
+export function resolveHabitatScene(values: HabitatValues): HabitatScene {
   let known = 0;
   let total = 0;
 
@@ -292,16 +295,26 @@ export function resolveHabitatScene(
       const aspectValues = values[aspectId] ?? {};
       return (
         sum +
-        (aspect?.indicators.filter((indicator) =>
-          isKnownIndicatorValue(aspectValues[indicator.id]),
+        (aspect?.indicators.filter(
+          (indicator) =>
+            indicator.informational !== true &&
+            isKnownIndicatorValue(aspectValues[indicator.id]),
         ).length ?? 0)
       );
     }, 0);
-    const categoryTotal = category.aspectIds.reduce(
-      (sum, aspectId) =>
-        sum + (catalogAspectById.get(aspectId)?.indicators.length ?? 0),
-      0,
-    );
+    const categoryTotal = category.aspectIds.reduce((sum, aspectId) => {
+      const aspectValues = values[aspectId] ?? {};
+      return (
+        sum +
+        (catalogAspectById
+          .get(aspectId)
+          ?.indicators.filter(
+            (indicator) =>
+              indicator.informational !== true &&
+              aspectValues[indicator.id] !== HABITAT_DECLINED_VALUE,
+          ).length ?? 0)
+      );
+    }, 0);
 
     known += categoryKnown;
     total += categoryTotal;
@@ -316,91 +329,19 @@ export function resolveHabitatScene(
 // They still count toward overall coverage everywhere the score appears.
 export function resolveEnvironmentCoverage(
   scene: HabitatScene,
-  values: Record<string, Record<string, HabitatIndicatorValue>>,
+  values: HabitatValues,
 ): { known: number; total: number; coverage: number } {
   const homeFacts = [
     values["home-location"]?.location,
     values["home-location"]?.area_type,
   ];
   const known = scene.known + homeFacts.filter(isKnownIndicatorValue).length;
-  const total = scene.total + homeFacts.length;
+  const total =
+    scene.total +
+    homeFacts.filter((value) => value !== HABITAT_DECLINED_VALUE).length;
   return {
     known,
     total,
     coverage: total === 0 ? 0 : Math.round((100 * known) / total),
   };
 }
-
-export const MOCK_HABITAT_VALUES: Record<
-  string,
-  Record<string, HabitatIndicatorValue>
-> = {
-  "home-location": {
-    location: "Lisbon",
-    area_type: "urban_center",
-    travel_pattern: "mostly_home",
-  },
-  "sleep-environment": {
-    night_temp_c: 19,
-    temp_control: "ac",
-    window_at_night: "open",
-    co2_meter: "aranet",
-    co2_typical_ppm: 1150,
-    darkness: "blackout",
-    night_noise: "quiet",
-    noise_countermeasures: HABITAT_DECLINED_VALUE,
-    humidity_known: "humidifier",
-    mattress_satisfaction: "good",
-    bedding_overheating: "never",
-    co_sleepers: "partner",
-    phone_by_bed: true,
-    tv_in_bedroom: true,
-  },
-  "home-air": {
-    ventilation: "windows_only",
-    damp_or_mold: "none",
-    air_purifier: "hepa",
-    stove: "induction",
-    smoke_sources: "none",
-  },
-  lighting: {
-    evening_light: "warm_dim",
-    morning_light_access: "balcony_or_garden",
-    daytime_light: "by_window",
-    light_therapy_lamp: false,
-  },
-  water: {
-    drinking_water: "filtered",
-  },
-  "recovery-access": {
-    sauna_access: "home",
-    sauna_type: "dry",
-    cold_exposure: "plunge",
-    red_light: "panel_owned",
-    red_light_model: HABITAT_DECLINED_VALUE,
-  },
-  "health-devices": {
-    scale: "smart",
-    bp_cuff: true,
-    thermometer: true,
-    pulse_oximeter: false,
-  },
-  "allergens-home": {
-    pets_at_home: "cat",
-    carpets: true,
-  },
-  workspace: {
-    work_mode: "remote",
-    desk_hours: 8,
-    standing_desk: "adjustable_used",
-    screen_setup: "laptop_only",
-    screen_at_eye_level: true,
-    chair: "ergonomic",
-    external_keyboard: true,
-    wrist_complaints: false,
-    breaks: "irregular",
-  },
-  "exercise-access": {
-    gym_access: "home_gym",
-  },
-};

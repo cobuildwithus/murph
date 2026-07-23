@@ -135,6 +135,7 @@ import {
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { EnvironmentEmptyState } from "../(dashboard)/environment/environment-page-client";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function Section({
@@ -819,6 +820,28 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="environment-empty-state"
+          id="environment-empty-state-component"
+        >
+          <Section title="Environment empty state">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production zero-data state with the guided voice walkthrough and
+              conversational fallback. The prompts collect one primary home
+              without adding a questionnaire to onboarding.
+            </p>
+            <EnvironmentEmptyState
+              contactAction={{
+                href: "sms:+15555550100?body=I%20want%20to%20update%20what%20you%20know%20about%20my%20home%20environment.",
+                kind: "text",
+                label: "Text Murph",
+              }}
+            />
+          </Section>
+        </div>
 
         <Separator />
 
