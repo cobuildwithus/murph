@@ -1,6 +1,6 @@
 # Low-usage continuity selling and group funding link self-heal
 
-Status: active
+Status: completed
 Created: 2026-07-23
 
 ## Goal
@@ -63,3 +63,5 @@ Created: 2026-07-23
   one", so it is correct with or without that lane.
 - `murph-topup-text-murph` lane touches Settings/fund-page UI only; no file
   overlap.
+Updated: 2026-07-23
+Completed: 2026-07-23
