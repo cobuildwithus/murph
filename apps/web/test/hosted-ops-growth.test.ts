@@ -14,7 +14,7 @@ import {
   readHostedMessageVolumeTotal,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
-import { HOSTED_MESSAGE_VOLUME_FLOOR } from "../src/lib/message-volume";
+import { HOSTED_MESSAGE_VOLUME_BASE } from "../src/lib/message-volume";
 
 vi.mock("server-only", () => ({}));
 
@@ -382,7 +382,7 @@ describe("hosted ops growth metrics", () => {
     });
   });
 
-  it("sums snapshot message counts for the public message volume total", async () => {
+  it("adds snapshot message sums to the base for the public message volume total", async () => {
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
       _sum: {
         inboundMessagesPriorDay: 4_100,
@@ -390,10 +390,12 @@ describe("hosted ops growth metrics", () => {
       },
     });
 
-    await expect(readHostedMessageVolumeTotal()).resolves.toBe(7_300);
+    await expect(readHostedMessageVolumeTotal()).resolves.toBe(
+      HOSTED_MESSAGE_VOLUME_BASE + 7_300,
+    );
   });
 
-  it("applies the floor when snapshot sums are low, null, or unreadable", async () => {
+  it("treats null snapshot sums as zero and falls back to the base when unreadable", async () => {
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
       _sum: {
         inboundMessagesPriorDay: 400,
@@ -401,14 +403,14 @@ describe("hosted ops growth metrics", () => {
       },
     });
     await expect(readHostedMessageVolumeTotal()).resolves.toBe(
-      HOSTED_MESSAGE_VOLUME_FLOOR,
+      HOSTED_MESSAGE_VOLUME_BASE + 400,
     );
 
     mocks.hostedGrowthDailySnapshot.aggregate.mockRejectedValueOnce(
       new Error("db down"),
     );
     await expect(readHostedMessageVolumeTotal()).resolves.toBe(
-      HOSTED_MESSAGE_VOLUME_FLOOR,
+      HOSTED_MESSAGE_VOLUME_BASE,
     );
   });
 
@@ -426,7 +428,9 @@ describe("hosted ops growth metrics", () => {
     expect(response.headers.get("Cache-Control")).toBe(
       "public, s-maxage=300, stale-while-revalidate=3600",
     );
-    await expect(response.json()).resolves.toEqual({ total: 7_300 });
+    await expect(response.json()).resolves.toEqual({
+      total: HOSTED_MESSAGE_VOLUME_BASE + 7_300,
+    });
   });
 
   it("counts own-paid or family-paid members in the mature converted count query", async () => {

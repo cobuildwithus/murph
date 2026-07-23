@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 
 import {
   formatMessageVolume,
-  HOSTED_MESSAGE_VOLUME_FLOOR,
+  HOSTED_MESSAGE_VOLUME_BASE,
   MESSAGE_VOLUME_ENDPOINT,
 } from "@/src/lib/message-volume";
 
 export function MessageVolumeLine() {
-  const [total, setTotal] = useState(HOSTED_MESSAGE_VOLUME_FLOOR);
+  const [total, setTotal] = useState(HOSTED_MESSAGE_VOLUME_BASE);
 
   useEffect(() => {
     let cancelled = false;
@@ -18,7 +18,7 @@ export function MessageVolumeLine() {
       .then((data: { total?: unknown } | null) => {
         const value = data?.total;
         if (!cancelled && typeof value === "number" && Number.isFinite(value)) {
-          setTotal(Math.max(HOSTED_MESSAGE_VOLUME_FLOOR, value));
+          setTotal(Math.max(HOSTED_MESSAGE_VOLUME_BASE, value));
         }
       })
       .catch(() => {});
