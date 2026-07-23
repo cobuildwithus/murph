@@ -3,11 +3,13 @@
 import { useSearchParams, useRouter } from "next/navigation";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
+import { ConsentContent } from "./consent-content";
 import { SectionsContent } from "./sections-content";
 
 const TABS = [
   { id: "brand", label: "Brand" },
   { id: "components", label: "Components" },
+  { id: "consent", label: "Consent" },
   { id: "sections", label: "Sections" },
 ] as const;
 
@@ -26,7 +28,13 @@ export function DesignPage() {
     <main className="min-h-screen bg-[#f5f0e8] antialiased">
       {/* Tab nav */}
       <div className="sticky top-0 z-30 border-b border-[#e5e1d8] bg-[#f5f0e8]/95 backdrop-blur-sm">
-        <div className={`mx-auto flex items-center gap-1 py-3 ${activeTab === "sections" ? "max-w-7xl px-5 sm:px-8 lg:px-12" : "max-w-5xl px-6 sm:px-10 lg:px-16"}`}>
+        <div
+          className={`mx-auto flex items-center gap-1 py-3 ${
+            activeTab === "sections"
+              ? "max-w-7xl px-5 sm:px-8 lg:px-12"
+              : "max-w-5xl px-6 sm:px-10 lg:px-16"
+          }`}
+        >
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -47,6 +55,8 @@ export function DesignPage() {
         <BrandContent />
       ) : activeTab === "sections" ? (
         <SectionsContent />
+      ) : activeTab === "consent" ? (
+        <ConsentContent />
       ) : (
         <ComponentsContent />
       )}
