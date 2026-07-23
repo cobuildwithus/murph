@@ -161,6 +161,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
   }
 
+  if (summary.isDirect) {
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+      telegramThreadId: telegramMessage.threadId,
+      telegramUserId: summary.senderTelegramUserId,
+    });
+  }
+
   if (!await readActiveHostedMemberAccess({
     memberId: existingMember.id,
     prisma: input.prisma,
@@ -205,14 +214,6 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     if (threadRoute) {
       runtimeMemberId = threadRoute.containerMemberId;
     }
-  }
-  if (summary.isDirect) {
-    await upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      telegramThreadId: telegramMessage.threadId,
-      telegramUserId: summary.senderTelegramUserId,
-    });
   }
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({

@@ -1630,6 +1630,76 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedWebhookReceiptUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("persists an inactive signup's direct thread without waking the runtime", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.not_started,
+            id: "member_telegram_123",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_123",
+          telegramUserIdEncrypted: null,
+        }),
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-setup",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "/start",
+        },
+        update_id: 656,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "inactive-member",
+    });
+
+    const upsertCall = hostedMemberRoutingUpsert.mock.calls[0]?.[0] as {
+      update: {
+        telegramUserIdEncrypted: string;
+      };
+    };
+    expect(
+      await readHostedMemberRoutingTelegramPrivateState({
+        memberId: "member_telegram_123",
+        telegramUserIdEncrypted: upsertCall.update.telegramUserIdEncrypted,
+      }),
+    ).toEqual({
+      telegramThreadId: "123:business:biz-setup",
+      telegramUserId: "456",
+    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("ignores business-account self messages flagged through sender_business_bot", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const hostedMemberRoutingFindUnique = vi.fn();
