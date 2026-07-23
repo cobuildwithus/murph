@@ -22,10 +22,8 @@ const require = createRequire(import.meta.url);
 
 export const HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_GRACE_MS = 270_000;
 export const HOSTED_TEMPORAL_WORKER_DEFAULT_SHUTDOWN_FORCE_MS = 295_000;
-export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = 2;
-export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_ACTIVITY_TASK_POLLS = 2;
+export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS = 100;
 export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS = 20;
-export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_WORKFLOW_TASK_POLLS = 5;
 export const HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CACHED_WORKFLOWS = 100;
 
 type HostedUserRuntimeWorkerEnvSource =
@@ -37,9 +35,7 @@ export interface HostedUserRuntimeWorkerOptions {
   connection?: NativeConnection;
   namespace?: string;
   maxConcurrentActivityTaskExecutions?: number;
-  maxConcurrentActivityTaskPolls?: number;
   maxConcurrentWorkflowTaskExecutions?: number;
-  maxConcurrentWorkflowTaskPolls?: number;
   production?: boolean;
   shutdownForceTimeMs?: number;
   shutdownGraceTimeMs?: number;
@@ -65,10 +61,8 @@ export async function createHostedUserRuntimeWorker(
   const workerPerformanceOptions = resolveHostedUserRuntimeWorkerPerformanceOptions({
     maxConcurrentActivityTaskExecutions:
       options.maxConcurrentActivityTaskExecutions,
-    maxConcurrentActivityTaskPolls: options.maxConcurrentActivityTaskPolls,
     maxConcurrentWorkflowTaskExecutions:
       options.maxConcurrentWorkflowTaskExecutions,
-    maxConcurrentWorkflowTaskPolls: options.maxConcurrentWorkflowTaskPolls,
     production,
     source: process.env,
   });
@@ -170,12 +164,12 @@ export function readHostedUserRuntimeWorkerShutdownOptions(
 }
 
 export interface HostedUserRuntimeWorkerPerformanceOptions {
+  activityTaskPollerBehavior: { type: "autoscaling" };
   maxCachedWorkflows: number;
   maxConcurrentActivityTaskExecutions: number;
-  maxConcurrentActivityTaskPolls: number;
   maxConcurrentWorkflowTaskExecutions: number;
-  maxConcurrentWorkflowTaskPolls: number;
   reuseV8Context: true;
+  workflowTaskPollerBehavior: { type: "autoscaling" };
 }
 
 export function readHostedUserRuntimeWorkerPerformanceOptions(
@@ -222,39 +216,33 @@ function resolveHostedUserRuntimeWorkerShutdownOptions(input: {
 
 function resolveHostedUserRuntimeWorkerPerformanceOptions(input: {
   maxConcurrentActivityTaskExecutions?: number;
-  maxConcurrentActivityTaskPolls?: number;
   maxConcurrentWorkflowTaskExecutions?: number;
-  maxConcurrentWorkflowTaskPolls?: number;
   production: boolean;
   source: HostedUserRuntimeWorkerEnvSource;
 }): Pick<
   WorkerOptions,
+  | "activityTaskPollerBehavior"
   | "maxConcurrentActivityTaskExecutions"
-  | "maxConcurrentActivityTaskPolls"
   | "maxConcurrentWorkflowTaskExecutions"
-  | "maxConcurrentWorkflowTaskPolls"
   | "maxCachedWorkflows"
   | "reuseV8Context"
+  | "workflowTaskPollerBehavior"
 > {
   const entries = readHostedUserRuntimeWorkerPerformanceEnvEntries(input.source);
   if (
     !input.production
     && input.maxConcurrentActivityTaskExecutions === undefined
-    && input.maxConcurrentActivityTaskPolls === undefined
     && input.maxConcurrentWorkflowTaskExecutions === undefined
-    && input.maxConcurrentWorkflowTaskPolls === undefined
     && !entries.hasPolicy
   ) {
-    return {};
+    return createHostedUserRuntimeAutoscalingPollerOptions();
   }
 
   return parseHostedUserRuntimeWorkerPerformanceOptions(entries, {
     maxConcurrentActivityTaskExecutions:
       input.maxConcurrentActivityTaskExecutions,
-    maxConcurrentActivityTaskPolls: input.maxConcurrentActivityTaskPolls,
     maxConcurrentWorkflowTaskExecutions:
       input.maxConcurrentWorkflowTaskExecutions,
-    maxConcurrentWorkflowTaskPolls: input.maxConcurrentWorkflowTaskPolls,
   });
 }
 
@@ -266,10 +254,8 @@ interface HostedUserRuntimeWorkerShutdownEnvEntries {
 
 interface HostedUserRuntimeWorkerPerformanceEnvEntries {
   activityExecutionEntry: { key: string; value: string } | null;
-  activityPollEntry: { key: string; value: string } | null;
   hasPolicy: boolean;
   workflowExecutionEntry: { key: string; value: string } | null;
-  workflowPollEntry: { key: string; value: string } | null;
 }
 
 function readHostedUserRuntimeWorkerPerformanceEnvEntries(
@@ -280,31 +266,16 @@ function readHostedUserRuntimeWorkerPerformanceEnvEntries(
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS",
     "TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_EXECUTIONS",
   );
-  const activityPollEntry = readOptionalEnvEntry(
-    source,
-    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
-    "TEMPORAL_WORKER_MAX_CONCURRENT_ACTIVITY_TASK_POLLS",
-  );
   const workflowExecutionEntry = readOptionalEnvEntry(
     source,
     "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS",
     "TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS",
   );
-  const workflowPollEntry = readOptionalEnvEntry(
-    source,
-    "HOSTED_TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
-    "TEMPORAL_WORKER_MAX_CONCURRENT_WORKFLOW_TASK_POLLS",
-  );
   return {
     activityExecutionEntry,
-    activityPollEntry,
     hasPolicy:
-      activityExecutionEntry !== null
-      || activityPollEntry !== null
-      || workflowExecutionEntry !== null
-      || workflowPollEntry !== null,
+      activityExecutionEntry !== null || workflowExecutionEntry !== null,
     workflowExecutionEntry,
-    workflowPollEntry,
   };
 }
 
@@ -356,9 +327,7 @@ function parseHostedUserRuntimeWorkerPerformanceOptions(
   overrides: Partial<Pick<
     HostedUserRuntimeWorkerPerformanceOptions,
     | "maxConcurrentActivityTaskExecutions"
-    | "maxConcurrentActivityTaskPolls"
     | "maxConcurrentWorkflowTaskExecutions"
-    | "maxConcurrentWorkflowTaskPolls"
   >>,
 ): HostedUserRuntimeWorkerPerformanceOptions {
   const maxConcurrentActivityTaskExecutions =
@@ -373,32 +342,10 @@ function parseHostedUserRuntimeWorkerPerformanceOptions(
       entries.workflowExecutionEntry,
       HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_WORKFLOW_TASK_EXECUTIONS,
     );
-  const maxConcurrentActivityTaskPolls =
-    overrides.maxConcurrentActivityTaskPolls
-    ?? parsePositiveIntegerEnvEntry(
-      entries.activityPollEntry,
-      Math.min(
-        HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_ACTIVITY_TASK_POLLS,
-        maxConcurrentActivityTaskExecutions,
-      ),
-    );
-  const maxConcurrentWorkflowTaskPolls =
-    overrides.maxConcurrentWorkflowTaskPolls
-    ?? parsePositiveIntegerEnvEntry(
-      entries.workflowPollEntry,
-      Math.min(
-        HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CONCURRENT_WORKFLOW_TASK_POLLS,
-        maxConcurrentWorkflowTaskExecutions,
-      ),
-    );
 
   assertPositiveInteger(
     maxConcurrentActivityTaskExecutions,
     "maxConcurrentActivityTaskExecutions",
-  );
-  assertPositiveInteger(
-    maxConcurrentActivityTaskPolls,
-    "maxConcurrentActivityTaskPolls",
   );
   assertIntegerAtLeast(
     maxConcurrentWorkflowTaskExecutions,
@@ -413,31 +360,23 @@ function parseHostedUserRuntimeWorkerPerformanceOptions(
       `maxConcurrentWorkflowTaskExecutions must be less than or equal to the fixed ${HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CACHED_WORKFLOWS}-Workflow cache limit.`,
     );
   }
-  assertIntegerAtLeast(
-    maxConcurrentWorkflowTaskPolls,
-    "maxConcurrentWorkflowTaskPolls",
-    2,
-  );
-  assertPollerDoesNotExceedExecutions({
-    executionLabel: "maxConcurrentActivityTaskExecutions",
-    executionValue: maxConcurrentActivityTaskExecutions,
-    pollerLabel: "maxConcurrentActivityTaskPolls",
-    pollerValue: maxConcurrentActivityTaskPolls,
-  });
-  assertPollerDoesNotExceedExecutions({
-    executionLabel: "maxConcurrentWorkflowTaskExecutions",
-    executionValue: maxConcurrentWorkflowTaskExecutions,
-    pollerLabel: "maxConcurrentWorkflowTaskPolls",
-    pollerValue: maxConcurrentWorkflowTaskPolls,
-  });
 
   return {
+    ...createHostedUserRuntimeAutoscalingPollerOptions(),
     maxCachedWorkflows: HOSTED_TEMPORAL_WORKER_DEFAULT_MAX_CACHED_WORKFLOWS,
     maxConcurrentActivityTaskExecutions,
-    maxConcurrentActivityTaskPolls,
     maxConcurrentWorkflowTaskExecutions,
-    maxConcurrentWorkflowTaskPolls,
     reuseV8Context: true,
+  };
+}
+
+function createHostedUserRuntimeAutoscalingPollerOptions(): Pick<
+  HostedUserRuntimeWorkerPerformanceOptions,
+  "activityTaskPollerBehavior" | "workflowTaskPollerBehavior"
+> {
+  return {
+    activityTaskPollerBehavior: { type: "autoscaling" },
+    workflowTaskPollerBehavior: { type: "autoscaling" },
   };
 }
 
@@ -479,19 +418,6 @@ function assertIntegerAtLeast(value: number, label: string, min: number): void {
   assertPositiveInteger(value, label);
   if (value < min) {
     throw new TypeError(`${label} must be greater than or equal to ${min}.`);
-  }
-}
-
-function assertPollerDoesNotExceedExecutions(input: {
-  executionLabel: string;
-  executionValue: number;
-  pollerLabel: string;
-  pollerValue: number;
-}): void {
-  if (input.pollerValue > input.executionValue) {
-    throw new TypeError(
-      `${input.pollerLabel} must be less than or equal to ${input.executionLabel}.`,
-    );
   }
 }
 
