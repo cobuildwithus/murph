@@ -10,8 +10,12 @@ import {
 } from "@murphai/device-syncd/connect-config";
 
 import { PageHeader } from "@/src/components/ui/page-header";
-import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
+import {
+  resolveHostedMurphContactOption,
+  resolveHostedMurphContactOptions,
+} from "@/src/components/murph/hosted-murph-contact-action";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
+import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
 import { resolveDeviceSyncVoiceMemoSources } from "@/src/lib/device-sync/device-sync-voice-memos";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -251,12 +255,11 @@ export default async function ConnectPage({
   const disconnectScopeBySourceId = new Map<string, ConnectSourceDisconnectScope>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
-  const recoveryContactAction = await resolveDeviceConnectRecoveryContactAction(
-    Boolean(auth.authenticatedMember),
-  );
-  const voiceMemoSources = await resolveDeviceSyncVoiceMemoSources(
-    auth.authenticatedMember?.id ?? null,
-  );
+  const [recoveryContactAction, voiceMemoSources, whoopSyncContactAction] = await Promise.all([
+    resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),
+    resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
+    resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
+  ]);
 
   if (auth.authenticatedMember) {
     try {
@@ -326,6 +329,7 @@ export default async function ConnectPage({
         initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
         initialLoadError={initialLoadError}
         sources={sources}
+        whoopSyncContactAction={whoopSyncContactAction}
         whoopSyncVoiceMemoSrc={voiceMemoSources.whoopSync}
       />
     </div>
@@ -366,6 +370,39 @@ async function resolveDeviceConnectRecoveryContactAction(authenticated: boolean)
         body: "Can you send me a fresh device connection link?",
       },
     });
+  } catch {
+    return null;
+  }
+}
+
+async function resolveWhoopSyncContactAction(
+  authenticated: boolean,
+): Promise<DeviceSyncCompletionContactAction | null> {
+  if (!authenticated) {
+    return null;
+  }
+
+  try {
+    const options = await resolveHostedMurphContactOptions({
+      message: {
+        body: "Help me finish setting up WHOOP through Apple Health.",
+      },
+    });
+    const option = options.find(
+      (candidate) => candidate.kind === "text" || candidate.kind === "telegram",
+    );
+
+    if (!option || option.kind === "email") {
+      return null;
+    }
+
+    return {
+      href: option.href,
+      kind: option.kind === "text" ? "imessage" : "telegram",
+      label: "Text Murph",
+      ...(option.rel ? { rel: option.rel } : {}),
+      ...(option.target ? { target: option.target } : {}),
+    };
   } catch {
     return null;
   }
