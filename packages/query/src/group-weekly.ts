@@ -1,7 +1,15 @@
 import {
+  addDaysToIsoDate,
+  formatTimeZoneDateTimeParts,
+} from "@murphai/contracts";
+
+import {
   buildOverviewWeeklyStatsFromDailySampleSummaries,
   type OverviewWeeklySampleSummary,
 } from "./overview-weekly-stats.ts";
+
+const BROAD_ACTIVITY_MINUTES_SEMANTICS = "broad-movement";
+const CANONICAL_WORKOUT_DAY_SEMANTICS = "canonical-workout-day";
 
 interface SharedGroupWeeklyMemberInput {
   displayName: string | null;
@@ -15,12 +23,14 @@ interface SharedGroupWeeklyMemberInput {
 interface SharedGroupDailyMetricData {
   date: string;
   metricKey: string;
+  metricSemantics?: string;
   unit: string | null;
   value: number;
 }
 
 interface SharedGroupWorkoutDayData {
   date: string;
+  metricSemantics?: string;
   workoutCount: number;
   workoutMinutes: number;
 }
@@ -51,7 +61,10 @@ interface SharedGroupHeartRateZoneDayData {
 
 export interface SharedGroupWeeklyStat {
   currentWeekAvg: number;
+  observedDayCount: number;
+  observedDates: string[];
   stream: string;
+  throughDate: string;
   unit: string | null;
 }
 
@@ -71,21 +84,117 @@ export function buildSharedGroupWeeklyMembers(input: {
   referenceAt: Date | string;
   timeZone: string;
 }): SharedGroupWeeklyMember[] {
-  return input.members.map((member) => ({
-    displayName: member.displayName,
-    memberId: member.memberId,
-    weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
-      readDailySampleSummaries(member),
-      input.timeZone,
-      input.referenceAt,
-    ).flatMap((stat) => stat.currentWeekAvg === null
-      ? []
-      : [{
-          currentWeekAvg: stat.currentWeekAvg,
-          stream: stat.stream,
-          unit: stat.unit,
-        }]),
-  }));
+  const window = resolveSharedGroupWeeklyWindow(
+    input.referenceAt,
+    input.timeZone,
+  );
+
+  return input.members.map((member) => {
+    const completedDailySummaries = readDailySampleSummaries(member)
+      .filter((summary) => summary.date < window.currentDay);
+    const coverageByStat = buildSharedGroupWeeklyCoverage(
+      completedDailySummaries,
+      window.currentWeekStart,
+      window.currentDay,
+    );
+
+    return {
+      displayName: member.displayName,
+      memberId: member.memberId,
+      weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
+        completedDailySummaries,
+        input.timeZone,
+        input.referenceAt,
+      ).flatMap((stat) => {
+        if (stat.currentWeekAvg === null) {
+          return [];
+        }
+        const coverage = coverageByStat.get(
+          buildSharedGroupWeeklyStatKey(stat.stream, stat.unit),
+        );
+        if (!coverage) {
+          return [];
+        }
+        const observedDates = [...coverage]
+          .sort((left, right) => left.localeCompare(right));
+        const throughDate = observedDates.at(-1);
+        return throughDate
+          ? [{
+              currentWeekAvg: stat.currentWeekAvg,
+              observedDayCount: observedDates.length,
+              observedDates,
+              stream: stat.stream,
+              throughDate,
+              unit: stat.unit,
+            }]
+          : [];
+      }),
+    };
+  });
+}
+
+function buildSharedGroupWeeklyCoverage(
+  summaries: readonly OverviewWeeklySampleSummary[],
+  currentWeekStart: string,
+  currentDay: string,
+): Map<string, Set<string>> {
+  const coverageByStat = new Map<string, Set<string>>();
+
+  for (const summary of summaries) {
+    if (
+      summary.sumValue === null
+      || summary.numericSampleCount <= 0
+      || summary.date < currentWeekStart
+      || summary.date >= currentDay
+    ) {
+      continue;
+    }
+
+    const key = buildSharedGroupWeeklyStatKey(summary.stream, summary.unit);
+    const existing = coverageByStat.get(key);
+    if (existing) {
+      existing.add(summary.date);
+      continue;
+    }
+
+    coverageByStat.set(key, new Set([summary.date]));
+  }
+
+  return coverageByStat;
+}
+
+function resolveSharedGroupWeeklyWindow(
+  referenceAt: Date | string,
+  timeZone: string,
+): { currentDay: string; currentWeekStart: string } {
+  const referenceDate = referenceAt instanceof Date
+    ? referenceAt
+    : new Date(referenceAt);
+  if (Number.isNaN(referenceDate.valueOf())) {
+    throw new TypeError(
+      "Shared group weekly referenceAt must be a valid datetime.",
+    );
+  }
+
+  const currentDay = formatTimeZoneDateTimeParts(
+    referenceDate,
+    timeZone,
+  );
+  const mondayOffset = currentDay.dayOfWeek === 0
+    ? 6
+    : currentDay.dayOfWeek - 1;
+
+  return {
+    currentDay: currentDay.dayKey,
+    currentWeekStart: addDaysToIsoDate(currentDay.dayKey, -mondayOffset),
+  };
+}
+
+function buildSharedGroupWeeklyStatKey(
+  stream: string,
+  unit: string | null,
+): string {
+  return `${stream}:${unit ?? ""}`;
 }
 
 function readDailySampleSummaries(
@@ -111,6 +220,13 @@ function appendDailySampleSummaries(input: {
 }): void {
   const data = input.record.data;
   if (isDailyMetricData(data)) {
+    if (
+      input.projectionScopeKey === "activity-days.v0"
+      && data.metricKey === "activity-minutes"
+      && data.metricSemantics !== BROAD_ACTIVITY_MINUTES_SEMANTICS
+    ) {
+      return;
+    }
     input.summaries.push(dailySummary({
       date: data.date,
       stream: data.metricKey,
@@ -120,6 +236,12 @@ function appendDailySampleSummaries(input: {
     return;
   }
   if (isWorkoutDayData(data)) {
+    if (
+      input.projectionScopeKey !== "workout-days.v0"
+      || data.metricSemantics !== CANONICAL_WORKOUT_DAY_SEMANTICS
+    ) {
+      return;
+    }
     input.summaries.push(
       dailySummary({
         date: data.date,
@@ -214,6 +336,10 @@ function isDailyMetricData(
     && typeof data.date === "string"
     && "metricKey" in data
     && typeof data.metricKey === "string"
+    && (
+      !("metricSemantics" in data)
+      || typeof data.metricSemantics === "string"
+    )
     && "unit" in data
     && (typeof data.unit === "string" || data.unit === null)
     && "value" in data
@@ -225,6 +351,10 @@ function isWorkoutDayData(
 ): data is SharedGroupWorkoutDayData {
   return "date" in data
     && typeof data.date === "string"
+    && (
+      !("metricSemantics" in data)
+      || typeof data.metricSemantics === "string"
+    )
     && "workoutCount" in data
     && typeof data.workoutCount === "number"
     && "workoutMinutes" in data

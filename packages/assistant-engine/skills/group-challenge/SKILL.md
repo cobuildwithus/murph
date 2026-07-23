@@ -68,8 +68,13 @@ grant Apple Health access.
 - Elevation gain: `elevation-gain-days.v0`
 - Floors climbed: `floors-climbed-days.v0`
 - Active calories: `active-calories-days.v0`
-- Broad workout count/minutes: `workout-days.v0`
-- Broad active minutes: `activity-days.v0`
+- Broad workout count/minutes: `workout-days.v0`, usable only when each scoring
+  record has `data.metricSemantics` exactly `"canonical-workout-day"`.
+  Unmarked or differently marked workout records are ambiguous and unusable,
+  not zero.
+- Broad movement minutes: `activity-days.v0`, usable only when each scoring
+  record has `data.metricSemantics` exactly `"broad-movement"`. An unmarked or
+  differently marked record is ambiguous and unusable, not zero.
 - Broad workout heart-rate zones: `heart-rate-zones-days.v0`
 - Workout strain: `workout-strain-days.v0`
 - Day strain: `day-strain-days.v0`
@@ -325,14 +330,25 @@ automation action rules with a `dailyLocal` schedule and
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
    returned records. `available` does not make an old record current for this
-   reporting cutoff. Never infer a grant from a record or a record from a grant.
+   reporting cutoff or make a current-local-day value complete. Always label a
+   current-day score provisional and do not turn it into a settled winner,
+   crown, or final result. Never infer a grant from a record or a record from a
+   grant. For `activity-days.v0`, an `available` record is usable as broad
+   movement only when its `data.metricSemantics` is exactly
+   `"broad-movement"`. Treat an unmarked or differently marked record as
+   ambiguous and unusable, never as zero or scoring evidence. Apply the same
+   rule to `workout-days.v0`: only
+   `data.metricSemantics="canonical-workout-day"` is a usable combined day.
    Never reuse remembered numbers — wrong scores turn jokes into noise. A
    recorded zero is a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
    - The scoring projection is `granted` and `available`, with current
-     challenge-metric data through the reporting cutoff: rank the participant.
-     Do not override current metric evidence with a device status.
+     challenge-metric data through the reporting cutoff: rank the participant
+     in settled standings only when the fact is not an unqualified current-day
+     value. A provisional current-day value may appear in clearly labeled live
+     standings, never as a final result. Do not override current metric
+     evidence with a device status.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact
@@ -340,35 +356,40 @@ automation action rules with a `dailyLocal` schedule and
      below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
-     the metric share exists, but Murph cannot verify the source problem because
-     connection status was not shared. Unless their sharing choices record an
-     explicit decline or prior handled offer action for that exact scope,
-     include the diagnostic scope in the one proactive permission offer
-     described below.
+     the current shared read lacks a usable metric and its cause is unverified.
+     Connection status was not shared, but that absence does not itself explain
+     the missing metric. Unless their sharing choices record an explicit decline
+     or prior handled offer action for that exact scope, include the diagnostic
+     scope in the one proactive permission offer described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
-     `device-sync-status.v0` record is `available`: use its literal source label,
-     coarse status, and, only when useful, the accurately named connection-wide
-     sync-job completion time described below. Treat a projection whose `observedAt` is more
-     than two local calendar days old as stale and unverified. Only
-     `needs-reconnect` and `disconnected` support a direct reconnect action.
-     `needs-attention` is generic and must not be translated into a denied
-     Apple Health permission. `setting-up` means setup is not complete.
-     `connected` means only that the source is connected; it does not prove
-     that the challenge metric arrived. If Apple Health has the literal
-     `connected` status and Steps are absent, say this group does not currently
-     have recent Steps for the participant and Apple Health is visible as
-     connected. Suggest opening Murph; if Steps still do not arrive, suggest
-     checking Apple Health Steps access. For any other Apple Health status,
-     follow the status-specific rules above. If the recent projection has an empty `sources`
-     list, say that no connected health source is visible in the shared
-     snapshot. That is not proof that no compatible source exists; suggest a
-     private source check or connection step.
+     `device-sync-status.v0` record is `available`: first say that the current
+     shared read lacks a usable metric and its cause is unverified regardless of
+     device status. Separately, you may state its literal source label, coarse
+     status, and, only when useful, the accurately named connection-wide
+     sync-job completion time described below. Never connect that status to the
+     metric absence. Treat a projection whose `observedAt` is more than two
+     local calendar days old as stale and unverified. Only
+     `needs-reconnect` and `disconnected` support a direct reconnect action,
+     based on the literal status alone; do not claim reconnecting will restore
+     the metric. `needs-attention` is generic and must not be translated into a
+     denied Apple Health permission. `setting-up` means setup is not complete.
+     `connected` means only that the source is connected. If Apple Health has
+     the literal `connected` status and Steps are absent, state these as two
+     independent facts: this group currently lacks recent Steps for the
+     participant, and Apple Health is visible as connected. You may suggest
+     opening Murph and, if needed, checking Apple Health Steps access as private
+     troubleshooting options, never as the established cause. For any other
+     Apple Health status, follow the status-specific rules above. If the recent
+     projection has an empty `sources` list, say only that this diagnostic
+     result contains no visible sources. That does not explain the missing
+     metric or prove that no compatible source exists; suggest a private source
+     check.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, and diagnostic data is also `granted` but `missing` or
-     stale: say that the reason is unverified. Do not guess about permissions,
-     a disconnected device, source freshness, or whether the participant opened
-     the app.
+     stale: say that the current shared read lacks a usable metric and its cause
+     is unverified. Do not guess about permissions, a disconnected device,
+     source freshness, or whether the participant opened the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
    participant denied, forgot, or has not approved Apple Health Steps. The
@@ -381,8 +402,9 @@ automation action rules with a `dailyLocal` schedule and
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
    message. Name every `in` participant who is missing current data, state the
-   current evidence-backed reason, and give the smallest useful action. Never
-   present a partial table as the full standings.
+   current evidence-backed status, say that the cause of a missing usable
+   metric is unverified, and give the smallest useful action. Never present a
+   partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
    in ordinary language in this same standings response and address the
@@ -424,8 +446,9 @@ automation action rules with a `dailyLocal` schedule and
    or stale data.
    Never offer the scoring scope merely because its grant exists but current
    data is missing. Apart from the exact diagnostic `not_granted` case above,
-   disconnected, `needs-reconnect`, and other sync/device cases get
-   ordinary-language sync or reconnect guidance and no permission card.
+   literal disconnected, `needs-reconnect`, and other device statuses may get
+   status-appropriate guidance and no permission card. Keep that guidance
+   separate from the unverified cause of the missing metric.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does

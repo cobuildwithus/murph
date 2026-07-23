@@ -54,10 +54,13 @@ describe('assistant running cardio skill', () => {
     const prompt = buildPrompt()
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy',
     )
     expect(prompt).toContain(
-      'running-cardio general aerobic programming; competition-training a named event or benchmark.',
+      'running-cardio and strength-training own programming',
+    )
+    expect(prompt).toContain(
+      'competition-training a named event or benchmark.',
     )
     expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
   })

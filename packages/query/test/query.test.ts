@@ -79,8 +79,16 @@ import { insertMetricPoints as insertProjectionMetricPoints } from "../src/proje
 import { QUERY_PROJECTION_SQLITE_VERSION } from "../src/projection/schema.ts";
 import {
   parseStoredWearableSummary,
+  STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+  STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+  STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+  stringifyStoredWearableProjectionSummary,
   type StoredWearableMetricSummaryKind,
 } from "../src/projection/wearable-summary-stored-codec.ts";
+import type { WearableActivityDay } from "../src/wearables/types.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
 import { parseMarkdownDocument } from "../src/markdown.ts";
 import {
@@ -859,7 +867,7 @@ test("wearable query uses Junction data origin to avoid outranking direct provid
     const day = await summarizeWearableDayRuntime(vaultRoot, "2026-04-01");
 
     assert.equal(day?.activity?.steps.selection.provider, "oura");
-    assert.equal(day?.activity?.steps.selection.title, "Direct Oura steps");
+    assert.equal(day?.activity?.steps.selection.title, "Oura Steps");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -4564,7 +4572,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 19);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 20);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4698,7 +4706,7 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
       readOnly: true,
     });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
     } finally {
       reopened.close();
     }
@@ -4777,7 +4785,207 @@ test("runtime reads rebuild v18 test-result identities after expanded lab-only a
       readOnly: true,
     });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime reads rebuild v19 activity rollups and workout-minute metric ownership", async () => {
+  const vaultRoot = await createFixtureVault();
+  const runtimeDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");
+  const date = "2026-03-22";
+
+  try {
+    const existingLedger = await readFile(eventLedgerPath, "utf8");
+    await writeFile(
+      eventLedgerPath,
+      existingLedger.concat(
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_activity_rollup_upgrade_run",
+          kind: "activity_session",
+          occurredAt: "2026-03-22T12:00:00.000Z",
+          recordedAt: "2026-03-22T13:02:00.000Z",
+          dayKey: date,
+          source: "device",
+          title: "Garmin run",
+          activityType: "running",
+          startAt: "2026-03-22T12:00:00.000Z",
+          endAt: "2026-03-22T13:00:00.000Z",
+          durationMinutes: 60,
+          externalRef: {
+            system: "garmin",
+            resourceType: "activity_session",
+            resourceId: "garmin-run-rollup-upgrade",
+          },
+          workout: {
+            metrics: {
+              activeCalories: 600,
+              distanceKm: 10,
+              maxHeartRate: 180,
+              totalElevationGainMeters: 200,
+            },
+          },
+        }),
+        "\n",
+        JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_activity_rollup_upgrade_strength",
+          kind: "activity_session",
+          occurredAt: "2026-03-22T18:00:00.000Z",
+          recordedAt: "2026-03-22T18:17:00.000Z",
+          dayKey: date,
+          source: "device",
+          title: "Garmin strength session",
+          activityType: "strength-training",
+          startAt: "2026-03-22T18:00:00.000Z",
+          endAt: "2026-03-22T18:15:00.000Z",
+          durationMinutes: 15,
+          externalRef: {
+            system: "garmin",
+            resourceType: "activity_session",
+            resourceId: "garmin-strength-rollup-upgrade",
+          },
+          workout: {
+            metrics: {
+              activeCalories: 90,
+              maxHeartRate: 172,
+            },
+          },
+        }),
+        "\n",
+      ),
+      "utf8",
+    );
+
+    await rebuildQueryProjection(vaultRoot);
+
+    const staleDatabase = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
+    try {
+      const activityRow = staleDatabase
+        .prepare(`
+          SELECT id, summary_json AS summaryJson
+          FROM query_wearable_summaries
+          WHERE provider_scope_key = 'providers:garmin'
+            AND summary_kind = 'activity'
+            AND summary_date = ?
+        `)
+        .get(date) as { id: string; summaryJson: string } | undefined;
+      assert.ok(activityRow);
+
+      const staleActivity = parseStoredWearableSummary<WearableActivityDay>(
+        "activity",
+        activityRow.summaryJson,
+      );
+      assert.ok(staleActivity);
+      staleActivity.activityTypes = ["strength-training"];
+      staleActivity.sessionMinutes = {
+        ...staleActivity.sessionMinutes,
+        confidence: {
+          ...staleActivity.sessionMinutes.confidence,
+          candidateCount: 1,
+        },
+        selection: {
+          ...staleActivity.sessionMinutes.selection,
+          value: 15,
+        },
+      };
+      staleActivity.sessionCount = {
+        ...staleActivity.sessionCount,
+        confidence: {
+          ...staleActivity.sessionCount.confidence,
+          candidateCount: 1,
+        },
+        selection: {
+          ...staleActivity.sessionCount.selection,
+          value: 1,
+        },
+      };
+
+      staleDatabase
+        .prepare("UPDATE query_wearable_summaries SET summary_json = ? WHERE id = ?")
+        .run(
+          stringifyStoredWearableProjectionSummary("activity", staleActivity),
+          activityRow.id,
+        );
+      staleDatabase
+        .prepare(`
+          UPDATE query_metric_points
+          SET metric_key = 'activity-minutes', value = 15, canonical_value = 15
+          WHERE effective_date = ? AND metric_key = 'workout-minutes'
+        `)
+        .run(date);
+      staleDatabase
+        .prepare(`
+          UPDATE query_metric_points
+          SET value = 1, canonical_value = 1
+          WHERE effective_date = ? AND metric_key = 'workout-count'
+        `)
+        .run(date);
+      staleDatabase.exec("PRAGMA user_version = 19;");
+
+      const staleActivityMetrics = staleDatabase
+        .prepare(`
+          SELECT metric_key AS metricKey, value
+          FROM query_metric_points
+          WHERE effective_date = ?
+            AND metric_key IN ('activity-minutes', 'workout-count', 'workout-minutes')
+          ORDER BY metric_key ASC
+        `)
+        .all(date) as Array<{ metricKey: string; value: number }>;
+      assert.deepEqual(staleActivityMetrics.map((row) => ({ ...row })), [
+        { metricKey: "activity-minutes", value: 15 },
+        { metricKey: "workout-count", value: 1 },
+      ]);
+    } finally {
+      staleDatabase.close();
+    }
+
+    const staleStatus = await getQueryProjectionStatus(vaultRoot);
+    assert.equal(staleStatus.exists, true);
+    assert.equal(staleStatus.fresh, false);
+
+    const [rebuiltActivity] = await summarizeWearableActivityRuntime(vaultRoot, {
+      date,
+      providers: ["garmin"],
+    });
+    assert.equal(rebuiltActivity?.sessionMinutes.selection.value, 75);
+    assert.equal(rebuiltActivity?.sessionCount.selection.value, 2);
+    assert.deepEqual(rebuiltActivity?.activityTypes, ["running", "strength-training"]);
+
+    const workoutMinutes = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "workout-minutes",
+      to: date,
+    });
+    const workoutCount = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "workout-count",
+      to: date,
+    });
+    const staleActivityMinutes = await listMetricPointsRuntime(vaultRoot, {
+      from: date,
+      limit: null,
+      metricKey: "activity-minutes",
+      to: date,
+    });
+    assert.deepEqual(workoutMinutes.map((point) => point.value), [75]);
+    assert.deepEqual(workoutCount.map((point) => point.value), [2]);
+    assert.deepEqual(staleActivityMinutes, []);
+
+    const reopened = openSqliteRuntimeDatabase(runtimeDatabasePath, {
+      create: false,
+      readOnly: true,
+    });
+    try {
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
     } finally {
       reopened.close();
     }
@@ -6583,7 +6791,12 @@ test("rebuildQueryProjection resets stale v6 projections that still carry the dr
   }
 });
 
-function rewriteStoredWearableSummaryRowsToLegacyFullForm(database: DatabaseSync): number {
+function rewriteStoredWearableSummaryRowsToLegacyFullForm(
+  database: DatabaseSync,
+  options: {
+    preserveInternalEvidence?: boolean;
+  } = {},
+): number {
   const rows = database
     .prepare(`
       SELECT id, summary_kind AS summaryKind, summary_json AS summaryJson
@@ -6595,7 +6808,27 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(database: DatabaseSync
 
   let rewritten = 0;
   for (const row of rows) {
-    const legacyJson = JSON.stringify(parseStoredWearableSummary(row.summaryKind, row.summaryJson));
+    const expanded = parseStoredWearableSummary<Record<string, unknown>>(
+      row.summaryKind,
+      row.summaryJson,
+    );
+    assert.ok(expanded);
+    if (options.preserveInternalEvidence) {
+      const stored = JSON.parse(row.summaryJson);
+      for (const evidenceKey of [
+        STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+        STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+        STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+        STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+        STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+      ]) {
+        if (Object.hasOwn(stored, evidenceKey)) {
+          expanded[evidenceKey] = stored[evidenceKey];
+        }
+      }
+    }
+    const legacyJson = JSON.stringify(expanded);
     if (legacyJson !== row.summaryJson) {
       update.run(legacyJson, row.id);
       rewritten += 1;
@@ -6792,7 +7025,9 @@ test("runtime wearable summaries read identically from compact and legacy full-f
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       assert.ok(
-        rewriteStoredWearableSummaryRowsToLegacyFullForm(database) > 0,
+        rewriteStoredWearableSummaryRowsToLegacyFullForm(database, {
+          preserveInternalEvidence: true,
+        }) > 0,
         "expected compact rows to differ from the legacy full form on disk",
       );
     } finally {

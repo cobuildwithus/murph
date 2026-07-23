@@ -8202,6 +8202,98 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
 });
 
+test("Junction normalizer emits bounded daily activity minutes only from complete intensity-duration buckets", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: [
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "complete-intensity-buckets",
+          date: "2026-05-20T00:00:00+00:00",
+          daily_movement: 4620,
+          distance: 4620,
+          duration_active_second: 600,
+          low: 60,
+          medium: 13,
+          high: 5,
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "distance-like-fields-only",
+          date: "2026-05-21T00:00:00+00:00",
+          daily_movement: 600,
+          distance: 600,
+          duration_active_second: 600,
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "missing-bucket",
+          date: "2026-05-22T00:00:00+00:00",
+          low: 20,
+          medium: 10,
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "negative-bucket",
+          date: "2026-05-23T00:00:00+00:00",
+          low: 20,
+          medium: -1,
+          high: 10,
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "non-finite-bucket",
+          date: "2026-05-24T00:00:00+00:00",
+          low: 20,
+          medium: 10,
+          high: "Infinity",
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "over-day-maximum",
+          date: "2026-05-25T00:00:00+00:00",
+          low: 1440,
+          medium: 1,
+          high: 0,
+        },
+        {
+          source: { provider: "garmin", type: "watch" },
+          id: "exact-day-maximum",
+          date: "2026-05-26T00:00:00+00:00",
+          low: 1440,
+          medium: 0,
+          high: 0,
+        },
+      ],
+    },
+  });
+
+  const activityMinuteEvents = payload.events?.filter(
+    (event) =>
+      event.kind === "observation"
+      && event.fields?.metric === "activity-minutes",
+  ) ?? [];
+  const metricValueByDay = new Map(
+    activityMinuteEvents.map((event) => [
+      event.dayKey,
+      event.fields?.value,
+    ]),
+  );
+
+  assert.equal(activityMinuteEvents.length, 2);
+  assert.equal(metricValueByDay.get("2026-05-20"), 78);
+  assert.equal(metricValueByDay.get("2026-05-26"), 1440);
+  assert.equal(metricValueByDay.has("2026-05-21"), false);
+  assert.equal(metricValueByDay.has("2026-05-22"), false);
+  assert.equal(metricValueByDay.has("2026-05-23"), false);
+  assert.equal(metricValueByDay.has("2026-05-24"), false);
+  assert.equal(metricValueByDay.has("2026-05-25"), false);
+  assert.ok(activityMinuteEvents.every((event) => event.fields?.unit === "minutes"));
+  assert.ok(activityMinuteEvents.every((event) => event.fields?.observationGrain === "summary"));
+  assert.ok(activityMinuteEvents.every((event) => event.externalRef?.facet === "activity-minutes"));
+});
+
 test("Junction recovery readiness score preserves source-specific semantics", () => {
   const payload = normalizeJunctionSnapshot({
     importedAt: "2026-05-20T12:00:00.000Z",

@@ -12,8 +12,15 @@ import {
   type WearableSummaryBundle,
   type WearableSummaryFilters,
 } from "../wearables.ts";
+import {
+  buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
+} from "../wearables/candidates.ts";
+import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type {
   WearableActivityDay,
+  WearableActivityMetricEvidence,
+  WearableActivitySessionEvidence,
   WearableActivitySessionAggregate,
   WearableBodyStateDay,
   WearableCandidateSourceFamily,
@@ -29,6 +36,7 @@ import type {
   WearableSourceHealthSummary,
 } from "../wearables/types.ts";
 import {
+  ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
@@ -42,8 +50,13 @@ import {
 import {
   parseJsonValue,
 } from "./schema.ts";
-import { projectPublicWearableSummaryBundle } from "./wearable-summary-public-json.ts";
 import {
+  projectPublicWearableSummaryBundle,
+  stringifyPublicWearableProjectionSummary,
+} from "./wearable-summary-public-json.ts";
+import {
+  parseStoredWearableActivityMetricEvidence,
+  parseStoredWearableActivitySessionEvidence,
   parseStoredWearableSummary,
   type StoredWearableMetricSummaryKind,
 } from "./wearable-summary-stored-codec.ts";
@@ -63,9 +76,25 @@ export function composePublicWearableSummaryBundleFromStoredRows(
     return emptyProjectedWearableSummaryBundle();
   }
 
+  const activitySessionEvidenceByProviderDate =
+    storedActivitySessionEvidenceByProviderDate(stored.rows, filters);
+  const activityMetricEvidenceByProviderDate =
+    storedActivityMetricEvidenceByProviderDate(stored.rows, filters);
+  validateStoredActivityEvidenceCompleteness(
+    stored.rows,
+    filters,
+    activityMetricEvidenceByProviderDate,
+    activitySessionEvidenceByProviderDate,
+  );
   return stored.providers.length === 1
     ? publicWearableSummaryBundleFromRows(stored.rows, filters, options)
-    : composePublicWearableSummaryBundleFromProviderRows(stored.rows, filters, options);
+    : composePublicWearableSummaryBundleFromProviderRows(
+        stored.rows,
+        filters,
+        activityMetricEvidenceByProviderDate,
+        activitySessionEvidenceByProviderDate,
+        options,
+      );
 }
 
 function emptyProjectedWearableSummaryBundle(): ProjectedWearableSummaryBundle {
@@ -145,15 +174,36 @@ function publicWearableSummaryBundleFromRows(
 function composePublicWearableSummaryBundleFromProviderRows(
   rows: readonly QueryWearableSummaryRow[],
   filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+  activityMetricEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivityMetricEvidence[]
+  >,
+  activitySessionEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivitySessionEvidence[]
+  >,
   options: {
     retainSourceHealthOutsideDateFilters?: boolean;
   },
 ): ProjectedWearableSummaryBundle {
   const providerBundle = publicWearableSummaryBundleFromRows(rows, filters, options);
-  const dataset = wearableDatasetFromProjectedBundle(providerBundle);
+  const activitySummaryScopes = storedActivitySummaryScopes(rows, filters);
+  const activityDatesWithCompleteMetricEvidence =
+    storedActivityDatesWithCompleteMetricEvidence(
+      activitySummaryScopes,
+      activityMetricEvidenceByProviderDate,
+      activitySessionEvidenceByProviderDate,
+    );
+  const dataset = wearableDatasetFromProjectedBundle(
+    providerBundle,
+    activitySummaryScopes,
+    activityMetricEvidenceByProviderDate,
+    activitySessionEvidenceByProviderDate,
+  );
   const composed = mergeStoredMetricConflictEvidence(
     buildWearableSummaryBundleFromDataset(dataset),
     providerBundle,
+    activityDatesWithCompleteMetricEvidence,
   );
   const recomputedSourceHealth = buildWearableSourceHealth({
     activityDays: composed.activityDays,
@@ -172,11 +222,14 @@ function composePublicWearableSummaryBundleFromProviderRows(
 function mergeStoredMetricConflictEvidence(
   bundle: WearableSummaryBundle,
   stored: ProjectedWearableSummaryBundle,
+  activityDatesWithCompleteMetricEvidence: ReadonlySet<string>,
 ): WearableSummaryBundle {
   return {
     ...bundle,
     activityDays: bundle.activityDays.map((summary) =>
-      mergeStoredSummaryMetricConflicts(summary, stored.activityDays, ACTIVITY_METRIC_KEYS)
+      activityDatesWithCompleteMetricEvidence.has(summary.date)
+        ? summary
+        : mergeStoredSummaryMetricConflicts(summary, stored.activityDays, ACTIVITY_METRIC_KEYS)
     ),
     bodyStateDays: bundle.bodyStateDays.map((summary) =>
       mergeStoredSummaryMetricConflicts(summary, stored.bodyStateDays, BODY_METRIC_KEYS)
@@ -231,7 +284,9 @@ function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummar
         summary: storedSummary,
       }))
       .filter((entry): entry is { metric: WearableResolvedMetric; summary: WearableMetricSummary } =>
-        entry.metric !== null && storedMetricSelfConflicts(entry.metric, participantProviders).length > 0
+        entry.metric !== null
+        && storedConflictBranchMatches(metricKey, metric, entry.metric)
+        && storedMetricSelfConflicts(entry.metric, participantProviders).length > 0
       );
     if (storedMetrics.length === 0) {
       continue;
@@ -294,6 +349,20 @@ function storedMetricSelfConflicts(
   }
 
   return metric.confidence.conflictingProviders.filter((conflictProvider) => conflictProvider === provider);
+}
+
+function storedConflictBranchMatches(
+  metricKey: WearableMetricKey,
+  current: WearableResolvedMetric,
+  stored: WearableResolvedMetric,
+): boolean {
+  return !ACTIVITY_BRANCH_SCOPED_METRIC_KEYS.has(metricKey)
+    || isActivitySessionRollupSelection(current) === isActivitySessionRollupSelection(stored);
+}
+
+function isActivitySessionRollupSelection(metric: WearableResolvedMetric): boolean {
+  return metric.selection.sourceKind === "activity-session-aggregate"
+    || metric.selection.sourceKind === "activity-session-day-rollup";
 }
 
 function getSummaryMetric(
@@ -540,20 +609,69 @@ function compareSourceHealthSummaries(
   return left.provider.localeCompare(right.provider);
 }
 
-function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBundle): WearableDataset {
+function wearableDatasetFromProjectedBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  activitySummaryScopes: readonly StoredActivitySummaryScope[] = [],
+  activityMetricEvidenceByProviderDate: ReadonlyMap<string, readonly WearableActivityMetricEvidence[]> = new Map(),
+  activitySessionEvidenceByProviderDate: ReadonlyMap<string, readonly WearableActivitySessionEvidence[]> = new Map(),
+): WearableDataset {
   const metricCandidates: WearableMetricCandidate[] = [];
-  const activitySessionAggregates: WearableActivitySessionAggregate[] = [];
+  const activitySessionCandidates: WearableMetricCandidate[] = [];
+  const legacyActivitySessionAggregates: WearableActivitySessionAggregate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
 
-  for (const summary of bundle.activityDays) {
-    metricCandidates.push(...projectedMetricCandidatesFromResolvedMetrics(
-      summary.date,
-      "activity",
-      activityResolvedMetrics(summary),
-    ));
-    const aggregate = projectedActivitySessionAggregate(summary);
-    if (aggregate) {
-      activitySessionAggregates.push(aggregate);
+  if (
+    activitySummaryScopes.length > 0
+    && activitySummaryScopes.length !== bundle.activityDays.length
+  ) {
+    throw invalidStoredActivityMetricEvidenceError();
+  }
+
+  for (const [summaryIndex, summary] of bundle.activityDays.entries()) {
+    const scope = activitySummaryScopes[summaryIndex];
+    if (scope && scope.date !== summary.date) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    const evidenceKey = scope
+      ? activitySessionEvidenceKey(scope.provider, scope.date)
+      : null;
+    const storedSessionEvidence = evidenceKey
+      ? activitySessionEvidenceByProviderDate.get(evidenceKey)
+      : undefined;
+    const storedMetricEvidence = evidenceKey
+      ? activityMetricEvidenceByProviderDate.get(evidenceKey)
+      : undefined;
+    const hasStoredMetricEvidence = storedMetricEvidence !== undefined;
+    const hasStoredSessionEvidence =
+      storedSessionEvidence !== undefined
+      && storedSessionEvidence.length > 0;
+    if (hasStoredMetricEvidence) {
+      metricCandidates.push(...projectedActivityMetricCandidates(storedMetricEvidence));
+    } else {
+      metricCandidates.push(...projectedMetricCandidatesFromResolvedMetrics(
+        summary.date,
+        "activity",
+        activityResolvedMetrics(summary).filter((metric) =>
+          metric.metric !== "sessionMinutes"
+          && metric.metric !== "sessionCount"
+          && !(
+            hasStoredSessionEvidence
+            && metric.selection.sourceKind === "activity-session-day-rollup"
+          )
+        ),
+      ));
+    }
+    if (hasStoredSessionEvidence) {
+      activitySessionCandidates.push(...projectedActivitySessionCandidates(
+        storedSessionEvidence,
+      ));
+    } else {
+      const aggregate = projectedActivitySessionAggregate(summary, {
+        includeWorkoutMetrics: hasStoredMetricEvidence,
+      });
+      if (aggregate) {
+        legacyActivitySessionAggregates.push(aggregate);
+      }
     }
   }
 
@@ -561,7 +679,7 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
     metricCandidates.push(...projectedMetricCandidatesFromResolvedMetrics(
       summary.date,
       "sleep",
-      sleepResolvedMetrics(summary),
+      sleepResolvedMetrics(summary).filter((metric) => metric.metric !== "sessionMinutes"),
     ));
     sleepWindows.push(...projectedSleepWindows(summary));
   }
@@ -582,14 +700,597 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
     ));
   }
 
+  const activitySessionAggregates = [
+    ...legacyActivitySessionAggregates,
+    ...buildActivitySessionAggregates(activitySessionCandidates),
+  ];
+
   return {
+    activitySessionCandidates,
     activitySessionAggregates,
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessionCandidates),
     metricSuppressionEvidence: [],
     metricCandidates,
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows,
   };
+}
+
+interface StoredActivitySummaryScope {
+  date: string;
+  hasSessionSelection: boolean;
+  provider: string;
+}
+
+function storedActivitySummaryScopes(
+  rows: readonly QueryWearableSummaryRow[],
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): StoredActivitySummaryScope[] {
+  const scopes: StoredActivitySummaryScope[] = [];
+  for (const row of rows) {
+    if (
+      row.summaryKind !== "activity"
+      || !wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)
+    ) {
+      continue;
+    }
+    const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(
+      row.summaryKind,
+      row.summaryJson,
+    );
+    if (!summary) {
+      continue;
+    }
+    const provider = storedRowProvider(row);
+    if (!provider || !row.summaryDate || summary.date !== row.summaryDate) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    scopes.push({
+      date: row.summaryDate,
+      hasSessionSelection: storedActivitySummaryHasSessionSelection(summary),
+      provider,
+    });
+  }
+  return scopes;
+}
+
+function storedActivityMetricEvidenceByProviderDate(
+  rows: readonly QueryWearableSummaryRow[],
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): Map<string, readonly WearableActivityMetricEvidence[]> {
+  const evidenceByProviderDate = new Map<string, readonly WearableActivityMetricEvidence[]>();
+  const evidenceModeByDate = new Map<string, "current" | "legacy">();
+
+  for (const row of rows) {
+    if (
+      row.summaryKind !== "activity"
+      || !wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)
+    ) {
+      continue;
+    }
+    const parsedEvidence = parseStoredWearableActivityMetricEvidence(row.summaryJson);
+    if (parsedEvidence.status === "absent") {
+      if (row.summaryDate) {
+        addStoredActivityMetricEvidenceMode(
+          evidenceModeByDate,
+          row.summaryDate,
+          "legacy",
+        );
+      }
+      continue;
+    }
+    if (parsedEvidence.status === "invalid") {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    const provider = storedRowProvider(row);
+    if (
+      !provider
+      || !row.summaryDate
+      || parsedEvidence.evidence.some((candidate) =>
+        candidate.date !== row.summaryDate
+        || normalizeWearableProviders([candidate.publicProvider])[0] !== provider
+        || resolveStoredActivityMetricEvidencePublicProvider(candidate) !== provider
+      )
+    ) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    const evidenceKey = activitySessionEvidenceKey(provider, row.summaryDate);
+    if (evidenceByProviderDate.has(evidenceKey)) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    evidenceByProviderDate.set(evidenceKey, parsedEvidence.evidence);
+    addStoredActivityMetricEvidenceMode(
+      evidenceModeByDate,
+      row.summaryDate,
+      "current",
+    );
+  }
+
+  return evidenceByProviderDate;
+}
+
+function addStoredActivityMetricEvidenceMode(
+  modeByDate: Map<string, "current" | "legacy">,
+  date: string,
+  mode: "current" | "legacy",
+): void {
+  const existingMode = modeByDate.get(date);
+  if (existingMode && existingMode !== mode) {
+    throw new Error(
+      "Stored activity metric ranking evidence mixes current and legacy rows for one date; "
+      + "rebuild the query projection.",
+    );
+  }
+  modeByDate.set(date, mode);
+}
+
+function validateStoredActivityEvidenceCompleteness(
+  rows: readonly QueryWearableSummaryRow[],
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+  metricEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivityMetricEvidence[]
+  >,
+  sessionEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivitySessionEvidence[]
+  >,
+): void {
+  for (const row of rows) {
+    if (
+      row.summaryKind !== "activity"
+      || !wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)
+    ) {
+      continue;
+    }
+
+    const parsedMetricEvidence = parseStoredWearableActivityMetricEvidence(
+      row.summaryJson,
+    );
+    if (parsedMetricEvidence.status === "absent") {
+      if (
+        parseStoredWearableActivitySessionEvidence(row.summaryJson).status
+          === "valid"
+      ) {
+        throw invalidStoredActivityMetricEvidenceError();
+      }
+      continue;
+    }
+    if (parsedMetricEvidence.status === "invalid") {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    const parsedSessionEvidence = parseStoredWearableActivitySessionEvidence(
+      row.summaryJson,
+    );
+    if (parsedSessionEvidence.status !== "valid") {
+      throw invalidStoredActivitySessionEvidenceError(
+        parsedSessionEvidence.status === "invalid"
+          ? parsedSessionEvidence.reason
+          : "malformed",
+      );
+    }
+
+    const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(
+      "activity",
+      row.summaryJson,
+    );
+    const provider = storedRowProvider(row);
+    if (!summary || !provider || !row.summaryDate || summary.date !== row.summaryDate) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+
+    const evidenceKey = activitySessionEvidenceKey(provider, row.summaryDate);
+    const metricEvidence = metricEvidenceByProviderDate.get(evidenceKey);
+    if (!metricEvidence) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+    const storedSessionEvidence = sessionEvidenceByProviderDate.get(evidenceKey);
+    if (!storedSessionEvidence) {
+      throw invalidStoredActivitySessionEvidenceError("malformed");
+    }
+    const sessionEvidence = storedSessionEvidence.length > 0
+      ? storedSessionEvidence
+      : undefined;
+    const rebuilt = rebuildStoredActivityEvidenceSummary(
+      summary,
+      metricEvidence,
+      sessionEvidence,
+    );
+    if (!rebuilt) {
+      throw invalidStoredActivityMetricEvidenceError();
+    }
+
+    if (
+      sessionEvidence !== undefined
+      && (
+        rebuilt.sessionMinutes.selection.value
+          !== summary.sessionMinutes.selection.value
+        || rebuilt.sessionCount.selection.value
+          !== summary.sessionCount.selection.value
+        || stringifyPublicWearableProjectionSummary(rebuilt.activityTypes)
+          !== stringifyPublicWearableProjectionSummary(summary.activityTypes)
+        || stringifyPublicWearableProjectionSummary(rebuilt.heartRateZones)
+          !== stringifyPublicWearableProjectionSummary(summary.heartRateZones)
+      )
+    ) {
+      throw invalidStoredActivitySessionEvidenceError("malformed");
+    }
+
+    const rebuiltMetrics = new Map(
+      activityResolvedMetrics(rebuilt).map((metric) => [metric.metric, metric]),
+    );
+    for (const storedMetric of activityResolvedMetrics(summary)) {
+      const rebuiltMetric = rebuiltMetrics.get(storedMetric.metric);
+      if (
+        !rebuiltMetric
+        || stringifyPublicWearableProjectionSummary(rebuiltMetric)
+          !== stringifyPublicWearableProjectionSummary(storedMetric)
+      ) {
+        throw invalidStoredActivityMetricEvidenceError();
+      }
+    }
+
+  }
+}
+
+function rebuildStoredActivityEvidenceSummary(
+  storedSummary: ProjectedWearableActivitySummary,
+  metricEvidence: readonly WearableActivityMetricEvidence[],
+  sessionEvidence: readonly WearableActivitySessionEvidence[] | undefined,
+): WearableActivityDay | null {
+  const metricCandidates = projectedActivityMetricCandidates(metricEvidence);
+  const activitySessionCandidates = sessionEvidence
+    ? projectedActivitySessionCandidates(sessionEvidence)
+    : [];
+  const projectedAggregate = sessionEvidence
+    ? null
+    : projectedActivitySessionAggregate(storedSummary, {
+        includeWorkoutMetrics: false,
+      });
+  const activitySessionAggregates = sessionEvidence
+    ? buildActivitySessionAggregates(activitySessionCandidates)
+    : projectedAggregate
+      ? [projectedAggregate]
+      : [];
+  const activitySessionDayRollups = sessionEvidence
+    ? buildActivitySessionDayRollups(activitySessionCandidates)
+    : [];
+  const rebuilt = buildWearableSummaryBundleFromDataset({
+    activitySessionCandidates,
+    activitySessionAggregates,
+    activitySessionDayRollups,
+    metricSuppressionEvidence: [],
+    metricCandidates,
+    provenanceDiagnostics: [],
+    rawMetricCandidates: metricCandidates,
+    sleepWindows: [],
+  });
+  return rebuilt.activityDays.find((summary) => summary.date === storedSummary.date) ?? null;
+}
+
+function storedActivityDatesWithCompleteMetricEvidence(
+  scopes: readonly StoredActivitySummaryScope[],
+  metricEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivityMetricEvidence[]
+  >,
+  sessionEvidenceByProviderDate: ReadonlyMap<
+    string,
+    readonly WearableActivitySessionEvidence[]
+  >,
+): Set<string> {
+  const scopesByDate = new Map<string, StoredActivitySummaryScope[]>();
+  for (const scope of scopes) {
+    const dateScopes = scopesByDate.get(scope.date) ?? [];
+    dateScopes.push(scope);
+    scopesByDate.set(scope.date, dateScopes);
+  }
+
+  const completeDates = new Set<string>();
+  for (const [date, dateScopes] of scopesByDate) {
+    if (
+      dateScopes.length > 0
+      && dateScopes.every((scope) => {
+        const evidenceKey = activitySessionEvidenceKey(scope.provider, scope.date);
+        return metricEvidenceByProviderDate.has(evidenceKey)
+          && (
+            !scope.hasSessionSelection
+            || (sessionEvidenceByProviderDate.get(evidenceKey)?.length ?? 0) > 0
+          );
+      })
+    ) {
+      completeDates.add(date);
+    }
+  }
+  return completeDates;
+}
+
+function storedActivitySessionEvidenceByProviderDate(
+  rows: readonly QueryWearableSummaryRow[],
+  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
+): Map<string, readonly WearableActivitySessionEvidence[]> {
+  const evidenceByProviderDate = new Map<string, readonly WearableActivitySessionEvidence[]>();
+  const evidenceModeByDate = new Map<string, "current" | "legacy">();
+
+  for (const row of rows) {
+    if (
+      row.summaryKind !== "activity"
+      || !wearableSummaryRowMatchesDateFilters(row.summaryDate, filters)
+    ) {
+      continue;
+    }
+    const parsedEvidence = parseStoredWearableActivitySessionEvidence(row.summaryJson);
+    if (parsedEvidence.status === "absent") {
+      if (row.summaryDate && storedActivityRowHasSessionSelection(row)) {
+        addStoredActivitySessionEvidenceMode(
+          evidenceModeByDate,
+          row.summaryDate,
+          "legacy",
+        );
+      }
+      continue;
+    }
+    if (parsedEvidence.status === "invalid") {
+      throw invalidStoredActivitySessionEvidenceError(parsedEvidence.reason);
+    }
+    const evidence = parsedEvidence.evidence;
+    const provider = storedRowProvider(row);
+    const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(
+      "activity",
+      row.summaryJson,
+    );
+    if (
+      !provider
+      || !row.summaryDate
+      || !summary
+      || (
+        evidence.length > 0
+          ? !storedActivitySummaryHasSessionSelection(summary)
+          : storedActivitySummaryHasSessionOwnedBranch(summary)
+      )
+      || evidence.some((session) =>
+        session.date !== row.summaryDate
+        || normalizeWearableProviders([session.provider])[0] !== provider
+      )
+    ) {
+      throw invalidStoredActivitySessionEvidenceError("malformed");
+    }
+    const evidenceKey = activitySessionEvidenceKey(provider, row.summaryDate);
+    if (evidenceByProviderDate.has(evidenceKey)) {
+      throw invalidStoredActivitySessionEvidenceError("malformed");
+    }
+    evidenceByProviderDate.set(evidenceKey, evidence);
+    addStoredActivitySessionEvidenceMode(
+      evidenceModeByDate,
+      row.summaryDate,
+      "current",
+    );
+  }
+
+  return evidenceByProviderDate;
+}
+
+function addStoredActivitySessionEvidenceMode(
+  modeByDate: Map<string, "current" | "legacy">,
+  date: string,
+  mode: "current" | "legacy",
+): void {
+  const existingMode = modeByDate.get(date);
+  if (existingMode && existingMode !== mode) {
+    throw new Error(
+      "Stored activity-session reconciliation evidence mixes current and legacy rows for one date; "
+      + "rebuild the query projection.",
+    );
+  }
+  modeByDate.set(date, mode);
+}
+
+function storedActivityRowHasSessionSelection(
+  row: QueryWearableSummaryRow,
+): boolean {
+  const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(
+    "activity",
+    row.summaryJson,
+  );
+  return summary ? storedActivitySummaryHasSessionSelection(summary) : false;
+}
+
+function storedActivitySummaryHasSessionSelection(
+  summary: ProjectedWearableActivitySummary,
+): boolean {
+  const sessionMinutes = summary?.sessionMinutes?.selection?.value;
+  const sessionCount = summary?.sessionCount?.selection?.value;
+  return (
+    typeof sessionMinutes === "number"
+    && Number.isFinite(sessionMinutes)
+    && sessionMinutes > 0
+  ) || (
+    typeof sessionCount === "number"
+    && Number.isFinite(sessionCount)
+    && sessionCount > 0
+  );
+}
+
+function storedActivitySummaryHasSessionOwnedBranch(
+  summary: ProjectedWearableActivitySummary,
+): boolean {
+  if (
+    storedActivitySummaryHasSessionSelection(summary)
+    || summary.activityTypes.length > 0
+    || summary.heartRateZones.length > 0
+  ) {
+    return true;
+  }
+
+  return activityResolvedMetrics(summary).some((metric) =>
+    metric.selection.sourceKind === "activity-session-aggregate"
+    || metric.selection.sourceKind === "activity-session-day-rollup"
+  );
+}
+
+function storedRowProvider(row: QueryWearableSummaryRow): string | undefined {
+  const providerScope = parseJsonValue<unknown>(row.providerScopeJson, null);
+  const providers = Array.isArray(providerScope)
+    ? normalizeWearableProviders(providerScope.filter((value): value is string => typeof value === "string"))
+    : [];
+  return providers.length === 1 ? providers[0] : undefined;
+}
+
+function invalidStoredActivityMetricEvidenceError(): Error {
+  return new Error(
+    "Stored activity metric ranking evidence is malformed; rebuild the query projection.",
+  );
+}
+
+function invalidStoredActivitySessionEvidenceError(
+  reason: "empty" | "malformed",
+): Error {
+  return new Error(
+    `Stored activity-session reconciliation evidence is ${reason}; rebuild the query projection.`,
+  );
+}
+
+function activitySessionEvidenceKey(provider: string, date: string): string {
+  return `${provider}\u0000${date}`;
+}
+
+function projectedActivityMetricCandidates(
+  evidence: readonly WearableActivityMetricEvidence[],
+): WearableMetricCandidate[] {
+  return evidence.map((candidate) => {
+    const dataOrigin = storedActivityMetricEvidenceDataOrigin(candidate);
+    const externalRef = {
+      facet: candidate.hasDayStrainFacet ? "day-strain" : null,
+      resourceId: candidate.exactKey,
+      resourceType: storedActivityMetricEvidenceResourceType(candidate),
+      system: candidate.provider,
+      version: null,
+    };
+
+    return {
+      candidateId: candidate.candidateKey,
+      dataOrigin,
+      date: candidate.date,
+      externalRef,
+      metric: candidate.metric,
+      occurredAt: candidate.occurredAt,
+      paths: [],
+      provider: candidate.provider,
+      recordedAt: candidate.recordedAt,
+      recordIds: [candidate.candidateKey],
+      sourceFamily: candidate.sourceFamily,
+      sourceKind: candidate.sourceKind,
+      title: storedActivityMetricEvidenceTitle(candidate),
+      unit: candidate.unit,
+      value: candidate.value,
+    };
+  });
+}
+
+function storedActivityMetricEvidenceTitle(
+  evidence: WearableActivityMetricEvidence,
+): string {
+  return `${formatProviderName(evidence.publicProvider)} ${formatMetricLabel(evidence.metric)}`;
+}
+
+function storedActivityMetricEvidenceDataOrigin(
+  evidence: WearableActivityMetricEvidence,
+): WearableMetricCandidate["dataOrigin"] {
+  const { aggregatorProvider, sourceProviderSlug, sourceType } = evidence.origin;
+  if (!aggregatorProvider && !sourceProviderSlug && !sourceType) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    ...(aggregatorProvider ? { aggregatorProvider } : {}),
+    ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+    ...(sourceType ? { sourceType } : {}),
+  };
+}
+
+function storedActivityMetricEvidenceResourceType(
+  evidence: WearableActivityMetricEvidence,
+): string | null {
+  switch (evidence.resourceClass) {
+    case "activity":
+      return "activity";
+    case "cycle":
+      return "cycle";
+    case "generic":
+      return "resource";
+    case "none":
+      return null;
+  }
+}
+
+function resolveStoredActivityMetricEvidencePublicProvider(
+  evidence: WearableActivityMetricEvidence,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: storedActivityMetricEvidenceDataOrigin(evidence),
+    externalRef: {
+      facet: evidence.hasDayStrainFacet ? "day-strain" : null,
+      resourceId: evidence.exactKey,
+      resourceType: storedActivityMetricEvidenceResourceType(evidence),
+      system: evidence.provider,
+      version: null,
+    },
+    provider: evidence.provider,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
+}
+
+function projectedActivitySessionCandidates(
+  evidence: readonly WearableActivitySessionEvidence[],
+): WearableMetricCandidate[] {
+  return evidence.flatMap((session, index) => {
+    const provider = normalizeWearableProviders([session.provider])[0];
+    if (
+      !provider
+      || !Number.isFinite(session.durationMinutes)
+      || session.durationMinutes <= 0
+    ) {
+      return [];
+    }
+
+    const recordId = `projected:activity-session-evidence:${provider}:${session.date}:${index}`;
+    return [{
+      activityType: session.activityType,
+      candidateId: recordId,
+      dataOrigin: null,
+      date: session.date,
+      externalRef: session.reconciliationResourceKey
+        ? {
+            facet: null,
+            resourceId: session.reconciliationResourceKey,
+            resourceType: "activity_session",
+            system: provider,
+            version: null,
+          }
+        : null,
+      heartRateZones: session.heartRateZones.map((zone) => ({ ...zone })),
+      metric: "sessionMinutes",
+      occurredAt: session.startedAt,
+      paths: [],
+      provider,
+      reconciliationDurationConsistent: session.durationConsistent,
+      reconciliationExactKey: session.reconciliationExactKey,
+      recordedAt: session.recordedAt,
+      recordIds: [recordId],
+      sessionEndAt: session.endedAt,
+      sessionStartAt: session.startedAt,
+      sourceFamily: "event",
+      sourceKind: "activity_session",
+      title: `${formatProviderName(provider)} activity session`,
+      unit: "minutes",
+      value: session.durationMinutes,
+      workoutMetricKeys: [...session.workoutMetricKeys],
+      workoutMetricValues: { ...session.workoutMetricValues },
+    }];
+  });
 }
 
 function projectedMetricCandidatesFromResolvedMetrics(
@@ -650,6 +1351,9 @@ function projectedMetricCandidateFromResolvedMetric(
 
 function projectedActivitySessionAggregate(
   summary: ProjectedWearableActivitySummary,
+  options: {
+    includeWorkoutMetrics: boolean;
+  },
 ): WearableActivitySessionAggregate | null {
   const sessionMinutes = summary.sessionMinutes.selection.value;
   const sessionCount = summary.sessionCount.selection.value;
@@ -667,6 +1371,10 @@ function projectedActivitySessionAggregate(
     return null;
   }
 
+  const workoutMetricValues = options.includeWorkoutMetrics
+    ? projectedActivitySessionWorkoutMetricValues(summary)
+    : {};
+
   return {
     activityTypes: [...summary.activityTypes],
     candidateId: `projected:activity-session:${provider}:${summary.date}`,
@@ -682,8 +1390,37 @@ function projectedActivitySessionAggregate(
     recordIds: [projectedActivitySessionRecordId(provider, summary.date)],
     sessionCount,
     sessionMinutes,
-    workoutMetricKeys: [],
+    sourceKind: summary.sessionMinutes.selection.sourceKind === "activity-session-day-rollup"
+      ? "activity-session-day-rollup"
+      : "activity-session-aggregate",
+    workoutMetricKeys: Object.keys(workoutMetricValues),
+    workoutMetricValues,
   };
+}
+
+function projectedActivitySessionWorkoutMetricValues(
+  summary: ProjectedWearableActivitySummary,
+): NonNullable<WearableActivitySessionAggregate["workoutMetricValues"]> {
+  const values: NonNullable<WearableActivitySessionAggregate["workoutMetricValues"]> = {};
+  for (const [metric, resolved] of [
+    ["activeCalories", summary.activeCalories],
+    ["distanceKm", summary.distanceKm],
+    ["maxHeartRate", summary.maxHeartRate],
+    ["totalElevationGainMeters", summary.totalElevationGainMeters],
+    ["workoutStrain", summary.workoutStrain],
+  ] as const) {
+    if (
+      (
+        resolved.selection.sourceKind === "activity-session-aggregate"
+        || resolved.selection.sourceKind === "activity-session-day-rollup"
+      )
+      && resolved.selection.value !== null
+      && Number.isFinite(resolved.selection.value)
+    ) {
+      values[metric] = resolved.selection.value;
+    }
+  }
+  return values;
 }
 
 function projectedMetricRecordIds(input: {
@@ -699,7 +1436,10 @@ function projectedMetricRecordIds(input: {
   if (
     input.summaryKind === "activity"
     && input.resolved.selection.sourceFamily === "derived"
-    && input.resolved.selection.sourceKind === "activity-session-aggregate"
+    && (
+      input.resolved.selection.sourceKind === "activity-session-aggregate"
+      || input.resolved.selection.sourceKind === "activity-session-day-rollup"
+    )
   ) {
     return [projectedActivitySessionRecordId(input.provider, input.date)];
   }
@@ -786,7 +1526,9 @@ function projectedSelectedSleepWindow(
   };
 }
 
-function activityResolvedMetrics(summary: ProjectedWearableActivitySummary): WearableResolvedMetric[] {
+function activityResolvedMetrics(
+  summary: ProjectedWearableActivitySummary | WearableActivityDay,
+): WearableResolvedMetric[] {
   return [
     summary.activityScore,
     summary.activeCalories,

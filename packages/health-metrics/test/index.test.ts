@@ -184,6 +184,8 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("steps_per_day")?.key, "steps");
   assert.equal(resolveMetricDefinition("activity_counts")?.key, "activity-counts");
   assert.equal(resolveMetricDefinition("active_minutes")?.key, "activity-minutes");
+  assert.equal(resolveMetricDefinition("sessionMinutes")?.key, "workout-minutes");
+  assert.equal(resolveMetricDefinition("workout_duration")?.key, "workout-minutes");
   assert.equal(resolveMetricDefinition("sessionCount")?.key, "workout-count");
   assert.equal(resolveMetricDefinition("peakCadence")?.key, "peak-30-minute-cadence");
   assert.equal(resolveMetricDefinition("resting_hr")?.key, "resting-heart-rate");
@@ -225,6 +227,8 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
     ["actigraphy-counts", "activity-counts"],
     ["active-minutes", "activity-minutes"],
     ["activeMinutes", "activity-minutes"],
+    ["session-minutes", "workout-minutes"],
+    ["workoutDuration", "workout-minutes"],
     ["workouts", "workout-count"],
     ["resting-hr", "resting-heart-rate"],
     ["sleep-hours", "total-sleep-minutes"],

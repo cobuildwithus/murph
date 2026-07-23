@@ -1,4 +1,9 @@
-import { deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
+import {
+  activityTextMatchesKind,
+  deviceDataOriginSchema,
+  normalizeActivityKindToken,
+  type DeviceDataOrigin,
+} from "@murphai/contracts";
 import {
   canonicalizeWearableProviderSlug,
   normalizeWearableMetricValue,
@@ -12,7 +17,11 @@ import {
   deriveWearableObservationEffectiveDate,
   readWearableExternalRef,
 } from "./observation.ts";
-import { dedupeExactMetricCandidates, dedupeSleepWindowCandidates } from "./dedupe.ts";
+import {
+  buildCandidateExactKey,
+  dedupeExactMetricCandidates,
+  dedupeSleepWindowCandidates,
+} from "./dedupe.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
   normalizeWearableOriginSourceSlug,
@@ -37,8 +46,9 @@ import {
   uniqueStrings,
 } from "./shared.ts";
 import type {
-  WearableActivitySessionMetricValues,
   WearableActivitySessionAggregate,
+  WearableActivitySessionMetricContributors,
+  WearableActivitySessionMetricValues,
   WearableCandidateSourceFamily,
   WearableDataset,
   WearableExternalRef,
@@ -57,6 +67,18 @@ import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
+// Elapsed windows can include pauses, so only gross duration mismatches lose preference.
+const ACTIVITY_SESSION_DURATION_CONSISTENCY_ABSOLUTE_TOLERANCE_MS = 2 * 60 * 1_000;
+const ACTIVITY_SESSION_DURATION_CONSISTENCY_RELATIVE_TOLERANCE = 0.2;
+const GENERIC_ACTIVITY_SESSION_TYPES = new Set([
+  "activity",
+  "exercise",
+  "other",
+  "training",
+  "unknown",
+  "workout",
+]);
 const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
   ["totalSleepMinutes", "total-sleep-minutes"],
   ["sleepEfficiency", "sleep-efficiency"],
@@ -192,7 +214,9 @@ export function collectWearableDataset(
   ].sort(compareMetricCandidateByDateDesc);
 
   return {
+    activitySessionCandidates: activitySessions,
     activitySessionAggregates: buildActivitySessionAggregates(activitySessions),
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessions),
     metricSuppressionEvidence: sanitizedMetricCandidates.suppressionEvidence,
     metricCandidates,
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
@@ -327,30 +351,81 @@ function firstPositiveMetricValue(
 export function buildActivitySessionAggregates(
   candidates: readonly WearableMetricCandidate[],
 ): WearableActivitySessionAggregate[] {
+  return aggregateActivitySessionCandidates(
+    dedupeExactActivitySessionCandidates(
+      [...candidates].sort(compareActivitySessionCandidate),
+    ),
+    (candidate) => `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`,
+    "activity-session-aggregate",
+  );
+}
+
+export function buildActivitySessionDayRollups(
+  candidates: readonly WearableMetricCandidate[],
+): WearableActivitySessionAggregate[] {
+  const candidatesByDate = new Map<string, WearableMetricCandidate[]>();
+  for (const candidate of candidates) {
+    const dateCandidates = candidatesByDate.get(candidate.date) ?? [];
+    dateCandidates.push(candidate);
+    candidatesByDate.set(candidate.date, dateCandidates);
+  }
+
+  return [...candidatesByDate.entries()]
+    .flatMap(([date, dateCandidates]) => {
+      const dedupedCandidates = dedupeActivitySessionCandidates(dateCandidates);
+      return aggregateActivitySessionCandidates(
+        dedupedCandidates,
+        () => date,
+        "activity-session-day-rollup",
+      ).map((rollup) =>
+        projectActivitySessionDayRollupSource(rollup, dedupedCandidates)
+      );
+    })
+    .sort(compareAggregateByDateDesc);
+}
+
+function aggregateActivitySessionCandidates(
+  candidates: readonly WearableMetricCandidate[],
+  groupKey: (candidate: WearableMetricCandidate) => string,
+  aggregateKind: "activity-session-aggregate" | "activity-session-day-rollup",
+): WearableActivitySessionAggregate[] {
   const grouped = new Map<string, WearableActivitySessionAggregate>();
 
-  for (const candidate of dedupeExactMetricCandidates(candidates).candidates) {
-    const key = `${candidate.date}:${candidate.provider}:${wearableDataOriginKey(candidate.dataOrigin)}`;
+  for (const candidate of [...candidates].sort(compareActivitySessionCandidate)) {
+    const key = groupKey(candidate);
     const activityType = candidate.activityType ?? null;
     const heartRateZones = candidate.heartRateZones ?? [];
+    const candidateProvider = resolveActivitySessionCandidatePublicProvider(candidate);
+    const candidateWorkoutMetrics = activitySessionCandidateWorkoutMetricEvidence(candidate);
     const existing = grouped.get(key);
     if (existing) {
       existing.paths = uniqueStrings([...existing.paths, ...candidate.paths]);
       existing.recordIds = uniqueStrings([...existing.recordIds, ...candidate.recordIds]);
-      existing.heartRateZones = mergeHeartRateZoneAggregates([
-        ...existing.heartRateZones,
-        ...heartRateZones,
-      ]);
+      existing.heartRateZones = aggregateKind === "activity-session-day-rollup"
+        ? mergeActivitySessionDayHeartRateZoneAggregates([
+            ...existing.heartRateZones,
+            ...heartRateZones,
+          ])
+        : mergeHeartRateZoneAggregates([
+            ...existing.heartRateZones,
+            ...heartRateZones,
+          ]);
       existing.sessionMinutes += candidate.value;
       existing.sessionCount += 1;
+      existing.sessionContributors = uniqueStrings([
+        ...(existing.sessionContributors ?? []),
+        candidateProvider,
+      ]).sort();
       existing.workoutMetricKeys = uniqueStrings([
         ...existing.workoutMetricKeys,
         ...(candidate.workoutMetricKeys ?? []),
       ]).sort();
-      existing.workoutMetricValues = mergeActivitySessionWorkoutMetricValues(
-        existing.workoutMetricValues,
-        candidate.workoutMetricValues,
-      );
+      const mergedWorkoutMetrics = mergeDistinctActivitySessionWorkoutMetricEvidence({
+        contributors: existing.workoutMetricContributors ?? {},
+        values: existing.workoutMetricValues ?? {},
+      }, candidateWorkoutMetrics);
+      existing.workoutMetricContributors = mergedWorkoutMetrics.contributors;
+      existing.workoutMetricValues = mergedWorkoutMetrics.values;
       if (activityType && !existing.activityTypes.includes(activityType)) {
         existing.activityTypes.push(activityType);
         existing.activityTypes.sort();
@@ -363,25 +438,888 @@ export function buildActivitySessionAggregates(
       activityTypes: activityType ? [activityType] : [],
       candidateId: buildCandidateId([
         candidate.provider,
-        wearableDataOriginKey(candidate.dataOrigin),
+        ...(aggregateKind === "activity-session-aggregate"
+          ? [wearableDataOriginKey(candidate.dataOrigin)]
+          : []),
         candidate.date,
-        "activity-session-aggregate",
+        aggregateKind,
       ]),
       dataOrigin: candidate.dataOrigin ?? null,
       date: candidate.date,
-      heartRateZones: mergeHeartRateZoneAggregates(heartRateZones),
+      heartRateZones: aggregateKind === "activity-session-day-rollup"
+        ? mergeActivitySessionDayHeartRateZoneAggregates(heartRateZones)
+        : mergeHeartRateZoneAggregates(heartRateZones),
       paths: [...candidate.paths],
       provider: candidate.provider,
       recordedAt: candidate.recordedAt,
       recordIds: [...candidate.recordIds],
+      sessionContributors: [candidateProvider],
       sessionCount: 1,
       sessionMinutes: candidate.value,
+      sourceKind: aggregateKind,
+      workoutMetricContributors: candidateWorkoutMetrics.contributors,
       workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
-      workoutMetricValues: candidate.workoutMetricValues ?? {},
+      workoutMetricValues: candidateWorkoutMetrics.values,
     });
   }
 
-  return [...grouped.values()].sort(compareAggregateByDateDesc);
+  return [...grouped.values()]
+    .map((aggregate) => ({
+      ...aggregate,
+      candidateId: buildCandidateId([
+        aggregate.provider,
+        aggregate.date,
+        aggregateKind,
+        ...[...aggregate.recordIds].sort(),
+      ]),
+    }))
+    .sort(compareAggregateByDateDesc);
+}
+
+function dedupeActivitySessionCandidates(
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  const deduped: WearableMetricCandidate[] = [];
+  const orderedCandidates = [...candidates].sort(compareActivitySessionCandidate);
+  // Collapse immutable identities before greedy overlap can merge one into an
+  // identity-less representation and strand another copy of the same resource.
+  const stableIdentityCandidates =
+    dedupeStableIdentityActivitySessionCandidates(orderedCandidates)
+      .sort(compareActivitySessionCandidate);
+
+  for (
+    const candidate of dedupeExactActivitySessionCandidates(stableIdentityCandidates)
+      .sort(compareActivitySessionCandidate)
+  ) {
+    const duplicateIndex = deduped.findIndex((existing) =>
+      activitySessionCandidatesRepresentSameWorkout(existing, candidate)
+    );
+    if (duplicateIndex < 0) {
+      deduped.push(cloneActivitySessionCandidate(candidate));
+      continue;
+    }
+
+    deduped[duplicateIndex] = mergeMirroredActivitySessionCandidates(
+      deduped[duplicateIndex]!,
+      candidate,
+    );
+  }
+
+  return deduped;
+}
+
+function dedupeStableIdentityActivitySessionCandidates(
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  const deduped: WearableMetricCandidate[] = [];
+  const candidateIndexByStableIdentity = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    const stableIdentity = buildActivitySessionStableResourceIdentity(candidate);
+    if (!stableIdentity) {
+      deduped.push(cloneActivitySessionCandidate(candidate));
+      continue;
+    }
+
+    const duplicateIndex = candidateIndexByStableIdentity.get(stableIdentity);
+    if (duplicateIndex === undefined) {
+      candidateIndexByStableIdentity.set(
+        stableIdentity,
+        deduped.push(cloneActivitySessionCandidate(candidate)) - 1,
+      );
+      continue;
+    }
+
+    deduped[duplicateIndex] = mergeMirroredActivitySessionCandidates(
+      deduped[duplicateIndex]!,
+      candidate,
+    );
+  }
+
+  return deduped;
+}
+
+function dedupeExactActivitySessionCandidates(
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  const deduped: WearableMetricCandidate[] = [];
+  const candidateIndexesByExactKey = new Map<string, number[]>();
+
+  for (const candidate of candidates) {
+    const exactKey = activitySessionCandidateReconciliationExactKey(candidate);
+    const candidateIndexes = candidateIndexesByExactKey.get(exactKey) ?? [];
+    const duplicateIndex = candidateIndexes.find((index) => {
+      const existing = deduped[index];
+      return existing !== undefined
+        && (
+          activitySessionCandidatesShareStableIdentity(existing, candidate)
+          || activitySessionTypesCompatible(existing.activityType, candidate.activityType)
+        );
+    });
+    if (duplicateIndex === undefined) {
+      const nextIndex = deduped.push(cloneActivitySessionCandidate(candidate)) - 1;
+      candidateIndexes.push(nextIndex);
+      candidateIndexesByExactKey.set(exactKey, candidateIndexes);
+      continue;
+    }
+
+    deduped[duplicateIndex] = mergeMirroredActivitySessionCandidates(
+      deduped[duplicateIndex]!,
+      candidate,
+    );
+  }
+
+  return deduped;
+}
+
+function activitySessionCandidatesRepresentSameWorkout(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): boolean {
+  if (left.date !== right.date) {
+    return false;
+  }
+
+  if (activitySessionCandidatesShareStableIdentity(left, right)) {
+    return true;
+  }
+
+  if (!activitySessionTypesCompatible(left.activityType, right.activityType)) {
+    return false;
+  }
+
+  const leftWindow = activitySessionCandidateWindow(left);
+  const rightWindow = activitySessionCandidateWindow(right);
+  if (!leftWindow || !rightWindow) {
+    return false;
+  }
+
+  const overlapMs =
+    Math.min(leftWindow.endMs, rightWindow.endMs)
+    - Math.max(leftWindow.startMs, rightWindow.startMs);
+  return overlapMs > 0
+    && overlapMs / Math.max(leftWindow.durationMs, rightWindow.durationMs)
+      >= ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO;
+}
+
+function activitySessionCandidatesShareStableIdentity(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): boolean {
+  const leftResourceIdentity = buildActivitySessionStableResourceIdentity(left);
+  const rightResourceIdentity = buildActivitySessionStableResourceIdentity(right);
+  return leftResourceIdentity !== null && leftResourceIdentity === rightResourceIdentity;
+}
+
+export function buildActivitySessionStableResourceIdentity(
+  candidate: WearableMetricCandidate,
+): string | null {
+  const resourceType = normalizeResourceToken(candidate.externalRef?.resourceType);
+  const resourceId = normalizeNullableString(candidate.externalRef?.resourceId);
+  if (!resourceType || !resourceId) {
+    return null;
+  }
+
+  return JSON.stringify([
+    resolveActivitySessionCandidatePublicProvider(candidate),
+    resourceType,
+    resourceId,
+    normalizeResourceToken(candidate.externalRef?.facet) ?? "",
+  ]);
+}
+
+function resolveActivitySessionCandidatePublicProvider(
+  candidate: WearableMetricCandidate,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: candidate.dataOrigin ?? null,
+    externalRef: candidate.externalRef,
+    provider: candidate.provider,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
+}
+
+function activitySessionTypesCompatible(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): boolean {
+  const normalizedLeft = normalizeActivityKindToken(left);
+  const normalizedRight = normalizeActivityKindToken(right);
+  if (
+    !normalizedLeft
+    || !normalizedRight
+    || GENERIC_ACTIVITY_SESSION_TYPES.has(normalizedLeft)
+    || GENERIC_ACTIVITY_SESSION_TYPES.has(normalizedRight)
+  ) {
+    return true;
+  }
+
+  return activityTextMatchesKind(normalizedLeft, normalizedRight)
+    || activityTextMatchesKind(normalizedRight, normalizedLeft);
+}
+
+function activitySessionCandidateWindow(
+  candidate: WearableMetricCandidate,
+): { durationMs: number; endMs: number; startMs: number } | null {
+  const timestamps = activitySessionCandidateReconciliationTimestamps(candidate);
+  const startMs = parseIsoTimestampMs(timestamps.startedAt);
+  const durationMs = candidate.value * 60 * 1_000;
+  if (startMs === null || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return null;
+  }
+
+  const explicitEndMs = parseIsoTimestampMs(timestamps.endedAt);
+  const endMs = explicitEndMs ?? startMs + durationMs;
+  if (!Number.isFinite(endMs) || endMs <= startMs) {
+    return null;
+  }
+
+  return {
+    durationMs: endMs - startMs,
+    endMs,
+    startMs,
+  };
+}
+
+export function activitySessionCandidateReconciliationTimestamps(
+  candidate: WearableMetricCandidate,
+): { endedAt: string | null; startedAt: string | null } {
+  const startedAt = parseIsoTimestampMs(candidate.sessionStartAt) === null
+    ? candidate.occurredAt
+    : candidate.sessionStartAt;
+  const startMs = parseIsoTimestampMs(startedAt);
+  if (startMs === null) {
+    return {
+      endedAt: null,
+      startedAt: null,
+    };
+  }
+
+  const endMs = parseIsoTimestampMs(candidate.sessionEndAt);
+  return {
+    endedAt: endMs !== null && endMs > startMs
+      ? candidate.sessionEndAt ?? null
+      : null,
+    startedAt: startedAt ?? null,
+  };
+}
+
+function parseIsoTimestampMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function mergeMirroredActivitySessionCandidates(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): WearableMetricCandidate {
+  const preferred = choosePreferredActivitySessionCandidate(left, right);
+  const secondary = preferred === left ? right : left;
+  const timestamps = mergeActivitySessionCandidateTimestamps(preferred, secondary);
+  const workoutMetrics = mergeMirroredActivitySessionWorkoutMetricEvidence(
+    preferred,
+    secondary,
+  );
+
+  return {
+    ...cloneActivitySessionCandidate(preferred),
+    activityType: selectPreferredActivitySessionType(preferred, secondary),
+    heartRateZones: mergeMirroredActivitySessionHeartRateZones(preferred, secondary),
+    paths: uniqueStrings([...left.paths, ...right.paths]),
+    recordedAt: latestIsoTimestamp([left.recordedAt, right.recordedAt]),
+    recordIds: uniqueStrings([...left.recordIds, ...right.recordIds]),
+    sessionEndAt: timestamps.endedAt,
+    sessionStartAt: timestamps.startedAt,
+    workoutMetricKeys: uniqueStrings([
+      ...(left.workoutMetricKeys ?? []),
+      ...(right.workoutMetricKeys ?? []),
+    ]).sort(),
+    workoutMetricContributors: workoutMetrics.contributors,
+    workoutMetricValues: workoutMetrics.values,
+  };
+}
+
+function mergeActivitySessionCandidateTimestamps(
+  preferred: WearableMetricCandidate,
+  secondary: WearableMetricCandidate,
+): { endedAt: string | null; startedAt: string | null } {
+  const preferredTimestamps = activitySessionCandidateReconciliationTimestamps(preferred);
+  if (activitySessionCandidateWindow(preferred)) {
+    return preferredTimestamps;
+  }
+
+  const secondaryWindow = activitySessionCandidateWindow(secondary);
+  if (
+    secondaryWindow
+    && activitySessionWindowMatchesDeclaredDuration(secondaryWindow, preferred.value)
+  ) {
+    return activitySessionCandidateReconciliationTimestamps(secondary);
+  }
+
+  return preferredTimestamps;
+}
+
+function choosePreferredActivitySessionCandidate(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): WearableMetricCandidate {
+  return compareActivitySessionCandidateReconciliationEvidence(left, right) <= 0
+    ? left
+    : right;
+}
+
+function compareActivitySessionCandidateReconciliationEvidence(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): number {
+  const durationConsistencyDifference =
+    Number(activitySessionCandidateDurationIsConsistent(right))
+    - Number(activitySessionCandidateDurationIsConsistent(left));
+  if (durationConsistencyDifference !== 0) {
+    return durationConsistencyDifference;
+  }
+
+  const coverageDifference =
+    activitySessionCandidateCoverageDurationMs(right)
+    - activitySessionCandidateCoverageDurationMs(left);
+  if (coverageDifference !== 0) {
+    return coverageDifference;
+  }
+
+  const declaredDurationDifference = right.value - left.value;
+  if (declaredDurationDifference !== 0) {
+    return declaredDurationDifference;
+  }
+
+  const completenessDifference =
+    activitySessionCandidateCompletenessScore(right)
+    - activitySessionCandidateCompletenessScore(left);
+  if (completenessDifference !== 0) {
+    return completenessDifference;
+  }
+
+  const recordedAtDifference =
+    (parseIsoTimestampMs(right.recordedAt) ?? 0)
+    - (parseIsoTimestampMs(left.recordedAt) ?? 0);
+  if (recordedAtDifference !== 0) {
+    return recordedAtDifference;
+  }
+
+  const publicEvidenceDifference =
+    activitySessionCandidatePublicEvidenceSignature(left)
+      .localeCompare(activitySessionCandidatePublicEvidenceSignature(right));
+  if (publicEvidenceDifference !== 0) {
+    return publicEvidenceDifference;
+  }
+
+  const reconciliationExactKeyDifference =
+    activitySessionCandidateReconciliationExactKey(left)
+      .localeCompare(activitySessionCandidateReconciliationExactKey(right));
+  if (reconciliationExactKeyDifference !== 0) {
+    return reconciliationExactKeyDifference;
+  }
+
+  return left.candidateId.localeCompare(right.candidateId);
+}
+
+function activitySessionCandidateReconciliationExactKey(
+  candidate: WearableMetricCandidate,
+): string {
+  return candidate.reconciliationExactKey ?? buildCandidateExactKey(candidate);
+}
+
+function activitySessionCandidateCoverageDurationMs(candidate: WearableMetricCandidate): number {
+  return activitySessionCandidateWindow(candidate)?.durationMs
+    ?? candidate.value * 60 * 1_000;
+}
+
+export function activitySessionCandidateDurationIsConsistent(
+  candidate: WearableMetricCandidate,
+): boolean {
+  if (candidate.reconciliationDurationConsistent !== undefined) {
+    return candidate.reconciliationDurationConsistent;
+  }
+
+  const timestamps = activitySessionCandidateReconciliationTimestamps(candidate);
+  if (
+    candidate.sessionEndAt !== null
+    && candidate.sessionEndAt !== undefined
+    && timestamps.endedAt === null
+  ) {
+    return false;
+  }
+
+  const window = activitySessionCandidateWindow(candidate);
+  return Boolean(
+    window
+    && activitySessionWindowMatchesDeclaredDuration(window, candidate.value),
+  );
+}
+
+function activitySessionWindowMatchesDeclaredDuration(
+  window: { durationMs: number },
+  durationMinutes: number,
+): boolean {
+  const declaredDurationMs = durationMinutes * 60 * 1_000;
+  if (!Number.isFinite(declaredDurationMs) || declaredDurationMs <= 0) {
+    return false;
+  }
+
+  const differenceMs = Math.abs(window.durationMs - declaredDurationMs);
+  const relativeToleranceMs =
+    Math.max(window.durationMs, declaredDurationMs)
+    * ACTIVITY_SESSION_DURATION_CONSISTENCY_RELATIVE_TOLERANCE;
+  return differenceMs <= Math.max(
+    ACTIVITY_SESSION_DURATION_CONSISTENCY_ABSOLUTE_TOLERANCE_MS,
+    relativeToleranceMs,
+  );
+}
+
+function activitySessionCandidateCompletenessScore(candidate: WearableMetricCandidate): number {
+  const timestamps = activitySessionCandidateReconciliationTimestamps(candidate);
+  return (candidate.activityType ? 1 : 0)
+    + (timestamps.startedAt === null ? 0 : 1)
+    + (timestamps.endedAt === null ? 0 : 1)
+    + (candidate.heartRateZones?.length ?? 0)
+    + (candidate.workoutMetricKeys?.length ?? 0);
+}
+
+function selectPreferredActivitySessionType(
+  preferred: WearableMetricCandidate,
+  secondary: WearableMetricCandidate,
+): string | null {
+  const preferredType = normalizeActivityKindToken(preferred.activityType);
+  const secondaryType = normalizeActivityKindToken(secondary.activityType);
+  if (
+    (!preferredType || GENERIC_ACTIVITY_SESSION_TYPES.has(preferredType))
+    && secondaryType
+    && !GENERIC_ACTIVITY_SESSION_TYPES.has(secondaryType)
+  ) {
+    return secondary.activityType ?? null;
+  }
+
+  return preferred.activityType ?? secondary.activityType ?? null;
+}
+
+function activitySessionCandidatePublicEvidenceSignature(
+  candidate: WearableMetricCandidate,
+): string {
+  const provider = resolveActivitySessionCandidatePublicProvider(candidate);
+  const timestamps = activitySessionCandidateReconciliationTimestamps(candidate);
+  const heartRateZones = (candidate.heartRateZones ?? []).map((zone) => ({
+    durationMinutes: zone.durationMinutes,
+    label: zone.label ?? null,
+    maxHeartRate: zone.maxHeartRate ?? null,
+    minHeartRate: zone.minHeartRate ?? null,
+    zone: zone.zone ?? null,
+  }));
+  const workoutMetrics = activitySessionCandidateWorkoutMetricEvidence(candidate);
+
+  return JSON.stringify({
+    activityType: candidate.activityType ?? null,
+    date: candidate.date,
+    durationMinutes: candidate.value,
+    endedAt: timestamps.endedAt,
+    heartRateZones,
+    provider,
+    recordedAt: candidate.recordedAt,
+    startedAt: timestamps.startedAt,
+    workoutMetricKeys: uniqueStrings(candidate.workoutMetricKeys ?? []).sort(),
+    workoutMetricContributors: workoutMetrics.contributors,
+    workoutMetricValues: {
+      activeCalories: workoutMetrics.values.activeCalories ?? null,
+      distanceKm: workoutMetrics.values.distanceKm ?? null,
+      maxHeartRate: workoutMetrics.values.maxHeartRate ?? null,
+      totalElevationGainMeters: workoutMetrics.values.totalElevationGainMeters ?? null,
+      workoutStrain: workoutMetrics.values.workoutStrain ?? null,
+    },
+  });
+}
+
+function mergeMirroredActivitySessionHeartRateZones(
+  preferred: WearableMetricCandidate,
+  secondary: WearableMetricCandidate,
+): WearableHeartRateZoneAggregate[] {
+  const merged = (preferred.heartRateZones ?? []).map((zone) => ({ ...zone }));
+
+  for (const secondaryZone of secondary.heartRateZones ?? []) {
+    const duplicateIndex = merged.findIndex((preferredZone) =>
+      activitySessionHeartRateZonesRepresentSameZone(preferredZone, secondaryZone)
+    );
+    if (duplicateIndex < 0) {
+      merged.push({ ...secondaryZone });
+      continue;
+    }
+
+    const preferredZone = merged[duplicateIndex]!;
+    merged[duplicateIndex] = {
+      durationMinutes: preferredZone.durationMinutes,
+      ...(preferredZone.label === undefined && secondaryZone.label !== undefined
+        ? { label: secondaryZone.label }
+        : preferredZone.label === undefined ? {} : { label: preferredZone.label }),
+      ...(preferredZone.maxHeartRate === undefined && secondaryZone.maxHeartRate !== undefined
+        ? { maxHeartRate: secondaryZone.maxHeartRate }
+        : preferredZone.maxHeartRate === undefined
+          ? {}
+          : { maxHeartRate: preferredZone.maxHeartRate }),
+      ...(preferredZone.minHeartRate === undefined && secondaryZone.minHeartRate !== undefined
+        ? { minHeartRate: secondaryZone.minHeartRate }
+        : preferredZone.minHeartRate === undefined
+          ? {}
+          : { minHeartRate: preferredZone.minHeartRate }),
+      ...(preferredZone.zone === undefined && secondaryZone.zone !== undefined
+        ? { zone: secondaryZone.zone }
+        : preferredZone.zone === undefined ? {} : { zone: preferredZone.zone }),
+    };
+  }
+
+  return merged;
+}
+
+function activitySessionHeartRateZonesRepresentSameZone(
+  left: WearableHeartRateZoneAggregate,
+  right: WearableHeartRateZoneAggregate,
+): boolean {
+  if (left.zone !== undefined && right.zone !== undefined) {
+    return left.zone === right.zone;
+  }
+
+  const leftLabel = normalizeActivityKindToken(left.label);
+  const rightLabel = normalizeActivityKindToken(right.label);
+  if (leftLabel && rightLabel) {
+    return leftLabel === rightLabel;
+  }
+
+  return left.minHeartRate !== undefined
+    && right.minHeartRate !== undefined
+    && left.maxHeartRate !== undefined
+    && right.maxHeartRate !== undefined
+    && left.minHeartRate === right.minHeartRate
+    && left.maxHeartRate === right.maxHeartRate;
+}
+
+interface ActivitySessionWorkoutMetricEvidence {
+  contributors: WearableActivitySessionMetricContributors;
+  values: WearableActivitySessionMetricValues;
+}
+
+interface SelectedActivitySessionWorkoutMetric {
+  contributors: string[];
+  value: number | undefined;
+}
+
+function activitySessionCandidateWorkoutMetricEvidence(
+  candidate: WearableMetricCandidate,
+): ActivitySessionWorkoutMetricEvidence {
+  const values = candidate.workoutMetricValues ?? {};
+  const provider = resolveActivitySessionCandidatePublicProvider(candidate);
+  const contributorsFor = (
+    metric: keyof WearableActivitySessionMetricValues,
+  ): string[] => values[metric] === undefined
+    ? []
+    : uniqueStrings([
+        ...(candidate.workoutMetricContributors?.[metric] ?? []),
+        ...(candidate.workoutMetricContributors?.[metric]?.length ? [] : [provider]),
+      ]).sort();
+
+  return {
+    contributors: {
+      ...(values.activeCalories === undefined
+        ? {}
+        : { activeCalories: contributorsFor("activeCalories") }),
+      ...(values.distanceKm === undefined ? {} : { distanceKm: contributorsFor("distanceKm") }),
+      ...(values.maxHeartRate === undefined
+        ? {}
+        : { maxHeartRate: contributorsFor("maxHeartRate") }),
+      ...(values.totalElevationGainMeters === undefined
+        ? {}
+        : {
+            totalElevationGainMeters: contributorsFor("totalElevationGainMeters"),
+          }),
+      ...(values.workoutStrain === undefined
+        ? {}
+        : { workoutStrain: contributorsFor("workoutStrain") }),
+    },
+    values: { ...values },
+  };
+}
+
+function mergeMirroredActivitySessionWorkoutMetricEvidence(
+  preferred: WearableMetricCandidate,
+  secondary: WearableMetricCandidate,
+): ActivitySessionWorkoutMetricEvidence {
+  const preferredEvidence = activitySessionCandidateWorkoutMetricEvidence(preferred);
+  const secondaryEvidence = activitySessionCandidateWorkoutMetricEvidence(secondary);
+
+  return buildActivitySessionWorkoutMetricEvidence({
+    activeCalories: selectPreferredMirroredWorkoutMetric(
+      "activeCalories",
+      preferredEvidence,
+      secondaryEvidence,
+    ),
+    distanceKm: selectPreferredMirroredWorkoutMetric(
+      "distanceKm",
+      preferredEvidence,
+      secondaryEvidence,
+    ),
+    maxHeartRate: selectMaximumWorkoutMetric(
+      "maxHeartRate",
+      preferredEvidence,
+      secondaryEvidence,
+    ),
+    totalElevationGainMeters: selectPreferredMirroredWorkoutMetric(
+      "totalElevationGainMeters",
+      preferredEvidence,
+      secondaryEvidence,
+    ),
+    workoutStrain: selectMaximumWorkoutMetric(
+      "workoutStrain",
+      preferredEvidence,
+      secondaryEvidence,
+    ),
+  });
+}
+
+function mergeDistinctActivitySessionWorkoutMetricEvidence(
+  left: ActivitySessionWorkoutMetricEvidence,
+  right: ActivitySessionWorkoutMetricEvidence,
+): ActivitySessionWorkoutMetricEvidence {
+  return buildActivitySessionWorkoutMetricEvidence({
+    activeCalories: sumWorkoutMetric("activeCalories", left, right),
+    distanceKm: sumWorkoutMetric("distanceKm", left, right),
+    maxHeartRate: selectMaximumWorkoutMetric("maxHeartRate", left, right),
+    totalElevationGainMeters: sumWorkoutMetric(
+      "totalElevationGainMeters",
+      left,
+      right,
+    ),
+    workoutStrain: selectMaximumWorkoutMetric("workoutStrain", left, right),
+  });
+}
+
+function selectPreferredMirroredWorkoutMetric(
+  metric: keyof WearableActivitySessionMetricValues,
+  preferred: ActivitySessionWorkoutMetricEvidence,
+  secondary: ActivitySessionWorkoutMetricEvidence,
+): SelectedActivitySessionWorkoutMetric {
+  const preferredValue = preferred.values[metric];
+  const secondaryValue = secondary.values[metric];
+  if (preferredValue === undefined) {
+    return selectedWorkoutMetric(metric, secondary);
+  }
+  if (secondaryValue === undefined) {
+    return selectedWorkoutMetric(metric, preferred);
+  }
+
+  return {
+    contributors: preferredValue === secondaryValue
+      ? mergeWorkoutMetricContributors(
+          preferred.contributors[metric],
+          secondary.contributors[metric],
+        )
+      : mergeWorkoutMetricContributors(preferred.contributors[metric]),
+    value: preferredValue,
+  };
+}
+
+function selectMaximumWorkoutMetric(
+  metric: keyof WearableActivitySessionMetricValues,
+  left: ActivitySessionWorkoutMetricEvidence,
+  right: ActivitySessionWorkoutMetricEvidence,
+): SelectedActivitySessionWorkoutMetric {
+  const leftValue = left.values[metric];
+  const rightValue = right.values[metric];
+  if (leftValue === undefined) {
+    return selectedWorkoutMetric(metric, right);
+  }
+  if (rightValue === undefined) {
+    return selectedWorkoutMetric(metric, left);
+  }
+  if (leftValue === rightValue) {
+    return {
+      contributors: mergeWorkoutMetricContributors(
+        left.contributors[metric],
+        right.contributors[metric],
+      ),
+      value: leftValue,
+    };
+  }
+
+  return leftValue > rightValue
+    ? selectedWorkoutMetric(metric, left)
+    : selectedWorkoutMetric(metric, right);
+}
+
+function sumWorkoutMetric(
+  metric: keyof WearableActivitySessionMetricValues,
+  left: ActivitySessionWorkoutMetricEvidence,
+  right: ActivitySessionWorkoutMetricEvidence,
+): SelectedActivitySessionWorkoutMetric {
+  const leftValue = left.values[metric];
+  const rightValue = right.values[metric];
+  if (leftValue === undefined) {
+    return selectedWorkoutMetric(metric, right);
+  }
+  if (rightValue === undefined) {
+    return selectedWorkoutMetric(metric, left);
+  }
+
+  return {
+    contributors: mergeWorkoutMetricContributors(
+      left.contributors[metric],
+      right.contributors[metric],
+    ),
+    value: leftValue + rightValue,
+  };
+}
+
+function selectedWorkoutMetric(
+  metric: keyof WearableActivitySessionMetricValues,
+  evidence: ActivitySessionWorkoutMetricEvidence,
+): SelectedActivitySessionWorkoutMetric {
+  return {
+    contributors: mergeWorkoutMetricContributors(evidence.contributors[metric]),
+    value: evidence.values[metric],
+  };
+}
+
+function mergeWorkoutMetricContributors(
+  ...contributorLists: Array<readonly string[] | undefined>
+): string[] {
+  return uniqueStrings(contributorLists.flatMap((contributors) => contributors ?? [])).sort();
+}
+
+function buildActivitySessionWorkoutMetricEvidence(input: {
+  activeCalories: SelectedActivitySessionWorkoutMetric;
+  distanceKm: SelectedActivitySessionWorkoutMetric;
+  maxHeartRate: SelectedActivitySessionWorkoutMetric;
+  totalElevationGainMeters: SelectedActivitySessionWorkoutMetric;
+  workoutStrain: SelectedActivitySessionWorkoutMetric;
+}): ActivitySessionWorkoutMetricEvidence {
+  return {
+    contributors: {
+      ...(input.activeCalories.value === undefined
+        ? {}
+        : { activeCalories: input.activeCalories.contributors }),
+      ...(input.distanceKm.value === undefined
+        ? {}
+        : { distanceKm: input.distanceKm.contributors }),
+      ...(input.maxHeartRate.value === undefined
+        ? {}
+        : { maxHeartRate: input.maxHeartRate.contributors }),
+      ...(input.totalElevationGainMeters.value === undefined
+        ? {}
+        : {
+            totalElevationGainMeters: input.totalElevationGainMeters.contributors,
+          }),
+      ...(input.workoutStrain.value === undefined
+        ? {}
+        : { workoutStrain: input.workoutStrain.contributors }),
+    },
+    values: {
+      ...(input.activeCalories.value === undefined
+        ? {}
+        : { activeCalories: input.activeCalories.value }),
+      ...(input.distanceKm.value === undefined ? {} : { distanceKm: input.distanceKm.value }),
+      ...(input.maxHeartRate.value === undefined
+        ? {}
+        : { maxHeartRate: input.maxHeartRate.value }),
+      ...(input.totalElevationGainMeters.value === undefined
+        ? {}
+        : { totalElevationGainMeters: input.totalElevationGainMeters.value }),
+      ...(input.workoutStrain.value === undefined
+        ? {}
+        : { workoutStrain: input.workoutStrain.value }),
+    },
+  };
+}
+
+function cloneActivitySessionCandidate(
+  candidate: WearableMetricCandidate,
+): WearableMetricCandidate {
+  return {
+    ...candidate,
+    heartRateZones: candidate.heartRateZones?.map((zone) => ({ ...zone })),
+    paths: [...candidate.paths],
+    recordIds: [...candidate.recordIds],
+    workoutMetricContributors: cloneActivitySessionWorkoutMetricContributors(
+      candidate.workoutMetricContributors,
+    ),
+    workoutMetricKeys: candidate.workoutMetricKeys ? [...candidate.workoutMetricKeys] : undefined,
+    workoutMetricValues: candidate.workoutMetricValues
+      ? { ...candidate.workoutMetricValues }
+      : undefined,
+  };
+}
+
+function cloneActivitySessionWorkoutMetricContributors(
+  contributors: WearableActivitySessionMetricContributors | undefined,
+): WearableActivitySessionMetricContributors | undefined {
+  if (!contributors) {
+    return undefined;
+  }
+
+  return {
+    ...(contributors.activeCalories
+      ? { activeCalories: [...contributors.activeCalories] }
+      : {}),
+    ...(contributors.distanceKm ? { distanceKm: [...contributors.distanceKm] } : {}),
+    ...(contributors.maxHeartRate ? { maxHeartRate: [...contributors.maxHeartRate] } : {}),
+    ...(contributors.totalElevationGainMeters
+      ? { totalElevationGainMeters: [...contributors.totalElevationGainMeters] }
+      : {}),
+    ...(contributors.workoutStrain ? { workoutStrain: [...contributors.workoutStrain] } : {}),
+  };
+}
+
+function compareActivitySessionCandidate(
+  left: WearableMetricCandidate,
+  right: WearableMetricCandidate,
+): number {
+  if (left.date !== right.date) {
+    return right.date.localeCompare(left.date);
+  }
+  const startDifference =
+    (
+      parseIsoTimestampMs(activitySessionCandidateReconciliationTimestamps(left).startedAt)
+      ?? Number.MAX_SAFE_INTEGER
+    )
+    - (
+      parseIsoTimestampMs(activitySessionCandidateReconciliationTimestamps(right).startedAt)
+      ?? Number.MAX_SAFE_INTEGER
+    );
+  if (startDifference !== 0) {
+    return startDifference;
+  }
+  return compareActivitySessionCandidateReconciliationEvidence(left, right);
+}
+
+function projectActivitySessionDayRollupSource(
+  rollup: WearableActivitySessionAggregate,
+  candidates: readonly WearableMetricCandidate[],
+): WearableActivitySessionAggregate {
+  const publicProviders = uniqueStrings(candidates.map((candidate) =>
+    resolveActivitySessionCandidatePublicProvider(candidate)
+  ));
+  if (publicProviders.length <= 1) {
+    return rollup;
+  }
+
+  return {
+    ...rollup,
+    candidateId: buildCandidateId([
+      "multiple",
+      rollup.date,
+      "activity-session-day-rollup",
+      ...[...rollup.recordIds].sort(),
+    ]),
+    dataOrigin: null,
+    provider: "multiple",
+  };
 }
 
 export function buildSleepStageAggregateCandidates(
@@ -568,23 +1506,40 @@ export function buildActivitySessionMetricCandidate(
   aggregate: WearableActivitySessionAggregate,
   metric: "sessionMinutes" | "sessionCount",
 ): WearableMetricCandidate {
+  const provider = resolveActivitySessionContributorProvider(
+    aggregate.sessionContributors,
+    aggregate.provider,
+  );
   return {
     candidateId: `${aggregate.candidateId}:${metric}`,
-    dataOrigin: aggregate.dataOrigin ?? null,
+    dataOrigin: provider === aggregate.provider ? aggregate.dataOrigin ?? null : null,
     date: aggregate.date,
     externalRef: null,
     metric,
     occurredAt: null,
     paths: [...aggregate.paths],
-    provider: aggregate.provider,
+    provider,
     recordedAt: aggregate.recordedAt,
     recordIds: [...aggregate.recordIds],
     sourceFamily: "derived",
-    sourceKind: "activity-session-aggregate",
-    title: `${formatProviderName(aggregate.provider)} activity sessions`,
+    sourceKind: aggregate.sourceKind ?? "activity-session-aggregate",
+    title: `${formatProviderName(provider)} activity sessions`,
     unit: metric === "sessionMinutes" ? "minutes" : "count",
     value: metric === "sessionMinutes" ? aggregate.sessionMinutes : aggregate.sessionCount,
   };
+}
+
+function resolveActivitySessionContributorProvider(
+  contributors: readonly string[] | undefined,
+  fallbackProvider: string,
+): string {
+  const normalizedContributors = uniqueStrings(contributors ?? []).sort();
+  if (normalizedContributors.length === 0) {
+    return fallbackProvider;
+  }
+  return normalizedContributors.length === 1
+    ? normalizedContributors[0]!
+    : "multiple";
 }
 
 export function buildActivitySessionWorkoutMetricCandidates(
@@ -596,20 +1551,24 @@ export function buildActivitySessionWorkoutMetricCandidates(
       return [];
     }
 
+    const provider = resolveActivitySessionContributorProvider(
+      aggregate.workoutMetricContributors?.[spec.metric],
+      aggregate.provider,
+    );
     return [{
       candidateId: `${aggregate.candidateId}:${spec.metric}`,
-      dataOrigin: aggregate.dataOrigin ?? null,
+      dataOrigin: provider === aggregate.provider ? aggregate.dataOrigin ?? null : null,
       date: aggregate.date,
       externalRef: null,
       metric: spec.metric,
       occurredAt: null,
       paths: [...aggregate.paths],
-      provider: aggregate.provider,
+      provider,
       recordedAt: aggregate.recordedAt,
       recordIds: [...aggregate.recordIds],
       sourceFamily: "derived",
-      sourceKind: "activity-session-aggregate",
-      title: `${formatProviderName(aggregate.provider)} activity sessions`,
+      sourceKind: aggregate.sourceKind ?? "activity-session-aggregate",
+      title: `${formatProviderName(provider)} activity sessions`,
       unit: spec.unit,
       value,
     }];
@@ -660,7 +1619,10 @@ export function resolveSelectedActivitySessionAggregate(
 ): WearableActivitySessionAggregate | null {
   if (
     selection.sourceFamily !== "derived"
-    || selection.sourceKind !== "activity-session-aggregate"
+    || (
+      selection.sourceKind !== "activity-session-aggregate"
+      && selection.sourceKind !== "activity-session-day-rollup"
+    )
     || !selection.provider
     || selection.recordIds.length === 0
   ) {
@@ -669,7 +1631,10 @@ export function resolveSelectedActivitySessionAggregate(
 
   const selectedRecordIds = sortedStrings(selection.recordIds);
   return aggregates.find((aggregate) =>
-    aggregate.provider === selection.provider
+    resolveActivitySessionContributorProvider(
+      aggregate.sessionContributors,
+      aggregate.provider,
+    ) === selection.provider
     && equalSortedStrings(sortedStrings(aggregate.recordIds), selectedRecordIds)
   ) ?? null;
 }
@@ -918,6 +1883,7 @@ function buildActivitySessionCandidate(
   const date = deriveWearableDate(entity, externalRef, {
     preferSleepEndAt: false,
   });
+  const workout = readPlainRecord(entity.attributes.workout);
 
   if (durationMinutes === null || !date) {
     return null;
@@ -928,6 +1894,14 @@ function buildActivitySessionCandidate(
     activityType: resolveActivitySessionActivityType(entity),
     heartRateZones: listWorkoutHeartRateZones(entity.attributes.workout),
     metric: "sessionMinutes",
+    sessionEndAt:
+      normalizeNullableString(entity.attributes.endAt)
+      ?? normalizeNullableString(workout?.endedAt),
+    sessionStartAt:
+      normalizeNullableString(entity.attributes.startAt)
+      ?? normalizeNullableString(workout?.startedAt)
+      ?? entity.occurredAt
+      ?? null,
     unit: "minutes",
     value: durationMinutes,
     workoutMetricKeys: listWorkoutMetricKeys(entity.attributes.workout),
@@ -1112,28 +2086,6 @@ function readActivitySessionWorkoutMetricValues(
   };
 }
 
-function mergeActivitySessionWorkoutMetricValues(
-  left: WearableActivitySessionMetricValues = {},
-  right: WearableActivitySessionMetricValues = {},
-): WearableActivitySessionMetricValues {
-  const activeCalories = sumOptionalNumbers(left.activeCalories, right.activeCalories);
-  const distanceKm = sumOptionalNumbers(left.distanceKm, right.distanceKm);
-  const maxHeartRate = maxOptionalNumbers(left.maxHeartRate, right.maxHeartRate);
-  const totalElevationGainMeters = sumOptionalNumbers(
-    left.totalElevationGainMeters,
-    right.totalElevationGainMeters,
-  );
-  const workoutStrain = maxOptionalNumbers(left.workoutStrain, right.workoutStrain);
-
-  return {
-    ...(activeCalories === undefined ? {} : { activeCalories }),
-    ...(distanceKm === undefined ? {} : { distanceKm }),
-    ...(maxHeartRate === undefined ? {} : { maxHeartRate }),
-    ...(totalElevationGainMeters === undefined ? {} : { totalElevationGainMeters }),
-    ...(workoutStrain === undefined ? {} : { workoutStrain }),
-  };
-}
-
 function firstFiniteNumber(...values: unknown[]): number | undefined {
   for (const value of values) {
     const numberValue = readNumber(value);
@@ -1142,26 +2094,6 @@ function firstFiniteNumber(...values: unknown[]): number | undefined {
     }
   }
   return undefined;
-}
-
-function sumOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
-  if (left === undefined) {
-    return right;
-  }
-  if (right === undefined) {
-    return left;
-  }
-  return left + right;
-}
-
-function maxOptionalNumbers(left: number | undefined, right: number | undefined): number | undefined {
-  if (left === undefined) {
-    return right;
-  }
-  if (right === undefined) {
-    return left;
-  }
-  return Math.max(left, right);
 }
 
 function readPlainRecord(value: unknown): Record<string, unknown> | null {
@@ -1238,6 +2170,40 @@ function mergeHeartRateZoneAggregates(
       continue;
     }
     merged.set(key, { ...zone });
+  }
+
+  return [...merged.values()].sort(compareHeartRateZoneAggregate);
+}
+
+function mergeActivitySessionDayHeartRateZoneAggregates(
+  zones: readonly WearableHeartRateZoneAggregate[],
+): WearableHeartRateZoneAggregate[] {
+  const merged = new Map<string, WearableHeartRateZoneAggregate>();
+
+  for (const zone of zones) {
+    const key = zone.zone === undefined
+      ? [
+          zone.label ?? "",
+          zone.minHeartRate ?? "",
+          zone.maxHeartRate ?? "",
+        ].join("|")
+      : `zone:${zone.zone}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...zone });
+      continue;
+    }
+
+    existing.durationMinutes += zone.durationMinutes;
+    if (existing.label !== zone.label) {
+      delete existing.label;
+    }
+    if (existing.minHeartRate !== zone.minHeartRate) {
+      delete existing.minHeartRate;
+    }
+    if (existing.maxHeartRate !== zone.maxHeartRate) {
+      delete existing.maxHeartRate;
+    }
   }
 
   return [...merged.values()].sort(compareHeartRateZoneAggregate);

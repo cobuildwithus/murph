@@ -12,9 +12,21 @@ import {
 } from "./schema.ts";
 
 const WEARABLE_SUMMARY_PROVENANCE_KEYS = new Set([
+  "activityMetricRankingEvidence",
+  "activityMetricRankingEvidenceCount",
+  "activityMetricRankingEvidenceFingerprint",
+  "activitySessions",
+  "activitySessionReconciliationEvidence",
+  "activitySessionReconciliationEvidenceCount",
+  "activitySessionReconciliationEvidenceFingerprint",
   "candidateId",
   "dataOrigin",
   "externalRef",
+  "reconciliationDurationConsistent",
+  "reconciliationExactKey",
+  "reconciliationResourceKey",
+  "sessionContributors",
+  "workoutMetricContributors",
 ]);
 
 export function stringifyPublicWearableProjectionSummary(summary: unknown): string {

@@ -226,6 +226,147 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('answers workout totals and shared activity facts without selection or sync guesses', async () => {
+    const dailyActivity = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'daily-activity',
+    )
+    const groupChat = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-chat',
+    )
+    const groupChallenge = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-challenge',
+    )
+    const groupNewsletter = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'group-newsletter',
+    )
+    expect(dailyActivity).toBeTruthy()
+    expect(groupChat).toBeTruthy()
+    expect(groupChallenge).toBeTruthy()
+    expect(groupNewsletter).toBeTruthy()
+    if (!dailyActivity || !groupChat || !groupChallenge || !groupNewsletter) {
+      return
+    }
+
+    expect(dailyActivity.triggerHint).toContain(
+      'all workouts, or total workout time for a date',
+    )
+    const dailyRaw = await readSkillFile(dailyActivity)
+    expect(dailyRaw).toContain(
+      'Factual wearable day and workout reads',
+    )
+    expect(dailyRaw).toContain(
+      '`vault-cli wearables day <date> --format json`',
+    )
+    expect(dailyRaw).toContain(
+      '`vault-cli wearables activity list --date <date> --format json`',
+    )
+    expect(dailyRaw).toContain(
+      '`vault-cli event list --kind activity_session --from <date> --to <date> --format json`',
+    )
+    expect(dailyRaw).toContain('do not manually deduplicate or sum provider records')
+    expect(dailyRaw).toContain('Raw records never')
+    expect(dailyRaw).toContain('Do not force')
+    expect(dailyRaw).toContain(
+      'changeable totals for the current local calendar day as provisional',
+    )
+    expect(dailyRaw).toContain(
+      'completed individual workout may still be described as',
+    )
+    expect(dailyRaw).toContain(
+      "does not make the day's combined count",
+    )
+    expect(dailyRaw).toContain('Distinct workouts on the same day are additive')
+    expect(dailyRaw).toContain('rather than replacing one with another')
+    expect(dailyRaw).toContain(
+      'not proof that the provider failed to sync or that a',
+    )
+
+    const groupRaw = await readSkillFile(groupChat)
+    expect(groupRaw).toContain('## Shared fact limits')
+    expect(groupRaw).toMatch(
+      /It\s+does not prove that the member's private\s+Murph lacks the workout/u,
+    )
+    expect(groupRaw).toContain('its cause is unverified')
+    expect(groupRaw).toMatch(
+      /Never use device status to explain why a metric\s+is absent/u,
+    )
+    expect(groupRaw).toContain(
+      '`data.metricSemantics` is exactly `"broad-movement"`',
+    )
+    expect(groupRaw).toContain(
+      '`data.metricSemantics` is exactly `"canonical-workout-day"`',
+    )
+    expect(groupRaw).toContain('ambiguous and unusable')
+    expect(groupRaw).toContain(
+      'current local calendar day as provisional',
+    )
+    expect(groupRaw).toContain(
+      'Never "correct" a day by replacing',
+    )
+
+    const challengeRaw = await readSkillFile(groupChallenge)
+    expect(challengeRaw).toMatch(
+      /label a\s+current-day score provisional/u,
+    )
+    expect(challengeRaw).toContain(
+      'A provisional current-day value may appear in clearly labeled live',
+    )
+    expect(challengeRaw).toContain(
+      '`data.metricSemantics` exactly `"broad-movement"`',
+    )
+    expect(challengeRaw).toContain(
+      '`data.metricSemantics` exactly `"canonical-workout-day"`',
+    )
+    expect(challengeRaw).toContain(
+      'its cause is unverified regardless of',
+    )
+    expect(challengeRaw).toContain(
+      'Never connect that status to the',
+    )
+
+    const newsletterRaw = await readSkillFile(groupNewsletter)
+    const newsletterCompact = newsletterRaw.replace(/\s+/gu, ' ')
+    expect(newsletterCompact).toContain(
+      'Follow the semantic owner supplied by the returned fact',
+    )
+    expect(newsletterCompact).toContain(
+      '`data.metricSemantics` is exactly `"broad-movement"`',
+    )
+    expect(newsletterCompact).toContain(
+      '`data.metricSemantics` is exactly `"canonical-workout-day"`',
+    )
+    expect(newsletterCompact).toContain(
+      'legacy or ambiguous result does not establish which concept it owns',
+    )
+    expect(newsletterCompact).toContain(
+      'Distinct workouts on one day add together',
+    )
+    expect(newsletterCompact).toContain(
+      '`observedDayCount`, `observedDates`,',
+    )
+    expect(newsletterCompact).toContain(
+      'never infer that unobserved',
+    )
+    expect(newsletterCompact).toContain(
+      'identical `observedDates` array',
+    )
+    expect(newsletterCompact).toContain(
+      'coverage differs, scope each average to its own dates and avoid a crown',
+    )
+    expect(newsletterCompact).toContain(
+      'current local calendar day as provisional',
+    )
+    expect(newsletterCompact).toContain(
+      'brief current-day "so far" qualifier is allowed',
+    )
+    expect(newsletterCompact).toContain(
+      'exclude every record whose date is the current local calendar day',
+    )
+    expect(newsletterCompact).toContain(
+      'must never affect the weekly average',
+    )
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',
@@ -949,7 +1090,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('If the returned group proves')
     expect(raw).not.toContain("Web's card is\n   the visible confirmation.")
     expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
-    expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)
+    expect(raw).toMatch(/literal disconnected, `needs-reconnect`, and other device statuses may get\s+status-appropriate guidance and no permission card\./u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')
     expect(raw).toContain(
       'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',

@@ -140,7 +140,9 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
   const sharedEditorialRules = [
     'Write a selective weekly story, not a census or one repeated metric block per member.',
     'Lead with a close race, leader, surprising contrast, or broad current-week pattern; use only numbers that develop that story.',
-    'Translate sleep to hours and minutes per night, movement to a per-day average, and workout duration to an average per recorded workout day. Never expose raw minute totals or unsupported weekly totals.',
+    'Use the semantic owner supplied by the returned fact: an activity-days.v0 record is broad movement only when data.metricSemantics="broad-movement", and a workout-days.v0 record is a canonical combined workout day only when data.metricSemantics="canonical-workout-day". Otherwise it is ambiguous and unusable, not zero. Never expose raw minute totals or unsupported weekly totals.',
+    'Never include the open current local day in a weekly average. A current-day value may appear only as a separate, explicit "today so far" aside and must not affect a weekly comparison, leader, winner, crown, or challenge.',
+    'Use only canonical combined day values. Distinct same-day workouts add together; never repair or explain a total by replacing one workout with another.',
     'Omit missing-data and lowest-performer callouts. Supportive is the default; coach roast is allowed only when the saved tone explicitly opts in and must target effort or group lore, never bodies, illness, or diagnoses.',
     'End with one easy question or challenge that invites a reply.',
   ]
@@ -149,6 +151,8 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
     ? [
         'This edition is delivered by group email. Do not send the digest to the bound chat.',
         'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier. Use only the returned `members` facts. Do not use `read_stats`, another group-health read, raw share files, or private one-to-one data.',
+        'Email prepare has already excluded the open local day and exposes activity-minutes only through the broad-movement semantic owner. Use observedDayCount, observedDates, and throughDate to scope averages to observed completed days; never treat unobserved days as zero or imply that a partial week is complete.',
+        'Declare a settled cross-person leader, winner, or crown for a metric only when every compared entry has an identical observedDates array. When coverage differs, scope each average to its own dates and avoid a crown.',
         'If preparation is unavailable or `referenceAt` is absent, return a skip decision and stop. If no participant can receive email, return one short chat message pointing to https://www.withmurph.ai/settings?addEmail=true and stop.',
         `Write a 140-220 word email. Its subject must start with the exact newsletter name ${JSON.stringify(input.newsletterName)} and continue with a specific hook. Provide equivalent HTML and text bodies.`,
         'Call `murph.newsletter` with `action="send"` exactly once and with no group or route identifier. After any send result, return a skip decision; the newsletter outbox owns delivery and retry.',
@@ -156,6 +160,7 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
     : [
         'This edition is delivered to the current group chat through the ordinary scheduled assistant response. Do not call `murph.newsletter` and do not require group email sharing.',
         'Call `murph.group` with `action="read_shared"` exactly once for the exact one to three health scopes listed in the saved configuration. Use only currently granted, available facts returned by that read; do not use private one-to-one data or raw share files.',
+        'Before computing a weekly average or comparison from the raw shared records, exclude every record dated on the current local day. A current-day value may appear only as a separate "today so far" aside.',
         'Write one concise, conversational group-chat update and return one send-message decision. The normal conversation outbox owns iMessage or Telegram delivery and retry.',
       ]
 

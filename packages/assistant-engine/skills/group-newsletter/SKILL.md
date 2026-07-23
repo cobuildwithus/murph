@@ -59,7 +59,13 @@ full supported set.
    factual private summary and stop.
 3. Build the featured set only from returned members with at least one
    `weeklyStats` entry. Never use or mention any participant outside `members`
-   in the subject, HTML body, or text body.
+   in the subject, HTML body, or text body. Each email `weeklyStats` entry
+   excludes the open local day and reports `observedDayCount`, `observedDates`,
+   and `throughDate`. Scope claims to those observed completed days; never
+   infer that unobserved days were zero or that the full week is represented.
+   Declare a settled cross-person leader, winner, or crown for a metric only
+   when every compared entry has an identical `observedDates` array. When
+   coverage differs, scope each average to its own dates and avoid a crown.
 4. Find the week's story before writing. Prefer a close race, clear leader,
    surprising combination, or broad current-week group pattern.
 5. Choose the facts that develop that story. Usually include 6–12 useful stats,
@@ -73,9 +79,13 @@ full supported set.
 
 For `current_chat`, do not call `murph.newsletter` and do not require email
 sharing. Call `murph.group action="read_shared"` once for the exact saved health
-scopes, use only the currently granted facts it returns, and return one concise
-`send_message` edition. The ordinary conversation outbox delivers it to the
-automation's bound iMessage or Telegram group route.
+scopes, use only the currently granted facts it returns, and exclude every
+record whose date is the current local calendar day before computing a weekly
+average or comparison. A current-day value may appear only as a separate,
+explicit "today so far" aside; it must never affect the weekly average,
+leaderboard, winner, or crown. Return one concise `send_message` edition. The
+ordinary conversation outbox delivers it to the automation's bound iMessage or
+Telegram group route.
 
 After any email `send` result—including sent, partial failure, no recipients,
 unavailable, or failed—do not retry `send` in the same turn. Return the
@@ -128,18 +138,37 @@ Never expose dashboard language such as a raw total of active minutes.
 - Round when extra precision adds nothing. Keep exact minutes when the closeness
   is the point.
 - Keep units consistent inside a comparison.
-- `activity-minutes` is broad movement and `workout-minutes` is exercise on
-  recorded workout days. Keep them separate. Present `activity-minutes` as
-  movement per observed day; present `workout-minutes` as minutes on recorded
-  workout days, never as a daily or weekly exercise total.
+- Follow the semantic owner supplied by the returned fact. Treat
+  an `activity-days.v0` record as broad movement only when its
+  `data.metricSemantics` is exactly `"broad-movement"`. An unmarked or
+  differently marked record is ambiguous and unusable, not zero. Email
+  `prepare` exposes `activity-minutes` only through that broad-movement owner.
+  A direct `workout-days.v0` record is canonical only when its
+  `data.metricSemantics` is exactly `"canonical-workout-day"`; otherwise its
+  count and minutes are ambiguous and unusable, not zero. Email `prepare`
+  exposes `workout-minutes` only through that canonical owner. Present it as
+  minutes on recorded workout days, never as a daily or weekly exercise total.
+  Keep them separate. If a legacy or ambiguous result does not establish which
+  concept it owns, do not relabel it as movement or exercise and do not use it
+  for a cross-person comparison.
+- Distinct workouts on one day add together in the canonical workout-day
+  value; mirrored copies count once. Never repair a shared daily value by
+  replacing one workout's minutes with another's or by adding raw records
+  independently.
+- Treat every value for the current local calendar day as provisional. Qualify
+  it as "so far" and do not use it for a settled leader, crown, or challenge.
+  Prefer complete earlier days when they support the story. Email `prepare`
+  weekly stats have already excluded the current local day. For a direct
+  shared read, exclude the current day from every weekly average and use it
+  only as a separate "today so far" aside.
 - Do not use `workout-count` to claim a weekly workout total, rank who completed
   the most workouts, or say someone completed workouts on unobserved days. Its
   current average covers recorded workout days only and omits zero days.
 - Do not claim a prior-week change, comeback, monthly high, or four-week high.
   The consented seven-record projection supports current-week averages only.
 - For other sources, say "exercise" only when the value represents workouts or
-  exercise. If the source is broad activity or `activeMinutes`, call it
-  "movement" and still translate it into hours or a daily average.
+  exercise. Say "movement" only when an explicit semantic owner identifies
+  broad movement, and still translate it into hours or a daily average.
 - Do not report the same duration as both a weekly total and a daily average
   unless the second view adds real context.
 
@@ -217,7 +246,8 @@ Before sending, verify all of the following:
 - Durations use human units rather than raw minute totals.
 - The email has one recognizable weekly story.
 - Cross-person comparisons are accurate and use consistent units.
-- No missing-data or lowest-performer callout slipped in.
+- No member-specific missing-data or lowest-performer callout slipped in. A
+  brief current-day "so far" qualifier is allowed when needed for truthfulness.
 - Roast language, if any, matches explicit opt-in and stays on effort or group
   lore.
 - The closing gives the group something easy to reply to.

@@ -42,6 +42,36 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Shared fact limits
+
+Say only what the current `read_shared` result proves. A granted projection
+with no usable record means only that the current shared read lacks that
+metric; its cause is unverified. It does not prove that the member's private
+Murph lacks the workout, that a provider has not synced it, that import failed,
+or that a share refresh failed. Separately granted
+`device-sync-status.v0` evidence permits only the literal status and timestamp
+meanings the result supplies. Never use device status to explain why a metric
+is absent. A record timestamp does not prove that a projection contains every
+source record.
+
+An `activity-days.v0` record is usable as broad movement only when its
+`data.metricSemantics` is exactly `"broad-movement"`. A missing or different
+marker makes that record ambiguous and unusable for totals, averages,
+standings, or movement language; it is not zero. Likewise, a
+`workout-days.v0` record is usable as the canonical combined workout day only
+when its `data.metricSemantics` is exactly `"canonical-workout-day"`;
+otherwise its workout count and minutes are ambiguous and unusable, not zero.
+
+Treat every value for the current local calendar day as provisional. Describe
+it as "so far" and do not use it to declare a settled daily winner, crown,
+challenge result, or complete total. This is a data-quality qualifier, not a
+reason to expose someone's missing data.
+
+Within one day, distinct workouts add together. Use a returned canonical
+combined workout-day value when available. Never "correct" a day by replacing
+one workout's duration with another's; a separate run and strength session both
+belong in the day total, while mirrored copies of one workout count once.
+
 ## Creating a hosted group
 
 In interactive group setup and additive-permission flows, call `read_current`

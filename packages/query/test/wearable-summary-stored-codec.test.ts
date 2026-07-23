@@ -3,17 +3,32 @@ import assert from "node:assert/strict";
 import { test } from "vitest";
 
 import { buildWearableSummaryBundleFromDataset, summarizeWearableMetricTrendFromBundle } from "../src/wearables.ts";
+import {
+  buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
+} from "../src/wearables/candidates.ts";
 import type {
+  WearableActivityDay,
   WearableActivitySessionAggregate,
   WearableDataset,
   WearableMetricCandidate,
+  WearableResolvedMetric,
   WearableSleepWindowCandidate,
 } from "../src/wearables/types.ts";
 import { composePublicWearableSummaryBundleFromStoredRows } from "../src/projection/wearable-summary-compose.ts";
 import { buildWearableSummaryProjectionFromDataset } from "../src/projection/wearable-summary-projector.ts";
 import { stringifyPublicWearableProjectionSummary } from "../src/projection/wearable-summary-public-json.ts";
+import { parseJsonValue } from "../src/projection/schema.ts";
 import {
+  parseStoredWearableActivityMetricEvidence,
+  parseStoredWearableActivitySessionEvidence,
   parseStoredWearableSummary,
+  STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+  STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+  STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+  STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
   stringifyStoredWearableProjectionSummary,
   type StoredWearableMetricSummaryKind,
 } from "../src/projection/wearable-summary-stored-codec.ts";
@@ -21,10 +36,16 @@ import {
 function candidate(input: {
   dataOrigin?: WearableMetricCandidate["dataOrigin"];
   date: string;
+  occurredAt?: string | null;
   provider: string;
   metric: string;
-  resourceType?: string;
+  recordedAt?: string | null;
+  resourceId?: string | null;
+  resourceType?: string | null;
+  sourceFamily?: WearableMetricCandidate["sourceFamily"];
+  sourceKind?: string;
   system?: string;
+  title?: string | null;
   value: number;
   unit?: string | null;
   facet: string;
@@ -36,20 +57,26 @@ function candidate(input: {
     date: input.date,
     externalRef: {
       facet: input.facet,
-      resourceId: `${input.facet}-${input.date}${input.suffix ?? ""}`,
-      resourceType: input.resourceType ?? "daily_summary",
+      resourceId: input.resourceId === undefined
+        ? `${input.facet}-${input.date}${input.suffix ?? ""}`
+        : input.resourceId,
+      resourceType: input.resourceType === undefined ? "daily_summary" : input.resourceType,
       system: input.system ?? input.provider,
       version: null,
     },
     metric: input.metric,
-    occurredAt: `${input.date}T07:00:00.000Z`,
+    occurredAt: input.occurredAt === undefined
+      ? `${input.date}T07:00:00.000Z`
+      : input.occurredAt,
     paths: [`ledger/events/2026/${input.date.slice(0, 7)}.jsonl`],
     provider: input.provider,
-    recordedAt: `${input.date}T08:11:23.000Z`,
+    recordedAt: input.recordedAt === undefined
+      ? `${input.date}T08:11:23.000Z`
+      : input.recordedAt,
     recordIds: [`evt_${input.provider}_${input.facet}_${input.date}${input.suffix ?? ""}`],
-    sourceFamily: "event",
-    sourceKind: `observation:${input.facet}`,
-    title: `${input.provider} ${input.facet}`,
+    sourceFamily: input.sourceFamily ?? "event",
+    sourceKind: input.sourceKind ?? `observation:${input.facet}`,
+    title: input.title === undefined ? `${input.provider} ${input.facet}` : input.title,
     unit: input.unit ?? null,
     value: input.value,
   };
@@ -94,7 +121,9 @@ function activityAggregate(input: {
   heartRateZones?: WearableActivitySessionAggregate["heartRateZones"];
   provider: string;
   sessionCount?: number;
+  workoutMetricValues?: NonNullable<WearableActivitySessionAggregate["workoutMetricValues"]>;
 }): WearableActivitySessionAggregate {
+  const workoutMetricValues = input.workoutMetricValues ?? {};
   return {
     activityTypes: input.activityTypes ?? [],
     candidateId: `${input.provider}:activity-session-aggregate:${input.date}`,
@@ -107,8 +136,109 @@ function activityAggregate(input: {
     recordIds: [`evt_${input.provider}_activity_${input.date}`],
     sessionCount: input.sessionCount ?? 1,
     sessionMinutes: input.durationMinutes,
-    workoutMetricKeys: [],
+    workoutMetricKeys: Object.keys(workoutMetricValues),
+    workoutMetricValues,
   };
+}
+
+function activitySessionCandidate(input: {
+  activityType: string;
+  dataOrigin?: WearableMetricCandidate["dataOrigin"];
+  date: string;
+  durationMinutes: number;
+  endedAt?: string | null;
+  externalRef?: WearableMetricCandidate["externalRef"];
+  heartRateZones?: NonNullable<WearableMetricCandidate["heartRateZones"]>;
+  id: string;
+  provider: string;
+  resourceId?: string;
+  recordedAt: string;
+  startedAt?: string | null;
+  workoutMetricValues: NonNullable<WearableMetricCandidate["workoutMetricValues"]>;
+}): WearableMetricCandidate {
+  return {
+    activityType: input.activityType,
+    candidateId: input.id,
+    dataOrigin: input.dataOrigin ?? null,
+    date: input.date,
+    externalRef: input.externalRef === undefined
+      ? {
+          facet: null,
+          resourceId: input.resourceId ?? input.id,
+          resourceType: "activity_session",
+          system: input.provider,
+          version: null,
+        }
+      : input.externalRef,
+    heartRateZones: input.heartRateZones ?? [],
+    metric: "sessionMinutes",
+    occurredAt: input.startedAt ?? null,
+    paths: [`ledger/events/2026/${input.date.slice(0, 7)}.jsonl`],
+    provider: input.provider,
+    recordedAt: input.recordedAt,
+    recordIds: [input.id],
+    sessionEndAt: input.endedAt ?? null,
+    sessionStartAt: input.startedAt ?? null,
+    sourceFamily: "event",
+    sourceKind: "activity_session",
+    title: `${input.provider} ${input.activityType}`,
+    unit: "minutes",
+    value: input.durationMinutes,
+    workoutMetricKeys: Object.keys(input.workoutMetricValues),
+    workoutMetricValues: input.workoutMetricValues,
+  };
+}
+
+function buildDirectAndStoredActivity(
+  date: string,
+  activitySessionCandidates: WearableMetricCandidate[],
+) {
+  const dataset: WearableDataset = {
+    activitySessionCandidates,
+    activitySessionAggregates: buildActivitySessionAggregates(activitySessionCandidates),
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessionCandidates),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const directBundle = buildWearableSummaryBundleFromDataset(dataset);
+  const direct = directBundle.activityDays.find(
+    (summary) => summary.date === date,
+  );
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const storedBundle = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const stored = storedBundle.activityDays.find((summary) => summary.date === date);
+
+  assert.ok(direct);
+  assert.ok(stored);
+  return { direct, directBundle, rows, stored, storedBundle };
+}
+
+function replaceStoredSummaryField(
+  summaryJson: string,
+  key: string,
+  value: unknown,
+): string {
+  const summary = parseJsonValue<Record<string, unknown> | null>(summaryJson, null);
+  assert.ok(summary);
+  summary[key] = value;
+  return JSON.stringify(summary);
+}
+
+function omitStoredSummaryField(
+  summaryJson: string,
+  key: string,
+): string {
+  const summary = parseJsonValue<Record<string, unknown> | null>(summaryJson, null);
+  assert.ok(summary);
+  delete summary[key];
+  return JSON.stringify(summary);
 }
 
 function buildFixtureDataset(providers: readonly string[]): WearableDataset {
@@ -171,6 +301,69 @@ function bundleSummariesByKind(
   ];
 }
 
+function activityOnlyDataset(
+  metricCandidates: readonly WearableMetricCandidate[],
+): WearableDataset {
+  return {
+    activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
+    metricCandidates: [...metricCandidates],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [...metricCandidates],
+    sleepWindows: [],
+  };
+}
+
+function composeStoredDataset(dataset: WearableDataset) {
+  return composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows: buildWearableSummaryProjectionFromDataset(dataset),
+  }, {});
+}
+
+function safeResolvedMetricSnapshot(resolved: WearableResolvedMetric): object {
+  const {
+    paths: _paths,
+    recordIds: _recordIds,
+    ...selection
+  } = resolved.selection;
+  return {
+    confidence: resolved.confidence,
+    metric: resolved.metric,
+    selection,
+  };
+}
+
+type ActivityParityMetric =
+  | "activityScore"
+  | "dayStrain"
+  | "floorsClimbed"
+  | "maxHeartRate"
+  | "percentRecorded"
+  | "steps"
+  | "totalCalories";
+
+type ActivityParityDay = Pick<WearableActivityDay, ActivityParityMetric>;
+
+function activityParityMetric(
+  day: ActivityParityDay,
+  metric: ActivityParityMetric,
+): WearableResolvedMetric {
+  return day[metric];
+}
+
+function requireJsonObject(value: unknown): Record<string, unknown> {
+  if (!isJsonRecord(value)) {
+    throw new Error("Expected a JSON object in the test fixture.");
+  }
+  return value;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 test("stored wearable summary codec round-trips summaries byte-exactly", () => {
   for (const providers of [["whoop"], ["whoop", "oura"]] as const) {
     const summaryGroups = bundleSummariesByKind(buildFixtureDataset(providers));
@@ -203,6 +396,920 @@ test("stored wearable summary codec round-trips summaries byte-exactly", () => {
         assert.doesNotMatch(storedActivity, /"candidates":/u);
       }
     }
+  }
+});
+
+test("stored activity evidence preserves global resource-specificity ranking", () => {
+  const date = "2026-06-03";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps-generic",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T10:00:00.000Z`,
+      resourceType: "measurement",
+      sourceKind: "observation:steps",
+      title: "private alpha title",
+      unit: "count",
+      value: 9_100,
+    }),
+    candidate({
+      date,
+      facet: "steps-summary",
+      metric: "steps",
+      provider: "oura",
+      recordedAt: `${date}T09:00:00.000Z`,
+      resourceType: "activity_summary",
+      sourceKind: "observation:steps",
+      title: "private beta title",
+      unit: "count",
+      value: 8_200,
+    }),
+  ]);
+
+  const direct = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+  const stored = composeStoredDataset(dataset).activityDays[0];
+  assert.ok(direct);
+  assert.ok(stored);
+  assert.equal(direct.steps.selection.provider, "oura");
+  assert.equal(direct.steps.selection.title, "Oura Steps");
+  assert.deepEqual(
+    safeResolvedMetricSnapshot(stored.steps),
+    safeResolvedMetricSnapshot(direct.steps),
+  );
+});
+
+test("stored activity evidence preserves agreement that changes a provider-local winner", () => {
+  const date = "2026-06-04";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T10:00:00.000Z`,
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 1_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T09:00:00.000Z`,
+      sourceKind: "observation:steps",
+      suffix: ":agreeing",
+      unit: "count",
+      value: 5_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "apple-health-kit",
+      recordedAt: `${date}T08:00:00.000Z`,
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 5_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "oura",
+      recordedAt: `${date}T07:00:00.000Z`,
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 5_000,
+    }),
+  ]);
+
+  const direct = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+  const stored = composeStoredDataset(dataset).activityDays[0];
+  assert.ok(direct);
+  assert.ok(stored);
+  assert.equal(direct.steps.selection.value, 5_000);
+  assert.deepEqual(
+    safeResolvedMetricSnapshot(stored.steps),
+    safeResolvedMetricSnapshot(direct.steps),
+  );
+});
+
+test("stored activity evidence preserves Junction versus direct-provider ranking", () => {
+  const date = "2026-06-05";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "oura",
+      recordedAt: `${date}T08:00:00.000Z`,
+      sourceKind: "observation:steps",
+      title: "private direct title",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      dataOrigin: {
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "oura",
+        sourceType: "ring",
+        version: 1,
+      },
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "junction",
+      recordedAt: `${date}T09:00:00.000Z`,
+      resourceType: "junction-oura-activity",
+      sourceKind: "observation:steps",
+      suffix: ":junction",
+      system: "junction",
+      title: "private Junction title",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T07:00:00.000Z`,
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 7_100,
+    }),
+  ]);
+
+  const direct = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+  const stored = composeStoredDataset(dataset).activityDays[0];
+  assert.ok(direct);
+  assert.ok(stored);
+  assert.equal(direct.steps.selection.provider, "oura");
+  assert.equal(direct.steps.selection.title, "Oura Steps");
+  assert.deepEqual(
+    safeResolvedMetricSnapshot(stored.steps),
+    safeResolvedMetricSnapshot(direct.steps),
+  );
+});
+
+test("stored activity evidence preserves exact duplicate partitions", () => {
+  const date = "2026-06-05";
+  const sharedResourceId = "shared-safe-fixture-resource";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      resourceId: sharedResourceId,
+      sourceKind: "observation:steps",
+      suffix: ":first",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      resourceId: sharedResourceId,
+      sourceKind: "observation:steps",
+      suffix: ":second",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "oura",
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 7_100,
+    }),
+  ]);
+
+  const direct = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+  const stored = composeStoredDataset(dataset).activityDays[0];
+  assert.ok(direct);
+  assert.ok(stored);
+  assert.equal(direct.steps.confidence.exactDuplicateCount, 1);
+  assert.deepEqual(
+    safeResolvedMetricSnapshot(stored.steps),
+    safeResolvedMetricSnapshot(direct.steps),
+  );
+});
+
+test("stored activity ranking evidence is private, strict, and hidden from public JSON", () => {
+  const date = "2026-06-06";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "alpha",
+      sourceKind: "observation:steps",
+      title: "safe selected title",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "alpha",
+      resourceType: "private-resource-marker",
+      sourceKind: "observation:steps",
+      suffix: ":private-candidate-marker",
+      title: "private-title-marker",
+      unit: "count",
+      value: 7_100,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "beta",
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 8_100,
+    }),
+  ]);
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const storedPayload = rows.map((row) => row.summaryJson).join("\n");
+  assert.doesNotMatch(
+    storedPayload,
+    /private-(?:candidate|resource|title)-marker/u,
+  );
+
+  const activityRow = rows.find((row) =>
+    row.summaryKind === "activity"
+    && row.providerScopeKey === "providers:alpha"
+  );
+  assert.ok(activityRow);
+  const parsed = parseStoredWearableActivityMetricEvidence(activityRow.summaryJson);
+  assert.equal(parsed.status, "valid");
+  if (parsed.status !== "valid") {
+    throw new Error("Expected valid activity metric evidence.");
+  }
+  assert.equal(parsed.evidence.length, 2);
+
+  const publicPayload = stringifyPublicWearableProjectionSummary(
+    JSON.parse(activityRow.summaryJson),
+  );
+  assert.doesNotMatch(
+    publicPayload,
+    /activityMetricRankingEvidence|activity-metric-(?:candidate|exact)/u,
+  );
+
+  const corruptions: Array<(evidence: Record<string, unknown>) => void> = [
+    (evidence) => {
+      evidence.resourceId = "forbidden-resource";
+    },
+    (evidence) => {
+      evidence.candidateKey = "raw-candidate-id";
+    },
+    (evidence) => {
+      evidence.exactKey = "raw-exact-id";
+    },
+    (evidence) => {
+      evidence.date = "2026-02-30";
+    },
+    (evidence) => {
+      evidence.occurredAt = date;
+    },
+    (evidence) => {
+      evidence.recordedAt = "2026-02-30T08:00:00.000Z";
+    },
+    (evidence) => {
+      evidence.provider = "Alpha";
+    },
+    (evidence) => {
+      requireJsonObject(evidence.origin).sourceInstanceId = "forbidden-source-instance";
+    },
+  ];
+  for (const corrupt of corruptions) {
+    const stored = requireJsonObject(JSON.parse(activityRow.summaryJson));
+    const evidence = stored[STORED_ACTIVITY_METRIC_EVIDENCE_KEY];
+    assert.ok(Array.isArray(evidence));
+    corrupt(requireJsonObject(evidence[0]));
+    assert.deepEqual(
+      parseStoredWearableActivityMetricEvidence(JSON.stringify(stored)),
+      { status: "invalid" },
+    );
+  }
+
+  const emptyStored = requireJsonObject(JSON.parse(activityRow.summaryJson));
+  const emptySummary = parseStoredWearableSummary<Record<string, unknown>>(
+    "activity",
+    JSON.stringify(emptyStored),
+  );
+  assert.ok(emptySummary);
+  assert.deepEqual(
+    parseStoredWearableActivityMetricEvidence(
+      stringifyStoredWearableProjectionSummary("activity", emptySummary, {
+        activityMetricEvidence: [],
+      }),
+    ),
+    { status: "valid", evidence: [] },
+  );
+});
+
+test("compose rejects mixed current and legacy activity metric evidence for one date", () => {
+  const date = "2026-06-07";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "alpha",
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 8_200,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "beta",
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 8_100,
+    }),
+  ]);
+  let removedEvidence = false;
+  const rows = buildWearableSummaryProjectionFromDataset(dataset).map((row) => {
+    if (
+      !removedEvidence
+      && row.summaryKind === "activity"
+      && row.summaryDate === date
+    ) {
+      removedEvidence = true;
+      return {
+        ...row,
+        summaryJson: omitStoredSummaryField(
+          omitStoredSummaryField(
+            omitStoredSummaryField(
+              row.summaryJson,
+              STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+            ),
+            STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+          ),
+          STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+        ),
+      };
+    }
+    return row;
+  });
+  assert.equal(removedEvidence, true);
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: false,
+      providers: [],
+      rows,
+    }, {}),
+    /activity metric ranking evidence mixes current and legacy rows/u,
+  );
+});
+
+test("compose rejects same-count nonselected metric evidence corruption", () => {
+  const date = "2026-06-07";
+  const rows = buildWearableSummaryProjectionFromDataset(activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T09:00:00.000Z`,
+      suffix: "-newer",
+      unit: "count",
+      value: 1_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      recordedAt: `${date}T08:00:00.000Z`,
+      suffix: "-older",
+      unit: "count",
+      value: 5_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "apple_health",
+      unit: "count",
+      value: 5_000,
+    }),
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "oura",
+      unit: "count",
+      value: 5_000,
+    }),
+  ]));
+  const corruptedRows = rows.map((row) => {
+    if (
+      row.summaryKind !== "activity"
+      || row.providerScopeKey !== "providers:garmin"
+    ) {
+      return row;
+    }
+    const stored = requireJsonObject(JSON.parse(row.summaryJson));
+    const evidence = stored[STORED_ACTIVITY_METRIC_EVIDENCE_KEY];
+    assert.ok(Array.isArray(evidence));
+    const nonselected = evidence
+      .map(requireJsonObject)
+      .find((candidateEvidence) => candidateEvidence.value === 5_000);
+    assert.ok(nonselected);
+    nonselected.value = 6_000;
+    return {
+      ...row,
+      summaryJson: JSON.stringify(stored),
+    };
+  });
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: false,
+      providers: [],
+      rows: corruptedRows,
+    }, {}),
+    /Stored activity metric ranking evidence is malformed/u,
+  );
+});
+
+test("compose rejects truncated or semantically empty activity metric evidence", () => {
+  const date = "2026-06-07";
+  const rows = buildWearableSummaryProjectionFromDataset(activityOnlyDataset([
+    candidate({
+      date,
+      facet: "steps",
+      metric: "steps",
+      provider: "garmin",
+      sourceKind: "observation:steps",
+      unit: "count",
+      value: 8_200,
+    }),
+  ]));
+  const rewriteMetricEvidence = (
+    updateCount: boolean,
+  ) => rows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    const stored = requireJsonObject(JSON.parse(row.summaryJson));
+    const evidence = stored[STORED_ACTIVITY_METRIC_EVIDENCE_KEY];
+    assert.ok(Array.isArray(evidence));
+    assert.equal(evidence.length, 1);
+    stored[STORED_ACTIVITY_METRIC_EVIDENCE_KEY] = [];
+    if (updateCount) {
+      stored[STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY] = 0;
+    }
+    return {
+      ...row,
+      summaryJson: JSON.stringify(stored),
+    };
+  });
+
+  for (const corruptedRows of [
+    rewriteMetricEvidence(false),
+    rewriteMetricEvidence(true),
+  ]) {
+    assert.throws(
+      () => composePublicWearableSummaryBundleFromStoredRows({
+        providerFilterWasProvided: true,
+        providers: ["garmin"],
+        rows: corruptedRows,
+      }, {}),
+      /Stored activity metric ranking evidence is malformed/u,
+    );
+  }
+});
+
+test("compose rejects incomplete cross-family current evidence pairs", () => {
+  const date = "2026-06-07";
+  const session = activitySessionCandidate({
+    activityType: "Running",
+    date,
+    durationMinutes: 30,
+    endedAt: `${date}T12:30:00.000Z`,
+    id: "garmin-run",
+    provider: "garmin",
+    recordedAt: `${date}T12:31:00.000Z`,
+    startedAt: `${date}T12:00:00.000Z`,
+    workoutMetricValues: {},
+  });
+  const steps = candidate({
+    date,
+    facet: "steps",
+    metric: "steps",
+    provider: "garmin",
+    sourceKind: "observation:steps",
+    unit: "count",
+    value: 8_200,
+  });
+  const currentRows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: [session],
+    activitySessionAggregates: buildActivitySessionAggregates([session]),
+    activitySessionDayRollups: buildActivitySessionDayRollups([session]),
+    metricSuppressionEvidence: [],
+    metricCandidates: [steps],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [steps],
+    sleepWindows: [],
+  });
+  const rows = currentRows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    return {
+      ...row,
+      summaryJson: omitStoredSummaryField(
+        omitStoredSummaryField(
+          omitStoredSummaryField(
+            row.summaryJson,
+            STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+          ),
+          STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+        ),
+        STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+      ),
+    };
+  });
+  const activityRow = rows.find((row) => row.summaryKind === "activity");
+  assert.ok(activityRow);
+  assert.equal(
+    parseStoredWearableActivityMetricEvidence(activityRow.summaryJson).status,
+    "absent",
+  );
+  assert.equal(
+    parseStoredWearableActivitySessionEvidence(activityRow.summaryJson).status,
+    "valid",
+  );
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows,
+    }, {}),
+    /Stored activity metric ranking evidence is malformed/u,
+  );
+
+  const rowsWithoutSessionEvidence = currentRows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    return {
+      ...row,
+      summaryJson: omitStoredSummaryField(
+        omitStoredSummaryField(
+          omitStoredSummaryField(
+            row.summaryJson,
+            STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+          ),
+          STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        ),
+        STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+      ),
+    };
+  });
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: rowsWithoutSessionEvidence,
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+
+  const rowsWithFalseZeroSessionEvidence = currentRows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    return {
+      ...row,
+      summaryJson: replaceStoredSummaryField(
+        omitStoredSummaryField(
+          row.summaryJson,
+          STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+        ),
+        STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        0,
+      ),
+    };
+  });
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: rowsWithFalseZeroSessionEvidence,
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+});
+
+test("compose rejects truncated or same-length-corrupt session evidence", () => {
+  const date = "2026-06-08";
+  const sessions = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 30,
+      endedAt: `${date}T12:30:00.000Z`,
+      id: "garmin-run",
+      provider: "garmin",
+      recordedAt: `${date}T12:31:00.000Z`,
+      startedAt: `${date}T12:00:00.000Z`,
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 20,
+      endedAt: `${date}T18:20:00.000Z`,
+      heartRateZones: [{ durationMinutes: 10, zone: 3 }],
+      id: "garmin-strength",
+      provider: "garmin",
+      recordedAt: `${date}T18:21:00.000Z`,
+      startedAt: `${date}T18:00:00.000Z`,
+      workoutMetricValues: {},
+    }),
+  ];
+  const rows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: sessions,
+    activitySessionAggregates: buildActivitySessionAggregates(sessions),
+    activitySessionDayRollups: buildActivitySessionDayRollups(sessions),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  });
+  const rewriteSessionEvidence = (
+    mutate: (evidence: Record<string, unknown>[]) => void,
+  ) => rows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    const stored = requireJsonObject(JSON.parse(row.summaryJson));
+    const rawEvidence = stored[STORED_ACTIVITY_SESSION_EVIDENCE_KEY];
+    assert.ok(Array.isArray(rawEvidence));
+    const evidence = rawEvidence.map(requireJsonObject);
+    assert.equal(evidence.length, 2);
+    mutate(evidence);
+    stored[STORED_ACTIVITY_SESSION_EVIDENCE_KEY] = evidence;
+    return {
+      ...row,
+      summaryJson: JSON.stringify(stored),
+    };
+  });
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: rewriteSessionEvidence((evidence) => {
+        evidence.pop();
+      }),
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: rewriteSessionEvidence((evidence) => {
+        evidence[0]!.durationMinutes = 37;
+      }),
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: rewriteSessionEvidence((evidence) => {
+        evidence[1]!.activityType = "Running";
+        evidence[1]!.heartRateZones = [];
+      }),
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+});
+
+test("current evidence fails closed for aggregate-only workout branches", () => {
+  const date = "2026-06-08";
+  const aggregates = [
+    activityAggregate({
+      activityTypes: ["running"],
+      date,
+      durationMinutes: 42,
+      provider: "garmin",
+      workoutMetricValues: {
+        activeCalories: 410,
+        distanceKm: 7.2,
+        maxHeartRate: 171,
+        totalElevationGainMeters: 85,
+        workoutStrain: 12.4,
+      },
+    }),
+    activityAggregate({
+      activityTypes: ["walking"],
+      date,
+      durationMinutes: 24,
+      provider: "oura",
+      workoutMetricValues: {
+        activeCalories: 180,
+        distanceKm: 2.1,
+        maxHeartRate: 132,
+        totalElevationGainMeters: 14,
+        workoutStrain: 6.8,
+      },
+    }),
+  ];
+  const dataset: WearableDataset = {
+    activitySessionAggregates: aggregates,
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  };
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const activityRows = rows.filter((row) => row.summaryKind === "activity");
+  assert.equal(activityRows.length, 2);
+  for (const row of activityRows) {
+    assert.deepEqual(
+      parseStoredWearableActivityMetricEvidence(row.summaryJson),
+      { status: "valid", evidence: [] },
+    );
+    assert.deepEqual(
+      parseStoredWearableActivitySessionEvidence(row.summaryJson),
+      { status: "valid", evidence: [] },
+    );
+  }
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: false,
+      providers: [],
+      rows,
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed/u,
+  );
+});
+
+test("current metric-only rows verify every explicit activity metric envelope", () => {
+  const date = "2026-06-09";
+  const dataset = activityOnlyDataset([
+    candidate({
+      date,
+      facet: "active-calories",
+      metric: "activeCalories",
+      provider: "garmin",
+      unit: "kcal",
+      value: 410,
+    }),
+    candidate({
+      date,
+      facet: "distance",
+      metric: "distanceKm",
+      provider: "garmin",
+      unit: "km",
+      value: 7.2,
+    }),
+    candidate({
+      date,
+      facet: "max-heart-rate",
+      metric: "maxHeartRate",
+      provider: "garmin",
+      unit: "bpm",
+      value: 171,
+    }),
+  ]);
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const activityRow = rows.find((row) => row.summaryKind === "activity");
+  assert.ok(activityRow);
+  assert.deepEqual(
+    parseStoredWearableActivitySessionEvidence(activityRow.summaryJson),
+    { status: "valid", evidence: [] },
+  );
+
+  const direct = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: true,
+    providers: ["garmin"],
+    rows,
+  }, {}).activityDays[0];
+  assert.ok(direct);
+  assert.ok(composed);
+  for (const metric of [
+    "activeCalories",
+    "distanceKm",
+    "maxHeartRate",
+  ] as const) {
+    assert.deepEqual(
+      safeResolvedMetricSnapshot(composed[metric]),
+      safeResolvedMetricSnapshot(direct[metric]),
+      metric,
+    );
+  }
+
+  const corruptedRows = rows.map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    const stored = requireJsonObject(JSON.parse(row.summaryJson));
+    const activeCalories = requireJsonObject(stored.activeCalories);
+    const selection = requireJsonObject(activeCalories.selection);
+    selection.value = 999;
+    return {
+      ...row,
+      summaryJson: JSON.stringify(stored),
+    };
+  });
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows: corruptedRows,
+    }, {}),
+    /Stored activity metric ranking evidence is malformed/u,
+  );
+});
+
+test("stored activity ranking evidence matches direct global ranking under deterministic fuzz", () => {
+  const metrics: readonly ActivityParityMetric[] = [
+    "activityScore",
+    "dayStrain",
+    "floorsClimbed",
+    "maxHeartRate",
+    "percentRecorded",
+    "steps",
+    "totalCalories",
+  ];
+  const providers = ["apple-health-kit", "garmin", "oura"] as const;
+  const resourceTypes = [null, "activity_summary", "cycle", "measurement"] as const;
+  const sourceFamilies = ["canonical", "derived", "event", "sample"] as const;
+
+  for (let seed = 1; seed <= 120; seed += 1) {
+    let state = seed;
+    const random = (): number => {
+      state = (state * 1_664_525 + 1_013_904_223) >>> 0;
+      return state / 0x1_0000_0000;
+    };
+    const metric = metrics[Math.floor(random() * metrics.length)]!;
+    const date = `2026-06-${String((seed % 28) + 1).padStart(2, "0")}`;
+    const candidateCount = 3 + Math.floor(random() * 6);
+    const metricCandidates: WearableMetricCandidate[] = [];
+
+    for (let index = 0; index < candidateCount; index += 1) {
+      const provider = providers[index % providers.length]!;
+      const resourceType = resourceTypes[Math.floor(random() * resourceTypes.length)]!;
+      const sourceFamily = sourceFamilies[Math.floor(random() * sourceFamilies.length)]!;
+      const valueBucket = Math.floor(random() * 5);
+      const recordedHour = String(6 + index).padStart(2, "0");
+      const occurredHour = String(5 + index).padStart(2, "0");
+      metricCandidates.push(candidate({
+        date,
+        facet: metric === "dayStrain" ? "day-strain" : `fuzz-${index}`,
+        metric,
+        occurredAt: `${date}T${occurredHour}:00:00.000Z`,
+        provider,
+        recordedAt: `${date}T${recordedHour}:00:00.000Z`,
+        resourceType,
+        sourceFamily,
+        sourceKind: "observation:fuzz",
+        suffix: `:seed-${seed}-${index}`,
+        title: `private-fuzz-title-${seed}-${index}`,
+        unit: "count",
+        value: valueBucket * 100 + (index % 2 === 0 ? 0 : 0.25),
+      }));
+    }
+
+    const dataset = activityOnlyDataset(metricCandidates);
+    const directDay = buildWearableSummaryBundleFromDataset(dataset).activityDays[0];
+    const storedDay = composeStoredDataset(dataset).activityDays[0];
+    assert.ok(directDay);
+    assert.ok(storedDay);
+    const direct = activityParityMetric(directDay, metric);
+    const stored = activityParityMetric(storedDay, metric);
+    assert.deepEqual(
+      safeResolvedMetricSnapshot(stored),
+      safeResolvedMetricSnapshot(direct),
+      `activity metric parity failed for seed ${seed} (${metric})`,
+    );
+    assert.doesNotMatch(stored.selection.title ?? "", /private-fuzz-title/u);
   }
 });
 
@@ -284,20 +1391,26 @@ test("compose preserves stored same-public provider conflict evidence", () => {
 
 test("compose preserves stored activity aggregate-owned types and heart-rate zones", () => {
   const date = "2026-05-04";
+  const session = activitySessionCandidate({
+    activityType: "Running",
+    date,
+    durationMinutes: 45,
+    endedAt: `${date}T12:45:00.000Z`,
+    heartRateZones: [{
+      durationMinutes: 18,
+      label: "Zone 2",
+      zone: 2,
+    }],
+    id: "garmin-run",
+    provider: "garmin",
+    recordedAt: `${date}T12:46:00.000Z`,
+    startedAt: `${date}T12:00:00.000Z`,
+    workoutMetricValues: {},
+  });
   const dataset: WearableDataset = {
-    activitySessionAggregates: [
-      activityAggregate({
-        activityTypes: ["Running"],
-        date,
-        durationMinutes: 45,
-        heartRateZones: [{
-          durationMinutes: 18,
-          label: "Zone 2",
-          zone: 2,
-        }],
-        provider: "garmin",
-      }),
-    ],
+    activitySessionCandidates: [session],
+    activitySessionAggregates: buildActivitySessionAggregates([session]),
+    activitySessionDayRollups: buildActivitySessionDayRollups([session]),
     metricSuppressionEvidence: [],
     metricCandidates: [],
     provenanceDiagnostics: [],
@@ -321,6 +1434,1082 @@ test("compose preserves stored activity aggregate-owned types and heart-rate zon
     label: "Zone 2",
     zone: 2,
   }]);
+});
+
+test("stored activity session evidence distinguishes legacy absence from invalid new rows", () => {
+  const date = "2026-04-15";
+  const session = activitySessionCandidate({
+    activityType: "Running",
+    date,
+    durationMinutes: 40,
+    endedAt: "2026-04-15T13:40:00.000Z",
+    id: "garmin-run",
+    provider: "garmin",
+    recordedAt: "2026-04-15T13:41:00.000Z",
+    startedAt: "2026-04-15T13:00:00.000Z",
+    workoutMetricValues: {},
+  });
+  const rows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: [session],
+    activitySessionAggregates: buildActivitySessionAggregates([session]),
+    activitySessionDayRollups: buildActivitySessionDayRollups([session]),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  });
+  const activityRow = rows.find((row) => row.summaryKind === "activity");
+
+  assert.ok(activityRow);
+  const valid = parseStoredWearableActivitySessionEvidence(activityRow.summaryJson);
+  assert.equal(valid.status, "valid");
+  assert.equal(valid.status === "valid" ? valid.evidence.length : 0, 1);
+  if (valid.status !== "valid") {
+    assert.fail("expected valid stored session evidence");
+  }
+  const publicSummary = parseStoredWearableSummary<Record<string, unknown>>(
+    "activity",
+    activityRow.summaryJson,
+  );
+  assert.ok(publicSummary);
+  const storeSessionEvidence = (
+    evidence: typeof valid.evidence,
+  ): string => stringifyStoredWearableProjectionSummary(
+    "activity",
+    publicSummary,
+    { activitySessionEvidence: evidence },
+  );
+  const validSession = valid.evidence[0];
+  assert.ok(validSession);
+  const {
+    durationConsistent: omittedDurationConsistency,
+    ...sessionWithoutDurationConsistency
+  } = validSession;
+  const {
+    reconciliationExactKey: omittedExactKey,
+    ...sessionWithoutExactKey
+  } = validSession;
+  const {
+    reconciliationResourceKey: omittedResourceKey,
+    ...sessionWithoutResourceKey
+  } = validSession;
+  assert.equal(typeof omittedDurationConsistency, "boolean");
+  assert.ok(omittedExactKey);
+  assert.ok(omittedResourceKey);
+  assert.deepEqual(
+    parseStoredWearableActivitySessionEvidence(
+      omitStoredSummaryField(
+        omitStoredSummaryField(
+          omitStoredSummaryField(
+            activityRow.summaryJson,
+            STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+          ),
+          STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        ),
+        STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+      ),
+    ),
+    { status: "absent" },
+  );
+  assert.deepEqual(
+    parseStoredWearableActivitySessionEvidence(
+      replaceStoredSummaryField(
+        replaceStoredSummaryField(
+          activityRow.summaryJson,
+          STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+          [],
+        ),
+        STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        0,
+      ),
+    ),
+    { status: "invalid", reason: "malformed" },
+  );
+  assert.deepEqual(
+    parseStoredWearableActivitySessionEvidence(
+      replaceStoredSummaryField(
+        activityRow.summaryJson,
+        STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+        [{ provider: "garmin" }],
+      ),
+    ),
+    { status: "invalid", reason: "malformed" },
+  );
+  assert.equal(
+    parseStoredWearableActivitySessionEvidence(
+      storeSessionEvidence([
+        { ...validSession, reconciliationResourceKey: null },
+      ]),
+    ).status,
+    "valid",
+  );
+  assert.equal(
+    parseStoredWearableActivitySessionEvidence(
+      storeSessionEvidence([{ ...validSession, endedAt: null }]),
+    ).status,
+    "valid",
+  );
+  for (const malformedSession of [
+    sessionWithoutDurationConsistency,
+    sessionWithoutExactKey,
+    sessionWithoutResourceKey,
+    {
+      ...validSession,
+      reconciliationExactKey: "raw-provider-resource-id",
+    },
+    {
+      ...validSession,
+      reconciliationResourceKey: "raw-provider-resource-id",
+    },
+    {
+      ...validSession,
+      date: "not-a-date",
+    },
+    {
+      ...validSession,
+      date: "2026-99-99",
+    },
+    {
+      ...validSession,
+      recordedAt: "not-a-timestamp",
+    },
+    {
+      ...validSession,
+      startedAt: "not-a-timestamp",
+    },
+    {
+      ...validSession,
+      endedAt: "not-a-timestamp",
+    },
+    {
+      ...validSession,
+      startedAt: null,
+    },
+    {
+      ...validSession,
+      endedAt: "2026-04-15T12:59:59.000Z",
+    },
+  ]) {
+    assert.deepEqual(
+      parseStoredWearableActivitySessionEvidence(
+        replaceStoredSummaryField(
+          activityRow.summaryJson,
+          STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+          [malformedSession],
+        ),
+      ),
+      { status: "invalid", reason: "malformed" },
+    );
+  }
+});
+
+test("stored activity evidence parsers reject array and scalar summary roots", () => {
+  for (const malformedSummaryJson of ["[]", JSON.stringify("scalar"), "42"]) {
+    assert.deepEqual(
+      parseStoredWearableActivityMetricEvidence(malformedSummaryJson),
+      { status: "invalid" },
+    );
+    assert.deepEqual(
+      parseStoredWearableActivitySessionEvidence(malformedSummaryJson),
+      { status: "invalid", reason: "malformed" },
+    );
+  }
+});
+
+test("compose fails closed for empty stored session evidence on a single-provider read", () => {
+  const date = "2026-04-15";
+  const session = activitySessionCandidate({
+    activityType: "Running",
+    date,
+    durationMinutes: 40,
+    id: "garmin-run",
+    provider: "garmin",
+    recordedAt: "2026-04-15T13:41:00.000Z",
+    workoutMetricValues: {},
+  });
+  const rows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: [session],
+    activitySessionAggregates: buildActivitySessionAggregates([session]),
+    activitySessionDayRollups: buildActivitySessionDayRollups([session]),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  }).map((row) =>
+    row.summaryKind === "activity"
+      ? {
+          ...row,
+          summaryJson: replaceStoredSummaryField(
+            replaceStoredSummaryField(
+              row.summaryJson,
+              STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+              [],
+            ),
+            STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+            0,
+          ),
+        }
+      : row
+  );
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: true,
+      providers: ["garmin"],
+      rows,
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed; rebuild the query projection/u,
+  );
+});
+
+test("compose rejects one malformed provider instead of returning a partial mixed-provider total", () => {
+  const date = "2026-04-15";
+  const sessions = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 40,
+      id: "garmin-run",
+      provider: "garmin",
+      recordedAt: "2026-04-15T13:41:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 20,
+      id: "oura-strength",
+      provider: "oura",
+      recordedAt: "2026-04-15T18:21:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+  const rows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: sessions,
+    activitySessionAggregates: buildActivitySessionAggregates(sessions),
+    activitySessionDayRollups: buildActivitySessionDayRollups(sessions),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  }).map((row) =>
+    row.summaryKind === "activity"
+    && row.providerScopeJson === JSON.stringify(["oura"])
+      ? {
+          ...row,
+          summaryJson: replaceStoredSummaryField(
+            row.summaryJson,
+            STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+            [{ provider: "oura" }],
+          ),
+        }
+      : row
+  );
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: false,
+      providers: [],
+      rows,
+    }, {}),
+    /Stored activity-session reconciliation evidence is malformed; rebuild the query projection/u,
+  );
+});
+
+test("compose rejects mixed current and legacy session evidence for one activity date", () => {
+  const date = "2026-04-15";
+  const sessions = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 40,
+      id: "garmin-run",
+      provider: "garmin",
+      recordedAt: "2026-04-15T13:41:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 20,
+      id: "oura-strength",
+      provider: "oura",
+      recordedAt: "2026-04-15T18:21:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+  const rows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: sessions,
+    activitySessionAggregates: buildActivitySessionAggregates(sessions),
+    activitySessionDayRollups: buildActivitySessionDayRollups(sessions),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  }).map((row) =>
+    row.summaryKind === "activity"
+    && row.providerScopeJson === JSON.stringify(["oura"])
+      ? {
+          ...row,
+          summaryJson: omitStoredSummaryField(
+            omitStoredSummaryField(
+              omitStoredSummaryField(
+                row.summaryJson,
+                STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+              ),
+              STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+            ),
+            STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+          ),
+        }
+      : row
+  );
+
+  assert.throws(
+    () => composePublicWearableSummaryBundleFromStoredRows({
+      providerFilterWasProvided: false,
+      providers: [],
+      rows,
+    }, {}),
+    /Stored activity-session reconciliation evidence mixes current and legacy rows for one date/u,
+  );
+});
+
+test("legacy multi-provider rows without internal evidence retain workout-owned metrics", () => {
+  const date = "2026-04-15";
+  const sessions = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-04-15T13:00:00.000Z",
+      id: "garmin-run",
+      provider: "garmin",
+      recordedAt: "2026-04-15T23:01:00.000Z",
+      startedAt: "2026-04-15T12:00:00.000Z",
+      workoutMetricValues: {
+        activeCalories: 600,
+        distanceKm: 10,
+        maxHeartRate: 180,
+        totalElevationGainMeters: 200,
+        workoutStrain: 15,
+      },
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 10,
+      endedAt: "2026-04-15T18:10:00.000Z",
+      id: "oura-strength",
+      provider: "oura",
+      recordedAt: "2026-04-15T18:11:00.000Z",
+      startedAt: "2026-04-15T18:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+  const legacyRows = buildWearableSummaryProjectionFromDataset({
+    activitySessionCandidates: sessions,
+    activitySessionAggregates: buildActivitySessionAggregates(sessions),
+    activitySessionDayRollups: buildActivitySessionDayRollups(sessions),
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [],
+  }).map((row) => {
+    if (row.summaryKind !== "activity") {
+      return row;
+    }
+    return {
+      ...row,
+      summaryJson: omitStoredSummaryField(
+        omitStoredSummaryField(
+          omitStoredSummaryField(
+            omitStoredSummaryField(
+              omitStoredSummaryField(
+                omitStoredSummaryField(
+                  row.summaryJson,
+                  STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+                ),
+                STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+              ),
+              STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+            ),
+            STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+          ),
+          STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+        ),
+        STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+      ),
+    };
+  });
+  const activityRows = legacyRows.filter((row) => row.summaryKind === "activity");
+
+  assert.equal(activityRows.length, 2);
+  assert.equal(
+    activityRows.every((row) =>
+      parseStoredWearableActivityMetricEvidence(row.summaryJson).status === "absent"
+      && parseStoredWearableActivitySessionEvidence(row.summaryJson).status === "absent"
+    ),
+    true,
+  );
+
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows: legacyRows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+
+  assert.ok(activity);
+  assert.equal(activity.activeCalories.selection.value, 600);
+  assert.equal(activity.distanceKm.selection.value, 10);
+  assert.equal(activity.maxHeartRate.selection.value, 180);
+  assert.equal(activity.totalElevationGainMeters.selection.value, 200);
+  assert.equal(activity.workoutStrain.selection.value, 15);
+});
+
+test("stored activity evidence composes distinct sessions and suppresses a cross-provider mirror", () => {
+  const date = "2026-04-16";
+  const runMetrics = {
+    activeCalories: 600,
+    distanceKm: 10,
+    maxHeartRate: 180,
+    totalElevationGainMeters: 200,
+    workoutStrain: 12.5,
+  };
+  const activitySessionCandidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-04-16T13:00:00.000Z",
+      id: "garmin-run",
+      provider: "garmin",
+      recordedAt: "2026-04-16T13:01:00.000Z",
+      startedAt: "2026-04-16T12:00:00.000Z",
+      workoutMetricValues: runMetrics,
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-04-16T13:00:00.000Z",
+      id: "apple-run-mirror",
+      provider: "apple-health-kit",
+      recordedAt: "2026-04-16T13:02:00.000Z",
+      startedAt: "2026-04-16T12:00:00.000Z",
+      workoutMetricValues: runMetrics,
+    }),
+    activitySessionCandidate({
+      activityType: "Functional strength training",
+      date,
+      durationMinutes: 15,
+      endedAt: "2026-04-16T22:15:00.000Z",
+      id: "oura-strength",
+      provider: "oura",
+      recordedAt: "2026-04-16T22:17:00.000Z",
+      startedAt: "2026-04-16T22:00:00.000Z",
+      workoutMetricValues: {
+        activeCalories: 90,
+        maxHeartRate: 172,
+        workoutStrain: 6,
+      },
+    }),
+  ];
+  const dailyMetricCandidates = [
+    candidate({
+      date,
+      facet: "daily-distance",
+      metric: "distanceKm",
+      provider: "garmin",
+      unit: "km",
+      value: 14.5,
+    }),
+    candidate({
+      date,
+      facet: "daily-active-calories",
+      metric: "activeCalories",
+      provider: "garmin",
+      unit: "kcal",
+      value: 0,
+    }),
+  ];
+  const dataset: WearableDataset = {
+    activitySessionCandidates,
+    activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
+    metricCandidates: dailyMetricCandidates,
+    provenanceDiagnostics: [],
+    rawMetricCandidates: dailyMetricCandidates,
+    sleepWindows: [],
+  };
+
+  const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const activityRows = rows.filter((row) => row.summaryKind === "activity");
+  const composed = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows,
+  }, {});
+  const activity = composed.activityDays.find((summary) => summary.date === date);
+  const garminActivityRows = activityRows.filter((row) =>
+    row.providerScopeJson === JSON.stringify(["garmin"])
+  );
+  const direct = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: true,
+    providers: ["garmin"],
+    rows: garminActivityRows,
+  }, {});
+
+  assert.equal(activityRows.length, 3);
+  assert.equal(
+    activityRows.every((row) => row.summaryJson.includes(`"${STORED_ACTIVITY_SESSION_EVIDENCE_KEY}"`)),
+    true,
+  );
+  assert.ok(activity);
+  assert.equal(activity.sessionMinutes.selection.value, 75);
+  assert.equal(activity.sessionCount.selection.value, 2);
+  assert.equal(activity.sessionMinutes.selection.provider, "multiple");
+  assert.equal(activity.activeCalories.selection.value, 690);
+  assert.equal(activity.activeCalories.selection.provider, "multiple");
+  assert.equal(activity.activeCalories.selection.sourceKind, "activity-session-day-rollup");
+  assert.equal(activity.distanceKm.selection.value, 14.5);
+  assert.equal(activity.distanceKm.selection.provider, "garmin");
+  assert.equal(activity.distanceKm.selection.sourceKind, "observation:daily-distance");
+  assert.equal(activity.totalElevationGainMeters.selection.value, 200);
+  assert.equal(activity.maxHeartRate.selection.value, 180);
+  assert.equal(activity.workoutStrain.selection.value, 12.5);
+  assert.equal("activitySessions" in activity, false);
+  assert.equal(STORED_ACTIVITY_SESSION_EVIDENCE_KEY in activity, false);
+  assert.equal(JSON.stringify(composed).includes(STORED_ACTIVITY_SESSION_EVIDENCE_KEY), false);
+  assert.equal(JSON.stringify(direct).includes(STORED_ACTIVITY_SESSION_EVIDENCE_KEY), false);
+  assert.equal("activitySessions" in (direct.activityDays[0] ?? {}), false);
+});
+
+test("stored activity evidence applies one global overlap reduction like the live summary", () => {
+  const date = "2026-02-14";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 100,
+      endedAt: "2026-02-14T13:20:00.000Z",
+      id: "apple-leading-window",
+      provider: "apple-health-kit",
+      recordedAt: "2026-02-14T13:21:00.000Z",
+      startedAt: "2026-02-14T11:40:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 100,
+      endedAt: "2026-02-14T13:40:00.000Z",
+      id: "garmin-middle-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:42:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 100,
+      endedAt: "2026-02-14T14:00:00.000Z",
+      id: "garmin-trailing-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T14:02:00.000Z",
+      startedAt: "2026-02-14T12:20:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, directBundle, rows, stored, storedBundle } =
+    buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 100);
+  assert.equal(direct.sessionCount.selection.value, 1);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+  assert.equal(
+    rows
+      .filter((row) => row.summaryKind === "activity")
+      .reduce(
+        (total, row) => {
+          const parsed = parseStoredWearableActivitySessionEvidence(row.summaryJson);
+          return total + (parsed.status === "valid" ? parsed.evidence.length : 0);
+        },
+        0,
+      ),
+    3,
+  );
+  assert.equal(JSON.stringify(stored).includes(STORED_ACTIVITY_SESSION_EVIDENCE_KEY), false);
+  assert.equal(directBundle.sourceHealth.every((summary) => summary.sleepNights === 0), true);
+  assert.equal(storedBundle.sourceHealth.every((summary) => summary.sleepNights === 0), true);
+});
+
+test("stored activity evidence preserves duration-consistency preference and pause tolerance", () => {
+  const date = "2026-02-14";
+  const scenarios = [
+    {
+      candidates: [
+        activitySessionCandidate({
+          activityType: "Running",
+          date,
+          durationMinutes: 10,
+          endedAt: "2026-02-14T13:00:00.000Z",
+          id: "inconsistent-duration",
+          provider: "garmin",
+          recordedAt: "2026-02-14T13:01:00.000Z",
+          startedAt: "2026-02-14T12:00:00.000Z",
+          workoutMetricValues: {},
+        }),
+        activitySessionCandidate({
+          activityType: "Run",
+          date,
+          durationMinutes: 50,
+          endedAt: "2026-02-14T12:50:00.000Z",
+          id: "consistent-duration",
+          provider: "garmin",
+          recordedAt: "2026-02-14T13:02:00.000Z",
+          startedAt: "2026-02-14T12:00:00.000Z",
+          workoutMetricValues: {},
+        }),
+      ],
+      label: "inconsistent elapsed window",
+    },
+    {
+      candidates: [
+        activitySessionCandidate({
+          activityType: "Running",
+          date,
+          durationMinutes: 50,
+          endedAt: "2026-02-14T13:00:00.000Z",
+          id: "plausibly-paused-duration",
+          provider: "garmin",
+          recordedAt: "2026-02-14T13:01:00.000Z",
+          startedAt: "2026-02-14T12:00:00.000Z",
+          workoutMetricValues: {},
+        }),
+        activitySessionCandidate({
+          activityType: "Run",
+          date,
+          durationMinutes: 49,
+          endedAt: "2026-02-14T12:49:00.000Z",
+          id: "unpaused-duration",
+          provider: "garmin",
+          recordedAt: "2026-02-14T13:02:00.000Z",
+          startedAt: "2026-02-14T12:00:00.000Z",
+          workoutMetricValues: {},
+        }),
+      ],
+      label: "plausible pause",
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const { direct, stored } = buildDirectAndStoredActivity(date, [...scenario.candidates]);
+    assert.equal(direct.sessionMinutes.selection.value, 50, scenario.label);
+    assert.equal(direct.sessionCount.selection.value, 1, scenario.label);
+    assert.equal(
+      stored.sessionMinutes.selection.value,
+      direct.sessionMinutes.selection.value,
+      scenario.label,
+    );
+    assert.equal(
+      stored.sessionCount.selection.value,
+      direct.sessionCount.selection.value,
+      scenario.label,
+    );
+  }
+});
+
+test("stored activity evidence keeps a duration-derived window coherent across merges", () => {
+  const date = "2026-02-14";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      id: "derived-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Run",
+      date,
+      durationMinutes: 50,
+      endedAt: "2026-02-14T12:50:00.000Z",
+      id: "shorter-explicit-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Outdoor Run",
+      date,
+      durationMinutes: 40,
+      endedAt: "2026-02-14T12:40:00.000Z",
+      id: "nested-after-merge",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:03:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 100);
+  assert.equal(direct.sessionCount.selection.value, 2);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+});
+
+test("stored activity evidence retains stable identity through an overlap merge", () => {
+  const date = "2026-02-14";
+  const sharedResourceId = "shared-three-way-resource";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-02-14T13:00:00.000Z",
+      externalRef: null,
+      id: "identityless-preferred",
+      provider: "apple-health-kit",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Run",
+      date,
+      durationMinutes: 50,
+      endedAt: "2026-02-14T12:50:00.000Z",
+      id: "stable-identity-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      resourceId: sharedResourceId,
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 50,
+      id: "stable-identity-without-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:03:00.000Z",
+      resourceId: sharedResourceId,
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 60);
+  assert.equal(direct.sessionCount.selection.value, 1);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+});
+
+test("stored activity evidence falls back from a reversed explicit end", () => {
+  const date = "2026-02-14";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-02-14T11:59:00.000Z",
+      id: "reversed-end",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Run",
+      date,
+      durationMinutes: 50,
+      endedAt: "2026-02-14T12:50:00.000Z",
+      id: "valid-end",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 50);
+  assert.equal(direct.sessionCount.selection.value, 1);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+});
+
+test("stored activity evidence preserves stable resource identity without timestamps", () => {
+  const date = "2026-02-14";
+  const sharedResourceId = "shared-garmin-workout";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 30,
+      id: "garmin-direct-no-window",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:00:00.000Z",
+      resourceId: sharedResourceId,
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      dataOrigin: {
+        aggregatorProvider: "junction",
+        originConfidence: "high",
+        sourceInstanceId: "garmin-watch",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        version: 1,
+      },
+      date,
+      durationMinutes: 30,
+      id: "garmin-junction-no-window",
+      provider: "junction",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      resourceId: sharedResourceId,
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 10,
+      endedAt: "2026-02-14T18:10:00.000Z",
+      id: "oura-strength",
+      provider: "oura",
+      recordedAt: "2026-02-14T18:11:00.000Z",
+      startedAt: "2026-02-14T18:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 40);
+  assert.equal(direct.sessionCount.selection.value, 2);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+  assert.deepEqual(stored.activityTypes, direct.activityTypes);
+  assert.equal(JSON.stringify(stored).includes("reconciliationDurationConsistent"), false);
+  assert.equal(JSON.stringify(stored).includes("reconciliationResourceKey"), false);
+  assert.equal(JSON.stringify(stored).includes("reconciliationExactKey"), false);
+});
+
+test("stored activity identity keeps endpoint-local ids partitioned by resource type and facet", () => {
+  const date = "2026-02-14";
+  const externalRef = (
+    resourceType: string,
+    resourceId: string,
+    facet: string | null = null,
+  ): NonNullable<WearableMetricCandidate["externalRef"]> => ({
+    facet,
+    resourceId,
+    resourceType,
+    system: "oura",
+    version: null,
+  });
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 30,
+      externalRef: externalRef("session", "endpoint-local-id"),
+      id: "oura-session-local-id",
+      provider: "oura",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Cycling",
+      date,
+      durationMinutes: 45,
+      externalRef: externalRef("workout", "endpoint-local-id"),
+      id: "oura-workout-local-id",
+      provider: "oura",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 20,
+      externalRef: externalRef("workout", "faceted-local-id", "primary"),
+      id: "oura-primary-facet",
+      provider: "oura",
+      recordedAt: "2026-02-14T18:01:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Swimming",
+      date,
+      durationMinutes: 25,
+      externalRef: externalRef("workout", "faceted-local-id", "secondary"),
+      id: "oura-secondary-facet",
+      provider: "oura",
+      recordedAt: "2026-02-14T18:02:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 120);
+  assert.equal(direct.sessionCount.selection.value, 4);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+  assert.deepEqual(stored.activityTypes, direct.activityTypes);
+  assert.equal(JSON.stringify(stored).includes("reconciliationResourceKey"), false);
+});
+
+test("stored activity evidence preserves raw exact partitions without public identity leakage", () => {
+  const date = "2026-02-14";
+  const garminOrigin = (sourceInstanceId: string): NonNullable<WearableMetricCandidate["dataOrigin"]> => ({
+    aggregatorProvider: "junction",
+    originConfidence: "high",
+    sourceInstanceId,
+    sourceProviderSlug: "garmin",
+    sourceType: "watch",
+    version: 1,
+  });
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      dataOrigin: garminOrigin("watch-a"),
+      date,
+      durationMinutes: 30,
+      externalRef: null,
+      id: "garmin-origin-a-no-identity",
+      provider: "junction",
+      recordedAt: "2026-02-14T13:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      dataOrigin: garminOrigin("watch-b"),
+      date,
+      durationMinutes: 30,
+      externalRef: null,
+      id: "garmin-origin-b-no-identity",
+      provider: "junction",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      workoutMetricValues: {},
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 10,
+      endedAt: "2026-02-14T18:10:00.000Z",
+      id: "oura-distinct-session",
+      provider: "oura",
+      recordedAt: "2026-02-14T18:11:00.000Z",
+      startedAt: "2026-02-14T18:00:00.000Z",
+      workoutMetricValues: {},
+    }),
+  ];
+
+  const { direct, stored } = buildDirectAndStoredActivity(date, candidates);
+
+  assert.equal(direct.sessionMinutes.selection.value, 70);
+  assert.equal(direct.sessionCount.selection.value, 3);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+  assert.equal(JSON.stringify(stored).includes("reconciliationExactKey"), false);
+});
+
+test("stored activity evidence preserves field-level contributor provenance", () => {
+  const date = "2026-02-14";
+  const candidates = [
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 60,
+      endedAt: "2026-02-14T13:00:00.000Z",
+      id: "garmin-preferred-run",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:01:00.000Z",
+      startedAt: "2026-02-14T12:00:00.000Z",
+      workoutMetricValues: {
+        activeCalories: 600,
+      },
+    }),
+    activitySessionCandidate({
+      activityType: "Running",
+      date,
+      durationMinutes: 55,
+      endedAt: "2026-02-14T12:57:00.000Z",
+      id: "apple-complementary-run",
+      provider: "apple-health-kit",
+      recordedAt: "2026-02-14T13:02:00.000Z",
+      startedAt: "2026-02-14T12:02:00.000Z",
+      workoutMetricValues: {
+        distanceKm: 10,
+        maxHeartRate: 190,
+        totalElevationGainMeters: 200,
+        workoutStrain: 15,
+      },
+    }),
+    activitySessionCandidate({
+      activityType: "Strength",
+      date,
+      durationMinutes: 15,
+      endedAt: "2026-02-14T18:15:00.000Z",
+      id: "oura-distinct-strength",
+      provider: "oura",
+      recordedAt: "2026-02-14T18:16:00.000Z",
+      startedAt: "2026-02-14T18:00:00.000Z",
+      workoutMetricValues: {
+        activeCalories: 100,
+        maxHeartRate: 175,
+        workoutStrain: 8,
+      },
+    }),
+  ];
+
+  const { direct, directBundle, stored, storedBundle } =
+    buildDirectAndStoredActivity(date, candidates);
+  const sourceContributions = (
+    sourceHealth: typeof directBundle.sourceHealth,
+  ) => sourceHealth
+    .map((summary) => ({
+      candidateMetrics: summary.candidateMetrics,
+      metricsContributed: summary.metricsContributed,
+      provider: summary.provider,
+      selectedMetrics: summary.selectedMetrics,
+    }))
+    .sort((left, right) => left.provider.localeCompare(right.provider));
+
+  assert.equal(direct.sessionMinutes.selection.value, 75);
+  assert.equal(stored.sessionMinutes.selection.value, direct.sessionMinutes.selection.value);
+  assert.equal(stored.sessionCount.selection.value, direct.sessionCount.selection.value);
+  assert.equal(stored.activeCalories.selection.provider, "multiple");
+  assert.equal(stored.distanceKm.selection.provider, "apple-health-kit");
+  assert.equal(stored.maxHeartRate.selection.provider, "apple-health-kit");
+  assert.equal(stored.totalElevationGainMeters.selection.provider, "apple-health-kit");
+  assert.equal(stored.workoutStrain.selection.provider, "apple-health-kit");
+  assert.equal(directBundle.sourceHealth.length, 3);
+  assert.equal(storedBundle.sourceHealth.length, 3);
+  assert.equal(directBundle.sourceHealth.every((summary) => summary.candidateMetrics === 1), true);
+  assert.equal(storedBundle.sourceHealth.every((summary) => summary.candidateMetrics === 1), true);
+  assert.deepEqual(sourceContributions(storedBundle.sourceHealth), sourceContributions(directBundle.sourceHealth));
 });
 
 test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in favor of WHOOP", () => {
@@ -380,6 +2569,32 @@ test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in 
   assert.equal(trend?.points[0]?.value, 327.3667);
 });
 
+test("stored sleep-window evidence does not create activity source coverage", () => {
+  const date = "2026-07-07";
+  const dataset: WearableDataset = {
+    activitySessionAggregates: [],
+    metricSuppressionEvidence: [],
+    metricCandidates: [],
+    provenanceDiagnostics: [],
+    rawMetricCandidates: [],
+    sleepWindows: [
+      sleepWindow("garmin", date),
+      sleepWindow("oura", date),
+    ],
+  };
+  const direct = buildWearableSummaryBundleFromDataset(dataset);
+  const stored = composePublicWearableSummaryBundleFromStoredRows({
+    providerFilterWasProvided: false,
+    providers: [],
+    rows: buildWearableSummaryProjectionFromDataset(dataset),
+  }, {});
+
+  assert.equal(direct.sleepNights.length, 1);
+  assert.equal(stored.sleepNights.length, 1);
+  assert.equal(direct.sourceHealth.every((summary) => summary.activityDays === 0), true);
+  assert.equal(stored.sourceHealth.every((summary) => summary.activityDays === 0), true);
+});
+
 test("compose preserves non-selected provider same-public conflict evidence", () => {
   const date = "2026-05-03";
   const dataset: WearableDataset = {
@@ -426,6 +2641,7 @@ test("compose preserves non-selected provider same-public conflict evidence", ()
     sleepWindows: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
+  const direct = buildWearableSummaryBundleFromDataset(dataset);
   const composed = composePublicWearableSummaryBundleFromStoredRows({
     providerFilterWasProvided: false,
     providers: [],
@@ -434,6 +2650,12 @@ test("compose preserves non-selected provider same-public conflict evidence", ()
   const activity = composed.activityDays.find((summary) => summary.date === date);
 
   assert.ok(activity);
+  const directActivity = direct.activityDays.find((summary) => summary.date === date);
+  assert.ok(directActivity);
+  assert.deepEqual(
+    safeResolvedMetricSnapshot(activity.steps),
+    safeResolvedMetricSnapshot(directActivity.steps),
+  );
   assert.equal(activity.steps.selection.provider, "garmin");
   assert.deepEqual(activity.steps.confidence.conflictingProviders, ["oura"]);
   assert.equal(activity.steps.confidence.level, "medium");
@@ -441,7 +2663,7 @@ test("compose preserves non-selected provider same-public conflict evidence", ()
     activity.steps.confidence.reasons.some((reason) =>
       reason === "Duplicate evidence from Oura disagreed after source reconciliation."
     ),
-    true,
+    false,
   );
   assert.equal(activity.summaryConfidence.conflictingMetrics.includes("steps"), true);
   assert.equal(composed.sourceHealth.find((summary) => summary.provider === "garmin")?.conflictCount, 1);
@@ -513,7 +2735,8 @@ test("compose recomputes source health and summary notes after stored conflicts 
 
   assert.ok(activity);
   assert.deepEqual(activity.steps.confidence.conflictingProviders, ["garmin"]);
-  assert.deepEqual(activity.activeCalories.confidence.conflictingProviders, ["oura"]);
+  assert.equal(activity.activeCalories.selection.provider, "oura");
+  assert.deepEqual(activity.activeCalories.confidence.conflictingProviders, ["garmin"]);
   assert.equal(garminSourceHealth?.conflictCount, 2);
   assert.equal(ouraSourceHealth?.conflictCount, 1);
 
@@ -629,14 +2852,34 @@ test("compose output from compact stored rows matches legacy full-form rows", ()
   const rows = buildWearableSummaryProjectionFromDataset(buildFixtureDataset(["whoop", "oura"]));
   assert.ok(rows.length > 0);
 
-  const legacyRows = rows.map((row) =>
-    row.summaryKind === "source_health"
-      ? row
-      : {
-          ...row,
-          summaryJson: JSON.stringify(parseStoredWearableSummary(row.summaryKind, row.summaryJson)),
-        }
-  );
+  const legacyRows = rows.map((row) => {
+    if (row.summaryKind === "source_health") {
+      return row;
+    }
+
+    const stored = JSON.parse(row.summaryJson);
+    const expanded = parseStoredWearableSummary<Record<string, unknown>>(
+      row.summaryKind,
+      row.summaryJson,
+    );
+    assert.ok(expanded);
+    for (const evidenceKey of [
+      STORED_ACTIVITY_METRIC_EVIDENCE_KEY,
+      STORED_ACTIVITY_METRIC_EVIDENCE_COUNT_KEY,
+      STORED_ACTIVITY_METRIC_EVIDENCE_FINGERPRINT_KEY,
+      STORED_ACTIVITY_SESSION_EVIDENCE_KEY,
+      STORED_ACTIVITY_SESSION_EVIDENCE_COUNT_KEY,
+      STORED_ACTIVITY_SESSION_EVIDENCE_FINGERPRINT_KEY,
+    ]) {
+      if (Object.hasOwn(stored, evidenceKey)) {
+        expanded[evidenceKey] = stored[evidenceKey];
+      }
+    }
+    return {
+      ...row,
+      summaryJson: JSON.stringify(expanded),
+    };
+  });
   assert.ok(
     legacyRows.some((legacyRow, index) => legacyRow.summaryJson !== rows[index]?.summaryJson),
     "expected compact rows to differ from legacy rows on disk",
