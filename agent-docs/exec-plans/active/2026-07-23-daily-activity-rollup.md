@@ -133,3 +133,23 @@ Updated: 2026-07-23
 - Canonical `pnpm verify:acceptance` passed in a fresh secret-free Testbox,
   including all workspace typechecks, coverage suites, app builds, security and
   dependency guards, and Cloudflare Worker tests.
+- A real Codex app-server turn against the scripted local provider consumed a
+  canonical combined current-day workout result, returned the distinct workout
+  count and combined duration with a "so far" qualifier, and made no unsupported
+  sync or import claim.
+- A second real app-server turn called the production `murph.group read_shared`
+  tool under the current-chat newsletter execution contract, computed settled
+  comparisons from completed days only, and kept open-day values in a separate
+  "today so far" aside.
+- Local product-experience review found no high, material, or
+  experience-collapse issue. The two requested assistant-output proof gaps are
+  covered by those focused app-server turns; no rendered UI proof applies
+  because no production UI changed.
+- A post-rebase range-diff audit confirmed that current group-message behavior
+  from `main` remains intact alongside the new semantic gates, additive
+  workout-day rollup, provisional-day handling, and non-causal diagnostic
+  language.
+- Deployment review established a runner-first immediate rollout followed by
+  Web from the same commit. Existing unmarked group snapshots converge on the
+  next ordinary grantor projection offer; derived browser/query projections
+  rebuild normally and no canonical or PostgreSQL migration is required.

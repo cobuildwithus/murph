@@ -324,6 +324,27 @@ to a bundle that restores or consumes legacy local projections; disable the Web
 producer/read path and forward-fix instead. There is no cleanup wake, local
 drain, or foreground reconciliation step in either deployment or rollback.
 
+The later canonical activity-semantics correction has a separate rollout
+order. Deploy Cloudflare and the runner bundle from the exact release commit
+first with immediate container rollout, confirm the deployed bundle fingerprint,
+then deploy Web from the same commit immediately. The new runner emits the
+`broad-movement` and `canonical-workout-day` markers; the new Web consumer
+rejects unmarked activity and workout rows as ambiguous instead of scoring
+them. During the short forward skew, an old Web version may omit the new marker,
+so the converged consumer can temporarily withhold that stat until a marked
+replacement arrives. Do not deploy Web first: an old warm runner can continue
+publishing the legacy summary shape.
+
+There is no bulk backfill for existing unmarked group snapshots. Each snapshot
+converges on the grantor's next ordinary private-runtime projection offer;
+browser replicas rebuild on their normal access/refresh path. Query SQLite,
+browser replicas, and group snapshots are derived and rebuildable, and this
+correction has no canonical or PostgreSQL migration. The corrected runner is
+the rollback floor because rolling it back reintroduces legacy daily summary
+production. Post-deploy, verify the exact runner fingerprint, exercise one
+ordinary projection refresh, and confirm that the resulting workout and
+movement rows carry their distinct markers before accepting group comparisons.
+
 ## Acceptance cases
 
 - Five `in` participants with two current scores produce a "2 of 5" partial
