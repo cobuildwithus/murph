@@ -4,9 +4,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
+import {
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+} from "../hosted-onboarding/logging";
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
+import { createHostedGroupJoinLinkForOwnedThreadContainerTx } from "./group-store";
 import {
   classifyHostedGroupUsageCapacity,
   type HostedGroupUsageCapacityState,
@@ -112,6 +117,59 @@ export async function readHostedGroupUsageStatus(input: {
       : null,
     periodEnd: decision.periodEnd.toISOString(),
   };
+}
+
+export async function readHostedGroupUsageStatusEnsuringFundingUrl(input: {
+  now?: Date;
+  prisma?: PrismaClient;
+  runtimeMemberId: string;
+}): Promise<HostedGroupUsageStatus | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const existing = await readHostedGroupUsageStatus({
+    prisma,
+    runtimeMemberId: input.runtimeMemberId,
+  });
+  if (existing?.fundingUrl) {
+    return existing;
+  }
+
+  // A group chat that has only ever talked to Murph has no HostedGroup row or
+  // join code yet; materialize the same group shell and join link the container
+  // owner could mint explicitly so the funding URL exists when usage needs it.
+  const [container, hasActiveAccess] = await Promise.all([
+    prisma.hostedThreadContainer.findUnique({
+      select: { ownerMemberId: true },
+      where: { memberId: input.runtimeMemberId },
+    }),
+    hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma }),
+  ]);
+  if (!container || !hasActiveAccess) {
+    return existing;
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => (
+      createHostedGroupJoinLinkForOwnedThreadContainerTx({
+        actorMemberId: container.ownerMemberId,
+        containerMemberId: input.runtimeMemberId,
+        now: input.now ?? new Date(),
+        tx,
+      })
+    ));
+  } catch (error) {
+    console.warn("Hosted group usage funding link provisioning failed.", {
+      ...sanitizeHostedOnboardingStructuredLogDetails({
+        errorName: error instanceof Error ? error.name : "unknown",
+        runtimeMemberIdSuffix: toHostedOnboardingLogIdSuffix(input.runtimeMemberId),
+      }),
+    });
+    return existing;
+  }
+
+  return readHostedGroupUsageStatus({
+    prisma,
+    runtimeMemberId: input.runtimeMemberId,
+  });
 }
 
 export function buildHostedGroupUsageFundingUrl(input: {

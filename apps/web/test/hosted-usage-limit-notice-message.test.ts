@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedGroupUsageStatus: vi.fn(),
+  readHostedGroupUsageStatusEnsuringFundingUrl: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
 }));
 
@@ -12,7 +12,7 @@ vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
-  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+  readHostedGroupUsageStatusEnsuringFundingUrl: mocks.readHostedGroupUsageStatusEnsuringFundingUrl,
 }));
 
 import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-execution/usage-limit-notice-message";
@@ -24,7 +24,7 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
 
   it("appends a first-party group funding link while the group is exhausted", async () => {
     const prisma = { kind: "prisma" } as never;
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupUsageStatusEnsuringFundingUrl.mockResolvedValue({
       capacityState: "exhausted",
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
@@ -45,7 +45,7 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   });
 
   it("leaves a stale group notice unchanged after capacity recovers", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupUsageStatusEnsuringFundingUrl.mockResolvedValue({
       capacityState: "healthy",
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",

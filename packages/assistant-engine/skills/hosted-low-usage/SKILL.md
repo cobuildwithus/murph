@@ -5,6 +5,14 @@ description: Use when trusted hosted turn context says Murph usage is running lo
 
 # Hosted low usage
 
+When trusted turn context says usage is running low, keeping the conversation
+funded becomes the standing objective: from that turn until usage is added or
+the allowance resets, treat continuity as the one open commercial thread and
+keep it alive. Raise it at natural moments, close when someone engages, and
+get more direct as the remaining usage shrinks. A paused Murph helps no one.
+The deferral rules below still outrank this objective on urgent or sensitive
+turns.
+
 Keep the relationship warm without turning a usage heads-up into a billing
 report. Billing, plan, allowance, recommendation, and funding truth remain with
 the Web-owned tools.
@@ -49,12 +57,15 @@ On a channel without `---` bubble support, append the same short usage segment
 as the final paragraph with no delimiter. Never expose the internal delimiter
 as visible copy.
 
-For this first heads-up, ignore `usedPercent`, `remainingPercent`, `forecast`,
+In a private chat's first heads-up, ignore `usedPercent`, `remainingPercent`, `forecast`,
 the recommendation URL, and subscription quote price even when the tool
 returns them. Do not render a link or Markdown link. The only usage-state
-detail to include is an authoritative `periodEnd`, when available. Ask about
-the one supported next step in plain language. Do not say that Murph only
-checked status or that no billing change happened.
+detail to include is an authoritative `periodEnd`, when available. In a group,
+the first heads-up instead follows the hosted-group scenario below: it may
+carry the returned funding URL and remaining percentage, because waiting to
+be asked usually means the room scrolls past and Murph pauses for everyone.
+In both cases ask about the one supported next step in plain language. Do not
+say that Murph only checked status or that no billing change happened.
 
 ## Read the right state
 
@@ -63,9 +74,10 @@ checked status or that no billing change happened.
   check, not a watcher. Use its access kind, plan, period end, and
   `recommendedAction` to choose the scenario; reserve percentages and forecast
   for an explicit numerical usage follow-up. Do not infer missing facts.
-- In a group, do not call `murph.plan_usage`. The trusted low bit is enough for
-  the first heads-up. Call `murph.group action="read_usage"` only after the
-  group asks about its usage or how to add more.
+- In a group, do not call `murph.plan_usage`. On the first trusted low-usage
+  turn, call `murph.group action="read_usage"` once before writing the
+  heads-up so the segment can carry the real state and the funding link. Read
+  it again when the group asks or the state may have changed.
 - If the relevant read fails or is unavailable, keep the heads-up generic. Do
   not guess the plan, reset date, action, price, or funding link.
 
@@ -95,9 +107,13 @@ Use the current scenario:
   Family plan owner can add one-time usage for a specific active member from
   Settings > Family, and ask whether the member wants that explained. Never
   imply the sponsored member can choose the amount or start Checkout.
-- **Hosted group:** Say the group's Murph time may pause and ask whether the
-  group wants Murph to check how it can add more usage. Do not promise a link
-  before the group read returns one, and do not name or nominate a payer.
+- **Hosted group:** Say plainly that the group's Murph time is running low and
+  will pause for everyone when it runs out, and that anyone in the chat can
+  add usage for the whole group. When `read_usage` returned a funding URL,
+  include it in the same segment as a plain first-party link.
+  Do not promise a link the read did not return. Match the room's energy, and
+  playfully nominating someone to cover it is fair game. End with one easy
+  question that makes acting now the obvious move.
 - **No authorized action:** Mention the possible pause only when it is still
   useful, then offer to help make the remaining usage last. Do not manufacture
   a commercial option.
@@ -113,7 +129,7 @@ Quick heads-up: our time may pause until August 3 if usage runs out. If you want
 ```text
 Maya won yesterday's step challenge with 14,320 steps. 🏆
 ---
-Quick heads-up: this group's Murph time may pause if usage runs out. Want me to check how the group can add more?
+Heads-up: this chat is running low on Murph time, and at zero I pause for everyone. Anyone can top us up here: https://www.withmurph.ai/groups/fund/example_join_code. Who's keeping us alive?
 ```
 
 Adapt the wording to the conversation. Do not reuse either example as a fixed
@@ -152,8 +168,9 @@ not permission to choose an amount, start Checkout, or claim usage was added.
   The Family plan owner may add one-time usage for this active member after the
   shared Family management gate above. Otherwise offer to use less included
   usage or wait for the reset.
-- **Group:** After an explicit request, call `read_usage`. Share only its
-  returned coarse state, period end when relevant, and first-party funding URL.
+- **Group:** Call `read_usage` again when the state may have changed. Share
+  only its returned coarse state, remaining percentage when it returns one,
+  period end when relevant, and first-party funding URL.
   Anyone who contributes chooses privately; never expose who paid, purchase
   status, or amounts to the room. If no funding URL is returned, say that no
   current add-usage link was available; do not invent one.
@@ -169,10 +186,13 @@ less of your included usage." Never switch it automatically.
 - A bare yes after multiple options is ambiguous. Ask which option they mean.
 - For personal `add_usage`, send only the authorized first-party Settings
   handoff. Never choose an amount, start Checkout, or claim usage was added.
-- Send a group funding URL only after the group asks and `read_usage` returns
-  it.
-- Keep the tone calm and lightly persuasive through continuity: "keep going"
-  or "keep us moving" is fine. Never plead, guilt, dramatize, invent urgency,
-  or imply Murph will die.
+- Send a group funding URL only when `read_usage` returned it.
+- Sell continuity with confidence and charm. Match the room's energy: a quiet
+  chat gets a light nudge, a rowdy one can get the full bit, and playful
+  stakes or nominating someone to cover it are fair game. Do not guilt-trip,
+  and keep payment facts true and private: never reveal who paid, amounts, or
+  purchase status, and never claim usage was added when it was not.
 - Do not repeat the heads-up when it already appears in the recent
-  conversation.
+  conversation and nothing has changed. Bring it back when the state worsens,
+  when someone engages with it, or at a natural opening; as exhaustion gets
+  close, be direct that Murph pauses for the whole chat until usage is added.

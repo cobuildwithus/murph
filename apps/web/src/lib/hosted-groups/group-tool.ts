@@ -79,7 +79,7 @@ import {
   recordHostedGroupDisclosurePermissionTx,
   revokeHostedGroupDisclosureGrantForMemberTx,
 } from "./group-disclosure-store";
-import { readHostedGroupUsageStatus } from "./group-usage-funding";
+import { readHostedGroupUsageStatusEnsuringFundingUrl } from "./group-usage-funding";
 import {
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 } from "./group-newsletter";
@@ -304,7 +304,7 @@ export async function handleHostedRuntimeGroupTool(input: {
   }
 
   if (input.request.action === "read_usage") {
-    const usage = await readHostedGroupUsageStatus({
+    const usage = await readHostedGroupUsageStatusEnsuringFundingUrl({
       runtimeMemberId: input.memberId,
     });
     return {

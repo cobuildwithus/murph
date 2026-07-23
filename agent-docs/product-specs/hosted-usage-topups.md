@@ -690,6 +690,14 @@ synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
 same fixed $5, $10, and $25 packs. The browser never submits payer or
 beneficiary identity.
 
+A group chat that has only ever talked to Murph has no `HostedGroup` row or
+join code. When the group `read_usage` action or the exhausted-notice
+projection needs a funding URL and none exists, Web self-heals: it runs the
+same owner-scoped ensure-group-and-mint-join-link transaction the container
+owner could invoke explicitly, with the container owner as the recorded actor.
+Provisioning failures keep the existing linkless result and are logged; they
+never block the read or the notice.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.

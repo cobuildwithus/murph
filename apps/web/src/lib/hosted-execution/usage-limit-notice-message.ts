@@ -3,7 +3,7 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
-import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
+import { readHostedGroupUsageStatusEnsuringFundingUrl } from "../hosted-groups/group-usage-funding";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
@@ -19,7 +19,7 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
 }): Promise<string> {
   try {
     if (input.noticeCode === "thread_usage_limit_reached") {
-      const status = await readHostedGroupUsageStatus({
+      const status = await readHostedGroupUsageStatusEnsuringFundingUrl({
         prisma: input.prisma,
         runtimeMemberId: input.memberId,
       });
