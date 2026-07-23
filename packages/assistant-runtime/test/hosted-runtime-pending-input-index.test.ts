@@ -1,9 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+  recordHostedMailboxAssistantInputItem,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
 } from "@murphai/assistant-engine";
@@ -21,6 +23,7 @@ import {
 } from "@murphai/runtime-state/node/assistant-state-fs";
 
 import {
+  compactHostedConversationMailboxHandledItemIds,
   compactHostedPendingAssistantInputIds,
   collectHostedPendingAssistantInputMediaRetentionProtections,
   enqueueHostedPendingAssistantInputId,
@@ -28,6 +31,7 @@ import {
   inspectHostedPendingAssistantInputWakeCandidate,
   readHostedPendingAssistantInputIds,
   resolveHostedPendingAssistantInputStatePath,
+  selectHostedConversationMailboxHandledItemBatch,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   resolveHostedPendingAssistantInputWakeAt,
@@ -49,6 +53,32 @@ afterEach(async () => {
 });
 
 describe("hosted pending assistant input index", () => {
+  it("rotates bounded exact handled-item batches without starving the tail", () => {
+    const candidates = Array.from({ length: 258 }, (_, index) => ({
+      inputId: `input-${index + 1}`,
+      mailboxItemId: `item-${index + 1}`,
+    }));
+
+    const first = selectHostedConversationMailboxHandledItemBatch({
+      candidates,
+      cursorInputId: null,
+    });
+    expect(first.candidates).toHaveLength(256);
+    expect(first.candidates[0]?.mailboxItemId).toBe("item-1");
+    expect(first.candidates.at(-1)?.mailboxItemId).toBe("item-256");
+    expect(first.nextCursorInputId).toBe("input-256");
+
+    const second = selectHostedConversationMailboxHandledItemBatch({
+      candidates,
+      cursorInputId: first.nextCursorInputId,
+    });
+    expect(second.candidates).toHaveLength(256);
+    expect(second.candidates.slice(0, 3).map((candidate) => candidate.mailboxItemId))
+      .toEqual(["item-257", "item-258", "item-1"]);
+    expect(second.candidates.at(-1)?.mailboxItemId).toBe("item-254");
+    expect(second.nextCursorInputId).toBe("input-254");
+  });
+
   it("preserves the exact abort reason before background compaction starts", async () => {
     const vaultRoot = await createTempVault();
     const controller = new AbortController();
@@ -77,6 +107,24 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).rejects.toThrow();
   });
 
+  it("fails closed when the handled-item batch cursor is not indexed", async () => {
+    const vaultRoot = await createTempVault();
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v2",
+      schemaVersion: 2,
+      value: {
+        backfilled: true,
+        handledBatchCursorInputId: "input-not-indexed",
+        inputIds: [],
+      },
+    }, null, 2)}\n`, "utf8");
+
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
+      .rejects.toThrow("must reference an indexed input");
+  });
+
   it("enqueues input ids idempotently without duplicates", async () => {
     const vaultRoot = await createTempVault();
     const inputId = "ain_00000000000000000000000000000001";
@@ -87,6 +135,361 @@ describe("hosted pending assistant input index", () => {
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       inputId,
     ]);
+  });
+
+  it("keeps the legacy value shape while appending before v2 compaction", async () => {
+    const vaultRoot = await createTempVault();
+    const inputId = "ain_00000000000000000000000000000001";
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v1",
+      schemaVersion: 1,
+      value: {
+        backfilled: true,
+        inputIds: [],
+      },
+    }, null, 2)}\n`, "utf8");
+
+    await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+
+    await expect(readFile(filePath, "utf8").then((value) => JSON.parse(value)))
+      .resolves.toEqual({
+        schema: "murph.hosted-pending-assistant-inputs.v1",
+        schemaVersion: 1,
+        value: {
+          backfilled: true,
+          inputIds: [inputId],
+        },
+      });
+  });
+
+  it("reports exact terminal mailbox items without crossing a mixed-channel pending input", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [
+        {
+          channel: "linq",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+        {
+          channel: "telegram",
+          eligibleAfter: null,
+          enabledAt: "2026-04-23T00:00:00.000Z",
+        },
+      ],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const earlier = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_prefix_linq",
+        eventId: "evt_prefix_linq",
+        itemId: "item_prefix_linq",
+        laneSeq: "2",
+        messageId: "msg_prefix_linq",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "linq",
+        text: "earliest pending input",
+      }),
+    });
+    const later = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_prefix_telegram",
+        eventId: "evt_prefix_telegram",
+        itemId: "item_prefix_telegram",
+        laneSeq: "5",
+        messageId: "msg_prefix_telegram",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        source: "telegram",
+        text: "later pending input",
+      }),
+    });
+    for (const inputId of [earlier.inputId, later.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    await recordHostedMailboxAssistantInputItem({
+      inputId: earlier.inputId,
+      mailboxItemId: "item_prefix_linq",
+      vault: vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: later.inputId,
+      mailboxItemId: "item_prefix_telegram",
+      vault: vaultRoot,
+    });
+
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual([]);
+
+    await writeTerminalEvidence({
+      evidenceId: earlier.inputId,
+      groupInputIds: [earlier.inputId],
+      vaultRoot,
+    });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual(["item_prefix_linq"]);
+
+    await writeTerminalEvidence({
+      evidenceId: later.inputId,
+      groupInputIds: [later.inputId],
+      vaultRoot,
+    });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "2",
+      vaultRoot,
+    })).resolves.toEqual(["item_prefix_telegram"]);
+  });
+
+  it("persists the exact handled-item batch cursor across checkpoint collection", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    for (const laneSeq of ["2", "3"] as const) {
+      const event = await upsertAssistantInputEvent({
+        vault: vaultRoot,
+        event: createAssistantInputEvent({
+          dedupeKey: `dedupe_exact_page_${laneSeq}`,
+          eventId: `evt_exact_page_${laneSeq}`,
+          itemId: `item_exact_page_${laneSeq}`,
+          laneSeq,
+          messageId: `msg_exact_page_${laneSeq}`,
+          occurredAt: `2026-04-23T00:00:0${laneSeq}.000Z`,
+          receivedAt: `2026-04-23T00:00:1${laneSeq}.000Z`,
+          source: "telegram",
+          text: `terminal input ${laneSeq}`,
+        }),
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: event.inputId,
+        vaultRoot,
+      });
+      await recordHostedMailboxAssistantInputItem({
+        inputId: event.inputId,
+        mailboxItemId: `item_exact_page_${laneSeq}`,
+        vault: vaultRoot,
+      });
+      await writeTerminalEvidence({
+        evidenceId: event.inputId,
+        groupInputIds: [event.inputId],
+        vaultRoot,
+      });
+    }
+
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "1",
+      vaultRoot,
+    })).resolves.toEqual(["item_exact_page_2", "item_exact_page_3"]);
+
+    const appended = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_exact_page_4",
+        eventId: "evt_exact_page_4",
+        itemId: "item_exact_page_4",
+        laneSeq: "4",
+        messageId: "msg_exact_page_4",
+        occurredAt: "2026-04-23T00:00:04.000Z",
+        receivedAt: "2026-04-23T00:00:14.000Z",
+        source: "telegram",
+        text: "terminal input 4",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: appended.inputId,
+      vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: appended.inputId,
+      mailboxItemId: "item_exact_page_4",
+      vault: vaultRoot,
+    });
+    await writeTerminalEvidence({
+      evidenceId: appended.inputId,
+      groupInputIds: [appended.inputId],
+      vaultRoot,
+    });
+
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "1",
+      vaultRoot,
+    })).resolves.toEqual([
+      "item_exact_page_4",
+      "item_exact_page_2",
+      "item_exact_page_3",
+    ]);
+  });
+
+  it("fails closed without discarding malformed conversation-prefix evidence", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const malformed = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_prefix_malformed",
+        eventId: "evt_prefix_malformed",
+        itemId: "item_prefix_malformed",
+        laneSeq: "not-a-sequence",
+        messageId: "msg_prefix_malformed",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "telegram",
+        text: "malformed pending input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: malformed.inputId,
+      vaultRoot,
+    });
+
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      malformed.inputId,
+    ]);
+  });
+
+  it("fails closed without discarding an indexed input whose event is missing", async () => {
+    const vaultRoot = await createTempVault();
+    const missingInputId = "ain_00000000000000000000000000000001";
+    await enqueueHostedPendingAssistantInputId({
+      inputId: missingInputId,
+      vaultRoot,
+    });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: false, indexComplete: true });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      missingInputId,
+    ]);
+  });
+
+  it("finds fresh runnable input after a large missing prefix without an unbounded wake probe", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const missingInputIds = Array.from(
+      { length: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT + 10 },
+      (_, index) => `ain_${String(index + 1).padStart(32, "0")}`,
+    );
+    for (const inputId of missingInputIds) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    const valid = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_valid_after_missing_prefix",
+        eventId: "evt_valid_after_missing_prefix",
+        itemId: "item_valid_after_missing_prefix",
+        laneSeq: "10",
+        messageId: "msg_valid_after_missing_prefix",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "fresh runnable input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: valid.inputId,
+      vaultRoot,
+    });
+
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
+  });
+
+  it("defers rather than immediately waking when a bounded probe sees only missing blockers", async () => {
+    const vaultRoot = await createTempVault();
+    for (let index = 0; index < DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT + 10; index += 1) {
+      await enqueueHostedPendingAssistantInputId({
+        inputId: `ain_${String(index + 1).padStart(32, "0")}`,
+        vaultRoot,
+      });
+    }
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({ hasCandidate: false, indexComplete: false });
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-04-23T00:00:00.000Z",
+      vaultRoot,
+    })).resolves.toBe("2026-04-23T00:00:30.000Z");
+  });
+
+  it("does not report a pending system-lane assistant input as handled conversation work", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const systemInput = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_prefix_system",
+        eventId: "evt_prefix_system",
+        itemId: "item_prefix_system",
+        lane: "system",
+        laneSeq: "system-item-token",
+        messageId: "msg_prefix_system",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "telegram",
+        text: "pending system input",
+      }),
+    });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: systemInput.inputId,
+      vaultRoot,
+    });
+
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual([]);
   });
 
   it("collects raw inbox media protections from active pending inputs", async () => {
@@ -148,6 +551,11 @@ describe("hosted pending assistant input index", () => {
     await enqueueHostedPendingAssistantInputId({
       inputId: event.inputId,
       vaultRoot,
+    });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-04-23T00:00:04.000Z",
+      version: 1,
     });
 
     await expect(collectHostedPendingAssistantInputMediaRetentionProtections({
@@ -513,10 +921,13 @@ describe("hosted pending assistant input index", () => {
       vaultRoot,
     });
     await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      first.inputId,
+      second.inputId,
+    ]);
   });
 
-  it("keeps complete nonempty index inspection conservative before maintenance compacts it", async () => {
+  it("does not wake for terminal inputs retained until exact acknowledgement", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -553,13 +964,13 @@ describe("hosted pending assistant input index", () => {
     });
 
     await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
-      .resolves.toEqual({ hasCandidate: true, indexComplete: true });
+      .resolves.toEqual({ hasCandidate: false, indexComplete: true });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
       .resolves.toEqual([event.inputId]);
     await expect(resolveHostedPendingAssistantInputWakeAt({ vaultRoot }))
       .resolves.toBeNull();
     await expect(readHostedPendingAssistantInputIds({ vaultRoot }))
-      .resolves.toEqual([]);
+      .resolves.toEqual([event.inputId]);
   });
 
   it("sorts remaining pending inputs by cursor during compaction", async () => {
@@ -623,7 +1034,7 @@ describe("hosted pending assistant input index", () => {
     ]);
   });
 
-  it("drops indexed inputs whose event record is missing", async () => {
+  it("keeps missing indexed events durable while returning valid runnable inputs", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -635,20 +1046,43 @@ describe("hosted pending assistant input index", () => {
       version: 1,
     });
     const missingInputId = "ain_00000000000000000000000000000001";
+    const valid = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_valid_with_missing",
+        eventId: "evt_valid_with_missing",
+        itemId: "item_valid_with_missing",
+        laneSeq: "10",
+        messageId: "msg_valid_with_missing",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "valid pending input",
+      }),
+    });
 
     await enqueueHostedPendingAssistantInputId({
       inputId: missingInputId,
       vaultRoot,
     });
+    await enqueueHostedPendingAssistantInputId({
+      inputId: valid.inputId,
+      vaultRoot,
+    });
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       missingInputId,
+      valid.inputId,
     ]);
 
-    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
-    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      valid.inputId,
+    ]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      missingInputId,
+      valid.inputId,
+    ]);
   });
 
-  it("drops indexed inputs whose source cannot be processed by the reply channel", async () => {
+  it("retains nonterminal indexed inputs whose source cannot currently use the reply channel", async () => {
     const vaultRoot = await createTempVault();
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -697,6 +1131,7 @@ describe("hosted pending assistant input index", () => {
     ]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       processable.inputId,
+      mismatched.inputId,
     ]);
   });
 
@@ -740,6 +1175,16 @@ describe("hosted pending assistant input index", () => {
     for (const inputId of [first.inputId, second.inputId]) {
       await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
     }
+    await recordHostedMailboxAssistantInputItem({
+      inputId: first.inputId,
+      mailboxItemId: "item_cursor_advanced",
+      vault: vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: second.inputId,
+      mailboxItemId: "item_channel_disabled",
+      vault: vaultRoot,
+    });
 
     await saveAssistantAutomationState(vaultRoot, {
       autoReply: [{
@@ -774,7 +1219,198 @@ describe("hosted pending assistant input index", () => {
       now: () => "2026-04-23T00:03:00.000Z",
       vaultRoot,
     })).resolves.toBeNull();
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-04-23T00:03:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      first.inputId,
+      second.inputId,
+    ]);
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual(["item_cursor_advanced"]);
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "10",
+      vaultRoot,
+    })).resolves.toEqual([]);
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: first.cursor,
+        enabledAt: "2026-04-23T00:04:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:04:00.000Z",
+      version: 1,
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      second.inputId,
+    ]);
+
+    await writeTerminalEvidence({
+      evidenceId: second.inputId,
+      groupInputIds: [second.inputId],
+      vaultRoot,
+    });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "10",
+      vaultRoot,
+    })).resolves.toEqual(["item_channel_disabled"]);
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({
+        hasCandidate: false,
+        indexComplete: true,
+      });
+    await expect(resolveHostedPendingAssistantInputWakeAt({
+      inspectOnly: true,
+      now: () => "2026-04-23T00:05:00.000Z",
+      vaultRoot,
+    })).resolves.toBeNull();
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "20",
+      vaultRoot,
+    })).resolves.toEqual([]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([]);
+  });
+
+  it("keeps ambiguous v1 omissions nonreplyable while recovering terminal acknowledgements", async () => {
+    const vaultRoot = await createTempVault();
+    const terminal = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_terminal",
+        eventId: "evt_legacy_v1_terminal",
+        itemId: "item_legacy_v1_terminal",
+        laneSeq: "5",
+        messageId: "msg_legacy_v1_terminal",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        source: "telegram",
+        text: "terminal input omitted by the legacy index",
+      }),
+    });
+    const previouslyAdmitted = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_previously_admitted",
+        eventId: "evt_legacy_v1_previously_admitted",
+        itemId: "item_legacy_v1_previously_admitted",
+        laneSeq: "10",
+        messageId: "msg_legacy_v1_previously_admitted",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        source: "telegram",
+        text: "previously admitted input later omitted by v1",
+      }),
+    });
+    const recordedPending = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_recorded_pending",
+        eventId: "evt_legacy_v1_recorded_pending",
+        itemId: "item_legacy_v1_recorded_pending",
+        laneSeq: "15",
+        messageId: "msg_legacy_v1_recorded_pending",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        source: "telegram",
+        text: "pending input that v1 still records",
+      }),
+    });
+    const contextOnly = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_legacy_v1_context_only",
+        eventId: "evt_legacy_v1_context_only",
+        itemId: "item_legacy_v1_context_only",
+        laneSeq: "20",
+        messageId: "msg_legacy_v1_context_only",
+        occurredAt: "2026-04-23T00:00:07.000Z",
+        receivedAt: "2026-04-23T00:00:08.000Z",
+        source: "telegram",
+        text: "context-only input that was never admitted",
+      }),
+    });
+    // These histories are intentionally indistinguishable once deployed v1
+    // has omitted the only admitted ID: one was genuinely pending, while the
+    // other was retained only as context. The migration must not infer that
+    // either is safe to reply to.
+    await enqueueHostedPendingAssistantInputId({
+      inputId: previouslyAdmitted.inputId,
+      vaultRoot,
+    });
+    await recordHostedMailboxAssistantInputItem({
+      inputId: terminal.inputId,
+      mailboxItemId: "item_legacy_v1_terminal",
+      vault: vaultRoot,
+    });
+    await writeTerminalEvidence({
+      evidenceId: terminal.inputId,
+      groupInputIds: [terminal.inputId],
+      vaultRoot,
+    });
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: contextOnly.cursor,
+        enabledAt: "2026-04-23T00:01:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:01:00.000Z",
+      version: 1,
+    });
+
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v1",
+      schemaVersion: 1,
+      value: {
+        backfilled: true,
+        inputIds: [recordedPending.inputId],
+      },
+    }, null, 2)}\n`, "utf8");
+
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({
+        hasCandidate: true,
+        indexComplete: false,
+      });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual(["item_legacy_v1_terminal"]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      terminal.inputId,
+      recordedPending.inputId,
+    ]);
+    await expect(readFile(filePath, "utf8").then((value) => JSON.parse(value)))
+      .resolves.toMatchObject({
+        schema: "murph.hosted-pending-assistant-inputs.v2",
+        schemaVersion: 2,
+      });
+
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      recordedPending.inputId,
+    ]);
+    await expect(inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }))
+      .resolves.toEqual({
+        hasCandidate: true,
+        indexComplete: true,
+      });
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "0",
+      vaultRoot,
+    })).resolves.toEqual(["item_legacy_v1_terminal"]);
+    await expect(compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: "5",
+      vaultRoot,
+    })).resolves.toEqual([]);
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
+      recordedPending.inputId,
+    ]);
   });
 
   it("does not backfill before eligibleAfter when compacting for consume-ack safety", async () => {
@@ -857,11 +1493,12 @@ function createAssistantInputEvent(input: {
   dedupeKey: string;
   eventId: string;
   itemId: string;
+  lane?: "conversation" | "system";
   laneSeq: string;
   messageId: string;
   occurredAt: string;
   receivedAt: string;
-  replyTarget?: "linq" | null;
+  replyTarget?: "linq" | "telegram" | null;
   source?: "linq" | "telegram";
   text: string;
 }) {
@@ -869,7 +1506,7 @@ function createAssistantInputEvent(input: {
   const replyTarget = input.replyTarget === null
     ? null
     : {
-        channel: "linq" as const,
+        channel: input.replyTarget ?? source,
         messageId: input.messageId,
         threadId: "thread_1",
       };
@@ -911,7 +1548,7 @@ function createAssistantInputEvent(input: {
       eventId: input.eventId,
       itemId: input.itemId,
       kind: "hosted-mailbox" as const,
-      lane: "conversation" as const,
+      lane: input.lane ?? "conversation",
       laneSeq: input.laneSeq,
       payloadSchema: "murph.hosted-mailbox-payload.v1",
       payloadSource: "inline" as const,
