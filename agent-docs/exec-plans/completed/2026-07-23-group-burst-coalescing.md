@@ -98,3 +98,6 @@ longer the latest inbound or when multiple conversations interleave.
   after no-reply, segments delivered in direct scope; transcript entries
   follow).
 - `pnpm test:diff` over touched paths; assistant-engine owner suite; typecheck.
+Status: completed
+Updated: 2026-07-23
+Completed: 2026-07-23
