@@ -37,9 +37,11 @@ At kickoff, identify the exact scoring scope and include it with
 a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
 offer only after `read_shared` proves an exact required scope is `not_granted`
-and the challenge page contains neither an explicit decline for that share nor
-a prior handled offer action for it. The device scope is diagnostic context,
-not scoring data: it shares only public
+for at least one affected participant whose challenge-page state contains
+neither an explicit decline for that exact share nor a prior handled offer
+action for that exact participant and scope. A handled action for one
+participant never suppresses an offer needed by another. The device scope is
+diagnostic context, not scoring data: it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
 participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
@@ -394,8 +396,10 @@ automation action rules with a `dailyLocal` schedule and
    use the scoring scope when that scope is `not_granted`; use
    `device-sync-status.v0` only when the scoring scope is granted but has no
    current metric and the diagnostic scope is `not_granted`. Exclude a scope
-   when every affected participant has explicitly declined it or the challenge
-   page records a handled offer action for it. Deduplicate the list.
+   only when every affected participant has either explicitly declined that
+   exact scope or has a handled offer action recorded for that exact participant
+   and scope. A prior handled action for one participant does not cover a newly
+   affected participant. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
    call `murph.group action="post_join_offer"` exactly once after the read with

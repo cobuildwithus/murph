@@ -25,6 +25,10 @@ Updated: 2026-07-23
 - Model-authored group progress remains available but is reserved for genuinely
   long work, never routine challenge setup, permission offers, standings reads,
   or short tool sequences.
+- The group-scoped progress tool description and system prompt carry the same
+  sparse rule, while direct-chat progress guidance remains unchanged.
+- A prior handled permission-offer action is keyed by exact participant and
+  scope and never suppresses a newly affected participant.
 - Focused prompt/skill tests, canonical diff verification, acceptance
   verification, required product/prompt/coverage reviews, and the final
   cross-cutting review pass.
@@ -32,8 +36,8 @@ Updated: 2026-07-23
 ## Scope
 
 - In scope: group-challenge and group-chat skill guidance; group-channel
-  progress prompt guidance; exact prompt/skill/planning regression tests; the
-  group challenge diagnostics product contract.
+  progress prompt and dynamic-tool guidance; exact prompt/skill/planning
+  regression tests; the group challenge diagnostics product contract.
 - Out of scope: Web-owned permission-card copy and accepted reactions; challenge
   scoring, scheduling, consent state, group membership, and direct-message reply
   splitting.
@@ -81,12 +85,15 @@ Updated: 2026-07-23
 - Preserve group `---` bubbles. They were not the cause of the screenshot; the
   defect was a server-owned card followed by redundant assistant narration.
 - Keep `send_progress_update` available in groups, but give it a sparse
-  group-specific prompt: genuinely long work only, at most one update, and
-  never routine challenge setup, permission offers, standings reads, or short
-  tool sequences. System-owned context-compaction progress remains unchanged.
+  group-specific system prompt and tool description: genuinely long work only,
+  at most one update, and never routine challenge setup, permission offers,
+  standings reads, or short tool sequences. System-owned context-compaction
+  progress remains unchanged.
 - Treat `post_join_offer: sent` as opaque because the scheduled adapter exposes
   only that handled status. Record a participant-and-scope handled action from
   the same `read_shared` evidence without claiming a card was visible.
+- Preserve natural `---` bubbles inside one assistant response or dispatch;
+  prohibit only separate status and permission-card companion follow-ups.
 
 ## Verification
 
@@ -128,3 +135,11 @@ Updated: 2026-07-23
     handled-action bookkeeping. Its progress-delivery and low-usage bubble
     findings were not applied after explicit product direction preserved group
     progress and `---` bubbles.
+  - The final rerun found three instruction conflicts: scope-wide handled-offer
+    wording, stale "received an offer" tool copy, and an ambiguous one-message
+    rule. All were accepted and corrected with exact participant-and-scope
+    eligibility plus explicit support for `---` bubbles inside one response.
+  - A product-experience rerun found that the generic progress tool description
+    contradicted the sparse group system prompt. The group route now receives a
+    matching group-specific tool description; the direct route remains
+    unchanged.

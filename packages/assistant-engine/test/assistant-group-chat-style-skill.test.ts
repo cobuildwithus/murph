@@ -50,6 +50,21 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('allows natural bubbles inside one group response without companion follow-ups', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Exactly one assistant response or dispatch per turn.',
+    )
+    expect(normalized).toContain(
+      'Natural `---` bubbles inside that response are allowed.',
+    )
+    expect(normalized).toContain(
+      'Never send a separate status or permission-card companion follow-up',
+    )
+    expect(normalized).not.toContain('Exactly one message per turn.')
+  })
+
   it('lets a server-owned permission card stand alone', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 

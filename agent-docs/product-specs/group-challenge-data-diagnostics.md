@@ -236,8 +236,9 @@ post an additive permission offer. Once a challenge is running, a scheduled
 standings turn may ask Web to post the existing additive offer only as a model
 tool call after `read_shared` reports an exact required scope as `not_granted`.
 Each included scope must have at least one affected participant for whom the
-challenge page records neither an explicit sharing decline nor a prior handled
-offer action.
+challenge page records neither an explicit sharing decline for that exact
+scope nor a prior handled offer action for that exact participant and scope. A
+handled action for one participant never covers another participant.
 
 The operation-local scheduled adapter accepts only scopes supported by that
 turn's missing-grant evidence and only one offer attempt. It rejects calls
