@@ -1,6 +1,6 @@
 # Remove hosted Linq pool serialization
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -49,7 +49,7 @@ Updated: 2026-07-23
    deliverability capacity.
 5. Run canonical verification, product review, preliminary specialist review,
    parent final review, final ReviewGPT, CI, and mergeability proof.
-6. Close the plan, create the final scoped commit, and hand off the open PR.
+6. Close the plan and create the exact pushed head for the final PR gate.
 
 ## Decisions
 
@@ -74,15 +74,19 @@ Updated: 2026-07-23
 - Hosted-web TypeScript check: passed.
 - Direct PostgreSQL final-slot concurrency proof: passed; one of two concurrent
   claims won and the persisted counter stopped at the configured limit.
-- `pnpm test:diff <touched paths>`: passed, including 6,274 hosted-web tests,
-  lint, development smoke, and the production build.
+- Post-remediation `pnpm test:diff <touched paths>`: passed, including 6,275
+  hosted-web tests, lint, development smoke, and the production build.
 - `pnpm docs:drift`: passed after refreshing the durable-doc index.
-- `pnpm verify:acceptance`: passed, including repository guards, workspace
-  typechecks, package coverage, app verification, package boundaries, and the
-  production build.
+- Post-remediation `pnpm verify:acceptance`: passed, including repository
+  guards, workspace typechecks, 6,275 hosted-web tests, package coverage, app
+  verification, package boundaries, and the production build.
 - Independent `product-experience-review`: `NO FINDINGS`.
 - Preliminary `completion-specialists`: findings. Accepted the two coverage
   gaps by proving real PostgreSQL blocking overlap and the all-claims-lost
   fallback. Resolved the rehome concern by deleting the obsolete non-atomic
   assignment-count gate: manual rehome does not send, while the actual
   proactive-send counter remains the hard atomic owner.
+- Parent final review: no findings after inspecting activation, inbound
+  first-contact routing, retry/fallback behavior, the atomic line-row claim,
+  and manual rehome.
+Completed: 2026-07-23
