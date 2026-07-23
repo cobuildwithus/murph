@@ -20,6 +20,7 @@ import {
   upsertHostedMemberPendingLinqParticipantContactTx,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
+import { updateHostedMemberCoreState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { parseHostedLinqWebhookEvent } from "@/src/lib/hosted-onboarding/linq";
 import { lockHostedMemberRow } from "@/src/lib/hosted-onboarding/shared";
@@ -424,12 +425,15 @@ describe.skipIf(!runPostgresConcurrencyProof)(
     });
 
     it.each([
-      "telegram-first",
-      "linq-first",
+      ["active", "telegram-first"],
+      ["active", "linq-first"],
+      ["activation-race", "telegram-first"],
+      ["activation-race", "linq-first"],
     ] as const)(
-      "keeps Telegram and Linq planner mailbox writes deadlock-free with %s routing",
-      async (startOrder) => {
+      "keeps %s-member Telegram and Linq planner mailbox writes deadlock-free with %s routing",
+      async (memberState, startOrder) => {
         const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const activation = createPrismaClient({ databaseUrl, poolMax: 1 });
         const telegramBase = createPrismaClient({ databaseUrl, poolMax: 1 });
         const linqBase = createPrismaClient({ databaseUrl, poolMax: 1 });
         const memberId = `hbm_cross_channel_route_${randomUUID()}`;
@@ -502,6 +506,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const releaseLinqUpsert = createDeferred();
         const telegramPlanFinished = createDeferred();
         const releaseTelegramCommit = createDeferred();
+        const activationUpdated = createDeferred();
+        const releaseActivation = createDeferred();
         const linqPid = createDeferred<number>();
         const telegramClient = telegramBase.$extends({
           query: {
@@ -521,7 +527,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           query: {
             hostedMemberRouting: {
               async upsert({ args, query }) {
-                if (startOrder === "linq-first") {
+                if (
+                  startOrder === "linq-first"
+                  || memberState === "activation-race"
+                ) {
                   linqRouteUpsertReached.resolve();
                   await releaseLinqUpsert.promise;
                 }
@@ -531,13 +540,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         });
         let memberCreated = false;
+        let activationTransaction = Promise.resolve();
         let telegramTransaction = Promise.resolve<string | undefined>(undefined);
         let linqTransaction = Promise.resolve<string | undefined>(undefined);
 
         try {
           await observer.hostedMember.create({
             data: {
-              billingStatus: HostedBillingStatus.active,
+              billingStatus: memberState === "active"
+                ? HostedBillingStatus.active
+                : HostedBillingStatus.not_started,
               id: memberId,
             },
           });
@@ -590,17 +602,47 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             }, transactionOptions);
           };
 
+          if (memberState === "activation-race") {
+            activationTransaction = activation.$transaction(async (tx) => {
+              // Match production activation's member-row owner and core-state
+              // write while keeping unrelated crypto provisioning out of this
+              // lock-order proof.
+              await lockHostedMemberRow(tx, memberId);
+              await updateHostedMemberCoreState({
+                billingStatus: HostedBillingStatus.active,
+                memberId,
+                prisma: tx,
+              });
+              activationUpdated.resolve();
+              await releaseActivation.promise;
+            }, transactionOptions);
+            await activationUpdated.promise;
+            runLinq();
+            await waitForBlockedBackend({
+              observer,
+              pid: await linqPid.promise,
+            });
+            releaseActivation.resolve();
+            await activationTransaction;
+            await linqRouteUpsertReached.promise;
+          }
+
           if (startOrder === "telegram-first") {
             runTelegram();
             await telegramRouteUpserted.promise;
-            runLinq();
+            if (memberState === "active") {
+              runLinq();
+            }
+            releaseLinqUpsert.resolve();
             await waitForBlockedBackend({
               observer,
               pid: await linqPid.promise,
             });
             releaseTelegramUpsert.resolve();
           } else {
-            runLinq();
+            if (memberState === "active") {
+              runLinq();
+            }
             await linqRouteUpsertReached.promise;
             runTelegram();
             await telegramPlanFinished.promise;
@@ -613,8 +655,13 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           }
 
           await expect(
-            Promise.all([telegramTransaction, linqTransaction]),
+            Promise.all([
+              activationTransaction,
+              telegramTransaction,
+              linqTransaction,
+            ]),
           ).resolves.toEqual([
+            undefined,
             "wake-appended-active-member",
             "wake-appended-active-member",
           ]);
@@ -647,7 +694,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           releaseTelegramUpsert.resolve();
           releaseLinqUpsert.resolve();
           releaseTelegramCommit.resolve();
-          await Promise.allSettled([telegramTransaction, linqTransaction]);
+          releaseActivation.resolve();
+          await Promise.allSettled([
+            activationTransaction,
+            telegramTransaction,
+            linqTransaction,
+          ]);
           if (memberCreated) {
             await observer.hostedMailboxItem.deleteMany({
               where: { userId: memberId },
@@ -656,7 +708,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               where: { id: memberId },
             });
           }
-          await disconnectClients([observer, telegramBase, linqBase]);
+          await disconnectClients([
+            observer,
+            activation,
+            telegramBase,
+            linqBase,
+          ]);
         }
       },
     );

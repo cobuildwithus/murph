@@ -1313,7 +1313,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.readHostedMemberSnapshot).not.toHaveBeenCalled();
   });
 
-  it("rechecks inactive access under the member row before taking the route lock", async () => {
+  it("rechecks inactive access under the route owner before routing", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
@@ -1357,16 +1357,14 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       prisma.hostedMember.findUnique.mock.invocationCallOrder[0]!;
     const refreshedAccessReadOrder =
       prisma.hostedMember.findUnique.mock.invocationCallOrder[1]!;
-    const memberRowLockOrder = prisma.$queryRaw.mock.invocationCallOrder.find(
-      (callOrder) =>
-        callOrder > initialAccessReadOrder
-        && callOrder < refreshedAccessReadOrder,
-    );
-    expect(memberRowLockOrder).toBeDefined();
+    const reclassificationLockOrder =
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0]!;
+    expect(initialAccessReadOrder).toBeLessThan(reclassificationLockOrder);
+    expect(reclassificationLockOrder).toBeLessThan(refreshedAccessReadOrder);
     expect(
       refreshedAccessReadOrder,
     ).toBeLessThan(
-      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[0],
+      mocks.acquireHostedMemberHomeLinqRouteLockTx.mock.invocationCallOrder[1],
     );
     expect(mocks.issueHostedInviteTx).not.toHaveBeenCalled();
   });

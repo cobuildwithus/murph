@@ -28,6 +28,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -85,7 +86,6 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "./contact-privacy";
 import { normalizePhoneNumber } from "./phone";
-import { lockHostedMemberRow } from "./shared";
 import {
   ensureHostedThreadContainerRouteTx,
 } from "../hosted-routing/thread-container-service";
@@ -544,7 +544,10 @@ export async function planHostedOnboardingLinqWebhook(input: {
     // The member row is also the home-route owner. Reclassify only after any
     // activation ahead of this request commits, and keep invite or mailbox
     // writes inside that same single-owner boundary.
-    await lockHostedMemberRow(input.prisma, existingMember.id);
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
     existingMemberEffectiveActive = await readActiveHostedMemberAccess({
       memberId: existingMember.id,
       prisma: input.prisma,
