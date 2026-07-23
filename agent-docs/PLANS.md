@@ -8,6 +8,13 @@ Execution plans are first-class artifacts in this repository.
 - Completed: `agent-docs/exec-plans/completed/`
 - Debt tracker: `agent-docs/exec-plans/tech-debt-tracker.md`
 
+Completed plans are immutable, non-operative records of the decisions and
+evidence available when a task closed. They may preserve assumptions later
+superseded by review or implementation. Never use a completed plan for current
+implementation, deployment, rollback, or incident response; follow the live
+owner documents indexed in `agent-docs/index.md`. When they conflict, the live
+owner document prevails and the completed snapshot remains unchanged.
+
 ## Lifecycle Scripts
 
 - Create a plan: `bash scripts/open-exec-plan.sh <slug> "<title>"`
