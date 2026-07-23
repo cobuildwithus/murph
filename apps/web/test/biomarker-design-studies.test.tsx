@@ -117,6 +117,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).toContain("WHOOP Completion Dialog");
   expect(componentsMarkup).toContain("Preview WHOOP completion");
   expect(componentsMarkup).toContain("Preview capacity fallback");
+  expect(componentsMarkup).toContain("Preview capacity fallback without contact route");
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-preparing"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-index"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');

@@ -203,6 +203,8 @@ export function ComponentsContent() {
   const [phoneInputValue, setPhoneInputValue] = useState("");
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
+  const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
+    useState(false);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -589,6 +591,12 @@ export function ComponentsContent() {
               <Button variant="outline" onClick={() => setWhoopCapacityPreviewOpen(true)}>
                 Preview capacity fallback
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setWhoopCapacityNoContactPreviewOpen(true)}
+              >
+                Preview capacity fallback without contact route
+              </Button>
             </div>
             {whoopCompletionPreviewKey > 0 ? (
               <DeviceSyncCompletionDialog
@@ -601,6 +609,12 @@ export function ComponentsContent() {
               guide={WHOOP_COMPLETION_SETUP_GUIDE}
               open={whoopCapacityPreviewOpen}
               onOpenChange={setWhoopCapacityPreviewOpen}
+            />
+            <DeviceSyncSetupGuideDialog
+              contactAction={null}
+              guide={WHOOP_COMPLETION_SETUP_GUIDE}
+              open={whoopCapacityNoContactPreviewOpen}
+              onOpenChange={setWhoopCapacityNoContactPreviewOpen}
             />
           </Section>
         </div>

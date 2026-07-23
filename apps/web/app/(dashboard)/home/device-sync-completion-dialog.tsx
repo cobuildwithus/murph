@@ -193,7 +193,7 @@ export function DeviceSyncSetupGuideDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        showCloseButton={false}
+        showCloseButton={contactAction === null}
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100%-2rem)] gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border sm:max-w-md md:p-7"
       >
         <DialogHeader className="items-center gap-4 text-center">
@@ -271,17 +271,7 @@ export function DeviceSyncSetupGuideDialog({
               <ContactIcon data-icon="inline-start" />
               Continue with Murph
             </a>
-          ) : (
-            <Button
-              type="button"
-              className="w-full"
-              size="xl"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              Continue with Murph
-            </Button>
-          )}
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

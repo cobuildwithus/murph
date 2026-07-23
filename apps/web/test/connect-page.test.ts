@@ -26,21 +26,57 @@ vi.mock("next/image", () => ({
   }),
 }));
 
-vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
-    open ? createElement("div", { "data-dialog-open": "true" }, children) : null,
-  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", {
+vi.mock("@/src/components/ui/dialog", () => {
+  let activeOnOpenChange: ((open: boolean) => void) | undefined;
+
+  return {
+    Dialog: ({
+      children,
+      onOpenChange,
+      open,
+    }: {
+      children?: ReactNode;
+      onOpenChange?: (open: boolean) => void;
+      open?: boolean;
+    }) => {
+      if (!open) {
+        return null;
+      }
+      activeOnOpenChange = onOpenChange;
+      return createElement("div", { "data-dialog-open": "true" }, children);
+    },
+    DialogContent: ({
+      children,
       className,
-      "data-dialog-content": "true",
-    }, children),
-  DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
-    createElement("p", props),
-  DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
-    createElement("div", props),
-  DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
-    createElement("h2", props),
-}));
+      showCloseButton,
+    }: HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) =>
+      createElement(
+        "div",
+        {
+          className,
+          "data-dialog-content": "true",
+        },
+        children,
+        showCloseButton
+          ? createElement(
+              "button",
+              {
+                "aria-label": "Close",
+                onClick: () => activeOnOpenChange?.(false),
+                type: "button",
+              },
+              "Close",
+            )
+          : null,
+      ),
+    DialogDescription: (props: HTMLAttributes<HTMLParagraphElement>) =>
+      createElement("p", props),
+    DialogHeader: (props: HTMLAttributes<HTMLDivElement>) =>
+      createElement("div", props),
+    DialogTitle: (props: HTMLAttributes<HTMLHeadingElement>) =>
+      createElement("h2", props),
+  };
+});
 
 vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
   HostedLegalConsentCard: (props: {
@@ -2664,12 +2700,16 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog when an intent reaches cap
   );
   assert.equal(rendered.assign.mock.calls.length, 0);
 
-  const continueButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "Continue with Murph");
-  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue with Murph"),
+    undefined,
+  );
+  const closeButton = rendered.container.querySelector('button[aria-label="Close"]');
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
 
   await act(async () => {
-    continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    closeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
   assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
@@ -2746,6 +2786,68 @@ test("ConnectSourcesGrid opens the WHOOP setup dialog for a manual start", async
   assert.ok(continueLink instanceof rendered.window.HTMLAnchorElement);
   assert.equal(continueLink.textContent, "Continue with Murph");
   assert.equal(continueLink.target, "_blank");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid gives a no-route manual capacity dialog a truthful close control", async () => {
+  const fetch = vi.fn(async (
+    _input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _input;
+    void _init;
+    return Response.json({
+      error: {
+        code: "WHOOP_DIRECT_CONNECT_CAP_REACHED",
+        message:
+          "Direct WHOOP connections are full right now. You can keep WHOOP syncing through Apple Health in the Murph app.",
+        retryable: false,
+      },
+    }, { status: 409 });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    sources: [
+      {
+        connectTarget: "whoop",
+        description: "Recovery, strain, sleep, and heart rate.",
+        id: "whoop",
+        logo: {
+          className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+          height: 15,
+          src: "/brand-logos/connect/whoop.svg",
+          width: 96,
+        },
+        name: "Whoop",
+      },
+    ],
+  }));
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.match(rendered.container.textContent ?? "", /Get your full sync/);
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/whoop/start");
+  assert.equal(
+    [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Continue with Murph"),
+    undefined,
+  );
+  const closeButton = rendered.container.querySelector('button[aria-label="Close"]');
+  assert.ok(closeButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    closeButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  assert.ok(rendered.container.querySelector("input[aria-label='Search sources']"));
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Get your full sync/);
 
   await rendered.cleanup();
 });
