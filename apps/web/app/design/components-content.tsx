@@ -546,23 +546,63 @@ export function ComponentsContent() {
         <Section title="Usage credit">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Group funding uses one shared card and the standard usage-credit
-            amount dialog. Credit is added only after payment is complete.
+            amount dialog. Family owners reuse that dialog with an exact member
+            label and status-only recovery when another target owns the active
+            checkout. Credit is added only after payment is complete.
           </p>
-          <div
-            className="max-w-xl"
-            data-design-component="group-usage-funding"
-            id="group-usage-funding-component"
-          >
-            <GroupUsageFundingCard
-              action={
+          <div className="grid gap-6 xl:grid-cols-2">
+            <div
+              data-design-component="group-usage-funding"
+              id="group-usage-funding-component"
+            >
+              <GroupUsageFundingCard
+                action={
+                  <HostedUsageTopUpDialog
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    offers={DESIGN_USAGE_OFFERS}
+                    scope="group"
+                  />
+                }
+                groupName="Sunday sleep crew"
+              />
+            </div>
+            <div
+              className="rounded-3xl border border-border bg-card p-6"
+              data-design-component="family-member-usage-top-up"
+              id="family-member-usage-top-up-component"
+            >
+              <p className="text-sm font-medium text-muted-foreground">
+                Family member
+              </p>
+              <p className="mt-1 font-serif text-2xl font-semibold tracking-normal text-foreground">
+                Alex
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Purchase one-time usage credit for this member, or resolve an
+                unfinished checkout for another usage destination.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   offers={DESIGN_USAGE_OFFERS}
-                  scope="group"
+                  scope="family"
+                  targetLabel="Alex"
                 />
-              }
-              groupName="Sunday sleep crew"
-            />
+                <HostedUsageTopUpDialog
+                  activePurchase={{
+                    offerCode: "usage_10_usd",
+                    purchaseId: "design_other_target",
+                    retryAllowed: false,
+                    status: "checkout_open",
+                    targetConflict: true,
+                  }}
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={[]}
+                  scope="family"
+                  targetLabel="Alex"
+                />
+              </div>
+            </div>
           </div>
         </Section>
 

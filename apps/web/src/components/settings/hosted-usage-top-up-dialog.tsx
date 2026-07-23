@@ -69,10 +69,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const purchase = screen.kind === "purchase" ? screen : null;
   const selection = screen.kind === "selection" ? screen : null;
   const canResume =
-    purchase?.status === "checkout_open" && purchase.checkoutUrl !== null;
+    purchase?.targetConflict !== true &&
+    purchase?.status === "checkout_open" &&
+    purchase.checkoutUrl !== null;
   const canCancel = purchase?.status === "checkout_open";
   const canRetry =
     purchase !== null &&
+    !purchase.targetConflict &&
     purchase.retryOfferCode !== null &&
     (purchase.status === "reconciling" ||
       (purchase.status === "checkout_open" && !canResume));
@@ -94,6 +97,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           ? "Check payment"
           : null
     : null;
+  const familyTarget =
+    props.scope === "family" && props.targetLabel ? props.targetLabel : null;
+  const triggerLabel =
+    purchaseTriggerLabel ??
+    (props.scope === "group" ? "Choose amount" : "Add usage");
   const statusContent = purchase
     ? readStatusContent({
         canResumeCheckout: canResume,
@@ -104,6 +112,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           props.purchaseReturn.purchaseId === purchase.purchaseId,
         scope: props.scope,
         status: purchase.status,
+        targetLabel: familyTarget ?? undefined,
         targetConflict: purchase.targetConflict,
       })
     : null;
@@ -125,10 +134,13 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               size={props.scope === "group" ? "xl" : "lg"}
               variant={props.scope === "group" ? "default" : "outline"}
               className={props.scope === "group" ? "w-full" : undefined}
+              aria-label={
+                familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
+              }
             />
           }
         >
-          {purchaseTriggerLabel ?? (props.scope === "group" ? "Choose amount" : "Add usage")}
+          {triggerLabel}
         </DialogTrigger>
       ) : null}
       <DialogContent
@@ -142,10 +154,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             className="text-3xl font-semibold leading-[1.1] tracking-tight outline-none"
           >
             {statusContent
-              ? statusContent.title
+              ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
               : props.offers.length === 0
                 ? "Usage credit unavailable"
-                : "Choose an amount"}
+                : familyTarget
+                  ? `Choose an amount for ${familyTarget}`
+                  : "Choose an amount"}
           </DialogTitle>
           <DialogDescription className="max-w-md text-base leading-6">
             {purchase
@@ -153,12 +167,16 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 ? "Manage the unfinished checkout before starting one for this usage destination."
                 : props.scope === "group"
                   ? "We’ll update this group’s credit as soon as payment is complete."
-                  : "We’ll update your credit as soon as payment is complete."
+                  : familyTarget
+                    ? `We’ll update the available credit for ${familyTarget} as soon as payment is complete.`
+                    : "We’ll update your credit as soon as payment is complete."
               : props.offers.length === 0
                 ? "There isn’t a usage-credit offer available for this account right now."
                 : props.scope === "group"
                   ? "Choose a one-time credit amount for this group."
-                  : "Choose a one-time credit amount for your account."}
+                  : familyTarget
+                    ? `Choose a one-time credit amount for ${familyTarget}.`
+                    : "Choose a one-time credit amount for your account."}
           </DialogDescription>
         </DialogHeader>
 

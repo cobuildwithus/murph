@@ -74,7 +74,7 @@ describe("assistant plan usage guidance", () => {
       "Do not provide that private account-management link for group_not_supported or hosted_access_inactive",
     );
     expect(guidance).toContain(
-      "not a group balance, group-funding, Checkout, or payment surface",
+      "not a Family or group balance, Family or group funding, Checkout, or payment surface",
     );
   });
 
@@ -110,5 +110,12 @@ describe("assistant plan usage guidance", () => {
     );
     expect(guidance).toContain("do not invent an action or claim a change");
     expect(guidance).toContain("murph.plan_usage's explicit private management handoff");
+    expect(guidance).toContain(`${MURPH_PRODUCT_ORIGIN}/settings#family`);
+    expect(guidance).toContain("owner=true, billingActive=true");
+    expect(guidance).toContain("matches exactly one members row with status=active");
+    expect(guidance).toContain("navigation only");
+    expect(MURPH_PLAN_USAGE_TOOL.description).toContain(
+      "For Family member usage management, do not use this tool or the personal subscription link",
+    );
   });
 });

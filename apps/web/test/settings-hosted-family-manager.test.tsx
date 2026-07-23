@@ -15,6 +15,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   requestHostedOnboardingJson: vi.fn(),
+  usageTopUpDialogProps: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -33,6 +34,23 @@ vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
     }
   },
   requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+}));
+
+vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
+  HostedUsageTopUpDialog: (props: {
+    activePurchase?: unknown;
+    checkoutUrl?: string;
+    deferTerminalRefreshUntilClose?: boolean;
+    offers: readonly unknown[];
+    purchaseReturn?: unknown;
+    scope?: string;
+    targetLabel?: string;
+  }) => {
+    mocks.usageTopUpDialogProps(props);
+    return props.offers.length > 0 || props.activePurchase || props.purchaseReturn
+      ? createElement("button", { type: "button" }, "Add usage")
+      : null;
+  },
 }));
 
 vi.mock("@/src/components/ui/dialog", () => ({
@@ -866,6 +884,112 @@ test("HostedFamilyManager hides the no-contact hint when the active contact has 
     assert.doesNotMatch(
       container.textContent ?? "",
       /No contact\? Anyone with the link can join\./,
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager leaves payment actions only on the frozen Family member", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: false,
+    status: "checkout_open" as const,
+    url: "https://checkout.stripe.test/session",
+  };
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: [
+        props.members[0],
+        {
+          isOwner: false,
+          joinedAtIso: "2026-07-10T00:00:00.000Z",
+          label: "Family member",
+          memberId: "member_family",
+          pendingPlanCode: null,
+          planCode: "edge" as const,
+        },
+      ],
+      usageTopUpActiveMemberId: "member_family",
+      usageTopUpActivePurchase: activePurchase,
+      usageTopUpOffers: [
+        { amountLabel: "$5", offerCode: "usage_5_usd" },
+        { amountLabel: "$10", offerCode: "usage_10_usd" },
+        { amountLabel: "$25", offerCode: "usage_25_usd" },
+      ],
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    expect([...container.querySelectorAll("button")].filter(
+      (button) => button.textContent === "Add usage",
+    )).toHaveLength(1);
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: null,
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+        offers: [],
+        scope: "family",
+        targetLabel: "you",
+      }),
+    );
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase,
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_family/usage-credit/checkout",
+        offers: [],
+        scope: "family",
+        targetLabel: "Family member",
+      }),
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+test("HostedFamilyManager renders a server-withheld former-member checkout as status-only", async () => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const activePurchase = {
+    offerCode: "usage_10_usd",
+    purchaseId: "hucp_abcdefghijklmnop",
+    retryAllowed: false,
+    status: "checkout_open" as const,
+  };
+  const { cleanup, container } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...baseFamilyManagerProps(),
+      usageTopUpActiveMemberId: "member_former",
+      usageTopUpActivePurchase: activePurchase,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      container.textContent ?? "",
+      /former family member\. It cannot be paid here/,
+    );
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase,
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_former/usage-credit/checkout",
+        deferTerminalRefreshUntilClose: true,
+        offers: [],
+        scope: "family",
+        targetLabel: "a former family member",
+      }),
     );
   } finally {
     await cleanup();
