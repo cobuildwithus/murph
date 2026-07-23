@@ -1,6 +1,6 @@
 # Tighten group challenge messaging UX
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -110,11 +110,10 @@ Updated: 2026-07-23
   - The complete Web group-tool test file passes all 79 tests, including the
     existing regression proving `status: sent` can accompany an all-granted
     result with no provider card send.
-  - Final local `test:diff` passed all affected typechecks, assistant-engine
-    (2,606
-    tests), and assistant-cli (128 tests). Its downstream assistant-runtime
-    shard was blocked by an unrelated shared `/tmp` test vault containing a v2
-    synthetic state file while this base expects v1.
+  - After reconciling the latest `main`, final local `test:diff` passed every
+    affected typecheck, package test, and Cloudflare verification lane,
+    including assistant-engine (2,606 tests), assistant-runtime (1,825 tests),
+    CLI (1,080 tests), and Cloudflare (1,873 tests).
   - A fresh Crabbox Testbox independently passed the affected typechecks,
     assistant-engine (2,604 tests), and assistant-runtime (1,801 tests),
     confirming the local runtime failure was environmental. The broad
@@ -148,8 +147,10 @@ Updated: 2026-07-23
     `NO FINDINGS`. They confirmed group/direct progress separation, preserved
     `---` bubbles, participant-and-scope offer eligibility, and card-only
     `finish_without_reply` behavior.
-  - `pnpm verify:acceptance` passed the full workspace typecheck, the
-    assistant-engine coverage lane (2,606 tests), broad package coverage, Web
-    lint/tests/build progress, and repository guards before the same unrelated
-    assistant-runtime shared-vault schema mismatch failed the package-coverage
-    aggregate.
+  - Final `pnpm verify:acceptance` passed the full workspace typecheck, the
+    assistant-engine and assistant-runtime coverage lanes, Web tests/lint/build,
+    broad package coverage, and repository guards. Its aggregate remained
+    non-green because one unrelated Venice setup-wizard test failed in the
+    broad parallel setup coverage lane; the immediate isolated rerun passed all
+    six tests in that file.
+Completed: 2026-07-23
