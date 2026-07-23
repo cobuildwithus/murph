@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 import {
   HostedLegalConsentCard,
   type HostedLegalConsentAcceptScope,
@@ -19,6 +21,11 @@ export function DashboardLegalConsentGate({
   variant?: "initial" | "update";
 }) {
   const isUpdate = variant === "update";
+  const pathname = usePathname();
+
+  if (pathname === "/records/connect") {
+    return null;
+  }
 
   return (
     <section

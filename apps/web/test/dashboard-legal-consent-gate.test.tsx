@@ -1,4 +1,4 @@
-import { act, createElement } from "react";
+import { act, createElement, Fragment, type ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
@@ -18,6 +18,29 @@ vi.mock("@/src/components/hosted-onboarding/client-api", async (importOriginal) 
     requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
   };
 });
+
+vi.mock("next/link", () => ({
+  default: ({
+    children,
+    className,
+    href,
+  }: {
+    children: ReactNode;
+    className?: string;
+    href: string;
+  }) => createElement("a", { className, href }, children),
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => window.location.pathname,
+}));
+
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
+  useAuth: () => ({
+    authenticated: true,
+    openAuthDialog: vi.fn(),
+  }),
+}));
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -238,6 +261,144 @@ test("persisted partial consent submits only the missing scope and reloads the e
   expect(rendered.reload).toHaveBeenCalledTimes(1);
 });
 
+test.each([
+  {
+    acceptedStatuses: [
+      createLaunchConsentStatus({ launchLegalGranted: true }),
+      createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+        launchLegalGranted: true,
+      }),
+    ],
+    initialStatus: createLaunchConsentStatus(),
+    label: "zero grants",
+    submittedScopes: ["launch.legal", "launch.health-data"],
+    variant: "initial" as const,
+  },
+  {
+    acceptedStatuses: [
+      createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+        launchLegalGranted: true,
+      }),
+    ],
+    initialStatus: createLaunchConsentStatus({ launchLegalGranted: true }),
+    label: "only legal granted",
+    submittedScopes: ["launch.health-data"],
+    variant: "initial" as const,
+  },
+  {
+    acceptedStatuses: [
+      createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+        launchLegalGranted: true,
+      }),
+    ],
+    initialStatus: createLaunchConsentStatus({
+      launchHealthDataGranted: true,
+    }),
+    label: "only health data granted",
+    submittedScopes: ["launch.legal"],
+    variant: "initial" as const,
+  },
+  {
+    acceptedStatuses: [
+      createLaunchConsentStatus({ launchLegalGranted: true }),
+      createLaunchConsentStatus({
+        launchHealthDataGranted: true,
+        launchLegalGranted: true,
+      }),
+    ],
+    initialStatus: createLaunchConsentStatus(),
+    label: "stale current versions",
+    submittedScopes: ["launch.legal", "launch.health-data"],
+    variant: "update" as const,
+  },
+])("clinical records keeps one consent owner with $label", async ({
+  acceptedStatuses,
+  initialStatus,
+  submittedScopes,
+  variant,
+}) => {
+  const claim = `cr_${"a".repeat(32)}`;
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce(initialStatus);
+  for (const acceptedStatus of acceptedStatuses) {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce(acceptedStatus);
+  }
+  const { RecordsConnectClient } = await import(
+    "../app/(dashboard)/records/connect/records-connect-client"
+  );
+
+  const rendered = await renderClientComponent(
+    createElement(
+      Fragment,
+      null,
+      createElement(DashboardLegalConsentGate, {
+        initialStatus,
+        variant,
+      }),
+      createElement(RecordsConnectClient, { authenticated: true }),
+    ),
+    {
+      location: {
+        hash: `#clinicalRecordsIntent=${claim}`,
+        href: `https://app.example.test/records/connect#clinicalRecordsIntent=${claim}`,
+        origin: "https://app.example.test",
+        pathname: "/records/connect",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  cleanupRender = rendered.cleanup;
+
+  await vi.waitFor(() => {
+    expect(rendered.container.textContent).toContain(
+      "Review how Murph uses your health data",
+    );
+  });
+  expect(rendered.container.textContent).not.toContain("Finish your consent");
+  expect(rendered.container.textContent).not.toContain("Review what changed");
+  expect(
+    [...rendered.container.querySelectorAll("button")].filter((button) =>
+      button.textContent?.includes("Continue"),
+    ),
+  ).toHaveLength(1);
+
+  const checkboxes = [
+    ...rendered.container.querySelectorAll('input[type="checkbox"]'),
+  ] as HTMLInputElement[];
+  expect(checkboxes).toHaveLength(submittedScopes.length);
+  for (const checkbox of checkboxes) {
+    await act(async () => {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true, cancelable: true }),
+      );
+      checkbox.dispatchEvent(
+        new rendered.window.Event("input", { bubbles: true }),
+      );
+      checkbox.dispatchEvent(
+        new rendered.window.Event("change", { bubbles: true }),
+      );
+    });
+  }
+
+  const continueButton = findButton(rendered.container, "Continue");
+  await act(async () => {
+    continueButton.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    await flushPromises();
+  });
+
+  await vi.waitFor(() => {
+    expect(rendered.container.textContent).toContain("Where do you get care?");
+  });
+  expect(rendered.container.textContent).not.toContain("Consent required");
+  expect(readRequestedConsentScopes().filter(Boolean)).toEqual(submittedScopes);
+});
+
 test("a consent preview uses only its injected in-memory acceptance owner", async () => {
   const currentStatus = createLaunchConsentStatus();
   const legalAcceptedStatus = createLaunchConsentStatus({
@@ -399,7 +560,7 @@ function findButton(container: Element, label: string): HTMLButtonElement {
 
 function readRequestedConsentScopes(): unknown[] {
   return mocks.requestHostedOnboardingJson.mock.calls.map(
-    ([request]) => request.payload.scope,
+    ([request]) => request.payload?.scope,
   );
 }
 
