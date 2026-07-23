@@ -16,14 +16,17 @@ export function buildHostedInviteReply(input: {
 }
 
 export function buildHostedDailyQuotaReply(input: {
+  dailyTextLimit?: number;
   seed?: string | null;
 } = {}): string {
+  const dailyTextLimit = input.dailyTextLimit ?? HOSTED_LINQ_DAILY_TEXT_LIMIT;
+
   return renderUserFacingMessage({
     context: {
-      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
+      dailyTextLimit,
     },
     key: "linq.daily_quota",
-    seed: input.seed ?? `daily-quota:${HOSTED_LINQ_DAILY_TEXT_LIMIT}`,
+    seed: input.seed ?? `daily-quota:${dailyTextLimit}`,
   }).text;
 }
 
