@@ -562,59 +562,6 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
   return counts;
 }
 
-export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(input: {
-  prisma: HostedOnboardingReadClient;
-  recipientPhones: readonly string[];
-  since: Date;
-}): Promise<Map<string, number>> {
-  const recipientPhoneEntries = buildHostedRecipientPhoneLookupEntries(
-    input.recipientPhones,
-  );
-
-  if (recipientPhoneEntries.length === 0) {
-    return new Map();
-  }
-
-  const counts = new Map<string, number>(
-    recipientPhoneEntries.map(({ recipientPhone }) => [recipientPhone, 0]),
-  );
-  const recipientPhoneByLookupKey = new Map(
-    recipientPhoneEntries.map(({ lookupKey, recipientPhone }) => [
-      lookupKey,
-      recipientPhone,
-    ] as const),
-  );
-
-  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
-    by: ["linqRecipientPhoneLookupKey"],
-    where: {
-      linqHomeLineAssignedAt: {
-        gte: input.since,
-      },
-      linqRecipientPhoneLookupKey: {
-        in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
-      },
-    },
-    _count: {
-      _all: true,
-    },
-  });
-
-  for (const groupedCount of groupedCounts) {
-    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
-      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
-      : null;
-
-    if (!recipientPhone) {
-      continue;
-    }
-
-    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
-  }
-
-  return counts;
-}
-
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
   homeLineAssignedAt: Date | null;

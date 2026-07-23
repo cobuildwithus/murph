@@ -22,7 +22,6 @@ const mocks = vi.hoisted(() => ({
   lookupHostedMemberRoutingByHomeLinqChatId: vi.fn(),
   lookupHostedMemberRoutingByPendingLinqParticipantContact: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince: vi.fn(),
   countHostedMemberHomeLinqBindingsByRecipientPhone: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
@@ -111,8 +110,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
   acquireHostedMemberHomeLinqRouteLockTx:
     mocks.acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince:
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone:
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone,
   lookupHostedMemberRoutingByHomeLinqChatId: mocks.lookupHostedMemberRoutingByHomeLinqChatId,
@@ -209,7 +206,6 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       linq.parseHostedLinqWebhookEvent(input.rawBody),
     );
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
-    mocks.countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince.mockResolvedValue(new Map());
     mocks.countHostedMemberHomeLinqBindingsByRecipientPhone.mockResolvedValue(new Map());
     mocks.claimHostedLinqOnboardingLinkNotice.mockResolvedValue(true);
     mocks.claimHostedLinqQuotaReplyNotice.mockResolvedValue(true);

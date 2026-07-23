@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -39,10 +39,40 @@ function createDeferred<T = void>(): Deferred<T> {
   return { promise, resolve };
 }
 
+async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
+  const rows = await tx.$queryRaw<Array<{ pid: number }>>`
+    SELECT pg_backend_pid() AS pid
+  `;
+  const pid = rows[0]?.pid;
+  if (typeof pid !== "number") {
+    throw new Error("Expected a PostgreSQL backend pid.");
+  }
+  return pid;
+}
+
+async function waitForBlockedBackend(input: {
+  observer: PrismaClient;
+  pid: number;
+}): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const rows = await input.observer.$queryRaw<Array<{ blocked: boolean }>>`
+      SELECT cardinality(pg_blocking_pids(${input.pid})) > 0 AS blocked
+    `;
+    if (rows[0]?.blocked === true) {
+      return;
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(
+    "Expected the PostgreSQL proactive-capacity contender to wait on the final slot.",
+  );
+}
+
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted Linq proactive capacity PostgreSQL concurrency",
   () => {
     it("admits only one concurrent claim for the final daily slot", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
       const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
       const phoneNumberLookupKey =
@@ -50,6 +80,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const dayUtc = new Date("2026-07-23T00:00:00.000Z");
       const limit = 50;
       const ownerClaimed = createDeferred<boolean>();
+      const contenderPid = createDeferred<number>();
       const releaseOwner = createDeferred();
       let contenderTransaction: Promise<boolean> | null = null;
       let ownerTransaction: Promise<boolean> | null = null;
@@ -84,17 +115,19 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           Promise.race([ownerClaimed.promise, ownerTransaction]),
         ).resolves.toBe(true);
 
-        contenderTransaction = contender.$transaction(
-          (tx) =>
-            claimHostedLinqProactiveConversationCapacityTx({
-              dayUtc,
-              limit,
-              phoneNumberLookupKey,
-              prisma: tx,
-            }),
-          transactionOptions,
-        );
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          return claimHostedLinqProactiveConversationCapacityTx({
+            dayUtc,
+            limit,
+            phoneNumberLookupKey,
+            prisma: tx,
+          });
+        }, transactionOptions);
+        await waitForBlockedBackend({
+          observer,
+          pid: await contenderPid.promise,
+        });
         releaseOwner.resolve();
 
         await expect(
@@ -119,7 +152,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             where: { phoneNumberLookupKey },
           });
         }
-        await disconnectClients([owner, contender]);
+        await disconnectClients([observer, owner, contender]);
       }
     });
   },

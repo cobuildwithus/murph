@@ -25,7 +25,6 @@ import { type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRouteLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   demoteHostedMemberLinqGroupChatBindingsTx,
   upsertHostedMemberHomeLinqBindingTx,

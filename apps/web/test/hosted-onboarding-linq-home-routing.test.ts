@@ -1213,6 +1213,40 @@ describe("resolveHostedMemberActivationLinqRoute", () => {
     );
   });
 
+  it("keeps the home assignment but suppresses the welcome when every atomic claim loses", async () => {
+    const line = buildLine("+15550100001", {
+      proactiveConversationCount: 49,
+      proactiveConversationDayUtc: startOfUtcDay(new Date()),
+    });
+    mocks.listHostedLinqAssignableHomeLines.mockResolvedValue([line]);
+    mocks.claimHostedLinqProactiveConversationCapacityTx.mockResolvedValue(false);
+
+    await expect(
+      resolveHostedMemberActivationLinqRoute({
+        member: buildMember(),
+        prisma: {} as never,
+      }),
+    ).resolves.toEqual({
+      welcomeRoute: null,
+    });
+
+    expect(
+      mocks.claimHostedLinqProactiveConversationCapacityTx,
+    ).toHaveBeenCalledTimes(2);
+    expect(mocks.upsertHostedMemberHomeLinqRecipientPhoneTx).toHaveBeenCalledWith({
+      clearPending: true,
+      homeLineAssignedAt: expect.any(Date),
+      memberId: "member_123",
+      prisma: {} as never,
+      recipientPhone: line.phoneNumber,
+    });
+    expect(
+      mocks.claimHostedLinqProactiveConversationCapacityTx.mock.invocationCallOrder[1],
+    ).toBeLessThan(
+      mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mock.invocationCallOrder[0],
+    );
+  });
+
   it("assigns a home line but suppresses the welcome when every line is at the hard cap", async () => {
     const dayUtc = startOfUtcDay(new Date());
     const firstLine = buildLine("+15550100001", {

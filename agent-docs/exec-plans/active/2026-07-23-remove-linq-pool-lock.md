@@ -59,6 +59,10 @@ Updated: 2026-07-23
 - Keep the daily proactive limit as the only atomic shared-pool capacity gate
   because it protects deliverability and already has a lock-free conditional
   update.
+- Manual rehome changes route ownership but does not send or open a proactive
+  conversation. It therefore checks only member ownership and target
+  assignability; applying proactive-send quotas there would require needless
+  shared coordination around a non-sending operation.
 - Retry a failed atomic claim once on the same line to absorb a UTC-day rollover
   race, then try the remaining daily-eligible lines within the same request.
   Genuine thrown database failures continue through the existing bounded
@@ -77,3 +81,8 @@ Updated: 2026-07-23
   typechecks, package coverage, app verification, package boundaries, and the
   production build.
 - Independent `product-experience-review`: `NO FINDINGS`.
+- Preliminary `completion-specialists`: findings. Accepted the two coverage
+  gaps by proving real PostgreSQL blocking overlap and the all-claims-lost
+  fallback. Resolved the rehome concern by deleting the obsolete non-atomic
+  assignment-count gate: manual rehome does not send, while the actual
+  proactive-send counter remains the hard atomic owner.
