@@ -272,7 +272,7 @@ async function prewarmHostedMemberActivationWriteDomainRoots(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  await Promise.all(
+  const outcomes = await Promise.allSettled(
     (["control", "ingress"] as const).map(async (domain) => {
       const root = await unwrapHostedDomainRootForWeb({
         domain,
@@ -282,6 +282,13 @@ async function prewarmHostedMemberActivationWriteDomainRoots(input: {
       root.rootKey.fill(0);
     }),
   );
+  const failure = outcomes.find(
+    (outcome): outcome is PromiseRejectedResult =>
+      outcome.status === "rejected",
+  );
+  if (failure) {
+    throw failure.reason;
+  }
 }
 
 export function buildHostedMemberActivationWelcomeRoute(input: {
