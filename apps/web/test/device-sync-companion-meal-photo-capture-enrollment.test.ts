@@ -12,6 +12,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   lockHostedMemberSponsoredAccessRows: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 
@@ -62,6 +64,7 @@ describe("meal photo capture enrollment credentials", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.lockHostedMemberRow.mockResolvedValue(undefined);
     mocks.lockHostedMemberSponsoredAccessRows.mockResolvedValue(undefined);
@@ -300,10 +303,11 @@ describe("meal photo capture enrollment credentials", () => {
       memberId: MEMBER_ID,
       prisma: prisma.client,
     });
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: prisma.client,
     });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
 
     mocks.assertActiveHostedMemberAccessAllowed.mockClear();
     prisma.setRecord({
@@ -353,10 +357,11 @@ describe("meal photo capture enrollment credentials", () => {
       memberId: MEMBER_ID,
       prisma: prisma.tx,
     });
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: prisma.tx,
     });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
 
     prisma.setRecord({
       ...requireStoredEnrollment(prisma.getRecord()),

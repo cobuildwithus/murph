@@ -6,7 +6,7 @@ import {
   IMessageMiniAppService,
   validateIMessageMiniAppProofAction,
 } from "@/src/lib/imessage-mini-app/service";
-import { assertHostedLaunchRequiredConsentGranted } from "@/src/lib/legal/consent";
+import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -18,12 +18,15 @@ export const POST = withJsonError(async (request: Request) => {
   const credential = await miniApp.requireCredential();
 
   // Credential issuance is not permanent account authority. Re-check the
-  // owning member and current launch consent on every extension action.
+  // owning member and launch consent on every extension action. Proof taps
+  // happen inside the iMessage extension with no consent UI, so stale
+  // launch-document acceptance must not break them; members with no grant at
+  // all still fail closed. Enrollment keeps requiring the current versions.
   await assertActiveHostedMemberAccessAllowed({
     memberId: credential.userId,
     prisma,
   });
-  await assertHostedLaunchRequiredConsentGranted({
+  await assertHostedHistoricalLaunchConsentGranted({
     memberId: credential.userId,
     prisma,
   });
