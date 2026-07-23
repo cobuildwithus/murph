@@ -23,6 +23,10 @@ const hostedDomainRootUnwrapCacheStorage = new AsyncLocalStorage<HostedDomainRoo
 export async function runWithHostedDomainRootUnwrapCache<TResult>(
   run: () => Promise<TResult>,
 ): Promise<TResult> {
+  if (hostedDomainRootUnwrapCacheStorage.getStore()) {
+    return run();
+  }
+
   const cache: HostedDomainRootUnwrapCache = new Map();
   try {
     return await hostedDomainRootUnwrapCacheStorage.run(cache, run);

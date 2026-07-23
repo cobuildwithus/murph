@@ -258,6 +258,8 @@ jobs:
           apps/web/test/device-sync-dirty-account-deletion-concurrency.test.ts
           apps/web/test/hosted-assistant-ask-retention-postgres.test.ts
           apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts
+          apps/web/test/hosted-onboarding-linq-home-routing-postgres.test.ts
+          apps/web/test/hosted-onboarding-member-lock-postgres.test.ts
           apps/web/test/hosted-onboarding-linq-participant-addition-concurrency.test.ts
           apps/web/test/hosted-linq-invite-deletion-contract-migration-postgres.test.ts
           apps/web/test/hosted-usage-credit-postgres-concurrency.test.ts

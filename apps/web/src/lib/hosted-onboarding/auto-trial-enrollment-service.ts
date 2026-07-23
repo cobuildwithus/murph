@@ -2,6 +2,7 @@ import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/cli
 import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
 import { HOSTED_APP_INITIAL_VISIT_HOME_PATH } from "./app-routes";
 import { buildHostedBillingOfferMetadata } from "./billing-offer-metadata";
@@ -12,6 +13,7 @@ import {
   isHostedAutoPulseTrialEnabled,
   parseHostedPulseTrialPolicyVersion,
 } from "./billing-plans";
+import { readStripeShouldRetryDirective } from "./billing";
 import { isHostedMemberSuspended } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
@@ -20,7 +22,8 @@ import {
 } from "./hosted-member-store";
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
-  withHostedMemberStripeMutationLock,
+  HostedMemberStripeMutationLockBusyError,
+  withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
@@ -39,10 +42,6 @@ import {
 } from "./member-activation-runtime-wake";
 import { requireHostedStripeBillingPlanConfig } from "./runtime";
 import {
-  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  lockHostedMemberRow,
-} from "./shared";
-import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -53,6 +52,17 @@ import {
   writeHostedMemberStripeBillingTx,
 } from "./stripe-billing-policy";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
+
+const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
+const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
+const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
+const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 120_000;
+const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS = 3;
+const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_RETRY_BASE_DELAY_MS = 25;
+const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
+  maxNetworkRetries: 0,
+  timeout: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS,
+} as const satisfies Stripe.RequestOptions;
 
 export type HostedAutoPulseTrialEnrollmentStatus =
   | "already_active"
@@ -252,43 +262,61 @@ export async function ensureHostedAutoPulseTrialEnrollment(
       stripe,
     });
 
-  const reservation = await prisma.$transaction(async (tx): Promise<HostedAutoPulseTrialReservationOutcome> => {
-    await lockHostedMemberRow(tx, invite.member.id);
-    const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+  let reservation: HostedAutoPulseTrialReservationOutcome;
+  try {
+    reservation = await withHostedMemberStripeMutationLockForOps({
+      acquisitionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
       memberId: invite.member.id,
-      prisma: tx,
+      prisma,
+      run: (tx): Promise<HostedAutoPulseTrialReservationOutcome> =>
+        runWithHostedDomainRootUnwrapCache(async () => {
+          const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+            memberId: invite.member.id,
+            prisma: tx,
+          });
+          const currentStatus =
+            resolveHostedAutoPulseTrialExistingStatus(currentMember);
+          if (currentStatus) {
+            return {
+              kind: "existing",
+              result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
+            };
+          }
+
+          assertHostedAutoPulseTrialEligible(currentMember);
+          const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
+            ? currentMember.billingRef
+            : await bindHostedMemberStripeCustomerIdIfMissingTx({
+                memberId: invite.member.id,
+                stripeCustomerId: candidateStripeCustomerId,
+                tx,
+              });
+          const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
+          if (!stripeCustomerId) {
+            throw hostedOnboardingError({
+              code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
+              httpStatus: 409,
+              message:
+                "Murph could not reserve Stripe billing for trial activation. Try again.",
+              retryable: true,
+            });
+          }
+
+          return {
+            kind: "reserved",
+            stripeCustomerId,
+          };
+        }),
+      transactionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS,
     });
-    const currentStatus = resolveHostedAutoPulseTrialExistingStatus(currentMember);
-    if (currentStatus) {
-      return {
-        kind: "existing",
-        result: buildHostedAutoPulseTrialEnrollmentResult(currentStatus),
-      };
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
     }
-
-    assertHostedAutoPulseTrialEligible(currentMember);
-    const reservedBillingRef = currentMember.billingRef?.stripeCustomerId
-      ? currentMember.billingRef
-      : await bindHostedMemberStripeCustomerIdIfMissingTx({
-          memberId: invite.member.id,
-          stripeCustomerId: candidateStripeCustomerId,
-          tx,
-        });
-    const stripeCustomerId = reservedBillingRef?.stripeCustomerId;
-    if (!stripeCustomerId) {
-      throw hostedOnboardingError({
-        code: "HOSTED_AUTO_PULSE_TRIAL_CUSTOMER_BIND_FAILED",
-        httpStatus: 409,
-        message: "Murph could not reserve Stripe billing for trial activation. Try again.",
-        retryable: true,
-      });
-    }
-
-    return {
-      kind: "reserved",
-      stripeCustomerId,
-    };
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    throw error;
+  }
 
   if (reservation.kind === "existing") {
     const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
@@ -556,44 +584,15 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   stripeCustomerId: string;
   subscriptionId: string;
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
-  const outcome = await withHostedMemberStripeMutationLock({
-    memberId: input.memberId,
-    prisma: input.prisma,
-    run: async (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> => {
-      const subscription = await input.stripe.subscriptions.retrieve(
-        input.subscriptionId,
-      );
-      const decisionNow = new Date();
-      assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
-        memberId: input.memberId,
-        priceId: input.priceId,
-        stripeCustomerId: input.stripeCustomerId,
-        subscription,
-      });
-      const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
-        subscription,
-        decisionNow,
-      );
-      const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-      const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
-        currentMember,
-        memberId: input.memberId,
-        now: input.now,
-        stripeCustomerId: input.stripeCustomerId,
-        subscription,
-        trialSnapshot,
-        tx,
-      });
-      await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
-        stripe: input.stripe,
-        subscriptionId: outcome.cleanupStripeSubscriptionId,
-      });
-      return outcome;
-    },
-  });
+  let outcome: HostedAutoPulseTrialFinalizationOutcome;
+  try {
+    outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input);
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
+    }
+    throw error;
+  }
 
   if (outcome.kind === "failed") {
     throw outcome.error;
@@ -605,6 +604,169 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   });
 
   return outcome.result;
+}
+
+function buildHostedAutoPulseTrialFinalizationBusyError() {
+  return hostedOnboardingError({
+    code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+    httpStatus: 503,
+    message: "Murph is still finishing this trial setup. Try again.",
+    retryable: true,
+  });
+}
+
+async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
+  memberId: string;
+  now: Date;
+  priceId: string;
+  prisma: PrismaClient;
+  stripe: Stripe;
+  stripeCustomerId: string;
+  subscriptionId: string;
+}): Promise<HostedAutoPulseTrialFinalizationOutcome> {
+  for (
+    let attempt = 1;
+    attempt <= HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      return await withHostedMemberStripeMutationLockForOps({
+        acquisitionTimeoutMs:
+          HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
+        memberId: input.memberId,
+        prisma: input.prisma,
+        run: (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> =>
+          runWithHostedDomainRootUnwrapCache(async () => {
+            const subscription =
+              await retrieveHostedAutoPulseTrialFinalizationSubscription({
+                stripe: input.stripe,
+                subscriptionId: input.subscriptionId,
+              });
+            const decisionNow = new Date();
+            assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
+              memberId: input.memberId,
+              priceId: input.priceId,
+              stripeCustomerId: input.stripeCustomerId,
+              subscription,
+            });
+            const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
+              subscription,
+              decisionNow,
+            );
+            const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+              memberId: input.memberId,
+              prisma: tx,
+            });
+            const finalizationOutcome =
+              await finalizeHostedAutoPulseTrialEnrollmentTx({
+                currentMember,
+                memberId: input.memberId,
+                now: input.now,
+                stripeCustomerId: input.stripeCustomerId,
+                subscription,
+                trialSnapshot,
+                tx,
+              });
+            await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+              requestOptions:
+                HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+              stripe: input.stripe,
+              subscriptionId:
+                finalizationOutcome.cleanupStripeSubscriptionId,
+            });
+            return finalizationOutcome;
+          }),
+        transactionTimeoutMs:
+          HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof HostedMemberStripeMutationLockBusyError) ||
+        attempt === HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS
+      ) {
+        throw error;
+      }
+      await waitForHostedAutoPulseTrialFinalizationRetry(attempt);
+    }
+  }
+
+  throw new Error("Hosted auto Pulse Trial finalization attempts exhausted.");
+}
+
+async function waitForHostedAutoPulseTrialFinalizationRetry(
+  completedAttempt: number,
+): Promise<void> {
+  const delayCeilingMs =
+    HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_RETRY_BASE_DELAY_MS *
+    (2 ** (completedAttempt - 1));
+  const delayMs = Math.floor(Math.random() * (delayCeilingMs + 1));
+  if (delayMs === 0) {
+    return;
+  }
+  await new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+async function retrieveHostedAutoPulseTrialFinalizationSubscription(input: {
+  stripe: Stripe;
+  subscriptionId: string;
+}): Promise<HostedAutoPulseTrialCampaignSubscription> {
+  try {
+    return await input.stripe.subscriptions.retrieve(
+      input.subscriptionId,
+      {},
+      HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+    );
+  } catch (error) {
+    if (isDefinitiveHostedAutoPulseTrialStripeAuthorityRejection(error)) {
+      throw hostedOnboardingError({
+        cause: error,
+        code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_REJECTED",
+        httpStatus: 502,
+        message: "Murph could not confirm this trial. Contact support.",
+      });
+    }
+    throw hostedOnboardingError({
+      cause: error,
+      code: "HOSTED_AUTO_PULSE_TRIAL_STRIPE_UNAVAILABLE",
+      httpStatus: 503,
+      message: "Stripe is still confirming this trial. Try again.",
+      retryable: true,
+    });
+  }
+}
+
+function isDefinitiveHostedAutoPulseTrialStripeAuthorityRejection(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const shouldRetry = readStripeShouldRetryDirective(error);
+  if (shouldRetry !== null) {
+    return !shouldRetry;
+  }
+  const statusCode = "statusCode" in error &&
+      typeof error.statusCode === "number"
+    ? error.statusCode
+    : null;
+  if (statusCode !== null) {
+    return statusCode >= 400 &&
+      statusCode < 500 &&
+      statusCode !== 409 &&
+      statusCode !== 429;
+  }
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : null;
+  const rawType = "rawType" in error && typeof error.rawType === "string"
+    ? error.rawType
+    : null;
+  return type === "StripeInvalidRequestError" ||
+    type === "StripeAuthenticationError" ||
+    type === "StripePermissionError" ||
+    rawType === "invalid_request_error" ||
+    rawType === "authentication_error" ||
+    rawType === "permission_error";
 }
 
 function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
@@ -920,6 +1082,7 @@ async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
 
   const subscriptions = await listHostedAutoPulseTrialStripeSubscriptionsForRecovery({
     pageLimit: 1,
+    requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
     stripe: input.stripe,
     stripeCustomerId,
   });
@@ -935,13 +1098,28 @@ async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
     )
     .map((subscription) => subscription.id);
 
-  await cancelHostedPulseTrialLoserSubscriptionsForMember({
-    memberId: input.memberId,
-    priceId: input.priceId,
-    prisma: input.prisma,
-    stripe: input.stripe,
-    subscriptionIds: loserSubscriptionIds,
-  });
+  try {
+    await cancelHostedPulseTrialLoserSubscriptionsForMember({
+      lockBudget: {
+        acquisitionTimeoutMs:
+          HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
+        transactionTimeoutMs:
+          HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
+      },
+      memberId: input.memberId,
+      priceId: input.priceId,
+      prisma: input.prisma,
+      requestOptions:
+        HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+      stripe: input.stripe,
+      subscriptionIds: loserSubscriptionIds,
+    });
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
+    }
+    throw error;
+  }
 }
 
 async function findReusableHostedAutoPulseTrialStripeSubscription(input: {
