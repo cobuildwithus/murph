@@ -288,6 +288,74 @@ describe("hosted Linq contact card client", () => {
     });
   });
 
+  it("corrects a non-Murph first name without clearing legacy provider fields", async () => {
+    const observedAt = new Date("2026-06-25T12:30:00.000Z");
+    linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({
+      syncedCount: 1,
+    });
+    linqLineStoreMocks.listHostedLinqContactCardLines.mockResolvedValue([
+      {
+        phoneNumber: "+15550000001",
+        phoneNumberHint: "*** 0001",
+        phoneNumberLookupKey: "lookup:1",
+        providerStatus: "HEALTHY",
+      },
+    ]);
+    const prisma = {};
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input : new URL(String(input));
+
+      if (url.pathname.endsWith("/contact_card")
+        && url.searchParams.get("phone_number") === "+15550000001"
+        && init?.method === "GET") {
+        return createJsonResponse({
+          contact_cards: [
+            {
+              first_name: "Murphy",
+              image_url: "https://cdn.linqapp.com/example/contact-card/sample/image-current.png",
+              is_active: true,
+              last_name: "Legacy",
+              phone_number: "+15550000001",
+            },
+          ],
+        });
+      }
+
+      if (url.pathname.endsWith("/contact_card")
+        && url.searchParams.get("phone_number") === "+15550000001"
+        && init?.method === "PATCH") {
+        expect(readJsonRequestBody(init)).toEqual({
+          first_name: "Murph",
+        });
+        return createJsonResponse({
+          first_name: "Murph",
+          image_url: "https://cdn.linqapp.com/example/contact-card/sample/image-current.png",
+          is_active: true,
+          last_name: "Legacy",
+          phone_number: "+15550000001",
+        });
+      }
+
+      throw new Error(`Unexpected Linq URL ${url.pathname}${url.search}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(reconcileHostedLinqContactCards({
+      observedAt,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      activeCards: 0,
+      atRiskLines: 0,
+      createdCards: 0,
+      criticalLines: 0,
+      inactiveCards: 0,
+      lineCount: 1,
+      updatedCards: 1,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps legacy provider fields when the contact-card first name is current", async () => {
     const observedAt = new Date("2026-06-25T12:30:00.000Z");
     linqInventoryMocks.syncHostedLinqPhoneNumberInventory.mockResolvedValue({

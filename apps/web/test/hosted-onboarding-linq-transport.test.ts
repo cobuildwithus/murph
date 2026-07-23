@@ -3,12 +3,20 @@ import { HostedBillingStatus } from "@prisma/client";
 
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
+  maybeShareHostedLinqContactCardAfterOutboundForRuntime: vi.fn().mockResolvedValue({
+    action: "share",
+  }),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
   acquireHostedLinqChatOwnershipLockTx:
     transportBoundaryMocks.acquireHostedLinqChatOwnershipLockTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  maybeShareHostedLinqContactCardAfterOutboundForRuntime:
+    transportBoundaryMocks.maybeShareHostedLinqContactCardAfterOutboundForRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async () => {
@@ -253,6 +261,9 @@ describe("hosted Linq webhook transport", () => {
       chatId: "chat-1",
       message: "invite-reply",
     }));
+    expect(
+      transportBoundaryMocks.maybeShareHostedLinqContactCardAfterOutboundForRuntime,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not dispatch a signup link when its exact active invite is absent", async () => {
