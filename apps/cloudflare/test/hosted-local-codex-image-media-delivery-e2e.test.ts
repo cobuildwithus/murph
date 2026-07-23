@@ -396,6 +396,9 @@ async function ensureScenario(): Promise<void> {
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    // The generated-image upload-failure regression arms a deliberate fault
+    // injection, so the harness must allow mutating intervention controls.
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-codex-media-",
