@@ -14,6 +14,26 @@ async function readNormalizedGroupChatSkill(): Promise<string> {
 }
 
 describe('assistant group-chat style guidance', () => {
+  it('completes explicitly requested compound media actions without fake provider limits', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Default to one assistant-authored response per turn.',
+    )
+    expect(normalized).toContain(
+      'Tool-owned effects the group explicitly requests, such as a contact card plus a song, may accompany it.',
+    )
+    expect(normalized).toContain(
+      'If the group explicitly requests a song plus another supported action, complete both in the current turn.',
+    )
+    expect(normalized).toContain(
+      'never invent a provider limitation to justify an assistant choice',
+    )
+    expect(normalized).not.toContain(
+      'it cannot share the turn with the contact card',
+    )
+  })
+
   it('keeps emoji use occasional instead of habitual', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
