@@ -29,6 +29,9 @@ import {
   writeRunnerRuntimeWriteFenceHeaders,
 } from "../../src/runner-outbound/write-fence.ts";
 import {
+  handleRunnerGeneratedImageUploadRequest,
+} from "../../src/runner-outbound/generated-images.ts";
+import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -295,6 +298,13 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
     return Response.json(await measureRunnerLeaseLatency(request));
   }
 
+  if (
+    url.pathname === "/__test/generated-images/upload-handler-signal"
+    && request.method === "POST"
+  ) {
+    return Response.json(await exerciseGeneratedImageUploadHandlerSignal(request));
+  }
+
   if (url.pathname === "/__test/alarm" && request.method === "POST") {
     const body = await request.json() as { userId?: unknown };
 
@@ -469,6 +479,70 @@ async function measureRunnerLeaseLatency(request: Request): Promise<{
     iterations,
     liveLease: summarizeLatency(liveLeaseSamples),
     warmupIterations,
+  };
+}
+
+async function exerciseGeneratedImageUploadHandlerSignal(request: Request): Promise<{
+  observedHasSignal: boolean;
+  observedSignalIsIncoming: boolean;
+  status: number;
+}> {
+  const userId = `member_generated_image_upload_worker_${Date.now()}`;
+  await getUserRunnerStub(userId).bindUser(userId);
+  const lease = await getUserRunnerStub(userId).beginWriteFenceForTest({
+    userId,
+    workspaceVersion: "7",
+  });
+  const headers = new Headers({
+    "content-type": "application/json; charset=utf-8",
+  });
+  writeRunnerRuntimeWriteFenceHeaders(headers, {
+    attemptId: lease.attemptId,
+    generation: lease.leaseGeneration,
+    workspaceVersion: lease.workspaceVersion ?? "7",
+  });
+
+  const uploadRequest = new Request("http://results.worker/generated-images", {
+    body: JSON.stringify({
+      alt: "Generated image upload worker test",
+      bytesBase64: "UklGRgAAAABXRUJQ",
+      contentType: "image/webp",
+      filename: "generated.webp",
+      metadata: {
+        source: "worker-generated-image-upload-signal",
+      },
+      source: "worker-generated-image-upload-signal",
+    }),
+    headers,
+    method: "POST",
+    signal: request.signal,
+  });
+  let observedHasSignal = false;
+  let observedSignalIsIncoming = false;
+  const response = await handleRunnerGeneratedImageUploadRequest({
+    env: {
+      ...readWorkerEnvironmentSource(),
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: "worker-test-account",
+      CLOUDFLARE_IMAGES_API_KEY: "worker-test-token",
+    },
+    fetchImpl: async (_input, init) => {
+      observedHasSignal = init?.signal instanceof AbortSignal;
+      observedSignalIsIncoming = init?.signal === uploadRequest.signal;
+      return Response.json({
+        result: {
+          variants: ["https://imagedelivery.net/worker-test/generated/public"],
+        },
+        success: true,
+      });
+    },
+    request: uploadRequest,
+    userId,
+  });
+
+  return {
+    observedHasSignal,
+    observedSignalIsIncoming,
+    status: response.status,
   };
 }
 

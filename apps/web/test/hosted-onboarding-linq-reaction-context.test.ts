@@ -305,7 +305,7 @@ describe("stageHostedLinqGroupReactionContext", () => {
             parts: [
               {
                 type: "text",
-                value: "Yes.",
+                value: "Reacted with a like reaction.",
               },
             ],
             reply_to: {
@@ -317,6 +317,41 @@ describe("stageHostedLinqGroupReactionContext", () => {
         event_type: "message.received",
       });
       expect(mocks.getHostedLinqReactionTargetMessage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["heart", undefined, "Reacted with a heart reaction."],
+    ["custom", "👍", "Reacted with 👍."],
+    ["custom", "❤", "Reacted with ❤."],
+  ])(
+    "describes a qualifying %s reaction in the synthetic message",
+    async (reactionType, customEmoji, expectedText) => {
+      mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          { handle: "+15551234567", isMe: false, status: "active" },
+        ],
+        isGroup: false,
+      });
+
+      await expect(buildHostedLinqAffirmativeReactionMessageEvent({
+        event: buildReactionEvent({
+          customEmoji,
+          reactionType,
+        }),
+      })).resolves.toMatchObject({
+        data: {
+          message: {
+            parts: [
+              {
+                type: "text",
+                value: expectedText,
+              },
+            ],
+          },
+        },
+      });
     },
   );
 

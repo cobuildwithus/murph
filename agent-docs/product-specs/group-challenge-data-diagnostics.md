@@ -12,9 +12,8 @@ participant whose data is missing, explains only what current authorized
 evidence supports, and gives the smallest safe next action.
 
 This contract adds an explicit `device-sync-status.v0` group share. It gives
-the room enough bounded connection context to distinguish a missing group
-grant from a visible source problem without exposing private account or device
-details.
+the room bounded literal connection-status context without exposing private
+account or device details. It never establishes why a shared metric is absent.
 
 ## Product outcome
 
@@ -28,8 +27,9 @@ Every scheduled challenge update does all of the following:
   reporting cutoff. A real zero is a score; absent data is not zero.
 - Names every `in` participant who is waiting on data in a separate status
   section.
-- Gives every missing participant one current evidence-backed reason and the
-  smallest useful action, or says the reason is unverified.
+- Gives every missing participant the current evidence-backed status and the
+  smallest useful action, while keeping the metric's absence causally
+  unverified.
 - Keeps individual troubleshooting and private account details in the affected
   participant's private thread.
 
@@ -149,15 +149,29 @@ to each `in` participant and stops at the first match:
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data through the reporting cutoff | Include the participant in the ranked standings. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data through the reporting cutoff | Include the participant in settled ranked standings only when the fact is not a current-local-day value. A same-day value may appear only in clearly labeled provisional/live standings. | None. Device status cannot override current metric evidence. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
-| Metric scope granted, but no `device-sync-status.v0` grant | Murph cannot verify why the metric is absent because connection status was not shared. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
-| Live diagnostic result with `needs-reconnect` or `disconnected` | Name the literal source label and its current coarse status. | Ask the participant to reconnect that source in their private Murph/app flow. |
-| Live diagnostic result with `setting-up` | The visible source is still setting up. | Ask the participant to finish setup in their private Murph/app flow. |
-| Live diagnostic result with `needs-attention` | The visible source needs attention; the result does not prove why. | Ask the participant to open Murph and inspect that source privately. Do not translate this into an Apple Health denial. |
-| Live diagnostic result with `connected`, but no metric data | The source is connected, but the challenge metric has not reached Murph. | Give a source-appropriate recovery step without claiming a cause. |
-| Live diagnostic result with no visible sources | No connected health source is visible in the consented result. | Ask the participant to check or connect a source privately. |
-| Diagnostic read unavailable | Murph cannot verify the reason. | Do not guess. Offer a private check and retry only through a later model-triggered read. |
+| Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
+| Live diagnostic result with `needs-reconnect` or `disconnected` | The current shared read lacks a usable metric and its cause is unverified. Separately name the literal source label and coarse status. | The literal status supports asking the participant to reconnect that source privately; do not claim reconnecting will restore the metric. |
+| Live diagnostic result with `setting-up` | The current shared read lacks a usable metric and its cause is unverified. Separately say that the visible source is still setting up. | Ask the participant to finish setup privately based on the literal status alone. |
+| Live diagnostic result with `needs-attention` | The current shared read lacks a usable metric and its cause is unverified. Separately say that the visible source needs attention. | Ask the participant to inspect that source privately. Do not translate this into an Apple Health denial or an explanation for the absent metric. |
+| Live diagnostic result with `connected` | The current shared read lacks a usable metric and its cause is unverified. Separately say only that the source reports `connected`. | Offer a private check as troubleshooting, not as an established cause or guaranteed fix. |
+| Live diagnostic result with an empty `sources` array | The current shared read lacks a usable metric and its cause is unverified. Separately say only that this diagnostic result contains no visible sources. | Offer a private source check. Do not infer that no source exists or explain the metric absence. |
+| Diagnostic read missing, stale, or unavailable | The current shared read lacks a usable metric; its cause is unverified. | Do not guess. Offer a private check and retry only through a later model-triggered read. |
+
+Any absent shared metric means only that the current consented read lacks a
+usable metric; its cause is unverified. It does not prove that the private vault
+lacks a workout, that a provider failed to sync, that import failed, or that
+snapshot refresh failed. Even a current `device-sync-status.v0` record supports
+only its literal source status and timestamps, never a causal claim about the
+missing metric. New `activity-days.v0` broad-movement rows carry
+`"broad-movement"`; new `workout-days.v0` canonical combined rows carry
+`"canonical-workout-day"`. During the producer-first compatibility release,
+readers continue accepting legacy unmarked rows until the bounded snapshot
+refresh is complete; exact-marker rejection ships only after that drain.
+Distinct workouts on one day add in the canonical workout-day rollup; Murph
+must never explain or correct a day by replacing one workout's minutes with
+another's.
 
 ## Apple Health boundary
 
@@ -168,14 +182,12 @@ cannot prove that the participant has not opened the app.
 
 When Apple Health has the literal `connected` status in a live diagnostic
 result and current Steps are absent from the authorized group snapshot,
-Murph may say that this group does not currently have recent Steps for the
-participant and that Apple Health is visible as connected. Other Apple Health
-statuses follow their status-specific rules. A `connected` status does not
-prove private ingestion failed;
-projection production may be the missing step. The safe first action is to open
-Murph. If Steps still do not arrive, Murph may ask the participant to check
-Apple Health Steps access. It must not present either action as the established
-cause.
+Murph may state only two independent facts: this group does not currently have
+recent Steps for the participant, and Apple Health is visible as connected.
+Other Apple Health statuses follow their literal status-specific rules.
+Opening Murph and checking Apple Health Steps access are private
+troubleshooting options only. Murph must not describe either option, the
+connection status, or projection production as the cause of the missing Steps.
 
 Liking or hearting a group permission offer grants only the disclosed Murph
 group-sharing scopes. It cannot grant or change HealthKit authorization.
@@ -270,14 +282,15 @@ case under the automatic-message invariant.
 The standings update stays one conversational group message. It leads with
 completeness, then separates the ranked standings from named participants
 waiting on data. For example, the semantic shape is "partial standings: 2 of 5
-current," a ranked section, then a waiting section with one reason/action per
+current," a ranked section, then a waiting section with one status/action per
 person. When eligible, Web's canonical permission card is a separate message;
 Murph never authors generic consent copy or tells members to react to standings.
 
 Names in the waiting section are operational status, not performance shaming.
-Each update may include the participant's current evidence-backed reason and
-smallest action because those facts explain how to read the standings. It does
-not repeat speculative causes or expose private troubleshooting in the room.
+Each update may include the participant's current evidence-backed status and
+smallest action because those facts explain how to read the standings. When a
+usable metric is absent, it says the cause is unverified. It does not repeat
+speculative causes or expose private troubleshooting in the room.
 
 ## Deployment compatibility
 
@@ -311,6 +324,30 @@ to a bundle that restores or consumes legacy local projections; disable the Web
 producer/read path and forward-fix instead. There is no cleanup wake, local
 drain, or foreground reconciliation step in either deployment or rollback.
 
+The canonical activity-semantics correction uses two small releases instead of
+a rollout flag or another state owner:
+
+1. Deploy the compatibility release to Web first. Its parser and encrypted
+   snapshot store preserve the optional `broad-movement` and
+   `canonical-workout-day` markers while readers still accept unmarked legacy
+   rows.
+2. Deploy Cloudflare from the same commit with
+   `container_rollout=immediate`, prove the runner fingerprint, and confirm one
+   ordinary projection carries both markers.
+3. Use the existing operator maintenance surface to wake current checkpointed
+   grantors in canary and bounded batches. That durable mailbox wake reuses the
+   ordinary Temporal, runtime checkpoint, and idle projection paths; it is not
+   a new backfill service. Retry failures and verify from aggregate evidence
+   that every current activity/workout snapshot was replaced after the
+   producer cutover.
+4. Only after the legacy population is zero, deploy the separate strict
+   consumer release that rejects missing or wrong markers.
+
+Browser replicas rebuild on their normal access/refresh path. Query SQLite,
+browser replicas, and group snapshots are derived and rebuildable, so this
+correction has no canonical or PostgreSQL migration. Do not add read-triggered
+cross-member fanout, polling, a scheduler, or persisted rollout state.
+
 ## Acceptance cases
 
 - Five `in` participants with two current scores produce a "2 of 5" partial
@@ -318,10 +355,11 @@ drain, or foreground reconciliation step in either deployment or rollback.
 - A participant with an explicit zero remains ranked at zero.
 - A participant missing the exact metric grant gets a group-share explanation,
   not a device diagnosis.
-- A participant missing only diagnostic consent gets an unverified explanation,
-  not a guessed Apple Health state.
+- A participant missing only diagnostic consent gets an unverified-cause
+  statement, not a guessed Apple Health state.
 - An Apple Health `connected` result plus absent Steps recommends
-  opening Murph and checking Steps access only as recovery steps.
+  opening Murph and checking Steps access only as non-causal troubleshooting
+  options.
 - A three-day-old connection sync-job timestamp may be named literally but is
   not presented as health-data receipt or a proven cause.
 - Challenge kickoff never calls `post_join_offer` as a side effect.

@@ -73,6 +73,8 @@ import type {
   WearableBodyStateSummary,
   WearableCandidateSourceFamily,
   WearableConfidenceLevel,
+  WearableDailyCumulativeMetric,
+  WearableDailyMaximumMetric,
   WearableDataset,
   WearableDaySummary,
   WearableDriftSummary,
@@ -116,6 +118,7 @@ import type {
   ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
 import {
+  ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
@@ -185,58 +188,64 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
   const metricCandidatesByDate = groupMetricCandidatesByDate(
     dataset.metricCandidates.filter((candidate) => metricSetHas(ACTIVITY_METRIC_KEYS, candidate.metric)),
   );
-  const activitySessionAggregatesByDate = groupActivitySessionAggregatesByDate(dataset.activitySessionAggregates);
+  const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
+    dataset.activitySessionDayRollups,
+  );
   const dates = collectSortedDatesDesc([
     ...metricCandidatesByDate.keys(),
-    ...activitySessionAggregatesByDate.keys(),
+    ...activitySessionDayRollupsByDate.keys(),
   ]);
 
   return dates.map((date) => {
     const dateCandidates = metricCandidatesByDate.get(date) ?? [];
-    const aggregates = activitySessionAggregatesByDate.get(date) ?? [];
-    const activityMetricCandidates = [
-      ...dateCandidates,
-      ...aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates),
-    ];
-    const steps = resolveMetric("steps", selectMetricCandidates(dateCandidates, "steps"), { metricFamily: "activity" });
-    const activeCalories = resolveMetric("activeCalories", selectMetricCandidates(activityMetricCandidates, "activeCalories"), {
+    const explicitDateCandidates = dateCandidates;
+    const aggregates = activitySessionDayRollupsByDate.get(date) ?? [];
+    const workoutMetricCandidates = aggregates.flatMap(buildActivitySessionWorkoutMetricCandidates);
+    const steps = resolveMetric("steps", selectMetricCandidates(explicitDateCandidates, "steps"), { metricFamily: "activity" });
+    const activeCalories = resolveDailyCumulativeMetric(
+      "activeCalories",
+      explicitDateCandidates,
+      workoutMetricCandidates,
+    );
+    const totalCalories = resolveMetric("totalCalories", selectMetricCandidates(explicitDateCandidates, "totalCalories"), {
       metricFamily: "activity",
     });
-    const totalCalories = resolveMetric("totalCalories", selectMetricCandidates(dateCandidates, "totalCalories"), {
+    const distanceKm = resolveDailyCumulativeMetric(
+      "distanceKm",
+      explicitDateCandidates,
+      workoutMetricCandidates,
+    );
+    const floorsClimbed = resolveMetric("floorsClimbed", selectMetricCandidates(explicitDateCandidates, "floorsClimbed"), {
       metricFamily: "activity",
     });
-    const distanceKm = resolveMetric("distanceKm", selectMetricCandidates(activityMetricCandidates, "distanceKm"), {
-      metricFamily: "activity",
-    });
-    const floorsClimbed = resolveMetric("floorsClimbed", selectMetricCandidates(dateCandidates, "floorsClimbed"), {
-      metricFamily: "activity",
-    });
-    const totalElevationGainMeters = resolveMetric(
+    const totalElevationGainMeters = resolveDailyCumulativeMetric(
       "totalElevationGainMeters",
-      selectMetricCandidates(activityMetricCandidates, "totalElevationGainMeters"),
-      { metricFamily: "activity" },
+      explicitDateCandidates,
+      workoutMetricCandidates,
     );
     const altitudeChangeMeters = resolveMetric(
       "altitudeChangeMeters",
-      selectMetricCandidates(dateCandidates, "altitudeChangeMeters"),
+      selectMetricCandidates(explicitDateCandidates, "altitudeChangeMeters"),
       { metricFamily: "activity" },
     );
-    const estimatedVo2Max = resolveMetric("estimatedVo2Max", selectMetricCandidates(dateCandidates, "estimatedVo2Max"), {
+    const estimatedVo2Max = resolveMetric("estimatedVo2Max", selectMetricCandidates(explicitDateCandidates, "estimatedVo2Max"), {
       metricFamily: "cardio",
     });
-    const activityScore = resolveMetric("activityScore", selectMetricCandidates(dateCandidates, "activityScore"), {
+    const activityScore = resolveMetric("activityScore", selectMetricCandidates(explicitDateCandidates, "activityScore"), {
       metricFamily: "activity",
     });
-    const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(dateCandidates, "dayStrain"), {
+    const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(explicitDateCandidates, "dayStrain"), {
       metricFamily: "activity",
     });
-    const workoutStrain = resolveMetric("workoutStrain", selectMetricCandidates(activityMetricCandidates, "workoutStrain"), {
-      metricFamily: "activity",
-    });
-    const maxHeartRate = resolveMetric("maxHeartRate", selectMetricCandidates(activityMetricCandidates, "maxHeartRate"), {
-      metricFamily: "activity",
-    });
-    const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(dateCandidates, "percentRecorded"), {
+    const workoutStrain = resolveDailyMaximumMetric(
+      "workoutStrain",
+      selectMetricCandidates([...explicitDateCandidates, ...workoutMetricCandidates], "workoutStrain"),
+    );
+    const maxHeartRate = resolveDailyMaximumMetric(
+      "maxHeartRate",
+      selectMetricCandidates([...explicitDateCandidates, ...workoutMetricCandidates], "maxHeartRate"),
+    );
+    const percentRecorded = resolveMetric("percentRecorded", selectMetricCandidates(explicitDateCandidates, "percentRecorded"), {
       metricFamily: "activity",
     });
     const sessionMinutes = resolveMetric(
@@ -306,6 +315,187 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       workoutStrain,
     };
   });
+}
+
+function resolveDailyCumulativeMetric(
+  metric: WearableDailyCumulativeMetric,
+  explicitDateCandidates: readonly WearableMetricCandidate[],
+  workoutMetricCandidates: readonly WearableMetricCandidate[],
+): WearableResolvedMetric {
+  const explicitDaily = resolveMaximumKnownMetric(
+    metric,
+    selectMetricCandidates(explicitDateCandidates, metric),
+    "explicit daily maximum",
+  );
+  const workoutRollup = resolveMetric(
+    metric,
+    selectMetricCandidates(workoutMetricCandidates, metric),
+    { metricFamily: "activity" },
+  );
+  return resolveOverlappingDailyMetricBranches({
+    explicit: explicitDaily,
+    explicitLabel: "explicit daily total",
+    metric,
+    reducerLabel: "daily cumulative lower-bound",
+    relationship: "these overlapping totals were not added",
+    workout: workoutRollup,
+    workoutLabel: "workout rollup",
+  });
+}
+
+function formatDailyReducerValue(selection: WearableMetricSelection): string {
+  if (selection.value === null) {
+    return "unknown";
+  }
+
+  const unit = selection.unit ? ` ${selection.unit}` : "";
+  return `${selection.value}${unit}`;
+}
+
+function resolveDailyMaximumMetric(
+  metric: WearableDailyMaximumMetric,
+  candidates: readonly WearableMetricCandidate[],
+): WearableResolvedMetric {
+  if (ACTIVITY_BRANCH_SCOPED_METRIC_KEYS.has(metric)) {
+    const explicitMaximum = resolveMaximumKnownMetric(
+      metric,
+      candidates.filter((candidate) => !isActivitySessionRollupMetricCandidate(candidate)),
+      "explicit daily maximum",
+    );
+    const workoutMaximum = resolveMaximumKnownMetric(
+      metric,
+      candidates.filter(isActivitySessionRollupMetricCandidate),
+      "workout maximum",
+    );
+    return resolveOverlappingDailyMetricBranches({
+      explicit: explicitMaximum,
+      explicitLabel: "explicit daily maximum",
+      metric,
+      reducerLabel: "daily nested-maximum",
+      relationship: "these nested maxima were not treated as disagreement",
+      workout: workoutMaximum,
+      workoutLabel: "workout maximum",
+    });
+  }
+
+  return resolveMaximumKnownMetric(metric, candidates, "daily maximum");
+}
+
+function isActivitySessionRollupMetricCandidate(candidate: WearableMetricCandidate): boolean {
+  return candidate.sourceKind === "activity-session-aggregate"
+    || candidate.sourceKind === "activity-session-day-rollup";
+}
+
+function resolveOverlappingDailyMetricBranches(input: {
+  explicit: WearableResolvedMetric;
+  explicitLabel: string;
+  metric: WearableDailyCumulativeMetric | WearableDailyMaximumMetric;
+  reducerLabel: string;
+  relationship: string;
+  workout: WearableResolvedMetric;
+  workoutLabel: string;
+}): WearableResolvedMetric {
+  const explicitValue = input.explicit.selection.value;
+  const workoutValue = input.workout.selection.value;
+  if (explicitValue === null && workoutValue === null) {
+    return input.explicit;
+  }
+
+  const chooseWorkout =
+    workoutValue !== null
+    && (explicitValue === null || workoutValue > explicitValue);
+  const selected = chooseWorkout ? input.workout : input.explicit;
+  const other = chooseWorkout ? input.explicit : input.workout;
+  const selectedLabel = chooseWorkout ? input.workoutLabel : input.explicitLabel;
+  const otherLabel = chooseWorkout ? input.explicitLabel : input.workoutLabel;
+  const reason = other.selection.value === null
+    ? `Used the ${selectedLabel} as the only known ${formatMetricLabel(input.metric)} value for the day.`
+    : selected.selection.value === other.selection.value
+      ? `Applied the ${input.reducerLabel} reducer: selected the ${selectedLabel} (${formatDailyReducerValue(
+          selected.selection,
+        )}), which matched the ${otherLabel}; ${input.relationship}.`
+      : `Applied the ${input.reducerLabel} reducer: selected the ${selectedLabel} (${formatDailyReducerValue(
+          selected.selection,
+        )}) over the ${otherLabel} (${formatDailyReducerValue(
+          other.selection,
+        )}); ${input.relationship}.`;
+
+  return {
+    candidates: [...input.explicit.candidates, ...input.workout.candidates],
+    confidence: {
+      ...selected.confidence,
+      candidateCount:
+        input.explicit.confidence.candidateCount
+        + input.workout.confidence.candidateCount,
+      exactDuplicateCount:
+        input.explicit.confidence.exactDuplicateCount
+        + input.workout.confidence.exactDuplicateCount,
+      reasons: [reason, ...selected.confidence.reasons],
+    },
+    metric: input.metric,
+    selection: selected.selection,
+  };
+}
+
+function resolveMaximumKnownMetric(
+  metric: WearableDailyCumulativeMetric | WearableDailyMaximumMetric,
+  candidates: readonly WearableMetricCandidate[],
+  reducerLabel: string,
+): WearableResolvedMetric {
+  const resolved = resolveMetric(metric, candidates, { metricFamily: "activity" });
+  const maximumValue = resolved.candidates.reduce<number | null>((maximum, candidate) =>
+    maximum === null || candidate.value > maximum ? candidate.value : maximum, null);
+  if (maximumValue === null) {
+    return resolved;
+  }
+
+  const maximum = resolveMetric(
+    metric,
+    resolved.candidates.filter((candidate) => candidate.value === maximumValue),
+    { metricFamily: "activity" },
+  );
+  const selectedProvider = maximum.selection.provider;
+  const conflictingProviders = selectedProvider
+    ? uniqueStrings(
+        resolved.candidates
+          .filter((candidate) => candidate.provider !== selectedProvider)
+          .filter((candidate) =>
+            Math.abs(candidate.value - maximumValue) > resolveMetricTolerance(metric)
+          )
+          .map((candidate) => candidate.provider),
+      )
+    : [];
+  const selectedEvidence = maximum.selection.sourceKind
+    ? `${formatProviderName(selectedProvider ?? "unknown")} ${maximum.selection.sourceKind}`
+    : formatProviderName(selectedProvider ?? "unknown");
+  const exactDuplicateReason = resolved.confidence.exactDuplicateCount > 0
+    ? [
+        `Suppressed ${resolved.confidence.exactDuplicateCount} exact duplicate candidate${
+          resolved.confidence.exactDuplicateCount === 1 ? "" : "s"
+        } before applying the ${reducerLabel} reducer.`,
+      ]
+    : [];
+  const conflictReason = conflictingProviders.length > 0
+    ? [`Conflicting values remained from ${conflictingProviders.map(formatProviderName).join(", ")}.`]
+    : [];
+
+  return {
+    candidates: resolved.candidates,
+    confidence: {
+      ...resolved.confidence,
+      conflictingProviders,
+      reasons: [
+        `Applied the ${reducerLabel} reducer across ${resolved.confidence.candidateCount} valid candidate${
+          resolved.confidence.candidateCount === 1 ? "" : "s"
+        } and selected ${selectedEvidence} at ${formatDailyReducerValue(maximum.selection)}.`,
+        ...exactDuplicateReason,
+        ...maximum.confidence.reasons,
+        ...conflictReason,
+      ],
+    },
+    metric,
+    selection: maximum.selection,
+  };
 }
 
 export function listWearableSleepNights(

@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 
 import { test } from "vitest";
 
+import { buildWearableSummaryBundleFromDataset } from "../src/wearables.ts";
+import {
+  buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
+} from "../src/wearables/candidates.ts";
 import { buildWearableSourceHealth } from "../src/wearables/source-health.ts";
 import type {
   WearableActivityDay,
@@ -130,7 +135,9 @@ function makeSleepWindowCandidate(
 
 function makeDataset(overrides: Partial<WearableDataset>): WearableDataset {
   return {
+    activitySessionCandidates: overrides.activitySessionCandidates ?? [],
     activitySessionAggregates: overrides.activitySessionAggregates ?? [],
+    activitySessionDayRollups: overrides.activitySessionDayRollups ?? [],
     metricSuppressionEvidence: overrides.metricSuppressionEvidence ?? [],
     metricCandidates: overrides.metricCandidates ?? [],
     provenanceDiagnostics: overrides.provenanceDiagnostics ?? [],
@@ -184,9 +191,13 @@ test("buildWearableSourceHealth aggregates duplicates, conflicts, staleness, and
         provider: "beta",
         recordedAt: "2026-04-03T08:10:00Z",
         recordIds: ["beta-activity-1"],
+        sessionContributors: ["beta"],
         sessionCount: 1,
         sessionMinutes: 42,
+        sourceKind: "activity-session-aggregate",
+        workoutMetricContributors: {},
         workoutMetricKeys: ["activeCalories", "averageHeartRate"],
+        workoutMetricValues: {},
       },
     ],
     metricCandidates: [alphaRawMetric],
@@ -377,6 +388,85 @@ test("buildWearableSourceHealth sorts equal-date providers alphabetically and re
     sourceHealth[1]?.notes.some((note) => note.includes("contributed candidate evidence but was not the preferred source")),
     true,
   );
+});
+
+test("source health attributes each workout rollup field only to its real contributors", () => {
+  const date = "2026-04-08";
+  const activitySessionCandidates: WearableMetricCandidate[] = [
+    {
+      ...makeMetricCandidate({
+        candidateId: "alpha-activity-session",
+        date,
+        metric: "sessionMinutes",
+        occurredAt: `${date}T13:00:00Z`,
+        provider: "alpha",
+        recordedAt: `${date}T13:35:00Z`,
+        sourceFamily: "event",
+        sourceKind: "activity_session",
+        unit: "minutes",
+        value: 30,
+      }),
+      activityType: "Running",
+      sessionEndAt: `${date}T13:30:00Z`,
+      sessionStartAt: `${date}T13:00:00Z`,
+      workoutMetricValues: {
+        activeCalories: 210,
+        maxHeartRate: 181,
+        totalElevationGainMeters: 42,
+        workoutStrain: 7,
+      },
+    },
+    {
+      ...makeMetricCandidate({
+        candidateId: "beta-activity-session",
+        date,
+        metric: "sessionMinutes",
+        occurredAt: `${date}T15:00:00Z`,
+        provider: "beta",
+        recordedAt: `${date}T15:50:00Z`,
+        sourceFamily: "event",
+        sourceKind: "activity_session",
+        unit: "minutes",
+        value: 45,
+      }),
+      activityType: "Strength",
+      sessionEndAt: `${date}T15:45:00Z`,
+      sessionStartAt: `${date}T15:00:00Z`,
+      workoutMetricValues: {
+        activeCalories: 160,
+        distanceKm: 6.2,
+        maxHeartRate: 174,
+        workoutStrain: 10,
+      },
+    },
+  ];
+  const dataset = makeDataset({
+    activitySessionCandidates,
+    activitySessionAggregates: buildActivitySessionAggregates(activitySessionCandidates),
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessionCandidates),
+  });
+  const sourceHealth = buildWearableSummaryBundleFromDataset(dataset).sourceHealth;
+
+  const byProvider = rowsByProvider(sourceHealth);
+  assert.equal(byProvider.get("alpha")?.selectedMetrics, 5);
+  assert.equal(byProvider.get("beta")?.selectedMetrics, 5);
+  assert.deepEqual(byProvider.get("alpha")?.metricsContributed, [
+    "activeCalories",
+    "maxHeartRate",
+    "sessionCount",
+    "sessionMinutes",
+    "totalElevationGainMeters",
+    "workoutStrain",
+  ]);
+  assert.deepEqual(byProvider.get("beta")?.metricsContributed, [
+    "activeCalories",
+    "distanceKm",
+    "maxHeartRate",
+    "sessionCount",
+    "sessionMinutes",
+    "workoutStrain",
+  ]);
+  assert.equal(sourceHealth.every((row) => row.sleepNights === 0), true);
 });
 
 test("sleep freshness ignores generic cardiorespiratory observations unless anchored to valid sleep", () => {

@@ -79,6 +79,7 @@ import { insertMetricPoints as insertProjectionMetricPoints } from "../src/proje
 import { QUERY_PROJECTION_SQLITE_VERSION } from "../src/projection/schema.ts";
 import {
   parseStoredWearableSummary,
+  STORED_ACTIVITY_EVIDENCE_KEY,
   type StoredWearableMetricSummaryKind,
 } from "../src/projection/wearable-summary-stored-codec.ts";
 import { parseFrontmatterDocument as parseHealthFrontmatterDocument } from "../src/health/shared.ts";
@@ -859,7 +860,7 @@ test("wearable query uses Junction data origin to avoid outranking direct provid
     const day = await summarizeWearableDayRuntime(vaultRoot, "2026-04-01");
 
     assert.equal(day?.activity?.steps.selection.provider, "oura");
-    assert.equal(day?.activity?.steps.selection.title, "Direct Oura steps");
+    assert.equal(day?.activity?.steps.selection.title, "Oura Steps");
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }
@@ -4564,7 +4565,7 @@ test("rebuildQueryProjection creates the compact metric point schema", async () 
       // Pin the literal version: a revert of the latest bump would keep every
       // constant-relative assertion green while legacy stores still carried old
       // projected metric point identities.
-      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 19);
+      assert.equal(QUERY_PROJECTION_SQLITE_VERSION, 20);
       assert.equal(readSqliteRuntimeUserVersion(database), QUERY_PROJECTION_SQLITE_VERSION);
 
       const columnRows = database
@@ -4698,7 +4699,7 @@ test("runtime reads rebuild v17 metric identities after lab catalog semantics ch
       readOnly: true,
     });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
     } finally {
       reopened.close();
     }
@@ -4777,7 +4778,7 @@ test("runtime reads rebuild v18 test-result identities after expanded lab-only a
       readOnly: true,
     });
     try {
-      assert.equal(readSqliteRuntimeUserVersion(reopened), 19);
+      assert.equal(readSqliteRuntimeUserVersion(reopened), QUERY_PROJECTION_SQLITE_VERSION);
     } finally {
       reopened.close();
     }
@@ -6583,7 +6584,12 @@ test("rebuildQueryProjection resets stale v6 projections that still carry the dr
   }
 });
 
-function rewriteStoredWearableSummaryRowsToLegacyFullForm(database: DatabaseSync): number {
+function rewriteStoredWearableSummaryRowsToLegacyFullForm(
+  database: DatabaseSync,
+  options: {
+    preserveInternalEvidence?: boolean;
+  } = {},
+): number {
   const rows = database
     .prepare(`
       SELECT id, summary_kind AS summaryKind, summary_json AS summaryJson
@@ -6595,7 +6601,19 @@ function rewriteStoredWearableSummaryRowsToLegacyFullForm(database: DatabaseSync
 
   let rewritten = 0;
   for (const row of rows) {
-    const legacyJson = JSON.stringify(parseStoredWearableSummary(row.summaryKind, row.summaryJson));
+    const expanded = parseStoredWearableSummary<Record<string, unknown>>(
+      row.summaryKind,
+      row.summaryJson,
+    );
+    assert.ok(expanded);
+    if (options.preserveInternalEvidence) {
+      const stored = JSON.parse(row.summaryJson);
+      if (Object.hasOwn(stored, STORED_ACTIVITY_EVIDENCE_KEY)) {
+        expanded[STORED_ACTIVITY_EVIDENCE_KEY] =
+          stored[STORED_ACTIVITY_EVIDENCE_KEY];
+      }
+    }
+    const legacyJson = JSON.stringify(expanded);
     if (legacyJson !== row.summaryJson) {
       update.run(legacyJson, row.id);
       rewritten += 1;
@@ -6792,7 +6810,9 @@ test("runtime wearable summaries read identically from compact and legacy full-f
     const database = openSqliteRuntimeDatabase(runtimeDatabasePath, { create: false });
     try {
       assert.ok(
-        rewriteStoredWearableSummaryRowsToLegacyFullForm(database) > 0,
+        rewriteStoredWearableSummaryRowsToLegacyFullForm(database, {
+          preserveInternalEvidence: true,
+        }) > 0,
         "expected compact rows to differ from the legacy full form on disk",
       );
     } finally {

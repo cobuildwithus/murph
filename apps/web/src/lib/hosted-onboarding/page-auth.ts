@@ -198,6 +198,7 @@ const HOSTED_SESSION_STORE_UNAVAILABLE_MESSAGE_PATTERNS = [
   /\bDATABASE_URL\b/u,
   /\bdatabase\b.*\bunavailable\b/iu,
   /\bconnection\b.*\b(?:closed|refused|terminated|timeout|timed out)\b/iu,
+  /\btimeout exceeded when trying to connect\b/iu,
   /\btable\b.*\bdoes not exist\b/iu,
   /\bcolumn\b.*\bdoes not exist\b/iu,
 ];
