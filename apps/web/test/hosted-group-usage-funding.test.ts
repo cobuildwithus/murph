@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
+  ensureHostedGroupUsageFundingJoinLinkTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
@@ -22,8 +22,8 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
-  createHostedGroupJoinLinkForOwnedThreadContainerTx:
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx,
+  ensureHostedGroupUsageFundingJoinLinkTx:
+    mocks.ensureHostedGroupUsageFundingJoinLinkTx,
 }));
 
 import {
@@ -151,7 +151,7 @@ describe("hosted group usage funding", () => {
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
     });
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockImplementation(
+    mocks.ensureHostedGroupUsageFundingJoinLinkTx.mockImplementation(
       async () => {
         state.group = { joinCode: "minted_join_code_1234" };
         return { group: { id: "hgrp_1" }, joinCode: "minted_join_code_1234" };
@@ -166,11 +166,38 @@ describe("hosted group usage funding", () => {
       fundingUrl: "https://www.withmurph.ai/groups/fund/minted_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
     });
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+    expect(mocks.ensureHostedGroupUsageFundingJoinLinkTx)
       .toHaveBeenCalledWith(expect.objectContaining({
-        actorMemberId: "member_owner_1",
         containerMemberId: "member_group_runtime",
       }));
+  });
+
+  it("does not provision for a retained container whose runtime access is inactive", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    const prisma = {
+      $transaction: vi.fn(),
+      hostedGroup: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+    });
+
+    await expect(readHostedGroupUsageStatusEnsuringFundingUrl({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toBeNull();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.ensureHostedGroupUsageFundingJoinLinkTx).not.toHaveBeenCalled();
   });
 
   it("mints a join link for an existing group row without one", async () => {
@@ -195,7 +222,7 @@ describe("hosted group usage funding", () => {
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       remainingUsdMicros: 900_000n,
     });
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockImplementation(
+    mocks.ensureHostedGroupUsageFundingJoinLinkTx.mockImplementation(
       async () => {
         state.group = { joinCode: "minted_join_code_5678" };
         return { group: { id: "hgrp_1" }, joinCode: "minted_join_code_5678" };
@@ -238,7 +265,7 @@ describe("hosted group usage funding", () => {
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
     });
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+    expect(mocks.ensureHostedGroupUsageFundingJoinLinkTx)
       .not.toHaveBeenCalled();
   });
 
@@ -264,7 +291,7 @@ describe("hosted group usage funding", () => {
       prisma: prisma as never,
       runtimeMemberId: "member_personal",
     })).resolves.toBeNull();
-    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+    expect(mocks.ensureHostedGroupUsageFundingJoinLinkTx)
       .not.toHaveBeenCalled();
   });
 
@@ -290,7 +317,7 @@ describe("hosted group usage funding", () => {
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
     });
-    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockRejectedValue(
+    mocks.ensureHostedGroupUsageFundingJoinLinkTx.mockRejectedValue(
       new Error("provisioning failed"),
     );
 

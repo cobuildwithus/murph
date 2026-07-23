@@ -72,6 +72,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('include it in the same segment as a plain first-party link')
     expect(skill).toContain("Match the room's energy")
     expect(skill).toContain('nominating someone to cover it')
+    expect(skill).toContain('skip the heads-up entirely')
+    expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')

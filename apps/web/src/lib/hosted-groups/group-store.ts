@@ -1140,6 +1140,55 @@ export async function createHostedGroupJoinLinkForOwnedThreadContainerTx(input: 
   };
 }
 
+// Funding-link self-heal for group chats that never touched group features.
+// Creates at most the bare HostedGroup row and join code so a funding URL can
+// exist; memberships, vault-share projections, and profile-name/email grants
+// stay behind explicit owner actions.
+export async function ensureHostedGroupUsageFundingJoinLinkTx(input: {
+  tx: Prisma.TransactionClient;
+  containerMemberId: string;
+  now: Date;
+}): Promise<{ joinCode: string } | null> {
+  await lockHostedThreadContainerRow(input.tx, input.containerMemberId);
+  const container = await input.tx.hostedThreadContainer.findUnique({
+    where: { memberId: input.containerMemberId },
+    select: { ownerMemberId: true },
+  });
+  if (!container) {
+    return null;
+  }
+
+  const existing = await input.tx.hostedGroup.findUnique({
+    where: { runtimeMemberId: input.containerMemberId },
+    select: { id: true, joinCode: true },
+  });
+  if (existing?.joinCode) {
+    return { joinCode: existing.joinCode };
+  }
+  if (existing) {
+    const link = await createOrReadHostedGroupJoinLinkTx({
+      actorMemberId: container.ownerMemberId,
+      groupId: existing.id,
+      now: input.now,
+      tx: input.tx,
+    });
+    return { joinCode: link.joinCode };
+  }
+
+  const created = await input.tx.hostedGroup.create({
+    data: {
+      id: generateHostedGroupId(),
+      joinCode: generateHostedGroupJoinCode(),
+      joinCodeCreatedAt: input.now,
+      kind: normalizeHostedGroupKind(null),
+      ownerMemberId: container.ownerMemberId,
+      runtimeMemberId: input.containerMemberId,
+    },
+    select: { joinCode: true },
+  });
+  return created.joinCode ? { joinCode: created.joinCode } : null;
+}
+
 export async function readHostedGroupJoinView(input: {
   joinCode: string;
   memberId?: string | null;

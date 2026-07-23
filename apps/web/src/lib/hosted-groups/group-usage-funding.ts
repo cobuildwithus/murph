@@ -11,7 +11,7 @@ import {
 import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
-import { createHostedGroupJoinLinkForOwnedThreadContainerTx } from "./group-store";
+import { ensureHostedGroupUsageFundingJoinLinkTx } from "./group-store";
 import {
   classifyHostedGroupUsageCapacity,
   type HostedGroupUsageCapacityState,
@@ -134,11 +134,12 @@ export async function readHostedGroupUsageStatusEnsuringFundingUrl(input: {
   }
 
   // A group chat that has only ever talked to Murph has no HostedGroup row or
-  // join code yet; materialize the same group shell and join link the container
-  // owner could mint explicitly so the funding URL exists when usage needs it.
+  // join code yet; materialize only the bare group row and join code so the
+  // funding URL exists when usage needs it. Memberships and sharing grants
+  // stay behind explicit owner actions.
   const [container, hasActiveAccess] = await Promise.all([
     prisma.hostedThreadContainer.findUnique({
-      select: { ownerMemberId: true },
+      select: { memberId: true },
       where: { memberId: input.runtimeMemberId },
     }),
     hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma }),
@@ -149,8 +150,7 @@ export async function readHostedGroupUsageStatusEnsuringFundingUrl(input: {
 
   try {
     await prisma.$transaction(async (tx) => (
-      createHostedGroupJoinLinkForOwnedThreadContainerTx({
-        actorMemberId: container.ownerMemberId,
+      ensureHostedGroupUsageFundingJoinLinkTx({
         containerMemberId: input.runtimeMemberId,
         now: input.now ?? new Date(),
         tx,

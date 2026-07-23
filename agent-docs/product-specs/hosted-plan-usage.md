@@ -325,11 +325,12 @@ inventing a billing menu:
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once and
   may include the returned coarse state and first-party funding URL in the
-  heads-up segment, matching the room's tone; playful payer nomination is
-  allowed, but who actually paid, purchase status, and amounts stay private,
-  and the assistant never promises a URL the read did not return. Web
-  self-heals a missing group funding link at that read, so the URL is normally
-  present.
+  heads-up segment, matching the room's tone; a `healthy` read suppresses the
+  heads-up entirely. Playful payer nomination is allowed, but who actually
+  paid, purchase status, and amounts stay private, and the assistant never
+  promises a URL the read did not return. Web self-heals a missing group
+  funding link at that read (bare group row and join code only, never
+  memberships or sharing grants), so the URL is normally present.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
