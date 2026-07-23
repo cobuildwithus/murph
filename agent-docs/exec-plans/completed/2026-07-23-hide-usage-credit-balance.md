@@ -1,6 +1,6 @@
 # Hide exact usage-credit balance from Settings
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -86,6 +86,16 @@ Updated: 2026-07-23
   at both viewports.
 - Frontend double-check: no findings through the approved Opus fallback after
   the preferred Fable lane reported exhausted usage credits.
+- Preliminary ReviewGPT specialist pass: `SPECIALIST_OUTCOME: PASS`, no
+  findings, no coverage patch.
+- Focused viewport-overflow proof: the three-state study passed at 768px and
+  1,280px after the catalog E2E expectation was aligned with the rendered
+  states. Two cold-server attempts timed out during an unrelated Turbopack
+  workflow-directive compile; the production route returned 200 and both tests
+  passed once the route was warmed in the same owned server session.
 - Hosted design-proof upload is unavailable because the required local
-  Cloudflare Images credential is not configured. The redacted local captures
-  remain in the ignored audit path for preliminary review packaging.
+  Cloudflare Images credential is not configured, and both the connected
+  Cloudflare API identity and the existing Wrangler session lack Images write
+  authorization. The redacted local captures remain in the ignored audit path
+  for review packaging.
+Completed: 2026-07-23
