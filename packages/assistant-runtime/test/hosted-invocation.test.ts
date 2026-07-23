@@ -87,10 +87,12 @@ describe("runHostedWorkspaceInvocation", () => {
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
     const platform = createRuntimePlatform();
     const waitForBackgroundAssistantWork = vi.fn(async () => undefined);
+    const onConversationActivityObserved = vi.fn();
 
     await expect(runHostedWorkspaceInvocation({
       job,
       mailboxPayloadDecoder: decodeMailboxPayload,
+      onConversationActivityObserved,
       platform,
       readCurrentLease: () => ({
         attemptId: job.request.attemptId,
@@ -111,6 +113,8 @@ describe("runHostedWorkspaceInvocation", () => {
     const captured = capturedRuntimeCalls[0];
     expect(captured?.job).toBe(job);
     expect(captured?.options.platform).toBe(platform);
+    captured?.options.onConversationActivityObserved?.("observed");
+    expect(onConversationActivityObserved).toHaveBeenCalledOnce();
     expect(captured?.options.runtimeWakeSignal).toBe(runtimeWakeSignal);
     expect(captured?.options.signal).toBe(abortController.signal);
     expect(captured?.options.vaultRoot).toBe(vaultRoot);

@@ -201,6 +201,7 @@ describe("hosted deploy automation helpers", () => {
       HOSTED_WEB_BASE_URL: "https://web.example.test",
       HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v2",
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "180000",
+      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
       HOSTED_ASSISTANT_APPROVAL_POLICY: "never",
       HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
       HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -345,6 +346,7 @@ describe("hosted deploy automation helpers", () => {
     expect(config.vars.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS).toBe("65000");
     expect(config.vars.HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS).toBe("30000");
     expect(config.vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS).toBe("180000");
+    expect(config.vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS).toBe("60000");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION).toContain("cryptoKeyVersions/1");
     expect(config.vars.HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM).toContain("BEGIN PUBLIC KEY");
     expect(config.vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID).toBe("cloudflare-automation:v2");
@@ -558,6 +560,7 @@ describe("hosted deploy automation helpers", () => {
       "HOSTED_EXECUTION_DEPLOY_CONTEXT: ${{ inputs.environment }}",
       "HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}",
       "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}",
+      "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS }}",
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT: ${{ inputs.container_rollout == 'immediate' && 'true' || 'false' }}",
       "HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: ${{ inputs.live_model_turn && 'true' || 'false' }}",
       'HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true"',
@@ -574,6 +577,7 @@ describe("hosted deploy automation helpers", () => {
       "DEPLOY_SUMMARY_SMOKE_USER_ID: ${{ inputs.smoke_user_id || 'not-set' }}",
       "printf -- '- Container rollout: `%s`\\n' \"${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}\"",
       "printf -- '- Runner idle TTL: `%s`\\n' \"${HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:-environment default}\"",
+      "printf -- '- Runner lifecycle reevaluation: `%s`\\n' \"${HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS:-environment default}\"",
       "printf -- '- Smoke user id: `%s`\\n' \"${DEPLOY_SUMMARY_SMOKE_USER_ID}\"",
       "MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: 1",
       "MURPH_RUNNER_BUNDLE_PACK_CONCURRENCY: 4",

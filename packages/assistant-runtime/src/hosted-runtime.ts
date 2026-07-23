@@ -72,6 +72,7 @@ import {
 } from "./hosted-runtime/channel-activity.ts";
 import {
   resolveHostedCurrentInputIdForAcceptedInputs,
+  type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
@@ -537,6 +538,9 @@ export interface HostedWorkspaceRuntimeJobOptions {
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  onConversationActivityObserved?: (
+    observation: Exclude<HostedConversationActivityObservation, "not_observed">,
+  ) => void;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   /**
@@ -553,6 +557,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 
 export interface HostedWorkspaceRuntimeJobImportContext {
   assistantAskRequestTargetKind?: "joined_group";
+  onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
@@ -566,6 +571,17 @@ interface HostedRuntimeWakeLatencySeed {
   foregroundWaitResolvedAtEpochMs?: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs?: number | null;
+}
+
+function notifyHostedConversationActivityObservedBestEffort(
+  callback: HostedWorkspaceRuntimeJobOptions["onConversationActivityObserved"],
+  observation: Exclude<HostedConversationActivityObservation, "not_observed">,
+): void {
+  try {
+    callback?.(observation);
+  } catch (error) {
+    console.warn("Hosted conversation activity callback failed.", error);
+  }
 }
 
 function mergeHostedRuntimeLatencyTraceStagedMilestones(
@@ -1032,6 +1048,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialAssistantInputLatencyMilestones,
         context?.latencyMilestones ?? null,
       ),
+      onConversationActivityObserved: () => {
+        options.onConversationActivityObserved?.("observed");
+      },
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
@@ -1780,17 +1799,26 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ...(confirmedAssistantTargetEnv ?? {}),
                 },
                 beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                  const assistantInputIds = acceptedInputs.every(
+                  const acceptedInputsOnlyAssistant = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
-                  )
-                    ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
-                    : [];
-                  const assistantInputId =
+                  );
+                  const assistantInputIds = acceptedInputs
+                    .filter((acceptedInput) => acceptedInput.source === "assistant-input")
+                    .map((acceptedInput) => acceptedInput.id);
+                  const acceptedInputContext =
                     await resolveHostedCurrentInputIdForAcceptedInputs({
                       assistantInputIds,
                       vaultRoot: restored.vaultRoot,
                     });
-                  currentAssistantInputId = assistantInputId;
+                  currentAssistantInputId = acceptedInputsOnlyAssistant
+                    ? acceptedInputContext.currentInputId
+                    : null;
+                  if (acceptedInputContext.conversationActivity !== "not_observed") {
+                    notifyHostedConversationActivityObservedBestEffort(
+                      options.onConversationActivityObserved,
+                      acceptedInputContext.conversationActivity,
+                    );
+                  }
                   return () => {
                     currentAssistantInputId = null;
                   };

@@ -304,6 +304,7 @@ export async function startHostedContainerEntrypoint(input: {
     runtime.startupConfig.runnerBundleManifestPath,
   );
   let activeHostedRunnerJobCount = 0;
+  let conversationWarmActivityCompletedAtEpochMs: number | null = null;
   let activeRuntimeWake: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
   let activeRuntimeWakeAttemptId: string | null = null;
   let activeRuntimeWakeLeaseGeneration: string | null = null;
@@ -341,6 +342,8 @@ export async function startHostedContainerEntrypoint(input: {
     // endpoint below.
     const invocationAbort = new AbortController();
     let claimedRunnerSlot = false;
+    let conversationActivityObservedForInvocation = false;
+    let conversationActivitySettled = false;
     let runtimeWakeForRequest: ((notification?: HostedContainerRuntimeWakeNotification) => boolean) | null = null;
     let job: HostedExecutionRunnerJobInput | null = null;
     let stopActiveJobDiagnostics: (() => void) | null = null;
@@ -350,6 +353,15 @@ export async function startHostedContainerEntrypoint(input: {
       leaseGeneration: string | null;
       userId: string;
     } | null = null;
+    const settleConversationActivity = () => {
+      if (conversationActivitySettled) {
+        return;
+      }
+      conversationActivitySettled = true;
+      if (conversationActivityObservedForInvocation) {
+        conversationWarmActivityCompletedAtEpochMs = Date.now();
+      }
+    };
 
     try {
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -359,6 +371,7 @@ export async function startHostedContainerEntrypoint(input: {
         response.setHeader("content-type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
           activeJobCount: activeHostedRunnerJobCount,
+          conversationWarmActivityCompletedAtEpochMs,
           hostedRuntimeArchitectureVersion:
             runtime.startupConfig.hostedRuntimeArchitectureVersion,
           ok: true,
@@ -842,6 +855,9 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       const result = await runtime.runWorkspaceInvocation(job, {
+        onConversationActivityObserved() {
+          conversationActivityObservedForInvocation = true;
+        },
         onRuntimeWakeReady(sendWake) {
           activeRuntimeWake = sendWake;
           activeRuntimeWakeAttemptId = job
@@ -891,8 +907,11 @@ export async function startHostedContainerEntrypoint(input: {
       });
 
       if (requestAbort.signal.aborted || response.destroyed) {
+        settleConversationActivity();
         return;
       }
+
+      settleConversationActivity();
 
       emitHostedExecutionStructuredLog({
         component: "container",
@@ -907,6 +926,9 @@ export async function startHostedContainerEntrypoint(input: {
       response.setHeader("content-type", "application/json; charset=utf-8");
       response.end(JSON.stringify(result));
     } catch (error) {
+      if (job) {
+        settleConversationActivity();
+      }
       const responseUnavailable = requestAbort.signal.aborted || response.destroyed;
 
       if (!responseUnavailable) {
@@ -925,6 +947,9 @@ export async function startHostedContainerEntrypoint(input: {
       const classified = classifyRunnerJobError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
     } finally {
+      if (job) {
+        settleConversationActivity();
+      }
       stopActiveJobDiagnostics?.();
       if (claimedRunnerSlot && invocationAbort.signal.aborted) {
         try {

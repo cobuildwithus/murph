@@ -79,6 +79,7 @@ export interface HostedWorkspaceInvocationOptions {
     containerEnsureReadyStartedAtEpochMs?: number;
   } | null;
   nodeStartupMs?: number | null;
+  onConversationActivityObserved?: () => void;
   onRuntimeWakeReady?: (
     sendWake: (input?: HostedWorkspaceInvocationRuntimeWakeInput) => boolean
   ) => void;
@@ -234,6 +235,7 @@ export async function runHostedWorkspaceInvocation(
       job,
       ...(Object.keys(latencyMilestones).length > 0 ? { latencyMilestones } : {}),
       mailboxPayloadDecoder: decodeMailboxPayload,
+      onConversationActivityObserved: options.onConversationActivityObserved,
       platform,
       readCurrentLease: () => currentLease,
       runtimeWakeSignal,
