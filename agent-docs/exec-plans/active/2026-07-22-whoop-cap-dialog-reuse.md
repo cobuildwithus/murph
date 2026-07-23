@@ -28,6 +28,8 @@ Updated: 2026-07-22
 - The existing device-sync completion/setup dialog and shared setup-guide
   builder.
 - Connect-page and completion-dialog tests plus the live design catalog.
+- The canonical audit-bundle allowlist needed to include the frontend guidance
+  required by the review prompt.
 
 ## Constraints
 
@@ -65,3 +67,6 @@ Updated: 2026-07-22
   test also fails when rerun alone.
 - The required Fable UI double-check stopped on explicit usage-credit
   exhaustion, so no Claude fallback was attempted.
+- Preliminary ReviewGPT packaging exposed that the canonical bundle omitted
+  `agent-docs/FRONTEND.md` even though the reviewer prompt requires it. The
+  bundle allowlist now includes the guide with a focused regression assertion.

@@ -108,6 +108,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "README.md" \
   "docs/architecture.md" \
   "docs/contracts/00-invariants.md" \
+  "agent-docs/FRONTEND.md" \
   "agent-docs/index.md" \
   "agent-docs/PLANS.md" \
   "agent-docs/RELIABILITY.md" \

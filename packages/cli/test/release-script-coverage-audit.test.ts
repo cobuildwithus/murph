@@ -2812,6 +2812,7 @@ Updated: 2026-04-24
     expect(repoToolsConfig).toContain('"apps/*/public/design-assets/**"')
     expect(repoToolsConfig).toContain('"docs/assets/*.jpg"')
     expect(repoToolsConfig).toContain('repo_tools_join_lines COBUILD_AUDIT_CONTEXT_EXCLUDE_GLOBS')
+    expect(repoToolsConfig).toContain('"agent-docs/FRONTEND.md"')
     expect(repoToolsConfig).toContain('"agent-docs/references/hosted-runtime-protocol.md"')
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'")
     expect(fullPackageScript).toContain("export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'")
