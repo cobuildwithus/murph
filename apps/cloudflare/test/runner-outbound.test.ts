@@ -3128,6 +3128,90 @@ describe("handleRunnerOutboundRequest", () => {
     });
   });
 
+  it("invokes the generated-image upload fetch with the global receiver", async () => {
+    // Regression guard for the production incident: workerd's global `fetch` is
+    // receiver-sensitive, so calling it as a foreign-object method (e.g. the old
+    // `input.fetchImpl(...)` where `fetchImpl` was the bare ambient global) throws
+    // `TypeError: Illegal invocation` synchronously. The frozen vitest workerd
+    // binary does not enforce this, so we assert the invariant explicitly with a
+    // receiver-strict stub: the upload must reach `fetch` with `this === globalThis`
+    // (i.e. routed through `normalizeCloudflareWorkerFetch`), never as a method on a
+    // local object. This test fails on the pre-fix `input.fetchImpl(...)` call shape.
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const pngBytes = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47,
+      0x0d, 0x0a, 0x1a, 0x0a,
+    ]);
+    let observedReceiver: unknown = "unset";
+    let receiverStrictCallCount = 0;
+    function receiverStrictFetch(
+      this: unknown,
+      _request: RequestInfo | URL,
+      _init?: RequestInit,
+    ): Promise<Response> {
+      receiverStrictCallCount += 1;
+      observedReceiver = this;
+      if (this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch': Illegal invocation");
+      }
+      return Promise.resolve(new Response(JSON.stringify({
+        result: {
+          variants: [
+            "https://imagedelivery.net/account_123/image_123/public",
+          ],
+        },
+        success: true,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      }));
+    }
+    vi.stubGlobal("fetch", receiverStrictFetch as unknown as typeof fetch);
+
+    // Call the handler with NO `fetchImpl` — the exact production dispatch shape
+    // (results.ts must fall back to the ambient global fetch). The handler must
+    // reach it through `normalizeCloudflareWorkerFetch` (global receiver). The
+    // pre-fix `input.fetchImpl(...)` method call would invoke the receiver-strict
+    // stub with `this === input`, which throws and degrades to a 502.
+    const env = createRunnerOutboundEnv({
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
+      CLOUDFLARE_IMAGES_API_KEY: "<redacted>",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const response = await handleRunnerGeneratedImageUploadRequest({
+      env,
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+      request: new Request(
+        `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
+        {
+          body: JSON.stringify({
+            alt: "Generated product image",
+            bytesBase64: Buffer.from(pngBytes).toString("base64"),
+            contentType: "image/png",
+            filename: "generated.png",
+            metadata: {
+              model: "gpt-image-2",
+              promptHash: "hash_123",
+              schema: "murph.generated-image.v1",
+            },
+            source: "gpt-image-2",
+          }),
+          headers: createMailboxPayloadDecodeHeaders(),
+          method: "POST",
+        },
+      ),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(200);
+    expect(receiverStrictCallCount).toBe(1);
+    expect(observedReceiver).toBe(globalThis);
+  });
+
   it("records a runtime issue when generated image upload throws", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const env = createRunnerOutboundEnv({
