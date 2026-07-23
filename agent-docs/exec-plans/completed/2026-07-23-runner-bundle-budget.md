@@ -1,6 +1,6 @@
 # Update runner bundle total byte budget
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -68,3 +68,18 @@ Updated: 2026-07-23
   - `pnpm verify:acceptance`
 - Expected outcomes: the exact fresh bundle remains under all three guards and
   all routed checks pass.
+- Results:
+  - focused runner entrypoint bundle test: 34/34 passed
+  - fresh runner bundle assembly: passed at 9,437,124 bytes
+  - `pnpm test:diff`: passed Cloudflare typecheck, 106 Node test files / 1,872
+    tests, and the Workers-runtime test
+  - preliminary `completion-specialists`: accepted under the documented
+    specialist exception at 268 seconds; exact candidate and attachment were
+    confirmed, the Pro model was selected, the completion marker and all three
+    lens dispositions were present, outcome was PASS, findings and patch
+    artifact were none
+  - parent final review: no correctness, scope, privacy, or proof gaps found
+  - `pnpm verify:acceptance`: passed the full repo typecheck, coverage, app
+    verification, production Web build, Cloudflare Node/Workers tests, package
+    boundaries, and architecture/privacy/artifact guards
+Completed: 2026-07-23
