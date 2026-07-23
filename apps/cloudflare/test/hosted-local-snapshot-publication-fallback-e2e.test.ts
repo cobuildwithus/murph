@@ -182,6 +182,9 @@ describe("hosted local snapshot publication fallback e2e", () => {
     expect(readSnapshotPublicationValidationStatuses()).toContain(409);
     const retainedSnapshotRef = rejectedPublicationStatus.workspace?.snapshotRef;
     expect(isHostedWorkspaceSnapshotV2Ref(retainedSnapshotRef ?? null)).toBe(true);
+    if (!retainedSnapshotRef) {
+      throw new Error("Rejected publication did not retain a restorable snapshot.");
+    }
     expect(requireWorkspaceVersion(rejectedPublicationStatus))
       .toBeGreaterThanOrEqual(initialWorkspaceVersion);
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);
@@ -189,6 +192,16 @@ describe("hosted local snapshot publication fallback e2e", () => {
     await waitForInvokeFailureDestroy({
       baselineInvokeFailureDestroyCount,
     });
+
+    requireScenario().queueAssistantResponses([firstReplyText], {
+      matchInputContains: firstInboundText,
+    });
+    const restoredStatus = await waitForCleanSnapshotPublication(retainedSnapshotRef);
+    const restoredSnapshotRef = restoredStatus.workspace?.snapshotRef;
+    if (!restoredSnapshotRef || !isHostedWorkspaceSnapshotV2Ref(restoredSnapshotRef)) {
+      throw new Error("Recovered provider turn did not publish a clean v2 snapshot.");
+    }
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineReplyCount + 1);
 
     const providerRequestBaseline = countAssistantProviderResponsesApiRequests();
     requireScenario().queueAssistantResponses([
@@ -226,13 +239,11 @@ describe("hosted local snapshot publication fallback e2e", () => {
       .join("\n\n");
     expect(recoveryProviderText).toContain(baselineFileSha256);
 
-    if (!retainedSnapshotRef) {
-      throw new Error("Rejected publication did not retain a restorable snapshot.");
-    }
-    const finalStatus = await waitForCleanSnapshotPublication(retainedSnapshotRef);
+    const finalStatus = await waitForCleanSnapshotPublication(restoredSnapshotRef);
     expect(finalStatus.workspace).not.toBeNull();
     expect(isHostedWorkspaceSnapshotV2Ref(finalStatus.workspace?.snapshotRef ?? null)).toBe(true);
     expect(finalStatus.workspace?.snapshotRef).not.toEqual(retainedSnapshotRef);
+    expect(finalStatus.workspace?.snapshotRef).not.toEqual(restoredSnapshotRef);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(countSnapshotPublicationFaults()).toBe(baselineFaultCount + 1);
@@ -344,7 +355,11 @@ async function waitForCleanSnapshotPublication(
   const startedAt = Date.now();
   let lastStatus: HostedRunnerStatusResponse | null = null;
   while (Date.now() - startedAt < 240_000) {
-    lastStatus = await requireScenario().harness.readUserStatus(userId);
+    lastStatus = await requireScenario().harness.readUserStatus(userId).catch(() => null);
+    if (!lastStatus) {
+      await sleep(250);
+      continue;
+    }
     const snapshotRef = lastStatus.workspace?.snapshotRef ?? null;
     if (
       isHostedWorkspaceSnapshotV2Ref(snapshotRef)
