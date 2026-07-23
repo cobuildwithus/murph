@@ -18,6 +18,12 @@ export const metadata: Metadata = {
 
 const OPS_TOOLS = [
   {
+    description:
+      "Inspect per-member and group-container inbound message volume, AI usage, and safely reset current included usage.",
+    href: "/ops/usage",
+    label: "Usage",
+  },
+  {
     description: "Review hosted growth, trial conversion, and daily revenue snapshots.",
     href: "/ops/growth",
     label: "Growth",

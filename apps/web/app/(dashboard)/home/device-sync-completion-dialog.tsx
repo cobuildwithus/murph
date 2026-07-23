@@ -137,15 +137,33 @@ export function DeviceSyncCompletionDialog({
               <SmartphoneIcon data-icon="inline-start" />
               {setupGuide.downloadAction.label}
             </a>
-            <Button
-              type="button"
-              className="w-full"
-              size="xl"
-              variant="ghost"
-              onClick={() => setOpen(false)}
-            >
-              Continue exploring
-            </Button>
+            {model.contactAction ? (
+              <a
+                aria-label={resolveContinueWithMurphAriaLabel(model.contactAction)}
+                className={buttonVariants({
+                  className: "w-full",
+                  size: "xl",
+                  variant: "outline",
+                })}
+                href={model.contactAction.href}
+                onClick={() => setOpen(false)}
+                rel={model.contactAction.rel}
+                target={model.contactAction.target}
+              >
+                <PrimaryIcon data-icon="inline-start" />
+                Continue with Murph
+              </a>
+            ) : (
+              <Button
+                type="button"
+                className="w-full"
+                size="xl"
+                variant="outline"
+                onClick={() => setOpen(false)}
+              >
+                Continue with Murph
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -250,6 +268,14 @@ function resolveHeaderIconKind(
     return "alert";
   }
   return model.kind === "connected-app" ? "link" : "watch";
+}
+
+function resolveContinueWithMurphAriaLabel(
+  action: NonNullable<DeviceSyncCompletionDialogModel["contactAction"]>,
+): string {
+  const channel = action.kind === "telegram" ? "Telegram" : "Messages";
+  const target = action.target === "_blank" ? " (opens in a new tab)" : "";
+  return `Continue with Murph in ${channel}${target}`;
 }
 
 function stripCompletionQueryParams() {

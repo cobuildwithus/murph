@@ -2,6 +2,16 @@
 
 Hosted integration control plane for Vercel deployments.
 
+## Frontend design proof
+
+The live design catalog is available at `/design`. Every pull request that
+changes user-facing frontend UI must render the real production component on
+`/design?tab=components`, or the complete composed section or flow on
+`/design?tab=sections`. Include hosted desktop and mobile screenshots captured
+from that catalog surface in the PR so reviewers can judge the UI without
+reconstructing the state locally. The `Frontend design proof` workflow enforces
+the catalog update and PR evidence contract.
+
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
 `apps/web` owns hosted member identity, routing, billing, email authorization,
@@ -605,9 +615,9 @@ Hosted AI usage metering:
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Purchased usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then append-only credit grants in order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
-- Usage-credit Checkout accepts only an authenticated payer buying for the same personal beneficiary, a server-owned offer code, and a single-use client request key. It uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an amount, Price, payer, beneficiary, or grant.
+- Usage-credit Checkout accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, uses Stripe `mode=payment`, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and explicitly disables Adaptive Pricing; the browser cannot choose an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
 - A browser return never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout, line-item, PaymentIntent, and Charge facts and commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
-- The purchase schema separates payer from beneficiary so the accounting owner can later support a synthetic group-container member. Group funding, group checkout authorization, and group contribution presentation are not implemented.
+- The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
 - Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
@@ -1245,6 +1255,7 @@ Hosted onboarding surfaces:
 Authenticated Settings usage-credit surfaces:
 
 - `POST /api/settings/billing/usage-credit/checkout`
+- `POST /api/settings/billing/family/members/:memberId/usage-credit/checkout`
 - `GET /api/settings/billing/usage-credit/purchases/:purchaseId`
 - `POST /api/settings/billing/usage-credit/purchases/:purchaseId/expire`
 
@@ -1274,8 +1285,9 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted onboarding Checkout uses Stripe subscription mode. The only current
-  one-time Checkout is the fixed personal usage-credit catalog in Settings.
+- Hosted onboarding Checkout uses Stripe subscription mode. Current one-time
+  Checkout uses the fixed usage-credit catalog for eligible personal, hosted
+  group, and Family-member destinations.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
 - `checkout.session.completed` normally binds refs only, except for the
@@ -1301,6 +1313,25 @@ Current hosted billing assumptions:
   mutation. Apply checks the same short-lived opaque proof under the shared
   hosted-member Stripe mutation lock, adds exactly seven days, and reconciles
   the local trial and usage-period window in that operation.
+- `/ops/usage` is the operator-only allowance inspection and recovery surface.
+  It derives personal-member and synthetic-group message activity from retained
+  canonical mailbox rows, derives all-time priced AI cost from immutable usage
+  rows, and labels the mailbox retention boundary. The table and reset reuse the
+  runtime's canonical allowance gate. A row reset verifies the displayed
+  current-period and usage-credit versions, then atomically clears current
+  included spend and the block while releasing only that capacity epoch's
+  logical notice claim. It preserves immutable usage, purchased credit, billing
+  state, mailbox rows, and delivery history, and refuses to race an in-flight
+  notice dispatch. After commit it signals the existing runtime recheck; a
+  rejected or bounded-timeout wake is returned as a committed partial result
+  with a wake-only retry. The table reads its decision and reset version from
+  one repeatable database snapshot, and derives blocked/available only from
+  that canonical decision rather than the potentially stale persisted marker.
+  Historical notice status is displayed independently from current admission.
+  A later crossing reuses the logical claim key but receives a fresh durable
+  delivery ID and provider idempotency key. Generic runtime and webhook
+  delivery fences keep deterministic durable IDs for latency and receipt
+  correlation.
 - A live `trialing` Pulse Trial extends from its current Stripe trial end. A
   lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
   The proof expires after 15 minutes. Active Family sponsorship and paid,

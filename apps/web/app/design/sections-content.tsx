@@ -5,7 +5,12 @@ import {
   BiomarkerPreparingStateStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import { Separator } from "@/src/components/ui/separator";
+import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import {
+  GroupUsageFundingStudy,
+  PersonalUsageCreditOwnerStudy,
+} from "./group-usage-funding-study";
 
 function StudySection({
   children,
@@ -35,6 +40,24 @@ export function SectionsContent() {
 
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Connect source card actions">
+        <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group usage funding">
+        <GroupUsageFundingStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Personal usage credit owner">
+        <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
       <Separator />

@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-07-20
+Last verified: 2026-07-22
 Status: Implemented current-state contract
 
 ## Goal
@@ -11,7 +11,7 @@ and let a private Murph conversation carry out the smallest billing action the
 member clearly chooses. Settings and Murph's read-only plan-usage tool consume
 the same web-owned projection. Stripe and the existing web billing services
 remain the payment system; Murph owns allowance and purchased usage capacity.
-The personal and group top-up implementation contract lives in
+The personal, Family-member, and group top-up implementation contract lives in
 `agent-docs/product-specs/hosted-usage-topups.md`.
 
 ## Ownership
@@ -114,9 +114,16 @@ Checkout route described in the top-up spec. Assistant policy uses a matching
 explicit choice. The read-only `murph.plan_usage` tool cannot start checkout,
 upgrade a plan, grant credit, or claim that a billing change happened.
 
+Family Settings may expose the same fixed-pack dialog beside each active member
+to the current active owner. That owner pays through the Family billing
+customer and the selected member alone receives the credit. This is account
+management, not a sponsored member recommendation, personal top-up, shared
+Family pool, or transfer.
+
 An explicit request in a private conversation to manage billing, or to perform
-a Family account change outside `murph.family_plan`'s status, checkout, and
-invite actions, may receive the canonical `/settings#subscription` handoff
+a Family account change outside `murph.family_plan`'s status, checkout, invite,
+and member-usage navigation rules, may receive the canonical
+`/settings#subscription` handoff
 after `murph.plan_usage` returns `active`, `exhausted`, or
 `trial_conversion_pending`. This is neutral browser navigation, not a projected
 billing action or recommendation. The assistant must say that no billing or
@@ -233,6 +240,50 @@ safe route and forbids lookup, claim, and send; an object permits only that
 exact target. Later counted usage may retry an uncompleted period claim, while
 the delivery owner permits at most one completed notice.
 
+### Operator usage recovery
+
+`/ops/usage` is the supported operator surface for inspecting and resetting
+hosted allowance state. It lists personal members and synthetic group
+containers from the existing hosted-member owner. Per-entity message totals
+come from retained canonical `conversation.message` mailbox rows, so the
+surface labels the 30-day retention boundary instead of presenting those rows
+as lifetime history. The trailing seven-day total and daily average use the
+same mailbox source. All-time priced AI usage is derived from immutable counted
+`HostedAiUsage` rows.
+
+A reset targets exactly one current allowance period. The table and reset both
+resolve that period through the canonical allowance gate, so Family-sponsored,
+trial, direct-billing, thread-container, inactive-access, plan-change, and
+no-persisted-row behavior cannot drift from runtime admission. The server locks
+the member and period in the same order as usage accounting, verifies the
+period timestamp and usage-credit ledger version shown to the operator, then
+clears current included spend and its blocked state. In the same serializable
+transaction it releases only the matching period-and-credit-version notice
+claim by clearing that delivery row's unique lookup key. The delivery row
+remains as history. A recent pre-provider dispatch makes the operation
+retryable instead of permitting a concurrent duplicate send.
+
+The table reads decision and concurrency-version facts from one repeatable
+database snapshot. Its blocked/available label comes from the canonical gate
+decision, never from the persisted `blocked_at` marker, because a plan change
+can make that storage marker stale until the mutating gate reconciles it. A
+historical notice claim is shown independently and never suppresses canonical
+availability. After reset commit, the route signals the existing hosted runtime
+recheck so accepted mailbox work is reconsidered immediately. That signal uses the
+existing bounded handoff deadline and forwards its abort signal. A rejection or
+timeout reports the reset as committed and exposes a wake-only retry instead of
+replaying the reset or claiming complete recovery. Reusing the logical notice
+key still permits only one active claim, while each explicitly re-released
+notice gets a fresh durable attempt ID and Linq provider idempotency key. Generic
+runtime and webhook delivery fences retain their deterministic durable IDs.
+This prevents a retained history row or provider deduplication from suppressing
+the next real limit crossing without changing unrelated delivery correlation.
+
+Reset never deletes or rewrites immutable usage rows, purchased-credit entries,
+the purchased-credit balance or version, billing state, mailbox rows, or
+delivery history. It creates no second usage ledger or message counter. A stale
+table row fails closed and must be refreshed before retrying.
+
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
 only from the projection's thresholded `recommendedAction`. A notice code, plan
 label, incomplete billing row, or legacy state must not independently imply
@@ -274,6 +325,16 @@ inventing a billing menu:
   funding URL without exposing a payer or contributor; the heads-up does not
   promise that URL before the read returns it.
 
+For an explicit Family member-usage management request, the assistant first
+calls `murph.family_plan action="read_status"`. It may provide
+`/settings#family` only when that current private result has `owner: true`,
+`billingActive: true`, and the intended person matches exactly one active
+member row. The handoff is browser navigation only: the assistant does not
+choose an amount, create Checkout, or claim payment or usage completion. It
+asks one narrow clarification for a missing or ambiguous member and provides no
+handoff when any authority gate fails. `murph.plan_usage` and the personal
+subscription handoff are not substitutes for this Family gate.
+
 ## Group Usage
 
 Classify a group-thread allowance from its source, never by comparing its
@@ -301,10 +362,11 @@ mailbox row. The composed usage system adds no second admission gate, persisted
 forecast, billing queue, cron, trial-ending webhook, automatic nudge, group
 wallet or usage account, automatic model switch, custom card form, App Clip,
 or mini app. It does not add a general Stripe API tool: the subscription action contract
-exposes only the three current web-owned operations above, and personal usage
-top-ups remain an authenticated Stripe-hosted Settings handoff. Group funding
+exposes only the three current web-owned operations above, and personal and
+Family-member usage top-ups remain authenticated Stripe-hosted Settings
+handoffs. Group funding
 uses the existing join code and synthetic member through an authenticated
-fixed-pack page; anonymous and Family funding remain unimplemented.
+fixed-pack page; anonymous funding remains unimplemented.
 
 ## Deployment
 

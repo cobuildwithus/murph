@@ -5,6 +5,7 @@ import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  createHostedFamilyMemberUsageCreditCheckout: vi.fn(),
   createHostedGroupUsageCreditCheckout: vi.fn(),
   createHostedUsageCreditCheckout: vi.fn(),
   expireHostedUsageCreditCheckout: vi.fn(),
@@ -31,6 +32,8 @@ vi.mock("@/src/lib/hosted-onboarding/usage-credit-purchase-service", async (impo
   >();
   return {
     ...original,
+    createHostedFamilyMemberUsageCreditCheckout:
+      mocks.createHostedFamilyMemberUsageCreditCheckout,
     createHostedGroupUsageCreditCheckout:
       mocks.createHostedGroupUsageCreditCheckout,
     createHostedUsageCreditCheckout: mocks.createHostedUsageCreditCheckout,
@@ -45,6 +48,9 @@ type CheckoutRoute = typeof import(
 type GroupCheckoutRoute = typeof import(
   "../app/api/groups/fund/[joinCode]/usage-credit/checkout/route"
 );
+type FamilyCheckoutRoute = typeof import(
+  "../app/api/settings/billing/family/members/[memberId]/usage-credit/checkout/route"
+);
 type StatusRoute = typeof import(
   "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/route"
 );
@@ -54,6 +60,7 @@ type ExpireRoute = typeof import(
 
 let checkoutRoute: CheckoutRoute;
 let expireRoute: ExpireRoute;
+let familyCheckoutRoute: FamilyCheckoutRoute;
 let groupCheckoutRoute: GroupCheckoutRoute;
 let statusRoute: StatusRoute;
 
@@ -78,6 +85,11 @@ beforeEach(async () => {
     status: "checkout_open",
     url: "https://checkout.stripe.test/group-session",
   });
+  mocks.createHostedFamilyMemberUsageCreditCheckout.mockResolvedValue({
+    purchaseId: "hucp_abcdefghijklmnop",
+    status: "checkout_open",
+    url: "https://checkout.stripe.test/family-session",
+  });
   mocks.expireHostedUsageCreditCheckout.mockResolvedValue({
     checkoutExpiresAt: "2026-07-16T18:30:00.000Z",
     purchaseId: "hucp_abcdefghijklmnop",
@@ -97,6 +109,9 @@ beforeEach(async () => {
   expireRoute = await import(
     "../app/api/settings/billing/usage-credit/purchases/[purchaseId]/expire/route"
   );
+  familyCheckoutRoute = await import(
+    "../app/api/settings/billing/family/members/[memberId]/usage-credit/checkout/route"
+  );
   groupCheckoutRoute = await import(
     "../app/api/groups/fund/[joinCode]/usage-credit/checkout/route"
   );
@@ -106,6 +121,30 @@ beforeEach(async () => {
 });
 
 describe("usage-credit checkout route", () => {
+  it("takes the Family beneficiary only from the route and the payer from session", async () => {
+    const request = createCheckoutRequest({
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_25_usd",
+    }, "https://join.example.test/api/settings/billing/family/members/hbm_familymember1/usage-credit/checkout");
+    const response = await familyCheckoutRoute.POST(
+      request,
+      createRouteContext({ memberId: "hbm_familymember1" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/family-session",
+    });
+    expect(mocks.createHostedFamilyMemberUsageCreditCheckout).toHaveBeenCalledWith({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: "request_key_123456",
+      offerCode: "usage_25_usd",
+      payerMemberId: "hbm_member123",
+      prisma: { label: "test-prisma" },
+    });
+  });
+
   it("resolves the group and payer only on the server", async () => {
     const request = createCheckoutRequest({
       clientRequestKey: "request_key_123456",

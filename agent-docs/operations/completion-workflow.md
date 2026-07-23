@@ -55,7 +55,10 @@ smallest correct ownership boundary with truthful proof and no unresolved
 accepted review finding. Completion requires the routed verification, the
 preliminary specialist ReviewGPT pass when any lens applies, any required local
 `product-experience-review`, any required Claude Code UI double-check, parent
-final review, plan/ledger closure, and scoped commit;
+final review, plan/ledger closure, and scoped commit. User-facing frontend UI
+work also requires the production component or section on the appropriate
+`/design` catalog tab and hosted desktop and mobile screenshots from that tab
+in the PR;
 PR-lane work additionally requires green CI and, when the change is eligible,
 the separate final pushed-head ReviewGPT gate.
 
@@ -130,7 +133,7 @@ become fallback product-decision owners.
    - any product-owned dimension separately adds local `product-experience-review`, especially for asynchronous, proactive, cross-actor, permission, latency, ordering, delivery, or recovery flows
    - when the later cross-cutting conditions apply, select exactly one final gate: final ReviewGPT when eligible, otherwise local `deep-review`
 5. Run the coverage-bearing verification command chosen from the verification doc once implementation is stable enough to produce a truthful signal. Prefer `pnpm test:diff <path ...>` when it covers the touched owner truthfully; otherwise run the edited owner package/app coverage command. Retain Crabbox/Testbox evidence when the canonical command dispatches remotely.
-6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
+6. For user-visible, persisted-state, operational, or trust-boundary changes, capture at least one direct scenario check in addition to scripted tests. Every user-facing frontend UI change must render its real production component on `/design?tab=components`, or its composed page section or flow on `/design?tab=sections`, and capture desktop and mobile screenshots from that catalog surface for the PR. When `product-experience-review` applies, run that local subagent now against the stable implementation and direct scenario evidence. For user-facing `apps/web` work, capture redacted desktop/mobile rendered evidence and complete the separate Claude Code UI double-check while credits are available; explicit credit exhaustion is recorded without adding a local frontend-review substitute.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the intent, applicable lens declarations, verification evidence, rendered-evidence manifest, and change-shape contract below.
 8. Run exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not three audits.
 9. Triage every preliminary finding locally. Download a returned `reviewgpt-coverage.patch` only from the exact owned review thread, inspect its full contents and paths, prove it touches only tests/fixtures/direct-proof scaffolding, run `git apply --check`, then apply it deliberately if accepted. Never pipe a downloaded artifact directly into `git apply`. Implement accepted prompt/frontend findings in the parent, rerun focused proof, commit, and push the resulting candidate. Do not rerun the preliminary pass merely because its findings caused corrections; the parent's final review and any applicable final ReviewGPT full-patch gate review the resulting diff.
@@ -194,6 +197,11 @@ Required:
   `Category | Added | Deleted` table plus a total. This is reviewer orientation
   and a scope-anomaly signal, not a quality target or an automatic merge or
   architecture verdict; moves and generated churn may distort raw counts.
+- **Design proof for user-facing frontend UI.** Link the exact
+  `/design?tab=components` or `/design?tab=sections` catalog surface and embed
+  hosted desktop and mobile screenshots captured there. The screenshots must
+  show every materially changed component or section and the states needed for
+  review. PRs without a user-facing frontend UI diff may write `Not applicable`.
 
 Optional when relevant: the rollout plan or follow-up PR that flips the gate, and any deliberately deferred work.
 

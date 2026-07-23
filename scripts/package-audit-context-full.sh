@@ -284,6 +284,12 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
   export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
 fi
 
+# Root dotfiles are not discovered by the ordinary source scan, but Crabbox
+# reviews depend on this provider/ref trust-root configuration even when the
+# current patch changes only its consumers.
+COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"$'\n'".crabbox.yaml"
+export COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS
+
 export COBUILD_AUDIT_CONTEXT_INCLUDE_TESTS_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_DOCS_DEFAULT='1'
 export COBUILD_AUDIT_CONTEXT_INCLUDE_CI_DEFAULT='1'

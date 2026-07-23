@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { CheckCircle2, Monitor } from "lucide-react";
+import { DeviceSyncCompletionDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
+import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
 import { TimelineEntry } from "@/src/components/ui/timeline-entry";
 import { ConclusionCard } from "@/src/components/conclusion-card";
@@ -73,10 +75,14 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
+import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
+import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
+import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -143,6 +149,46 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
+  contactAction: {
+    href: "sms:?body=I%20just%20connected%20my%20WHOOP",
+    kind: "imessage",
+    label: "Text Murph",
+  },
+  detail:
+    "Heads up: WHOOP doesn't share all of your data automatically. Syncing through Apple Health gives Murph the complete picture.",
+  failed: false,
+  kind: "device-sync",
+  retryHref: null,
+  setupGuide: {
+    actionAriaLabel: "See how to sync all of your WHOOP data",
+    actionLabel: "Get full sync",
+    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
+    downloadAction: {
+      ariaLabel: "Download App to sync WHOOP through Apple Health",
+      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      label: "Download App",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
+    steps: [
+      {
+        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
+        title: "Download Murph and sign in",
+      },
+      {
+        detail:
+          "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
+        title: "Turn on Apple Health in WHOOP",
+      },
+    ],
+    title: "Get your full sync",
+    voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
+  },
+  title: "WHOOP is connected",
+  unverified: false,
+};
+
 type SegmentedControlDemoValue = "phone" | "email" | "telegram";
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
@@ -158,6 +204,7 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
+  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -170,6 +217,7 @@ export function ComponentsContent() {
   const [inlineContactAvatarId, setInlineContactAvatarId] = useState("hooded");
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
+  const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -539,6 +587,113 @@ export function ComponentsContent() {
               <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
+        </Section>
+
+        <Separator />
+
+        <div id="whoop-completion-dialog" className="scroll-mt-24">
+          <Section title="WHOOP Completion Dialog">
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Production completion flow for WHOOP. Open the preview, then choose
+              Get full sync to review the voice memo, setup steps, and action hierarchy.
+            </p>
+            <div className="flex">
+              <Button onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}>
+                Preview WHOOP completion
+              </Button>
+            </div>
+            {whoopCompletionPreviewKey > 0 ? (
+              <DeviceSyncCompletionDialog
+                key={whoopCompletionPreviewKey}
+                model={WHOOP_COMPLETION_DIALOG_MODEL}
+              />
+            ) : null}
+          </Section>
+        </div>
+
+        <Separator />
+
+        <Section title="Usage credit">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Group funding uses one shared card and the standard usage-credit
+            amount dialog. Family owners reuse that dialog with an exact member
+            label and status-only recovery when another target owns the active
+            checkout. Credit is added only after payment is complete.
+          </p>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <div
+              data-design-component="group-usage-funding"
+              id="group-usage-funding-component"
+            >
+              <GroupUsageFundingCard
+                action={
+                  <HostedUsageTopUpDialog
+                    checkoutUrl="/api/design/usage-credit-preview"
+                    offers={DESIGN_USAGE_OFFERS}
+                    scope="group"
+                  />
+                }
+                groupName="Sunday sleep crew"
+              />
+            </div>
+            <div
+              className="rounded-3xl border border-border bg-card p-6"
+              data-design-component="family-member-usage-top-up"
+              id="family-member-usage-top-up-component"
+            >
+              <p className="text-sm font-medium text-muted-foreground">
+                Family member
+              </p>
+              <p className="mt-1 font-serif text-2xl font-semibold tracking-normal text-foreground">
+                Alex
+              </p>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                Purchase one-time usage credit for this member, or resolve an
+                unfinished checkout for another usage destination.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <HostedUsageTopUpDialog
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={DESIGN_USAGE_OFFERS}
+                  scope="family"
+                  targetLabel="Alex"
+                />
+                <HostedUsageTopUpDialog
+                  activePurchase={{
+                    offerCode: "usage_10_usd",
+                    purchaseId: "design_other_target",
+                    retryAllowed: false,
+                    status: "checkout_open",
+                    targetConflict: true,
+                  }}
+                  checkoutUrl="/api/design/usage-credit-preview"
+                  offers={[]}
+                  scope="family"
+                  targetLabel="Alex"
+                />
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Garmin Historical Data Preflight">
+          <div className="flex flex-col items-start gap-3">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Provider-specific reminder shown before Murph opens Garmin&apos;s
+              authorization screen. It names the default-off permission without
+              claiming Murph can verify the external setting.
+            </p>
+            <Button onClick={() => setGarminHistoricalDataDialogOpen(true)}>
+              Preview Garmin preflight
+            </Button>
+          </div>
+          <GarminHistoricalDataDialog
+            open={garminHistoricalDataDialogOpen}
+            onContinue={() => setGarminHistoricalDataDialogOpen(false)}
+            onOpenChange={setGarminHistoricalDataDialogOpen}
+          />
         </Section>
 
         <Separator />

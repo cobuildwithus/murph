@@ -1467,7 +1467,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('ReviewGPT first-reviewed head: <full-sha>')
     expect(prReviewGptLoop).toContain('`ROUND_OUTCOME: INVALID`')
     expect(prReviewGptLoop).toContain(
-      'A marked concrete-model response that completes in under 7.5 minutes',
+      'its minimum trustworthy duration is 4 minutes',
+    )
+    expect(prReviewGptLoop).toContain(
+      'Treat 7.5 minutes as the default final-gate trust floor',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A marked concrete-model response below 6.5 minutes is too',
     )
     expect(prReviewGptLoop).toContain('too-fast-response retries never advance')
     expect(prReviewGptLoop).toContain('review remediation has added at least 500')
@@ -2934,6 +2940,11 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'agent-docs/prompts/coverage-write.md',
         'coverage lens\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        '.crabbox.yaml',
+        'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
+      )
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
       execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: harnessRoot })
       const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -3040,6 +3051,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         expect.arrayContaining([
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
+          '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
           'audit-packages/desktop.png',
           'review-gpt-pr-context/review-phase.json',
@@ -3126,6 +3138,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe('')
+      expect(listZipEntries(roundOne.zipPath)).toContain('.crabbox.yaml')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {
@@ -3175,6 +3188,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           { encoding: 'utf8' },
         ),
       ).toBe(expectedDelta)
+      expect(listZipEntries(roundTwo.zipPath)).toContain('.crabbox.yaml')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const missingPrevious = invokePackager('missing-previous', currentHead, {
@@ -3248,6 +3262,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).toContain('agent-docs/operations/pr-reviewgpt-loop.md')
       expect(leanEntries).toContain('agent-docs/product-specs/repo.md')
       expect(leanEntries).toContain('agent-docs/references/hosted-runtime-protocol.md')
+      expect(leanEntries).not.toContain('.crabbox.yaml')
       expect(leanEntries).not.toContain('agent-docs/product-specs/repo-v1.md')
       expect(leanEntries).toContain('docs/architecture.md')
       expect(leanEntries).toContain('docs/contracts/00-invariants.md')
@@ -3263,6 +3278,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(leanEntries).not.toContain('apps/web/public/legal/privacy.pdf')
       expect(leanEntries).not.toContain('docs/assets/readme-hero.jpg')
 
+      expect(fullEntries).toContain('.crabbox.yaml')
       expect(fullEntries).toContain('packages/cli/test/release-script-coverage-audit.test.ts')
       expect(fullEntries).toContain('apps/web/test/device-sync-http.test.ts')
       expect(fullEntries).toContain('docs/device-sync-hosted-control-plane.md')

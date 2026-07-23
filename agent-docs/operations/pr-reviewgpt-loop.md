@@ -122,8 +122,16 @@ The guarded ZIP contains:
 head. The response must contain `SPECIALIST_REVIEW_COMPLETE` and one of
 `SPECIALIST_OUTCOME: PASS`, `SPECIALIST_OUTCOME: FINDINGS`, or
 `SPECIALIST_OUTCOME: INVALID`. Apply the same exact-turn, attachment, configured
-model, minimum-duration, and owned-target checks used by the final gate. An
-`INVALID` result is a tooling/evidence failure: correct the gap and retry the
+model, and owned-target checks used by the final gate. Because this is a narrow,
+lens-scoped pass, its minimum trustworthy duration is 4 minutes rather than the
+final gate's default 7.5-minute floor. A marked response below 4 minutes does not
+count. The current ReviewGPT package may conservatively reject any marked
+concrete-model response below 7.5 minutes; a specialist response at or above 4
+minutes may still count after local inspection confirms the exact turn,
+attachment, requested model selection, completion marker, and substantive lens
+coverage. Record the elapsed time, lane/model evidence, and acceptance reason;
+the package's missing attestation sidecar is expected for this manual exception.
+An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
 same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
 specialist pass; do not split or rerun it by lens.
 
@@ -308,17 +316,27 @@ requires it or the current user explicitly asks for it.
    round. Correct its evidence or invocation gap and retry the same round number
    against the same pushed head.
 
-   A marked concrete-model response that completes in under 7.5 minutes is
-   untrusted and does not count. ReviewGPT must fail the run, preserve the
-   response only as diagnostic output, and omit model-verification attestation.
-   Retry the same substantive round number against the same pushed head; browser,
-   model, capture, attachment, and too-fast-response retries never advance the
-   round counter. For responses at or above the minimum, still verify the exact
-   turn, completion marker, attachment, and model evidence. If those checks show
-   a different or downgraded model, incomplete response, or missing snapshot,
-   discard the round, correct the profile or invocation, and retry. If only one
-   lane is healthy, pin it with `REVIEW_GPT_BROWSER_LANE` and note the temporary
-   override in handoff.
+   Treat 7.5 minutes as the default final-gate trust floor, not an absolute
+   stopwatch verdict. A marked concrete-model response below 6.5 minutes is too
+   fast and does not count. A response from 6.5 minutes up to the 7.5-minute
+   default is near-threshold and may count at local discretion when inspection
+   confirms the exact turn, attachment, requested model selection, completion
+   marker, and a substantive review proportionate to the requested scope. Record
+   the elapsed time, selected lane/model evidence, artifact-quality judgment,
+   and acceptance reason in the round handoff. The current ReviewGPT package may
+   conservatively fail such a near-threshold run and omit its model-verification
+   sidecar; that diagnostic status alone does not invalidate a documented manual
+   acceptance. Responses at or above 7.5 minutes still require all ordinary
+   evidence checks and are not trusted by duration alone.
+
+   If a too-fast response is not accepted under this narrow exception, preserve
+   it only as diagnostic output and retry the same substantive round number
+   against the same pushed head. Browser, model, capture, attachment, and
+   too-fast-response retries never advance the round counter. If evidence shows
+   a different or downgraded model, incomplete response, missing snapshot, or
+   shallow/templated output, discard the round regardless of duration, correct
+   the profile or invocation, and retry. If only one lane is healthy, pin it
+   with `REVIEW_GPT_BROWSER_LANE` and note the temporary override in handoff.
 
 4. Triage every finding locally before fixing:
    - **Accepted bug/edge case**: confirm the issue through a

@@ -144,3 +144,68 @@ for (const route of ROUTES) {
     });
   }
 }
+
+for (const width of [768, 1280] as const) {
+  test(`personal usage-credit owner stays contained @ ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.route("**/*", (route) => {
+      if (isLoopbackUrl(route.request().url())) {
+        route.continue();
+      } else {
+        route.abort();
+      }
+    });
+
+    const response = await page.goto(
+      "/design?tab=sections#personal-usage-credit-owner",
+      { waitUntil: "load" },
+    );
+    expect(response?.status(), "design owner study should respond 200").toBe(200);
+
+    const study = page.locator(
+      '[data-design-study="personal-usage-credit-owner"]',
+    );
+    const card = study.locator('[aria-label="Pulse included AI usage"]');
+    const trigger = card.getByRole("button", { name: "Add usage" });
+    await expect(study.locator("[inert]")).toHaveCount(1);
+    await expect(trigger).toBeVisible();
+
+    const layout = await page.evaluate(() => {
+      const owner = document.querySelector(
+        '[aria-label="Pulse included AI usage"]',
+      );
+      const button = Array.from(owner?.querySelectorAll("button") ?? []).find(
+        (candidate) => candidate.textContent?.trim() === "Add usage",
+      );
+      if (!(owner instanceof HTMLElement) || !(button instanceof HTMLElement)) {
+        return null;
+      }
+      const ownerRect = owner.getBoundingClientRect();
+      const buttonRect = button.getBoundingClientRect();
+      return {
+        buttonClassName: button.className,
+        buttonRight: buttonRect.right,
+        buttonWidth: buttonRect.width,
+        documentClientWidth: document.documentElement.clientWidth,
+        documentScrollWidth: document.documentElement.scrollWidth,
+        ownerRight: ownerRect.right,
+        ownerWidth: ownerRect.width,
+      };
+    });
+
+    expect(layout).not.toBeNull();
+    if (!layout) {
+      return;
+    }
+    expect(layout.documentScrollWidth).toBeLessThanOrEqual(
+      layout.documentClientWidth + OVERFLOW_TOLERANCE_PX,
+    );
+    expect(layout.buttonRight).toBeLessThanOrEqual(
+      layout.ownerRight + OVERFLOW_TOLERANCE_PX,
+    );
+    expect(layout.buttonWidth).toBeLessThan(layout.ownerWidth / 2);
+    expect(layout.buttonClassName.split(/\s+/u)).not.toContain("w-full");
+  });
+}

@@ -48,6 +48,14 @@ jobs:
           done
           sudo ln -sf "$(command -v pnpm)" /usr/local/bin/pnpm
 
+      - name: Install the secret-free delegated verification entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo install -o root -g root -m 0555 \
+            scripts/crabbox/trusted-verification-entrypoint.sh \
+            /usr/local/bin/murph-crabbox-verify
+
       - name: Keep Testbox available for delegated commands
         if: success()
         uses: useblacksmith/run-testbox@3f60ff9ceb2c10c3feefa87dc0c6490cffae059d
