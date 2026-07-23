@@ -10,9 +10,6 @@ import {
 import { readHostedExecutionEnvironment } from "../env.ts";
 import { json, jsonError, methodNotAllowed, notFound, readJsonObject, unauthorized } from "../json.ts";
 import {
-  createCloudflareHostedPublicInternetFetch,
-} from "../runtime-platform/public-internet-fetch.ts";
-import {
   HostedEmailPreProviderError,
   HostedEmailSendValidationError,
   readHostedEmailConfig,
@@ -78,8 +75,6 @@ export async function handleRunnerResultsRequest(input: {
   if (input.url.pathname === HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH) {
     return handleRunnerGeneratedImageUploadRequest({
       env: input.env,
-      environment: input.environment,
-      fetchImpl: createCloudflareHostedPublicInternetFetch(fetch),
       request: input.request,
       userId: input.userId,
     });

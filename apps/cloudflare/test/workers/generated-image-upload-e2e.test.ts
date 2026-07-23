@@ -10,7 +10,7 @@ interface UploadHandlerSignalResponse {
 }
 
 describe("generated image upload Worker fetch path", () => {
-  it("keeps the fixed upload handler on a fresh timeout signal", async () => {
+  it("forwards the caller's request signal to the upload", async () => {
     const response = await SELF.fetch(
       "https://worker.test/__test/generated-images/upload-handler-signal",
       { method: "POST" },
@@ -21,6 +21,8 @@ describe("generated image upload Worker fetch path", () => {
 
     expect(result.status).toBe(200);
     expect(result.observedHasSignal).toBe(true);
-    expect(result.observedSignalIsIncoming).toBe(false);
+    // The upload is bounded by the caller-owned deadline (the incoming request
+    // signal), not a separate handler-local timer.
+    expect(result.observedSignalIsIncoming).toBe(true);
   });
 });

@@ -589,7 +589,6 @@ const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
     : hostedLocalCloudflareImagesFetch;
   return handleRunnerGeneratedImageUploadRequest({
     env,
-    environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
     fetchImpl,
     request,
     userId,

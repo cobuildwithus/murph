@@ -5,7 +5,6 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
-  listHostedAssistantRuntimeIssuesForTest,
   listHostedAiUsageForTest,
 } from "#hosted-web-testing";
 import {
@@ -271,7 +270,7 @@ describe("hosted local Codex image media delivery e2e", () => {
     );
   }, 360_000);
 
-  it("degrades to text and records an issue when generated-image upload throws", async () => {
+  it("degrades to text when generated-image upload throws", async () => {
     const materializedChatId = `chat_local_codex_media_${userId}`;
     const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
     const outboundCountBeforeGeneration = requireLinqStub().countObservedSends(replyPath);
@@ -312,31 +311,6 @@ describe("hosted local Codex image media delivery e2e", () => {
 
     const finalStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    const issues = await listHostedAssistantRuntimeIssuesForTest({
-      component: "assistant.generated-image",
-      environment: requireScenario().runtimeEnv,
-      operation: "generated_image_upload",
-    });
-    expect(issues).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        component: "assistant.generated-image",
-        errorCode: "type_error",
-        issueKind: "tool_error",
-        operation: "generated_image_upload",
-        phase: "tool_call",
-        severity: "error",
-        surface: "hosted.runner-outbound",
-      }),
-    ]));
-    const uploadIssue = issues.find((issue) => issue.errorCode === "type_error");
-    expect(uploadIssue?.detailsJson).toEqual(expect.objectContaining({
-      errorCode: "type_error",
-      errorMessage: "Hosted-local Cloudflare Images upload TypeError.",
-      errorName: "TypeError",
-      failureKind: "thrown",
-      provider: "cloudflare_images",
-      timeoutMs: 30_000,
-    }));
   }, 360_000);
 });
 
