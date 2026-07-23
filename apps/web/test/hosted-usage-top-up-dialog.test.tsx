@@ -2332,7 +2332,7 @@ test("offers the payer Text Murph on a fulfilled Family top-up return", async ()
   }
 });
 
-test("lets the payer pick a channel when several contact channels resolve", async () => {
+test("renders inline channel rows in the one dialog when several channels resolve", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
     purchaseId: "hucp_contact_multi0",
     status: "fulfilled",
@@ -2373,21 +2373,40 @@ test("lets the payer pick a channel when several contact channels resolve", asyn
     });
 
     assert.match(rendered.container.textContent ?? "", /Usage added/);
-    assert.equal(rendered.container.querySelector("a"), null);
-    await clickButton(rendered.container, rendered.window, "Text Murph");
-
-    assert.match(
-      rendered.container.textContent ?? "",
-      /Pick how you want to text Murph\./,
+    // The channel rows live inside the success dialog itself; no nested
+    // picker dialog opens on top of it.
+    assert.equal(
+      rendered.container.querySelectorAll('[role="dialog"]').length,
+      1,
     );
+    assert.match(rendered.container.textContent ?? "", /Text Murph/);
     const textLink = rendered.container.querySelector('a[href^="sms:"]');
     assert.ok(textLink);
+    assert.equal(
+      textLink.getAttribute("href"),
+      "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+    );
     assert.match(textLink.textContent ?? "", /Messages/);
+    assert.equal(
+      textLink.getAttribute("aria-label"),
+      "Text Murph in Messages",
+    );
     const telegramLink = rendered.container.querySelector(
       'a[href^="https://t.me/"]',
     );
     assert.ok(telegramLink);
+    assert.equal(
+      telegramLink.getAttribute("href"),
+      "https://t.me/withmurph_bot?text=Hey+Murph%2C+I+just+added+more+usage.",
+    );
     assert.match(telegramLink.textContent ?? "", /Telegram/);
+    assert.equal(
+      telegramLink.getAttribute("aria-label"),
+      "Text Murph in Telegram (opens in a new tab)",
+    );
+
+    await clickButton(rendered.container, rendered.window, "Close");
+    assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
   } finally {
     await rendered.cleanup();
   }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { CircleAlertIcon } from "lucide-react";
+import { CircleAlertIcon, MessageCircle } from "lucide-react";
 
-import { MurphContactActionButton } from "@/src/components/murph/murph-contact-action-button";
-import { Button } from "@/src/components/ui/button";
+import { MurphContactChannelRows } from "@/src/components/murph/murph-contact-channel-rows";
+import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   Dialog,
@@ -21,6 +22,7 @@ import {
   FieldSet,
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
+import { cn } from "@/src/lib/utils";
 
 import {
   readStatusContent,
@@ -263,12 +265,26 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 </Button>
               ) : null}
               {showContactAction ? (
-                <MurphContactActionButton
-                  actionLabel="Text Murph"
-                  className="w-full"
-                  options={contactOptions}
-                  pickerDescription="Pick how you want to text Murph."
-                />
+                contactOptions.length === 1 ? (
+                  <MurphContactLink
+                    actionLabel="Text Murph"
+                    option={contactOptions[0]}
+                    className={cn(buttonVariants({ size: "lg" }), "w-full")}
+                  >
+                    <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
+                    Text Murph
+                  </MurphContactLink>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-sm font-medium text-foreground">
+                      Text Murph
+                    </p>
+                    <MurphContactChannelRows
+                      actionLabel="Text Murph"
+                      options={contactOptions}
+                    />
+                  </div>
+                )
               ) : null}
               <Button
                 type="button"

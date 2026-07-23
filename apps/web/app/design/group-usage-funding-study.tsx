@@ -9,6 +9,7 @@ import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-t
 import { Button } from "@/src/components/ui/button";
 import {
   buildMurphSmsHref,
+  buildMurphTelegramTextHref,
   type MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
 
@@ -29,19 +30,17 @@ const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
   },
 ];
 
-const DESIGN_TOP_UP_MULTI_CHANNEL_OPTIONS: MurphContactOption[] = [
+const DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS: MurphContactOption[] = [
   ...DESIGN_TOP_UP_CONTACT_OPTIONS,
   {
-    href: "https://t.me/murph_design_preview",
+    href: buildMurphTelegramTextHref({
+      body: "Hey Murph, I just added more usage for the group.",
+      username: "withmurph_bot",
+    }),
     kind: "telegram",
     label: "Telegram",
     rel: "noopener noreferrer",
     target: "_blank",
-  },
-  {
-    href: "mailto:murph@example.com?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage%20for%20the%20group.",
-    kind: "email",
-    label: "Email",
   },
 ];
 
@@ -100,14 +99,23 @@ function GroupUsageFundingStudy() {
       >
         <p className="text-sm text-muted-foreground">
           After payment completes, the confirmation offers a Text Murph action
-          when the payer has a Murph contact channel.
+          when the payer has a Murph contact channel. One channel renders a
+          direct link; several channels render inline rows in the same dialog.
         </p>
-        <Button
-          variant="outline"
-          onClick={() => setFulfilledPreviewKey((key) => key + 1)}
-        >
-          Preview usage added with Text Murph
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setFulfilledPreviewKey((key) => key + 1)}
+          >
+            Preview usage added with Text Murph
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => setMultiChannelPreviewKey((key) => key + 1)}
+          >
+            Preview usage added with channel choices
+          </Button>
+        </div>
         {fulfilledPreviewKey > 0 ? (
           <HostedUsageTopUpDialog
             key={fulfilledPreviewKey}
@@ -124,21 +132,6 @@ function GroupUsageFundingStudy() {
             scope="group"
           />
         ) : null}
-      </div>
-      <div
-        className="flex w-full max-w-xl flex-col items-start gap-3"
-        data-design-state="usage-added-text-murph-multi-channel"
-      >
-        <p className="text-sm text-muted-foreground">
-          With more than one contact channel, Text Murph opens a channel
-          picker.
-        </p>
-        <Button
-          variant="outline"
-          onClick={() => setMultiChannelPreviewKey((key) => key + 1)}
-        >
-          Preview usage added with channel picker
-        </Button>
         {multiChannelPreviewKey > 0 ? (
           <HostedUsageTopUpDialog
             key={multiChannelPreviewKey}
@@ -148,7 +141,7 @@ function GroupUsageFundingStudy() {
               retryAllowed: false,
               status: "fulfilled",
             }}
-            contactOptions={DESIGN_TOP_UP_MULTI_CHANNEL_OPTIONS}
+            contactOptions={DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS}
             deferTerminalRefreshUntilClose
             initialOpen
             offers={[]}
