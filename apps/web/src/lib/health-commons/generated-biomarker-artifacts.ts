@@ -10,7 +10,7 @@ import type {
 } from "@murphai/health-commons/runtime";
 
 const ROUTE_INDEX_SCHEMA_VERSION = "murph.commons.web.route-index.v1";
-const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v2";
+const BIOMARKER_INDEX_SCHEMA_VERSION = "murph.commons.web.biomarker-index.v3";
 const BIOMARKER_SHELL_SCHEMA_VERSION = "murph.commons.web.biomarker-shell.v1";
 const BIOMARKER_OVERVIEW_SCHEMA_VERSION = "murph.commons.web.biomarker-overview.v1";
 const BIOMARKER_RESEARCH_SCHEMA_VERSION = "murph.commons.web.biomarker-research.v1";
@@ -474,6 +474,9 @@ function isGeneratedBiomarkerFallbackRange(
   const lowerBound = range["lowerBound"];
   const upperBound = range["upperBound"];
   return typeof range["applicability"] === "string"
+    && Array.isArray(range["eligibleSpecimenKinds"])
+    && range["eligibleSpecimenKinds"].length > 0
+    && range["eligibleSpecimenKinds"].every((kind) => kind === "serum" || kind === "plasma")
     && typeof range["label"] === "string"
     && typeof range["unit"] === "string"
     && (lowerBound === undefined || isGeneratedBiomarkerFallbackBound(lowerBound))

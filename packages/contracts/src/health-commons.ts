@@ -301,6 +301,14 @@ export const HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES = [
 export type HealthCommonsBiomarkerGuidanceSourceType =
   (typeof HEALTH_COMMONS_BIOMARKER_GUIDANCE_SOURCE_TYPES)[number];
 
+export const HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS = [
+  "serum",
+  "plasma",
+] as const;
+
+export type HealthCommonsBiomarkerFallbackSpecimenKind =
+  (typeof HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS)[number];
+
 const KEY_PATTERN = "^[a-z_]+:[A-Za-z0-9][A-Za-z0-9._:/-]*(?:@[A-Za-z0-9._:-]+)?$";
 const STABLE_ID_PATTERN = "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$";
 const PATH_SEGMENT_PATTERN = "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]+$";
@@ -1591,6 +1599,9 @@ export type HealthCommonsBiomarkerGuidanceSource = z.infer<
 
 export const healthCommonsBiomarkerFallbackRangeSchema = z
   .object({
+    eligibleSpecimenKinds: z
+      .array(z.enum(HEALTH_COMMONS_BIOMARKER_FALLBACK_SPECIMEN_KINDS))
+      .min(1),
     label: shortStringSchema,
     unit: shortStringSchema,
     lowerBound: healthCommonsBiomarkerGuidanceBoundSchema.optional(),

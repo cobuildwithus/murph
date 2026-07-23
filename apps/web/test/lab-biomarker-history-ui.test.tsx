@@ -2,11 +2,15 @@ import { act, createElement, type ReactNode } from "react";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
+  createBrowserVaultReplica,
   createBrowserVaultQueryClient,
+  createVaultReadModel,
   type BrowserVaultLabResultRow,
   type BrowserVaultQueryClient,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
+import { buildMetricProjection } from "@murphai/query";
+import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -61,6 +65,8 @@ vi.mock("next/link", () => ({
 
 import { BiomarkersPageClient } from "../app/(dashboard)/biomarkers/biomarkers-page-client";
 import { LabBiomarkerDetailClient } from "../app/(dashboard)/biomarkers/results/[metricKey]/lab-biomarker-detail-client";
+
+type BrowserVaultEntity = Parameters<typeof createVaultReadModel>[0]["entities"][number];
 
 beforeEach(() => {
   linkPropsMock.value = [];
@@ -1228,15 +1234,96 @@ test("a unit-matched fallback appears only when the latest lab range is absent",
     const text = rendered.container.textContent ?? "";
     expect(text).toContain("In range");
     expect(text).not.toContain("Lab rangeNot listed");
-    expect(text).toContain("97 to 107 mmol/L");
-    expect(text).toContain("CSCC harmonized adult reference interval");
+    expect(text).toContain("98 to 107 mmol/L");
+    expect(text).toContain("Mayo Clinic Laboratories adult serum reference interval");
     expect(text).toContain("General adult reference");
     expect(text).not.toContain("Latest lab range");
     expect(
       rendered.container.querySelector(
-        '[aria-label="Chloride results over time; general adult reference 97 to 107 mmol/L from CSCC harmonized adult reference interval"]',
+        '[aria-label="Chloride results over time; general adult reference 98 to 107 mmol/L from Mayo Clinic Laboratories adult serum reference interval"]',
       ),
     ).not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  { expected: true, specimenType: "serum" },
+  { expected: false, specimenType: "urine" },
+  { expected: false, specimenType: null },
+] as const)(
+  "production projection selects a canonical-unit fallback only for $specimenType specimen",
+  async ({ expected, specimenType }) => {
+    const vault = createVaultReadModel({
+      entities: [importedTotalProteinTest(specimenType)],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    });
+    const replica = await createBrowserVaultReplica({
+      generatedAt: "2026-07-22T12:00:00.000Z",
+      metricPoints: buildMetricProjection(vault).metricPoints,
+      sourceBundleHash: "8".repeat(64),
+      vault,
+    });
+    browserVaultMock.value.client = createBrowserVaultQueryClient(replica);
+    browserVaultMock.value.status = "ready";
+
+    const rendered = await renderClientComponent(
+      <LabBiomarkerDetailClient
+        authenticated
+        fallbackRanges={[{
+          applicability: "For contextual fallback display on adult serum results.",
+          eligibleSpecimenKinds: ["serum"],
+          label: "Reviewed serum interval",
+          lowerBound: { inclusive: true, value: 6.3 },
+          unit: "g/dL",
+          upperBound: { inclusive: true, value: 7.9 },
+        }]}
+        metricKey="total-protein"
+      />,
+      { requireButton: false },
+    );
+
+    try {
+      const text = rendered.container.textContent ?? "";
+      expect(text).toContain("7 g/dL");
+      expect(text).toContain("In range");
+      expect(text.includes("General adult reference")).toBe(expected);
+      expect(text.includes("6.3 to 7.9 g/dL")).toBe(expected);
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("a specimen-mismatched fallback is withheld", async () => {
+  browserVaultMock.value.client = clientWithRows([
+    labRow({
+      analyte: "Chloride",
+      biomarkerKey: "biomarker:chloride",
+      id: "chloride-plasma",
+      metricKey: "chloride",
+      normalizedUnit: "mmol/L",
+      normalizedValue: 101,
+      specimenKind: "plasma",
+      unit: "mmol/L",
+      value: 101,
+    }),
+  ]);
+  browserVaultMock.value.status = "ready";
+
+  const rendered = await renderClientComponent(
+    <LabBiomarkerDetailClient
+      authenticated
+      fallbackRanges={TEST_ADULT_FALLBACK_RANGES}
+      metricKey="chloride"
+    />,
+    { requireButton: false },
+  );
+
+  try {
+    expect(rendered.container.textContent).not.toContain("General adult reference");
   } finally {
     await rendered.cleanup();
   }
@@ -1285,7 +1372,7 @@ test("the reporting lab range wins over a matching general fallback", async () =
     expect(text).toContain("Latest lab range");
     expect(text).toContain("98 to 106 mmol/L");
     expect(text).not.toContain("General adult reference");
-    expect(text).not.toContain("CSCC harmonized adult reference interval");
+    expect(text).not.toContain("Mayo Clinic Laboratories adult serum reference interval");
   } finally {
     await rendered.cleanup();
   }
@@ -1356,6 +1443,7 @@ test.each([
       fallbackRanges={[{
         applicability: "For contextual fallback display on adult serum or plasma results.",
         ...bound,
+        eligibleSpecimenKinds: ["serum"],
         label: "Reviewed adult limit",
         unit: "mmol/L",
       }]}
@@ -1413,13 +1501,14 @@ function clientWithRows(rows: BrowserVaultLabResultRow[]): BrowserVaultQueryClie
   return createBrowserVaultQueryClient(createReplica(rows));
 }
 
-const TEST_ADULT_FALLBACK_RANGES = [{
+const TEST_ADULT_FALLBACK_RANGES: readonly HealthCommonsWebBiomarkerFallbackRange[] = [{
   applicability: "For contextual fallback display on adult serum or plasma results.",
-  label: "CSCC harmonized adult reference interval",
-  lowerBound: { inclusive: true, value: 97 },
+  eligibleSpecimenKinds: ["serum"],
+  label: "Mayo Clinic Laboratories adult serum reference interval",
+  lowerBound: { inclusive: true, value: 98 },
   unit: "mmol/L",
   upperBound: { inclusive: true, value: 107 },
-}] as const;
+}];
 
 function createReplica(labResultRows: BrowserVaultLabResultRow[]): BrowserVaultReplica {
   return {
@@ -1467,10 +1556,49 @@ function labRow(
     referenceRange: null,
     rowSchema: "murph.browser-vault.lab-result-row.v1",
     sourceLabel: "Lab result",
+    specimenKind: "serum",
     textValue: null,
     unit: "%",
     value: 5.6,
     ...overrides,
+  };
+}
+
+function importedTotalProteinTest(specimenType: "serum" | "urine" | null): BrowserVaultEntity {
+  return {
+    attributes: {
+      collectedAt: "2026-06-14T08:00:00.000Z",
+      dataOrigin: { importedAt: "2026-06-15T08:00:00.000Z" },
+      labName: "Example Lab",
+      results: [{
+        analyte: "Total Protein",
+        flag: "normal",
+        unit: "g/L",
+        value: 70,
+      }],
+      source: "import",
+      ...(specimenType === null ? {} : { specimenType }),
+      testCategory: "blood",
+      testName: "metabolic_panel",
+    },
+    body: null,
+    date: "2026-06-14",
+    entityId: `evt-total-protein-${specimenType ?? "missing"}`,
+    experimentSlug: null,
+    family: "event",
+    frontmatter: {},
+    kind: "test",
+    links: [],
+    lookupIds: [],
+    occurredAt: "2026-06-14T08:00:00.000Z",
+    path: `ledger/events/evt-total-protein-${specimenType ?? "missing"}.md`,
+    primaryLookupId: `evt-total-protein-${specimenType ?? "missing"}`,
+    recordClass: "ledger",
+    relatedIds: [],
+    status: null,
+    stream: null,
+    tags: [],
+    title: "Metabolic panel",
   };
 }
 

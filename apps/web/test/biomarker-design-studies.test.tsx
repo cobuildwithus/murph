@@ -349,8 +349,8 @@ test("reference context study covers an exact source limit and reviewed fallback
   expect(markup).toContain("latest lab range");
   expect(markup).toContain("&lt;5.7%");
   expect(markup).toContain("general adult reference");
-  expect(markup).toContain("97 to 107 mmol/L");
-  expect(markup).toContain("CSCC harmonized adult reference interval");
+  expect(markup).toContain("98 to 107 mmol/L");
+  expect(markup).toContain("Mayo Clinic Laboratories adult serum reference interval");
   expect(markup).not.toContain("Results over time");
 });
 

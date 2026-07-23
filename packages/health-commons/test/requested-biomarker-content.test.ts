@@ -177,17 +177,41 @@ const EXPECTED_GUIDANCE_CLASSIFICATION_COUNTS = {
 } as const;
 
 const EXPECTED_FALLBACK_RANGES = {
-  "biomarker:calcium": { lowerBound: 2.15, unit: "mmol/L", upperBound: 2.55 },
-  "biomarker:chloride": { lowerBound: 97, unit: "mmol/L", upperBound: 107 },
-  "biomarker:ldh": { lowerBound: 122, unit: "U/L", upperBound: 235 },
-  "biomarker:phosphate": { lowerBound: 0.8, unit: "mmol/L", upperBound: 1.5 },
-  "biomarker:total-protein": { lowerBound: 62, unit: "g/L", upperBound: 79 },
+  "biomarker:chloride": {
+    lowerBound: 98,
+    title: "Chloride, Serum",
+    unit: "mmol/L",
+    upperBound: 107,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/8460",
+  },
+  "biomarker:ldh": {
+    lowerBound: 122,
+    title: "Lactate Dehydrogenase (LDH), Serum",
+    unit: "U/L",
+    upperBound: 222,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/8344",
+  },
+  "biomarker:phosphate": {
+    lowerBound: 2.5,
+    title: "Phosphorus (Inorganic), Serum",
+    unit: "mg/dL",
+    upperBound: 4.5,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/8408",
+  },
+  "biomarker:total-protein": {
+    lowerBound: 6.3,
+    title: "Protein, Total, Serum",
+    unit: "g/dL",
+    upperBound: 7.9,
+    url: "https://www.mayocliniclabs.com/test-catalog/Overview/8520",
+  },
 } as const;
 
 const REPRESENTATIVE_CONTEXT_DEPENDENT_FALLBACK_OMISSIONS = [
   "biomarker:blood-glucose", // fasting state and test context
   "biomarker:hba1c", // diagnostic decision limits are not reference intervals
   "biomarker:serum-creatinine", // age and sex
+  "biomarker:calcium", // adult interval changes with age and sex
   "biomarker:alkaline-phosphatase", // age and sex
   "biomarker:albumin", // assay method
   "biomarker:potassium", // serum versus plasma
@@ -387,6 +411,7 @@ describe("requested biomarker Health Commons coverage", () => {
       );
 
       for (const range of fallbackRanges) {
+        expect(range.eligibleSpecimenKinds).toEqual(["serum"]);
         expect(range.label.trim().length).toBeGreaterThan(0);
         expect(range.unit.trim()).toBe(range.unit);
         expect(range.unit.length).toBeGreaterThan(0);
@@ -421,7 +446,7 @@ describe("requested biomarker Health Commons coverage", () => {
       }
     }
 
-    expect(actualFallbackEntityKeys.length).toBeGreaterThanOrEqual(5);
+    expect(actualFallbackEntityKeys.length).toBeGreaterThanOrEqual(4);
     expect(actualFallbackEntityKeys.sort()).toEqual(
       Object.keys(EXPECTED_FALLBACK_RANGES).sort(),
     );
@@ -433,17 +458,16 @@ describe("requested biomarker Health Commons coverage", () => {
 
       const range = fallbackRanges?.[0];
       expect(range).toMatchObject({
-        label: "CSCC harmonized adult reference interval",
+        eligibleSpecimenKinds: ["serum"],
         unit: expected.unit,
         lowerBound: { inclusive: true, value: expected.lowerBound },
         upperBound: { inclusive: true, value: expected.upperBound },
         source: {
-          title: "Best practice guidelines on reference interval harmonization in Canada: Evidence-based recommendations from the CSCC working group on reference interval harmonization (CSCC WG-hRI)",
-          organization: "Canadian Society of Clinical Chemists",
-          year: 2025,
-          sourceType: "consensus_statement",
-          url: "https://cscc-sccc.ca/wp-content/uploads/Best-practice-guidelines-on-reference-interval-harmonization-in-Canada.pdf",
-          doi: "10.1016/j.clinbiochem.2025.110986",
+          title: expected.title,
+          organization: "Mayo Clinic Laboratories",
+          year: 2026,
+          sourceType: "assay_documentation",
+          url: expected.url,
         },
       });
     }

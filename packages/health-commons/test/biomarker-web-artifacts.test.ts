@@ -15,6 +15,7 @@ const TEST_REFERENCE_GUIDANCE: HealthCommonsBiomarkerReferenceGuidance = {
   use: "context_only",
   fallbackRanges: [
     {
+      eligibleSpecimenKinds: ["serum"],
       label: "Example contextual interval",
       unit: "fallback-unit",
       lowerBound: { inclusive: true, value: 2 },

@@ -2735,6 +2735,9 @@ function isGeneratedWebBiomarkerFallbackRange(value: unknown): boolean {
   const lowerBound = value["lowerBound"];
   const upperBound = value["upperBound"];
   return typeof value["applicability"] === "string"
+    && Array.isArray(value["eligibleSpecimenKinds"])
+    && value["eligibleSpecimenKinds"].length > 0
+    && value["eligibleSpecimenKinds"].every((kind) => kind === "serum" || kind === "plasma")
     && typeof value["label"] === "string"
     && typeof value["unit"] === "string"
     && (lowerBound === undefined || isGeneratedWebBiomarkerFallbackBound(lowerBound))

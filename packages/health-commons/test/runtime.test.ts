@@ -269,7 +269,7 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       .filter((entry) => entry.published)
       .map((entry) => entry.routeId);
 
-    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v2");
+    expect(biomarkerIndex.schemaVersion).toBe("murph.commons.web.biomarker-index.v3");
     expect(publishedRouteIds).toEqual(expect.arrayContaining([
       "estimated-vo2max",
       "resting-heart-rate",
@@ -283,11 +283,12 @@ describe("@murphai/health-commons runtime catalog reader", () => {
       published: true,
     }));
     expect(
-      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "calcium")?.fallbackRanges,
+      biomarkerIndex.biomarkers.find((entry) => entry.routeId === "chloride")?.fallbackRanges,
     ).toEqual([expect.objectContaining({
-      lowerBound: { inclusive: true, value: 2.15 },
+      eligibleSpecimenKinds: ["serum"],
+      lowerBound: { inclusive: true, value: 98 },
       unit: "mmol/L",
-      upperBound: { inclusive: true, value: 2.55 },
+      upperBound: { inclusive: true, value: 107 },
     })]);
   });
 

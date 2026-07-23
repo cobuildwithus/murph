@@ -231,14 +231,15 @@ flattening the historical trend to fit a wide interval. Label source context as
 latest so it does not imply that older labs shared the same range. If the latest
 comparable result has no usable numeric source range, an exact-unit authored
 Health Commons fallback may appear instead as `General adult reference`; it
-never changes the source status, and context-dependent markers omit it. Keep the
-authored fallback source label in the chart legend. Qualified source ranges
-remain ledger-only and block a generic fallback from superseding more specific
-source context. Do not add a visible chart title or single-result trend
-instruction above or below this graph. Simplifying the hierarchy must not
-imply that excluded values were plotted. The loading skeleton mirrors the same
-latest-result, chart, and ledger structure rather than substituting a generic
-card grid.
+never changes the source status and appears only when the result's normalized
+specimen kind is explicitly eligible. Missing, mismatched, and context-dependent
+specimens omit it. Keep the authored fallback source label in the chart legend.
+Qualified source ranges remain ledger-only and block a generic fallback from
+superseding more specific source context. Do not add a visible chart title or
+single-result trend instruction above or below this graph. Simplifying the
+hierarchy must not imply that excluded values were plotted. The loading skeleton
+mirrors the same latest-result, chart, and ledger structure rather than
+substituting a generic card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature

@@ -45,7 +45,7 @@ export const HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION =
 export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
   "murph.commons.web.experiment-index.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
-  "murph.commons.web.biomarker-index.v2" as const;
+  "murph.commons.web.biomarker-index.v3" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
   "murph.commons.web.experiment-research-tab.v1" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION =
@@ -186,7 +186,12 @@ export interface HealthCommonsWebBiomarkerIndexEntry {
 
 export type HealthCommonsWebBiomarkerFallbackRange = Pick<
   HealthCommonsBiomarkerFallbackRange,
-  "applicability" | "label" | "lowerBound" | "unit" | "upperBound"
+  | "applicability"
+  | "eligibleSpecimenKinds"
+  | "label"
+  | "lowerBound"
+  | "unit"
+  | "upperBound"
 >;
 
 export interface HealthCommonsWebBiomarkerIndex {
@@ -689,6 +694,7 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             desiredDirection: entity.biomarker?.direction?.desired ?? null,
             fallbackRanges: entity.referenceGuidance?.fallbackRanges?.map((range) => ({
               applicability: range.applicability,
+              eligibleSpecimenKinds: range.eligibleSpecimenKinds,
               label: range.label,
               ...(range.lowerBound ? { lowerBound: range.lowerBound } : {}),
               unit: range.unit,

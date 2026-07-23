@@ -938,6 +938,7 @@ describe("@murphai/contracts health commons schemas", () => {
       }],
     } as const;
     const interval = {
+      eligibleSpecimenKinds: ["serum"],
       label: "Reviewed interval",
       unit: "example-unit",
       lowerBound: { inclusive: true, value: 2 },
@@ -946,6 +947,7 @@ describe("@murphai/contracts health commons schemas", () => {
       source,
     } as const;
     const upperBoundOnly = {
+      eligibleSpecimenKinds: ["plasma"],
       label: "Reviewed upper bound",
       unit: "alternate-unit",
       upperBound: { inclusive: false, value: 10 },
@@ -953,6 +955,7 @@ describe("@murphai/contracts health commons schemas", () => {
       source,
     } as const;
     const lowerBoundOnly = {
+      eligibleSpecimenKinds: ["serum", "plasma"],
       label: "Reviewed lower bound",
       unit: "third-unit",
       lowerBound: { inclusive: true, value: 1 },
@@ -980,6 +983,18 @@ describe("@murphai/contracts health commons schemas", () => {
       safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
         ...baseGuidance,
         fallbackRanges: [{ ...interval, source: undefined }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{ ...interval, eligibleSpecimenKinds: undefined }],
+      }),
+    ).toMatchObject({ success: false });
+    expect(
+      safeParseContract(healthCommonsBiomarkerReferenceGuidanceSchema, {
+        ...baseGuidance,
+        fallbackRanges: [{ ...interval, eligibleSpecimenKinds: ["urine"] }],
       }),
     ).toMatchObject({ success: false });
     expect(

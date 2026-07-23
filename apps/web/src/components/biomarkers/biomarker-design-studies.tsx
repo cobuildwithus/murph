@@ -501,9 +501,9 @@ export function BiomarkerReferenceContextStudy() {
               { date: "2025-02-17", id: "synthetic-chloride-2025", value: 103 },
               { date: "2026-04-23", id: "synthetic-chloride-2026", value: 101 },
             ]}
-            referenceRange={{ high: 107, low: 97 }}
-            referenceRangeLabel="97 to 107 mmol/L"
-            referenceRangeSourceLabel="CSCC harmonized adult reference interval"
+            referenceRange={{ high: 107, low: 98 }}
+            referenceRangeLabel="98 to 107 mmol/L"
+            referenceRangeSourceLabel="Mayo Clinic Laboratories adult serum reference interval"
             referenceRangeTitle="General adult reference"
             unit="mmol/L"
           />

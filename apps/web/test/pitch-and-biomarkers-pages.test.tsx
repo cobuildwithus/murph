@@ -254,9 +254,10 @@ test("Biomarker result context follows explicit Health Commons entity mappings",
 
   const chlorideContext = resolveLabBiomarkerContext("chloride");
   assert.deepEqual(chlorideContext.fallbackRanges, [{
-    applicability: "For contextual fallback display on serum or plasma results from adults ages 19 through 79 when the saved result uses this exact unit and has no range; the interval was harmonized from Canadian data, and source-laboratory flags and per-result ranges remain authoritative.",
-    label: "CSCC harmonized adult reference interval",
-    lowerBound: { inclusive: true, value: 97 },
+    applicability: "For contextual fallback display on serum results from adults age 18 or older when the saved result uses this exact unit and has no range; source-laboratory flags and per-result ranges remain authoritative.",
+    eligibleSpecimenKinds: ["serum"],
+    label: "Mayo Clinic Laboratories adult serum reference interval",
+    lowerBound: { inclusive: true, value: 98 },
     unit: "mmol/L",
     upperBound: { inclusive: true, value: 107 },
   }]);
@@ -296,6 +297,7 @@ function createBiomarkerRouteReplica(): BrowserVaultReplica {
       referenceRange: null,
       rowSchema: "murph.browser-vault.lab-result-row.v1",
       sourceLabel: "Lab result",
+      specimenKind: "serum",
       textValue: null,
       unit: "%",
       value: 5.4,

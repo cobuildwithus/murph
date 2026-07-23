@@ -18,22 +18,23 @@ referenceGuidance:
   reviewStatus: reviewed
   use: context_only
   fallbackRanges:
-    - label: "CSCC harmonized adult reference interval"
-      unit: "g/L"
+    - label: "Mayo Clinic Laboratories serum reference interval"
+      unit: "g/dL"
+      eligibleSpecimenKinds:
+        - serum
       lowerBound:
-        value: 62
+        value: 6.3
         inclusive: true
       upperBound:
-        value: 79
+        value: 7.9
         inclusive: true
-      applicability: "For contextual fallback display on serum or plasma results from adults ages 19 through 79 when the saved result uses this exact unit and has no range; the interval was harmonized from Canadian data, and source-laboratory flags and per-result ranges remain authoritative."
+      applicability: "For contextual fallback display on serum results from adults when the saved result uses this exact unit and has no range; the source establishes this interval for people age 1 or older, and source-laboratory flags and per-result ranges remain authoritative."
       source:
-        title: "Best practice guidelines on reference interval harmonization in Canada: Evidence-based recommendations from the CSCC working group on reference interval harmonization (CSCC WG-hRI)"
-        organization: "Canadian Society of Clinical Chemists"
-        year: 2025
-        sourceType: "consensus_statement"
-        url: "https://cscc-sccc.ca/wp-content/uploads/Best-practice-guidelines-on-reference-interval-harmonization-in-Canada.pdf"
-        doi: "10.1016/j.clinbiochem.2025.110986"
+        title: "Protein, Total, Serum"
+        organization: "Mayo Clinic Laboratories"
+        year: 2026
+        sourceType: "assay_documentation"
+        url: "https://www.mayocliniclabs.com/test-catalog/Overview/8520"
   items:
     - kind: reference_interval
       guidance: "Use the reporting laboratory’s reference interval for Total Protein; Commons does not replace the source range because reference limits depend on assay, specimen, and reference population."

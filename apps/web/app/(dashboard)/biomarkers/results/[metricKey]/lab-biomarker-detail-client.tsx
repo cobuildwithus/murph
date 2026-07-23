@@ -572,7 +572,7 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
  * have come from a different lab or range. Exact one-sided source limits are
  * valid context; qualified ranges that cannot be normalized stay in the
  * ledger. A sourced adult fallback is used only when the latest comparable
- * result has no lab range and the authored unit matches exactly.
+ * result has no lab range and the authored unit and specimen match exactly.
  */
 function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
@@ -614,7 +614,9 @@ function resolveChartedReferenceContext(
 
   const comparableUnit = formatLabUnit(detail.comparableUnit).trim();
   const fallback = fallbackRanges.find(
-    (candidate) => formatLabUnit(candidate.unit).trim() === comparableUnit,
+    (candidate) => formatLabUnit(candidate.unit).trim() === comparableUnit
+      && detail.latest.specimenKind !== null
+      && candidate.eligibleSpecimenKinds.includes(detail.latest.specimenKind),
   );
   if (!fallback) {
     return null;
