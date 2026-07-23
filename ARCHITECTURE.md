@@ -882,15 +882,18 @@ transient slots have been consumed or cleared.
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
 input, using the reaction event as inbound identity and the reacted-to message
-only as a reply reference. That same planner owns private and group routing,
+only as a reply reference. The synthetic text describes the actual reaction
+without asserting agreement. That same planner owns private and group routing,
 access, quotas, mailbox dedupe, and wake handoff. At the existing assistant
 outbox-history boundary, the reply reference must exactly match a sent Murph
-delivery on the same route before the synthetic `Yes.` can reach reply
-generation. Synthetic reactions stay in one-input automation groups, so an
-adjacent ordinary reply cannot lend them trust or be suppressed with them.
-This keeps the path independent of Linq's short provider-message retention
-while rendering the exact same- or cross-session target from existing outbox
-truth.
+delivery on the same route before the reaction description can reach reply
+generation. The turn context binds the reaction to that exact message and
+treats a tapback as acknowledgment or appreciation by default, and as agreement
+only when the target asked a question or proposed a specific action to confirm.
+Synthetic reactions stay in one-input automation groups, so an adjacent
+ordinary reply cannot lend them trust or be suppressed with them. This keeps
+the path independent of Linq's short provider-message retention while rendering
+the exact same- or cross-session target from existing outbox truth.
 Unmatched targets are terminally silent, and synthetic reaction identities are
 excluded from message read receipts and provider-message cleanup. The reaction
 path adds no mailbox kind, state, or lifecycle. Existing group join-offer

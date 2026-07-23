@@ -198,7 +198,7 @@ The affirmative-reaction adapter transfers target authorship from a live Linq
 message read to an optional wake marker plus exact same-route sent-outbox
 attestation in the runner. Old Web with a marker-aware runner is safe; new Web
 with an old runner is unsafe because the old tolerant parser drops the marker
-and imports the synthetic `Yes.` as an ordinary message.
+and imports the synthetic reaction description as an ordinary message.
 
 Roll out the first marker-aware release in this order:
 
