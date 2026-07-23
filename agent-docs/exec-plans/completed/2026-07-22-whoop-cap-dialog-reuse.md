@@ -1,8 +1,8 @@
 # Reuse the WHOOP setup dialog at capacity
 
-Status: active
+Status: completed
 Created: 2026-07-22
-Updated: 2026-07-22
+Updated: 2026-07-23
 
 ## Goal
 
@@ -55,12 +55,13 @@ Updated: 2026-07-22
   checklist, download action, and Continue with Murph action.
 - Focused Web tests pass for the manual and device-intent capacity paths, the
   normal completion path, and the design-catalog entry.
-- Canonical diff-aware verification passes: 494 Web test files, 6,216 tests,
-  TypeScript, lint, production build, and development smoke.
-- The local `product-experience-review` returned `NO FINDINGS`. Existing
-  desktop and mobile catalog captures confirm the unchanged guide hierarchy;
-  a fresh branch capture is blocked because no in-app browser instance is
-  available in this session.
+- Canonical path-explicit `pnpm test:diff` passes: 29 repo-tools files and 421
+  tests; 114 CLI files and 1,080 tests; 494 Web files and 6,219 tests; all
+  affected typechecks; lint with zero errors; development smoke; and the
+  production build.
+- The local `product-experience-review` returned `NO FINDINGS`. Fresh desktop,
+  mobile, short-mobile, and mobile-landscape catalog captures confirm the
+  direct capacity preview and the unchanged guide hierarchy.
 - `pnpm verify:acceptance` passes the touched Web/device-sync surfaces but is
   blocked by three deterministic failures in an untouched assistant-runtime
   diagnostics test caused by a pending-input state schema mismatch. The exact
@@ -83,3 +84,9 @@ Updated: 2026-07-22
   The short viewports scroll internally, all voice/download/contact controls
   are keyboard reachable, Escape dismisses the dialog, and focus returns to
   the direct capacity-preview trigger.
+- The preliminary specialist pass reviewed the exact pushed candidate for all
+  three declared lenses. Its three accepted findings and returned test-only
+  coverage patch were fully inspected, applied deliberately, and resolved.
+- The parent final review found no remaining ownership, behavior, responsive,
+  accessibility, or coverage gap in the complete base-to-head diff.
+Completed: 2026-07-23
