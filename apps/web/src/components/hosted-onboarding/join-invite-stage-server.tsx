@@ -498,7 +498,7 @@ function JoinInviteActivePanel({
         <div className="flex items-center gap-2.5 text-sm text-olive">
           <CheckCircleIcon className="size-4 shrink-0" />
           <p className="leading-relaxed">
-            Murph will text you shortly. Reply to start.
+            Murph is ready whenever you are.
           </p>
         </div>
       )}

@@ -49,17 +49,21 @@ vi.mock("@/src/components/biomarkers/lab-biomarker-history-chart", async () => {
       points,
       referenceRange,
       referenceRangeLabel,
+      referenceRangeSourceLabel,
+      referenceRangeTitle = "Latest lab range",
     }: {
       ariaDescribedBy?: string;
       displayName: string;
       points: readonly unknown[];
       referenceRange: { high: number | null; low: number | null };
       referenceRangeLabel?: string | null;
+      referenceRangeSourceLabel?: string | null;
+      referenceRangeTitle?: string;
       unit: string | null;
     }): ReactNode {
       return React.createElement("div", {
         "aria-describedby": ariaDescribedBy,
-        "aria-label": `${displayName} results over time; latest lab range ${referenceRangeLabel}`,
+        "aria-label": `${displayName} results over time; ${referenceRangeTitle.toLowerCase()} ${referenceRangeLabel}${referenceRangeSourceLabel ? ` from ${referenceRangeSourceLabel}` : ""}`,
         "data-high": referenceRange.high,
         "data-low": referenceRange.low,
         "data-point-count": points.length,
@@ -75,6 +79,7 @@ import {
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
   BiomarkerPreparingStateStudy,
+  BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
 import {
   BIOMARKER_DEVICE_STUDIES,
@@ -91,10 +96,19 @@ test("design page routes the biomarker studies through the dedicated sections ta
   const sectionsMarkup = renderToStaticMarkup(createElement(DesignPage));
 
   expect(sectionsMarkup).toContain(">Sections<");
+  expect(sectionsMarkup).toContain("Homepage security and privacy");
+  expect(sectionsMarkup).toContain("Consumer Health Data Privacy Notice");
+  expect(sectionsMarkup).toContain(
+    'href="/consumer-health-data-privacy-policy"',
+  );
+  expect(sectionsMarkup).toContain("Homepage experiment flow");
+  expect(sectionsMarkup).toContain("Homepage personas");
+  expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain("Group usage funding");
-  expect(sectionsMarkup).toContain("Biomarker detail");
+  expect(sectionsMarkup).toContain("Biomarker result detail");
+  expect(sectionsMarkup).toContain("Biomarker reference context");
   expect(sectionsMarkup).toContain("Boundary result detail");
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
@@ -311,14 +325,14 @@ test("biomarker detail study keeps the result and history concise", () => {
   expect(markup).not.toContain(">Lab range</dt>");
   expect(markup).not.toContain("4 comparable results");
   expect(markup).toContain("Example laboratory");
-  expect(markup).toContain("Results over time");
+  expect(markup).not.toContain("Results over time");
   expect(markup).not.toContain("Numeric history");
   expect(markup).not.toContain("A steady rise");
   expect(markup).not.toContain("exact results plotted");
   expect(markup).not.toContain("shaded band");
   expect(markup).not.toContain('aria-describedby="illustrative-biomarker-chart-caption"');
   expect(markup).toContain(
-    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL"',
+    'aria-label="Illustrative hemoglobin results over time; latest lab range 13.0 to 17.0 g/dL from Example laboratory"',
   );
   expect(markup).toContain('data-reference-range-label="13.0 to 17.0 g/dL"');
   expect(markup).toContain('data-point-count="4"');
@@ -336,6 +350,19 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).not.toContain("invented midpoint");
   expect(markup).toContain("Source range not listed");
   expect(markup).not.toContain('role="img"');
+});
+
+test("reference context study covers an exact source limit and published comparator", () => {
+  const markup = renderToStaticMarkup(createElement(BiomarkerReferenceContextStudy));
+
+  expect(markup).toContain('data-design-study="biomarker-reference-context"');
+  expect(markup).toContain("latest lab range");
+  expect(markup).toContain("&lt;5.7%");
+  expect(markup).toContain("published adult comparator");
+  expect(markup).toContain("98 to 107 mmol/L");
+  expect(markup).toContain("Mayo Clinic Laboratories adult serum reference interval");
+  expect(markup).toContain("not the reporting lab&#x27;s range");
+  expect(markup).not.toContain("Results over time");
 });
 
 function getButton(container: HTMLElement, label: string): HTMLButtonElement {

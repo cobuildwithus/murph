@@ -139,7 +139,9 @@ function createActivityExpiryContainerDouble(input: {
     }
 
     return new Response(JSON.stringify(createRunnerResult(input.resultOverrides)), {
-      headers: { "content-type": "application/json; charset=utf-8" },
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
       status: 200,
     });
   });
@@ -185,6 +187,8 @@ function createRunnerResult(overrides: Record<string, unknown> = {}) {
 
 function createRunnerHealthResult(): Record<string, unknown> {
   return {
+    activeJobCount: 0,
+    conversationWarmActivityCompletedAtEpochMs: null,
     hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
     ok: true,
   };

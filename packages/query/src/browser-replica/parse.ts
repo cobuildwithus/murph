@@ -141,10 +141,17 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
     referenceRange: readNullableReferenceRange(record.referenceRange, `${label}.referenceRange`),
     rowSchema,
     sourceLabel: readNullableString(record.sourceLabel),
+    specimenKind: readNullableLabSpecimenKind(record.specimenKind, `${label}.specimenKind`),
     textValue,
     unit: readNullableString(record.unit),
     value: valueNumber,
   };
+}
+
+function readNullableLabSpecimenKind(value: unknown, label: string): "plasma" | "serum" | null {
+  if (value === null || value === undefined) return null;
+  if (value === "plasma" || value === "serum") return value;
+  throw new TypeError(`${label} must be plasma, serum, or null.`);
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {

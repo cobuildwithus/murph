@@ -3,9 +3,15 @@ import {
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
   BiomarkerPreparingStateStudy,
+  BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
+import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
   GroupUsageFundingStudy,
@@ -38,6 +44,24 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage security and privacy">
+        <SecurityTeaserSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage experiment flow">
+        <HowItWorksSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage personas">
+        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
       </StudySection>
@@ -46,6 +70,12 @@ export function SectionsContent() {
 
       <StudySection title="Connect source card actions">
         <ConnectSourceCardStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Home partial-load recovery">
+        <HomeLoadStateStudy />
       </StudySection>
 
       <Separator />
@@ -74,8 +104,14 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Biomarker detail">
+      <StudySection title="Biomarker result detail">
         <BiomarkerDetailStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Biomarker reference context">
+        <BiomarkerReferenceContextStudy />
       </StudySection>
 
       <Separator />

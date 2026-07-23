@@ -187,7 +187,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       },
     },
     murph:
-      "Deep sleep is down 24% on days you have coffee after 2pm. The afternoon espresso is the lever.",
+      "The clearest pattern is lower deep sleep after afternoon espresso: down 24% on days you have coffee after 2pm.",
   },
   {
     topic: "Doctor recap",
@@ -206,7 +206,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       ],
     },
     murph:
-      "18 of 26 days, averaging 42 minutes. Three more this week and you beat April. Knee load reads clean from Garmin.",
+      "18 of 26 days, averaging 42 minutes. Three more this week and you beat April. Garmin shows no unusual change in your recent training load.",
   },
   {
     topic: "Mammogram",
@@ -239,13 +239,13 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       price: "$41.96",
     },
     murph:
-      "Done. Same dose since your triglycerides came down last panel. I queued a recheck of your lipids for November.",
+      "Reordered. I also queued a lipid recheck for November.",
   },
   {
     topic: "B12",
     user: "Do I still need the B12?",
     murph:
-      "Yes for now. Last reading was 312, just above the low end. The methylcobalamin is moving you the right way. Two more months and we recheck.",
+      "Your last B12 was 312, just above the low end. I pulled the trend and drafted a question for your next visit.",
   },
   {
     topic: "Steps",
@@ -284,7 +284,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       ],
     },
     murph:
-      "On pace. Long runs hitting 18 mi at 5:48, Z2 base 4:32/km, knee load clean. Three weeks until tempo block. Want me to lock in next month?",
+      "On pace. Long runs hitting 18 mi at 5:48, Z2 base 4:32/km, training load steady. Three weeks until tempo block. Want me to lock in next month?",
   },
   {
     topic: "Tabata",
@@ -303,7 +303,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
     topic: "HRV",
     user: "How's my HRV been this month?",
     murph:
-      "Average 51 ms, up 8% from May. The sauna nights are doing the work. Biggest gains on Tuesday and Friday sessions.",
+      "Average 51 ms, up 8% from May. HRV was highest on sauna nights, mostly Tuesday and Friday.",
   },
   {
     topic: "Recovery",
@@ -317,7 +317,7 @@ const EXCHANGES: ReadonlyArray<Exchange> = [
       ],
     },
     murph:
-      "Recovery score 87. Cleared for the threshold session. Eat 80g of carbs before you head out.",
+      "Recovery score 87, above your recent baseline. Today looks like a strong training day.",
   },
 ];
 

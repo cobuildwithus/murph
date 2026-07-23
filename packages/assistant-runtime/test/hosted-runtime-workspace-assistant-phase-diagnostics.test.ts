@@ -23,8 +23,10 @@ const mocks = vi.hoisted(() => ({
   })),
   drainHostedPreparedAssistantDeliveries: vi.fn(),
   drainHostedProviderCleanupAfterCommit: vi.fn(),
+  hasCompleteAssistantAutoReplyTerminalEvidence: vi.fn(),
   hasPendingAssistantAutoReplyInput: vi.fn(),
   hydrateHostedExecutionDefaultTarget: vi.fn(),
+  listAssistantInputEvents: vi.fn(),
   listPendingAssistantAutoReplyLinqCleanupEvidence: vi.fn(),
   markAssistantAutoReplyLinqCleanupQueued: vi.fn(),
   prepareHostedAssistantAutomationForWake: vi.fn(),
@@ -46,6 +48,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@murphai/assistant-engine/assistant-automation", () => ({
+  hasCompleteAssistantAutoReplyTerminalEvidence:
+    mocks.hasCompleteAssistantAutoReplyTerminalEvidence,
   hasPendingAssistantAutoReplyInput: mocks.hasPendingAssistantAutoReplyInput,
   listPendingAssistantAutoReplyLinqCleanupEvidence:
     mocks.listPendingAssistantAutoReplyLinqCleanupEvidence,
@@ -57,6 +61,7 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
   return {
     ...actual,
     createStoreBackedAssistantInputSource: mocks.createStoreBackedAssistantInputSource,
+    listAssistantInputEvents: mocks.listAssistantInputEvents,
   };
 });
 
@@ -146,6 +151,11 @@ beforeEach(() => {
     nextWakeAt: null,
   });
   mocks.hydrateHostedExecutionDefaultTarget.mockImplementation(async (value) => value);
+  mocks.hasCompleteAssistantAutoReplyTerminalEvidence.mockResolvedValue(false);
+  mocks.listAssistantInputEvents.mockResolvedValue({
+    events: [],
+    nextCursor: null,
+  });
   mocks.listPendingAssistantAutoReplyLinqCleanupEvidence.mockResolvedValue({
     captureIds: [],
     linqMessageIds: [],
