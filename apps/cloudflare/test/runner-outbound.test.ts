@@ -120,6 +120,9 @@ import {
   readHostedRunnerWebControlRoute,
 } from "../src/runner-outbound/shared-web-control-policy.ts";
 import {
+  handleRunnerGeneratedImageUploadRequest,
+} from "../src/runner-outbound/generated-images.ts";
+import {
   HOSTED_RUNTIME_MAILBOX_PAYLOAD_DECODE_PATH,
 } from "../src/runtime-mailbox-payload-decode-contract.ts";
 import {
@@ -3043,13 +3046,17 @@ describe("handleRunnerOutboundRequest", () => {
       request,
       init,
     ) => {
-      expect(String(request)).toBe(
+      const outboundRequest = request instanceof Request
+        ? request
+        : new Request(request, init);
+      expect(outboundRequest.url).toBe(
         "https://api.cloudflare.com/client/v4/accounts/account_123/images/v1",
       );
-      expect(init?.method).toBe("POST");
-      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer images-token");
-      expect(init?.body).toBeInstanceOf(FormData);
-      const form = init?.body as FormData;
+      expect(outboundRequest.method).toBe("POST");
+      expect(outboundRequest.headers.get("authorization")).toBe("Bearer <redacted>");
+      expect(outboundRequest.signal).toBeInstanceOf(AbortSignal);
+      expect(outboundRequest.signal).not.toBe(uploadRequest.signal);
+      const form = await outboundRequest.formData();
       expect(form.get("requireSignedURLs")).toBe("false");
       expect(form.get("metadata")).toBe(JSON.stringify({
         model: "gpt-image-2",
@@ -3077,8 +3084,9 @@ describe("handleRunnerOutboundRequest", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await handleRunnerOutboundRequest(
-      new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`, {
+    const uploadRequest = new Request(
+      `http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`,
+      {
         body: JSON.stringify({
           alt: "Generated product image",
           bytesBase64: Buffer.from(pngBytes).toString("base64"),
@@ -3093,10 +3101,13 @@ describe("handleRunnerOutboundRequest", () => {
         }),
         headers: createMailboxPayloadDecodeHeaders(),
         method: "POST",
-      }),
+      },
+    );
+    const response = await handleRunnerOutboundRequest(
+      uploadRequest,
       createRunnerOutboundEnv({
         CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
-        CLOUDFLARE_IMAGES_API_KEY: "images-token",
+        CLOUDFLARE_IMAGES_API_KEY: "<redacted>",
         USER_RUNNER: {
           getByName: runner.getByName,
         },
@@ -3115,6 +3126,116 @@ describe("handleRunnerOutboundRequest", () => {
         url: "https://imagedelivery.net/account_123/image_123/public",
       },
     });
+  });
+
+  it("records a runtime issue when generated image upload throws", async () => {
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      CLOUDFLARE_IMAGES_ACCOUNT_ID: "account_123",
+      CLOUDFLARE_IMAGES_API_KEY: "<redacted>",
+      USER_RUNNER: {
+        getByName: runner.getByName,
+      },
+    });
+    const uploadError = new TypeError("Hosted-local Cloudflare Images upload TypeError.");
+    const uploadFetchMock = vi.fn<typeof fetch>(async () => {
+      throw uploadError;
+    });
+    const issueFetchMock = vi.fn<typeof fetch>(async (request, init) => {
+      const issueRequest = request instanceof Request
+        ? request
+        : new Request(request, init);
+      expect(issueRequest.url).toBe(
+        "https://web.example.test/api/internal/hosted-execution/issues/record",
+      );
+      expect(issueRequest.method).toBe("POST");
+      await expect(verifyHostedWebCallbackSignatureHeaders({
+        environment: readHostedExecutionEnvironment(
+          asWorkerStringEnvironment(env),
+        ).webCallbackSigning,
+        method: "POST",
+        payload: await issueRequest.clone().text(),
+        request: issueRequest,
+        path: "/api/internal/hosted-execution/issues/record",
+        userId: "member_123",
+      })).resolves.toBe(true);
+      const body = await issueRequest.json() as {
+        issues?: unknown[];
+      };
+      expect(body.issues).toHaveLength(1);
+      expect(body.issues?.[0]).toEqual(expect.objectContaining({
+        component: "assistant.generated-image",
+        environment: "hosted",
+        errorCode: "type_error",
+        issueKind: "tool_error",
+        operation: "generated_image_upload",
+        phase: "tool_call",
+        severity: "error",
+        surface: "hosted.runner-outbound",
+      }));
+      expect((body.issues?.[0] as { details?: unknown }).details).toEqual(
+        expect.objectContaining({
+          errorCode: "type_error",
+          errorMessage: "Hosted-local Cloudflare Images upload TypeError.",
+          errorName: "TypeError",
+          failureKind: "thrown",
+          provider: "cloudflare_images",
+          timeoutMs: 30_000,
+        }),
+      );
+      return new Response(JSON.stringify({
+        issueIds: ["ari_1111111111111111_222222222222222222222222"],
+        recorded: 1,
+      }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+
+    const response = await handleRunnerGeneratedImageUploadRequest({
+      env,
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+      fetchImpl: uploadFetchMock,
+      issueFetchImpl: issueFetchMock,
+      request: new Request(`http://results.worker${HOSTED_EXECUTION_RUNNER_GENERATED_IMAGE_UPLOAD_PATH}`, {
+        body: JSON.stringify({
+          alt: "Generated product image",
+          bytesBase64: Buffer.from([
+            0x89, 0x50, 0x4e, 0x47,
+            0x0d, 0x0a, 0x1a, 0x0a,
+          ]).toString("base64"),
+          contentType: "image/png",
+          filename: "generated.png",
+          metadata: {
+            model: "gpt-image-2",
+            promptHash: "hash_123",
+            schema: "murph.generated-image.v1",
+          },
+          source: "gpt-image-2",
+        }),
+        headers: createMailboxPayloadDecodeHeaders(),
+        method: "POST",
+      }),
+      userId: "member_123",
+    });
+
+    expect(response.status).toBe(502);
+    expect(uploadFetchMock).toHaveBeenCalledOnce();
+    expect(issueFetchMock).toHaveBeenCalledOnce();
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        component: "runner",
+        details: expect.objectContaining({
+          errorCode: "type_error",
+          errorName: "TypeError",
+          operation: "generated_image_upload",
+        }),
+        level: "warn",
+        message: "Hosted generated-image upload failed.",
+      }),
+    );
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {

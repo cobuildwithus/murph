@@ -68,6 +68,7 @@ const hostedTestingHostOnlyEnv = {
 type HostedTestPrismaClient =
   & HostedTestPrismaFactoryClient
   & HostedActionApprovalForTestPrismaClient
+  & HostedAssistantRuntimeIssueForTestPrismaClient
   & HostedPhoneCallForTestPrismaClient
   & HostedUsageLimitForTestPrismaClient
   & HostedUsageCreditForTestPrismaClient
@@ -581,6 +582,25 @@ interface HostedRuntimeLogForTestPrismaRow {
   redactedJson: unknown;
 }
 
+interface HostedAssistantRuntimeIssueForTestPrismaClient {
+  hostedAssistantRuntimeIssue: {
+    findMany(args: unknown): Promise<HostedAssistantRuntimeIssueForTestPrismaRow[]>;
+  };
+}
+
+interface HostedAssistantRuntimeIssueForTestPrismaRow {
+  component: string;
+  detailsJson: unknown;
+  errorCode: string | null;
+  issueKind: string;
+  operation: string | null;
+  occurredAt: Date;
+  phase: string;
+  severity: string;
+  summary: string;
+  surface: string | null;
+}
+
 export interface HostedRuntimeLogForTestRow {
   at: string;
   component: string;
@@ -588,6 +608,19 @@ export interface HostedRuntimeLogForTestRow {
   level: string;
   phase: string;
   redactedJson: Record<string, unknown> | null;
+}
+
+export interface HostedAssistantRuntimeIssueForTestRow {
+  component: string;
+  detailsJson: Record<string, unknown> | null;
+  errorCode: string | null;
+  issueKind: string;
+  operation: string | null;
+  occurredAt: string;
+  phase: string;
+  severity: string;
+  summary: string;
+  surface: string | null;
 }
 
 export async function appendHostedExecutionWakeForTest(input: {
@@ -1186,6 +1219,39 @@ export async function listHostedRuntimeLogsForTest(input: {
       level: row.level,
       phase: row.phase,
       redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
+    }));
+  });
+}
+
+export async function listHostedAssistantRuntimeIssuesForTest(input: {
+  component?: string;
+  environment?: NodeJS.ProcessEnv;
+  limit?: number;
+  operation?: string;
+}): Promise<HostedAssistantRuntimeIssueForTestRow[]> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const rows = await deps.prisma.hostedAssistantRuntimeIssue.findMany({
+      orderBy: {
+        occurredAt: "asc",
+      },
+      take: normalizeHostedTestingLimit(input.limit ?? 1_000),
+      where: {
+        ...(input.component ? { component: input.component } : {}),
+        ...(input.operation ? { operation: input.operation } : {}),
+      },
+    });
+
+    return rows.map((row) => ({
+      component: row.component,
+      detailsJson: normalizeHostedTestingRedactedJson(row.detailsJson),
+      errorCode: row.errorCode,
+      issueKind: row.issueKind,
+      operation: row.operation,
+      occurredAt: row.occurredAt.toISOString(),
+      phase: row.phase,
+      severity: row.severity,
+      summary: row.summary,
+      surface: row.surface,
     }));
   });
 }

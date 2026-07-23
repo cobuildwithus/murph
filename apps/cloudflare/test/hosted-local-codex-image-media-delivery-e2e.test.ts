@@ -5,6 +5,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 import {
+  listHostedAssistantRuntimeIssuesForTest,
   listHostedAiUsageForTest,
 } from "#hosted-web-testing";
 import {
@@ -31,6 +32,8 @@ const linqWebhookSecret = "linq-local-webhook-secret";
 const assistantReplyText = "Here is the setup image.";
 const assistantMediaUrl = "https://assets.example.test/assistant-media/dead-bug-setup.png";
 const generatedImageReplyText = "Here is the generated setup image.";
+const generatedImageUploadFailureReplyText =
+  "I generated it, but the image upload failed, so I can only send text right now.";
 const generatedImageUrl = "https://imagedelivery.net/hosted-local/generated-image/public";
 const productionLikeAssistantModel = "gpt-5.6-terra";
 const localRunnerIdleTtlMs = "300000";
@@ -266,6 +269,74 @@ describe("hosted local Codex image media delivery e2e", () => {
       }),
       2,
     );
+  }, 360_000);
+
+  it("degrades to text and records an issue when generated-image upload throws", async () => {
+    const materializedChatId = `chat_local_codex_media_${userId}`;
+    const replyPath = `/chats/${encodeURIComponent(materializedChatId)}/messages`;
+    const outboundCountBeforeGeneration = requireLinqStub().countObservedSends(replyPath);
+    await requireScenario().harness.armGeneratedImageUploadTypeErrorForTest(userId);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("generate_image", {
+        alt: "Generated upload failure setup",
+        prompt: "Render a simple synthetic mobility setup diagram for a failure test.",
+      }),
+      generatedImageUploadFailureReplyText,
+    ], {
+      matchInputContains: "Generate an image that hits the upload failure path",
+    });
+
+    const generationResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      materializedChatId,
+      {
+        eventId: `evt_codex_generated_media_upload_failure_${userId}`,
+        messageId: `msg_codex_generated_media_upload_failure_${userId}`,
+        text: "Generate an image that hits the upload failure path.",
+      },
+    ));
+    expect(generationResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const generationSend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeGeneration,
+      expectedPath: replyPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(readObservedLinqMessageParts(generationSend)).toEqual([
+      {
+        type: "text",
+        value: generatedImageUploadFailureReplyText,
+      },
+    ]);
+
+    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    const issues = await listHostedAssistantRuntimeIssuesForTest({
+      component: "assistant.generated-image",
+      environment: requireScenario().runtimeEnv,
+      operation: "generated_image_upload",
+    });
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        component: "assistant.generated-image",
+        errorCode: "type_error",
+        issueKind: "tool_error",
+        operation: "generated_image_upload",
+        phase: "tool_call",
+        severity: "error",
+        surface: "hosted.runner-outbound",
+      }),
+    ]));
+    const uploadIssue = issues.find((issue) => issue.errorCode === "type_error");
+    expect(uploadIssue?.detailsJson).toEqual(expect.objectContaining({
+      errorCode: "type_error",
+      errorMessage: "Hosted-local Cloudflare Images upload TypeError.",
+      errorName: "TypeError",
+      failureKind: "thrown",
+      provider: "cloudflare_images",
+      timeoutMs: 30_000,
+    }));
   }, 360_000);
 });
 
