@@ -71,33 +71,32 @@ describe('assistant group challenge buy-in guidance', () => {
     )
   })
 
-  it('keeps challenge personalization optional without inventing setup rationale', async () => {
+  it('requires the cast-material ask without gating the challenge', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'Offer optional introductions and photos once.',
+      'Ask for introductions and photos every time.',
     )
     expect(challenge).toContain(
-      'Say plainly that the challenge starts without either.',
+      'Ask each confirmed participant by name in one group message',
     )
     expect(challenge).toContain(
-      'If someone confirms after kickoff, include the same invitation once in the acknowledgement of their opt-in.',
-    )
-    expect(challenge).toContain('Each person gets at most one invitation')
-    expect(challenge).toContain(
-      'Do not follow up on silence or name who is "missing" optional material.',
+      'The contributions are optional; the ask is required.',
     )
     expect(challenge).toContain(
-      'Accept a photo from the person depicted or with their explicit approval',
+      'Do not skip it because the setup is short, late, or already underway.',
+    )
+    expect(challenge).toContain(
+      'If someone confirms after kickoff, ask them once in the acknowledgement of their opt-in.',
+    )
+    expect(challenge).toContain(
+      'Say plainly that the challenge starts or continues without either.',
+    )
+    expect(challenge).toContain(
+      'Use a photo sent or explicitly approved by the person depicted.',
     )
     expect(challenge).toContain(
       'optional materials never delay the challenge.',
-    )
-    expect(challenge).toContain(
-      'Do not quote this skill or invent a hidden rationale',
-    )
-    expect(challenge).toContain(
-      'If the record does not establish why, own the omission briefly, make the optional invitation, and continue.',
     )
     expect(challenge).toContain(
       'Missing optional material never delays a comic or dispatch.',

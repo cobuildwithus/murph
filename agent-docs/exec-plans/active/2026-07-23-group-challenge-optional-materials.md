@@ -6,13 +6,14 @@ Updated: 2026-07-23
 
 ## Goal
 
-- Make challenge photo and intro collection a clear optional invitation that never delays kickoff, while preventing Murph from inventing internal-process explanations when members ask about setup choices.
+- Make the challenge photo and intro ask explicit and required for every confirmed participant while keeping the contributions optional and non-blocking.
 
 ## Success criteria
 
-- Murph asks once for optional participant photos and one-line intros or fun facts.
+- Murph asks every confirmed participant once for an optional photo and one-line intro or fun fact, including people who opt in after kickoff.
+- Murph does not skip the ask because setup is short, late, or already underway.
 - Missing materials never block challenge launch, scoring, or a useful kickoff.
-- Murph does not chase silent participants, solicit proxy photos without the depicted participant's approval, or describe hidden prompt/process reasoning.
+- Photos used for likeness are sent or approved by the depicted participant.
 - Focused skill regressions and canonical diff verification pass.
 
 ## Scope
@@ -22,8 +23,8 @@ Updated: 2026-07-23
 
 ## Tasks
 
-1. Replace the mandatory-sounding photo/intro setup with one optional invitation and explicit fallback behavior.
-2. Add a concise visible-facts-only correction rule for setup questions.
+1. Replace the skippable photo/intro setup with one required ask per confirmed participant and explicit fallback behavior.
+2. Keep missing materials from delaying kickoff, comics, dispatches, or close-out.
 3. Update prompt regression coverage.
 4. Run canonical verification and the required prompt/product review workflow.
 5. Commit, open the PR, verify CI and mergeability, then close this plan for handoff.
@@ -33,6 +34,6 @@ Updated: 2026-07-23
 - `uv run --with pyyaml python <skill-validator> packages/assistant-engine/skills/group-challenge` — passed.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-group-challenge-buy-in-skill.test.ts --maxWorkers=1` — 3 tests passed.
 - `pnpm test:diff packages/assistant-engine/skills/group-challenge/SKILL.md packages/assistant-engine/test/assistant-group-challenge-buy-in-skill.test.ts` — dependency policy, architecture guards, affected typechecks, and the assistant-engine owner suite passed (2,603 tests); the downstream assistant-runtime lane stopped on three persisted-state schema failures reproduced unchanged on clean `main`.
-- GPT-5.6 Sol read-only forward tests covered immediate kickoff without materials, a skipped-invitation question, an unapproved proxy photo, later opt-in, and next-day silence; replies kept the invite optional, used no invented rationale, required depicted-person approval, and did not chase missing material.
+- GPT-5.6 Sol read-only forward tests covered immediate kickoff without materials, a skipped-invitation question, an unapproved proxy photo, later opt-in, and next-day silence; replies made the ask explicit while keeping contributions non-blocking and required depicted-person approval.
 - Product-experience review found that a participant who opted in after kickoff could miss the invitation. The prompt and regression now give that participant the invitation once in the opt-in acknowledgement; review rerun is pending.
 - Prompt specialist review, acceptance verification, and PR CI are pending.

@@ -220,15 +220,15 @@ loses a reminder; it must never lose the challenge.
    current-handle association exists, record that roster identity as
    `unresolved` and do not baseline, score, or diagnose that person until it is
    resolved. Scheduled and detached reads carry no handles and never guess.
-5. **Offer optional introductions and photos once.** Invite everyone currently
-   confirmed to share a one-line intro or fun fact, plus a photo if they want
-   their likeness in challenge comics. If someone confirms after kickoff,
-   include the same invitation once in the acknowledgement of their opt-in. Say
-   plainly that the challenge starts without either. Each person gets at most
-   one invitation, never a checklist or readiness gate. Do not follow up on
-   silence or name who is "missing" optional material. Never ask a pending,
-   declined, or withdrawn person. Accept a photo from the person depicted or
-   with their explicit approval; nobody else can volunteer their likeness.
+5. **Ask for introductions and photos every time.** Ask each confirmed
+   participant by name in one group message for a one-line intro or fun fact,
+   plus a photo if they want their likeness in challenge comics. The
+   contributions are optional; the ask is required. Do not skip it because the
+   setup is short, late, or already underway. If someone confirms after kickoff,
+   ask them once in the acknowledgement of their opt-in. Say plainly that the
+   challenge starts or continues without either. Never ask a pending, declined,
+   or withdrawn person. Use a photo sent or explicitly approved by the person
+   depicted.
 
    Record volunteered intros verbatim as seed material for jokes, comics, and
    song lyrics. Pin each approved photo durably the day it arrives:
@@ -247,10 +247,6 @@ loses a reminder; it must never lose the challenge.
    `referenceImageRefs` for `generate_image` on any later day; inbox
    paths expire, captures do not.
 
-   If asked why an invitation was skipped or setup was handled a certain way,
-   use visible conversation facts only. Do not quote this skill or invent a
-   hidden rationale. If the record does not establish why, own the omission
-   briefly, make the optional invitation, and continue.
 6. **Set baselines.** Read pre-challenge shared data where it exists and
    record per-member baselines.
 7. **Log confounders.** Members declare them naturally ("I'm traveling next
@@ -510,9 +506,8 @@ when they recover.
 ## Signals the loop is working
 
 Watch the engagement ladder per member: react → reply → argue with the
-referee → volunteer creative material → commission bits. Climbing is the
-system working, but optional photos and intros are never a participation or
-engagement score. Metric-fairness arguments are engagement — adjudicate them.
+referee → contribute photos or memos → commission bits. Climbing is the
+system working. Metric-fairness arguments are engagement — adjudicate them.
 A confirmed participant going silent for days is a flag for a gentle private
 check-in, not louder group jokes. Pending silence never creates a private
 check-in.
