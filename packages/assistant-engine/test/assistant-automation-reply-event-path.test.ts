@@ -1257,7 +1257,7 @@ describe('assistant auto-reply event-first path', () => {
       '',
       'Would you like me to continue?',
       '',
-      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation; treat it as agreement or a "yes" only when this message asked a question or proposed a specific action to confirm. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
+      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
     ].join('\n'))
     expect(turnContext).not.toContain('Should I send the newer message?')
     expect(turnContext).not.toContain('another assistant run')

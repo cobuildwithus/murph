@@ -1,6 +1,6 @@
 # Describe Linq tapbacks to the model instead of synthesizing a literal Yes reply
 
-Status: active
+Status: completed
 Created: 2026-07-23
 Updated: 2026-07-23
 
@@ -93,3 +93,4 @@ Updated: 2026-07-23
 - Expected outcomes: touched-owner suites green; grep shows no remaining
   literal `Yes.` synthesis or "reacted affirmatively" phrasing outside
   historical changelog text.
+Completed: 2026-07-23

@@ -889,7 +889,9 @@ outbox-history boundary, the reply reference must exactly match a sent Murph
 delivery on the same route before the reaction description can reach reply
 generation. The turn context binds the reaction to that exact message and
 treats a tapback as acknowledgment or appreciation by default, and as agreement
-only when the target asked a question or proposed a specific action to confirm.
+only when the target asked a single closed yes/no question or proposed one
+specific action whose affirmative answer is unambiguous; a reaction alone never
+establishes user facts, consent, or authorization.
 Synthetic reactions stay in one-input automation groups, so an adjacent
 ordinary reply cannot lend them trust or be suppressed with them. This keeps
 the path independent of Linq's short provider-message retention while rendering
