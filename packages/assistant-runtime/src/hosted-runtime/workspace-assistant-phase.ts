@@ -48,7 +48,6 @@ import {
   type AssistantExecutionContext,
   type AssistantHostedGroupPermissionOfferTool,
   type AssistantHostedGroupSharedReader,
-  type AssistantPhoneCallPort,
   type AssistantInputEventRecord,
   type MurphManagedAutomationDiagnosticStage,
   type AssistantTurnEnvironment,
@@ -272,7 +271,6 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
-  beforePhoneCallStart?: ((originSessionId: string) => Promise<void>) | null;
   causalPendingEffectsOnly?: boolean;
   deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
@@ -292,27 +290,6 @@ export interface HostedWorkspaceRuntimeAssistantPhaseInput
 export type HostedWorkspaceRuntimeAssistantPhase = (
   input: HostedWorkspaceRuntimeAssistantPhaseInput,
 ) => Promise<HostedWorkspaceRunnerAssistantPhaseResult>;
-
-function createHostedOriginCheckpointedPhoneCallPort(input: {
-  beforePhoneCallStart?: ((originSessionId: string) => Promise<void>) | null;
-  phoneCalls: AssistantPhoneCallPort | null | undefined;
-}): AssistantPhoneCallPort | null {
-  if (!input.phoneCalls) {
-    return null;
-  }
-  const phoneCalls = input.phoneCalls;
-  return {
-    async start(request, context) {
-      if (!input.beforePhoneCallStart) {
-        throw new TypeError(
-          "Hosted phone-call start requires origin checkpoint support.",
-        );
-      }
-      await input.beforePhoneCallStart(request.originSessionId);
-      return await phoneCalls.start(request, context);
-    },
-  };
-}
 
 /**
  * The chat-scoped murph.group actions need the raw Linq chat id and the
@@ -1321,10 +1298,7 @@ export async function runHostedWorkspaceAssistantPhase(
           input.runtime.platform.assistantConfigurationToolPort ?? null,
         connectedApps: input.runtime.platform.connectedApps ?? null,
         ...(clinicalRecordsConnectLinkTool ? { clinicalRecordsConnectLinkTool } : {}),
-        phoneCalls: createHostedOriginCheckpointedPhoneCallPort({
-          beforePhoneCallStart: input.beforePhoneCallStart,
-          phoneCalls: input.runtime.platform.phoneCalls,
-        }),
+        phoneCalls: input.runtime.platform.phoneCalls ?? null,
         progressDeliveryDependencies: createHostedAssistantProgressDeliveryDependencies({
           effectsPort: input.runtime.platform.effectsPort,
           forwardedEnv: input.runtime.forwardedEnv,

@@ -778,6 +778,122 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
+  test("new direct session boundary stops and resumes the foreground mailbox watcher", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-new-direct-boundary-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const boundarySessionIds: string[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointNewDirectAssistantSession: async (sessionId) => {
+          boundarySessionIds.push(sessionId);
+          runtimeWakeSignal.notify(Date.now());
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_new_direct_boundary",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            fetchRequests,
+            items: [],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_new_direct_boundary",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          const fetchCountBeforeBoundary = fetchRequests.length;
+          const boundary = input.beforeNewDirectAssistantSessionProviderTurn;
+          if (!boundary) {
+            throw new Error("Expected new direct session boundary.");
+          }
+          await boundary("session-new-direct-boundary");
+          assert.ok(fetchRequests.length > fetchCountBeforeBoundary);
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.deepEqual(boundarySessionIds, ["session-new-direct-boundary"]);
+      assert.equal(runtimeWakeSignal.consumePending(), null);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  test("new direct session boundary resumes the foreground watcher after checkpoint failure", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-new-direct-failure-"));
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const checkpointFailure = new Error("Synthetic new direct session checkpoint failure.");
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await runHostedWorkspaceUntilIdleOrBudget({
+        checkpointNewDirectAssistantSession: async () => {
+          runtimeWakeSignal.notify(Date.now());
+          throw checkpointFailure;
+        },
+        checkpointRequestBuilder: createHostedWorkspaceCheckpointRequestBuilder({
+          attemptId: "attempt_synthetic_runner_new_direct_failure",
+          expectedWorkspaceVersion: "0",
+          leaseGeneration: "1",
+          nextWakeAt: null,
+          nextWakeReason: null,
+          snapshotRef: null,
+        }),
+        expectedUserId: TEST_USER_ID,
+        async importItem() {
+          return { status: "imported" };
+        },
+        limitPerLane: 10,
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({
+            fetchRequests,
+            items: [],
+          }).mailboxPort,
+          workspacePort: createWorkspacePort({ checkpointRequests: [] }),
+        }),
+        requestId: "request_synthetic_runner_new_direct_failure",
+        runtimeWakeSignal,
+        async runAssistantPhase(input) {
+          const fetchCountBeforeBoundary = fetchRequests.length;
+          const boundary = input.beforeNewDirectAssistantSessionProviderTurn;
+          if (!boundary) {
+            throw new Error("Expected new direct session boundary.");
+          }
+          await assert.rejects(
+            boundary("session-new-direct-failure"),
+            (error: unknown) => error === checkpointFailure,
+          );
+          assert.ok(fetchRequests.length > fetchCountBeforeBoundary);
+          return { progressed: false };
+        },
+        vaultRoot,
+        workspace: createWorkspaceState({ version: "0" }),
+        now: () => TEST_NOW,
+      });
+
+      assert.equal(runtimeWakeSignal.consumePending(), null);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   test("tracks blocked initial mailbox import as local workspace mutation completion", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-import-track-"));
     const abortController = new AbortController();

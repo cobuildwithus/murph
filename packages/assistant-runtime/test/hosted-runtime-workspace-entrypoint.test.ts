@@ -88,6 +88,7 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
@@ -224,6 +225,10 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  createHostedWorkspaceRuntimeBridgeJobOptions,
+  type HostedWorkspaceSnapshotArchiveBuilder,
+} from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -11653,12 +11658,7 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            const hashPrefix =
-              snapshotInput.reason === "assistant_runtime_commit"
-                ? "a"
-                : snapshotInput.reason === "outbox_receipt"
-                  ? "b"
-                  : "c";
+            const hashPrefix = snapshotInput.reason === "outbox_receipt" ? "b" : "c";
             return {
               snapshotRef: createBundleRef({
                 hash: hashPrefix.repeat(64),
@@ -19923,116 +19923,211 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("checkpoints a new phone-call origin before external start and restores it after a crash", async () => {
-    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-phone-origin-checkpoint-"));
-    const restoredWorkspaceRoot = await mkdtemp(
-      path.join(tmpdir(), "murph-phone-origin-restore-"),
+  test("publishes a new direct session through the production snapshot bridge before provider start", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-new-direct-session-checkpoint-"),
     );
+    const restoredWorkspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-new-direct-session-restore-"),
+    );
+    const vaultRoot = path.join(workspaceRoot, "durable", "vault");
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
-    const crashAfterExternalStart = new Error(
-      "Synthetic crash after external phone-call start.",
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const crashAfterProviderStart = new Error(
+      "Synthetic crash after provider start.",
     );
-    const originSessionId = "asst_phone_origin_restart_stable";
+    const originSessionId = "asst_new_direct_restart_stable";
+    const snapshotId = "snapshot_new_direct_origin";
+    const objectKey = `users/${TEST_USER_ID}/workspace-snapshots/${snapshotId}.snapshot.enc`;
     let checkpointBundle: Uint8Array | null = null;
+    let providerStarted = false;
 
     try {
-      await expect(runHostedWorkspaceRuntimeJobInProcess(
-        createWorkspaceRuntimeJobInput({
-          request: {
-            idleCheckpointDelayMs: 180_000,
-          },
-        }),
-        {
-          async createCheckpointSnapshot(snapshotInput) {
-            events.push(`snapshot:${snapshotInput.reason}`);
-            const snapshot = await snapshotHostedAssistantRuntimeHotState({
-              vaultRoot,
-            });
-            checkpointBundle = snapshot.bundle;
-            const hash = sha256HostedBundleHex(snapshot.bundle);
-            return {
-              snapshotRef: createBundleRef({
-                hash,
-                key: "users/bundles/member-synthetic/phone-origin.bundle.json",
-                size: snapshot.bundle.byteLength,
-              }),
-            };
-          },
-          async importItem() {
-            throw new Error("Phone-call origin checkpoint test has no mailbox items.");
-          },
-          platform: createPlatform({
-            events,
-            mailboxPort: createMailboxPort({
-              events,
-              items: [],
-            }),
-            workspacePort: createWorkspacePort({
-              checkpointRequests,
-              events,
-              workspace: null,
-            }),
-          }),
-          async runAssistantPhase(phaseInput) {
-            await saveAssistantSession(vaultRoot, parseAssistantSessionRecord({
-              alias: null,
-              binding: {
-                actorId: "actor_phone_origin",
-                channel: "linq",
-                conversationKey: null,
-                delivery: {
-                  kind: "thread",
-                  target: "linq_chat_phone_origin",
-                },
-                identityId: "identity_phone_origin",
-                threadId: "thread_phone_origin",
-                threadIsDirect: true,
-              },
-              createdAt: TEST_NOW,
-              lastTurnAt: null,
-              resumeState: null,
-              schema: "murph.assistant-session.v1",
-              sessionId: originSessionId,
-              target: {
-                adapter: "codex-cli",
-                approvalPolicy: "never",
-                codexCommand: null,
-                codexHome: null,
-                model: "gpt-5.6-terra",
-                modelProvider: "vercel-ai-gateway",
-                oss: false,
-                profile: null,
-                reasoningEffort: "medium",
-                sandbox: "danger-full-access",
-              },
-              turnCount: 0,
-              updatedAt: TEST_NOW,
-            }));
-            events.push("origin:created");
-            await phaseInput.beforePhoneCallStart?.(originSessionId);
-            await phaseInput.beforePhoneCallStart?.(originSessionId);
-            events.push("phone:start");
-            throw crashAfterExternalStart;
-          },
-          vaultRoot,
+      await mkdir(path.join(workspaceRoot, "durable", "home"), { recursive: true });
+      await mkdir(path.join(workspaceRoot, "scratch"), { recursive: true });
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const job = createWorkspaceRuntimeJobInput({
+        request: {
+          idleCheckpointDelayMs: 180_000,
         },
-      )).rejects.toBe(crashAfterExternalStart);
+      });
+      const workspaceSnapshotPort: NonNullable<
+        HostedRuntimePlatform["workspaceSnapshotPort"]
+      > = {
+        async abortSnapshotSession() {
+          events.push("snapshot:abort");
+        },
+        async completeSnapshotSession(input) {
+          events.push("snapshot:complete");
+          checkpointRequests.push(input.checkpointRequest);
+          return {
+            checkpoint: {
+              checkpointed: true,
+              workspace: createWorkspaceState({
+                snapshotRef: input.ref,
+                version: String(
+                  BigInt(input.checkpointRequest.expectedWorkspaceVersion) + 1n,
+                ),
+              }),
+            },
+            snapshotRef: input.ref,
+          };
+        },
+        async putSnapshotObjectDirect() {
+          events.push("snapshot:upload");
+          return {
+            snapshotDirectR2PresignElapsedMs: 1,
+            snapshotDirectR2PutElapsedMs: 1,
+          };
+        },
+        async restoreWorkspaceSnapshot() {},
+        async startSnapshotSession(input) {
+          events.push(`snapshot:start:${input.reason}`);
+          return {
+            encryption: {
+              aad: buildHostedWorkspaceSnapshotV2Aad({
+                objectKey,
+                snapshotId,
+                userId: TEST_USER_ID,
+              }),
+              dataKeyBase64: "data-key-base64",
+              ivBase64: "iv-base64",
+              rootKeyId: "root-key-new-direct",
+              scheme: HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME,
+              wrappedDataKey: "wrapped-data-key",
+            },
+            limits: {
+              maxSinglePartEncryptedBytes: 1024 * 1024,
+              warnEncryptedBytes: 512 * 1024,
+            },
+            objectKey,
+            snapshotId,
+          };
+        },
+      };
+      const platform = createPlatform({
+        events,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: null,
+        }),
+        workspaceSnapshotPort,
+      });
+      const snapshotArchiveBuilder: HostedWorkspaceSnapshotArchiveBuilder = {
+        async buildEncryptedSnapshot(input) {
+          events.push("snapshot:archive");
+          checkpointBundle = (
+            await snapshotHostedAssistantRuntimeHotState({ vaultRoot })
+          ).bundle;
+          const temporaryDirectoryPath = await mkdtemp(
+            path.join(input.outputDir, "new-direct-snapshot-"),
+          );
+          const encryptedFilePath = path.join(
+            temporaryDirectoryPath,
+            "snapshot.enc",
+          );
+          await writeFile(encryptedFilePath, "encrypted snapshot", "utf8");
+          return {
+            compression: HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
+            encryptedByteSize: 18,
+            encryptedFilePath,
+            encryptedObjectSha256: "a".repeat(64),
+            fileCount: input.archiveEntries.length,
+            plaintextArchiveSha256: "b".repeat(64),
+            temporaryDirectoryPath,
+            totalPlainBytes: 18,
+          };
+        },
+      };
+      const bridgeOptions = createHostedWorkspaceRuntimeBridgeJobOptions({
+        decodeMailboxPayload: {
+          async decode() {
+            throw new Error("New direct session checkpoint test has no mailbox payloads.");
+          },
+        },
+        platform,
+        request: job.request,
+        runtime: {},
+        snapshotArchiveBuilder,
+        snapshotDiagnosticsHashSecret: "f".repeat(64),
+        vaultRoot,
+        async waitForBackgroundAssistantWork() {
+          assert.equal(providerStarted, false);
+          events.push("snapshot:wait-for-provider-idle");
+        },
+      });
+
+      await expect(runHostedWorkspaceRuntimeJobInProcess(job, {
+        ...bridgeOptions,
+        runtimeWakeSignal,
+        async runAssistantPhase(phaseInput) {
+          await saveAssistantSession(vaultRoot, parseAssistantSessionRecord({
+            alias: null,
+            binding: {
+              actorId: "actor_new_direct_origin",
+              channel: "linq",
+              conversationKey: null,
+              delivery: {
+                kind: "thread",
+                target: "linq_chat_new_direct_origin",
+              },
+              identityId: "identity_new_direct_origin",
+              threadId: "thread_new_direct_origin",
+              threadIsDirect: true,
+            },
+            createdAt: TEST_NOW,
+            lastTurnAt: null,
+            resumeState: null,
+            schema: "murph.assistant-session.v1",
+            sessionId: originSessionId,
+            target: {
+              adapter: "codex-cli",
+              approvalPolicy: "never",
+              codexCommand: null,
+              codexHome: null,
+              model: "gpt-5.6-terra",
+              modelProvider: "vercel-ai-gateway",
+              oss: false,
+              profile: null,
+              reasoningEffort: "medium",
+              sandbox: "danger-full-access",
+            },
+            turnCount: 0,
+            updatedAt: TEST_NOW,
+          }));
+          events.push("origin:created");
+          await phaseInput.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [],
+            newDirectUserActionSession: {
+              sessionId: originSessionId,
+            },
+          });
+          providerStarted = true;
+          events.push("provider:start");
+          throw crashAfterProviderStart;
+        },
+      })).rejects.toBe(crashAfterProviderStart);
 
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
-        "assistant_runtime_commit",
+        "idle_shutdown",
       ]);
       assert.ok(
         requireEventIndex(events, "origin:created")
-          < requireEventIndex(events, "snapshot:assistant_runtime_commit"),
+          < requireEventIndex(events, "snapshot:wait-for-provider-idle"),
       );
       assert.ok(
-        requireEventIndex(events, "snapshot:assistant_runtime_commit")
-          < requireEventIndex(events, "workspace.checkpoint"),
+        requireEventIndex(events, "snapshot:wait-for-provider-idle")
+          < requireEventIndex(events, "snapshot:start:idle_shutdown"),
       );
       assert.ok(
-        requireEventIndex(events, "workspace.checkpoint")
-          < requireEventIndex(events, "phone:start"),
+        requireEventIndex(events, "snapshot:complete")
+          < requireEventIndex(events, "provider:start"),
       );
       assert.ok(checkpointBundle);
 
@@ -20048,8 +20143,67 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(resolved.session.sessionId, originSessionId);
       assert.equal(resolved.session.binding.threadIsDirect, true);
     } finally {
-      await removeTempRoot(vaultRoot);
+      await removeTempRoot(workspaceRoot);
       await removeTempRoot(restoredWorkspaceRoot);
+    }
+  });
+
+  test("blocks provider start when the new direct session checkpoint fails", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-new-direct-session-checkpoint-failure-"),
+    );
+    const checkpointFailure = new Error(
+      "Synthetic new direct session checkpoint failure.",
+    );
+    const checkpointReasons: HostedWorkspaceCheckpointRequest["reason"][] = [];
+    let providerStarted = false;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await expect(runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            idleCheckpointDelayMs: 180_000,
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            checkpointReasons.push(snapshotInput.reason);
+            throw checkpointFailure;
+          },
+          async importItem() {
+            throw new Error("New direct session failure test has no mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: null,
+            }),
+          }),
+          runtimeWakeSignal: createCoalescingRuntimeWakeSignal(),
+          async runAssistantPhase(phaseInput) {
+            await phaseInput.beforeProviderAcceptedInputs?.({
+              acceptedInputs: [],
+              newDirectUserActionSession: {
+                sessionId: "asst_new_direct_checkpoint_failure",
+              },
+            });
+            providerStarted = true;
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      )).rejects.toBe(checkpointFailure);
+
+      assert.deepEqual(checkpointReasons, ["idle_shutdown"]);
+      assert.equal(providerStarted, false);
+    } finally {
+      await removeTempRoot(vaultRoot);
     }
   });
 

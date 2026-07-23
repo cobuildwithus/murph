@@ -803,123 +803,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
-  it("durably prepares a phone-call origin before delegating the start", async () => {
-    const events: string[] = [];
-    const beforePhoneCallStart = vi.fn(async (originSessionId: string) => {
-      expect(originSessionId).toBe("asst_phone_origin");
-      events.push("origin:checkpointed");
-    });
-    const start = vi.fn(async () => {
-      events.push("phone:start");
-      return {
-        phoneCallId: "hpc_origin_checkpointed",
-        status: "calling" as const,
-      };
-    });
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
-      await laneInput.executionContext.hosted?.phoneCalls?.start({
-        brief: {
-          allowTransferToUser: false,
-          goal: "Ask whether the office is open on Friday.",
-          instructions: [],
-          shareableFacts: {},
-          successCriteria: "The office states its Friday hours.",
-          timeZone: "America/New_York",
-          to: {
-            phoneNumber: "+12125550123",
-          },
-        },
-        originSessionId: "asst_phone_origin",
-        requestKey: "phone-request-origin-checkpoint",
-      });
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: true,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      };
-    });
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      beforePhoneCallStart,
-      runtimePhoneCalls: { start },
-    }));
-
-    expect(events).toEqual(["origin:checkpointed", "phone:start"]);
-    expect(beforePhoneCallStart).toHaveBeenCalledTimes(1);
-    expect(start).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not delegate a phone-call start when origin checkpointing fails", async () => {
-    const checkpointFailure = new Error("Synthetic origin checkpoint failure.");
-    const start = vi.fn();
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
-      await expect(laneInput.executionContext.hosted?.phoneCalls?.start({
-        brief: {
-          allowTransferToUser: false,
-          goal: "Ask whether the office is open on Friday.",
-          instructions: [],
-          shareableFacts: {},
-          successCriteria: "The office states its Friday hours.",
-          timeZone: "America/New_York",
-          to: {
-            phoneNumber: "+12125550123",
-          },
-        },
-        originSessionId: "asst_phone_origin",
-        requestKey: "phone-request-origin-checkpoint-failure",
-      })).rejects.toBe(checkpointFailure);
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: false,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      };
-    });
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      beforePhoneCallStart: vi.fn(async () => {
-        throw checkpointFailure;
-      }),
-      runtimePhoneCalls: { start },
-    }));
-
-    expect(start).not.toHaveBeenCalled();
-  });
-
-  it("does not expose an uncheckpointed hosted phone-call start path", async () => {
-    const start = vi.fn();
-    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
-      await expect(laneInput.executionContext.hosted?.phoneCalls?.start({
-        brief: {
-          allowTransferToUser: false,
-          goal: "Ask whether the office is open on Friday.",
-          instructions: [],
-          shareableFacts: {},
-          successCriteria: "The office states its Friday hours.",
-          timeZone: "America/New_York",
-          to: {
-            phoneNumber: "+12125550123",
-          },
-        },
-        originSessionId: "asst_phone_origin",
-        requestKey: "phone-request-without-origin-checkpoint",
-      })).rejects.toThrow("requires origin checkpoint support");
-      return {
-        assistantAutomationCurrentTurnDeliveryIntentIds: [],
-        assistantAutomationProgressed: false,
-        nextWakeAt: null,
-        redactedLogEntries: [],
-      };
-    });
-
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
-      runtimePhoneCalls: { start },
-    }));
-
-    expect(start).not.toHaveBeenCalled();
-  });
-
   it("starts the assistant lane before a scheduled group operation lazily reads the Web-owned shared snapshot", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "hosted-share-authority-"));
     const sequence: string[] = [];
@@ -15035,7 +14918,6 @@ function createPhaseWorkspace(input: {
 function createPhaseInput(input: {
   acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
-  beforePhoneCallStart?: HostedWorkspaceRuntimeAssistantPhaseInput["beforePhoneCallStart"];
   causalPendingEffectsOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
   assistantInputIds?: string[];
@@ -15101,7 +14983,6 @@ function createPhaseInput(input: {
         : {}
     ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
-    beforePhoneCallStart: input.beforePhoneCallStart,
     causalPendingEffectsOnly: input.causalPendingEffectsOnly,
     clearAssistantAutomationScheduleChanged:
       input.clearAssistantAutomationScheduleChanged,

@@ -479,20 +479,49 @@ function fitPhoneCallResultContext(input: {
   }
 
   const summary = typeof input.data.summary === "string" ? input.data.summary : "";
+  const followUp = typeof input.data.followUp === "string" ? input.data.followUp : null;
+  const fitSummary = (boundedFollowUp: string | null): string | null => {
+    const buildFallback = (boundedSummary: string) => build({
+      outcome: input.data.outcome,
+      ...(boundedFollowUp ? { followUp: boundedFollowUp } : {}),
+      summary: boundedSummary,
+    });
+    let low = 0;
+    let high = [...summary].length;
+    let best = buildFallback(HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER.trim());
+    if (Buffer.byteLength(best, "utf8") > HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES) {
+      return null;
+    }
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const truncatedSummary = `${[...summary].slice(0, middle).join("").trimEnd()}${HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER}`;
+      const candidate = buildFallback(truncatedSummary);
+      if (Buffer.byteLength(candidate, "utf8") <= HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES) {
+        best = candidate;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return best;
+  };
+  const withFullFollowUp = fitSummary(followUp);
+  if (withFullFollowUp) {
+    return withFullFollowUp;
+  }
+
+  const followUpCharacters = [...(followUp ?? "")];
   let low = 0;
-  let high = [...summary].length;
-  let best = build({
-    outcome: input.data.outcome,
-    summary: HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER.trim(),
-  });
+  let high = followUpCharacters.length;
+  let best = fitSummary(HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER.trim());
+  if (!best) {
+    throw new RangeError("Hosted phone-call result context prefix exceeds its byte limit.");
+  }
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
-    const truncatedSummary = `${[...summary].slice(0, middle).join("").trimEnd()}${HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER}`;
-    const candidate = build({
-      outcome: input.data.outcome,
-      summary: truncatedSummary,
-    });
-    if (Buffer.byteLength(candidate, "utf8") <= HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES) {
+    const truncatedFollowUp = `${followUpCharacters.slice(0, middle).join("").trimEnd()}${HOSTED_PHONE_CALL_RESULT_TRUNCATION_MARKER}`;
+    const candidate = fitSummary(truncatedFollowUp);
+    if (candidate) {
       best = candidate;
       low = middle + 1;
     } else {

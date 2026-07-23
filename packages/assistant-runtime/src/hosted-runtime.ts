@@ -1726,6 +1726,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let currentAssistantInputId: string | null = null;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
+          checkpointNewDirectAssistantSession,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
           initialMailboxImport: passInput.initialMailboxImport,
           initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
@@ -1772,8 +1773,22 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ...runtimeEnv,
                   ...(confirmedAssistantTargetEnv ?? {}),
                 },
-                beforePhoneCallStart: checkpointPhoneCallOriginSession,
-                beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
+                beforeProviderAcceptedInputs: async ({
+                  acceptedInputs,
+                  newDirectUserActionSession,
+                }) => {
+                  if (newDirectUserActionSession) {
+                    const checkpointNewDirectSession =
+                      phaseInput.beforeNewDirectAssistantSessionProviderTurn;
+                    if (!checkpointNewDirectSession) {
+                      throw new TypeError(
+                        "Hosted new direct assistant sessions require pre-provider checkpoint support.",
+                      );
+                    }
+                    await checkpointNewDirectSession(
+                      newDirectUserActionSession.sessionId,
+                    );
+                  }
                   const assistantInputIds = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
                   )
@@ -2105,18 +2120,17 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         nextWakeAt: pendingWake.nextWakeAt,
       });
     };
-    const durablyCheckpointedPhoneCallOriginSessionIds = new Set<string>();
-    let phoneCallOriginCheckpointTail = Promise.resolve();
-    const checkpointPhoneCallOriginSession = async (originSessionId: string) => {
-      const checkpointOperation = phoneCallOriginCheckpointTail.then(async () => {
-        if (durablyCheckpointedPhoneCallOriginSessionIds.has(originSessionId)) {
-          return;
-        }
+    const durablyCheckpointedNewDirectAssistantSessionIds = new Set<string>();
+    const checkpointNewDirectAssistantSession = async (sessionId: string) => {
+      if (durablyCheckpointedNewDirectAssistantSessionIds.has(sessionId)) {
+        return;
+      }
+      await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
+      try {
         await drainLocalWorkspaceMutationsBestEffort();
         assertRuntimeNotAborted();
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
           assertRuntimeNotAborted,
-          checkpointReason: "assistant_runtime_commit",
           checkpointRequestBuilder,
           expectedUserId: input.request.userId,
           inboxMediaRetentionWakeAt:
@@ -2130,15 +2144,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           workspacePort: foregroundWorkspacePort,
         });
         rebaseCommittedWorkspace(checkpoint.workspace);
-        durablyCheckpointedPhoneCallOriginSessionIds.add(originSessionId);
-        // The provider turn continues after this boundary and may mutate the
-        // same workspace. Keep the ordinary final checkpoint armed for those
-        // later writes instead of treating the pre-call snapshot as clean.
+        durablyCheckpointedNewDirectAssistantSessionIds.add(sessionId);
+        // Provider work continues after this boundary and mutates the same
+        // workspace. Keep the ordinary final checkpoint armed for those later
+        // writes instead of treating the pre-provider snapshot as clean.
         runtimeStateDirty = true;
         markIdleCheckpointTimerAfterDirtyWork();
-      });
-      phoneCallOriginCheckpointTail = checkpointOperation.catch(() => undefined);
-      await checkpointOperation;
+      } finally {
+        resumeDetachedAssistantAskAfterWorkspaceBoundary();
+      }
     };
     const stageDurableCheckpointFollowUp = (
       workspace: HostedWorkspaceState | null,
@@ -4510,7 +4524,6 @@ function hostedRuntimeWakeIsDue(
 
 async function checkpointHostedRuntimeDirtyWorkspace(input: {
   assertRuntimeNotAborted: () => void;
-  checkpointReason?: "assistant_runtime_commit" | "idle_shutdown";
   checkpointRequestBuilder: ReturnType<typeof createHostedWorkspaceSnapshotCheckpointRequestBuilder>;
   checkpointSignal?: AbortSignal | null;
   expectedUserId: string;
@@ -4545,7 +4558,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     inboxMediaRetentionWakeAt: input.inboxMediaRetentionWakeAt,
     nextWakeAt: input.nextWakeAt,
     nextWakeReason: input.nextWakeReason,
-    reason: input.checkpointReason ?? "idle_shutdown",
+    reason: "idle_shutdown" as const,
     redactedStatus,
     ...(input.runtimeWakePendingAtCheckpoint === undefined
       ? {}

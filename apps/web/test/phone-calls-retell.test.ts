@@ -788,6 +788,12 @@ describe("Retell phone-call result handling", () => {
     expect(context).toContain("needs_user");
     expect(context).toContain("結");
     expect(context).toContain("untrusted");
+    const data = JSON.parse(
+      context.split("Untrusted call result data JSON:\n\n")[1] ?? "null",
+    ) as Record<string, unknown> | null;
+    expect(data).not.toBeNull();
+    expect(data?.followUp).toBe("次".repeat(1_000));
+    expect(data?.summary).toContain("[truncated]");
   });
 
   it("updates call_ended once with provider id and end timestamp", async () => {

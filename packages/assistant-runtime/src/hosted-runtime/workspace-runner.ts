@@ -151,7 +151,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
   (
     | HostedWorkspaceSnapshotCheckpointMailboxInput
     | {
-      reason: "assistant_runtime_commit" | "idle_shutdown";
+      reason: "idle_shutdown";
     }
   ) & {
     expectedWorkspaceVersion?: string;
@@ -227,6 +227,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   acceptedAssistantInputCausalSeq?: string | null;
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
+  beforeNewDirectAssistantSessionProviderTurn?: ((sessionId: string) => Promise<void>) | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -356,6 +357,7 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
+  checkpointNewDirectAssistantSession?: ((sessionId: string) => Promise<void>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -1019,6 +1021,20 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }),
     assistantAutomationScheduleChanged: () => assistantAutomationScheduleChanged,
     backgroundMaintenanceSignal: backgroundMaintenanceAbortController.signal,
+    beforeNewDirectAssistantSessionProviderTurn:
+      input.checkpointNewDirectAssistantSession
+        ? async (sessionId: string): Promise<void> => {
+            await stopForegroundMailboxImportLoop();
+            try {
+              await input.checkpointNewDirectAssistantSession?.(sessionId);
+            } finally {
+              if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
+                await startForegroundMailboxImportLoop();
+                await foregroundMailboxImportLoop?.drainPendingWake();
+              }
+            }
+          }
+        : null,
     clearAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = false;
     },

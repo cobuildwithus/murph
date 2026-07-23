@@ -33,9 +33,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // assembly instead of silently regressing cold start. The baselines are the
 // clean packaged measurements after unused contracts and query exports became
 // tree-shakeable. Entry and static-closure caps retain their platform-jitter
-// tolerances. The restart-stable phone-call origin checkpoint measured
-// 9,427,608B on local macOS; the total cap preserves 32KB for small reviewed
-// additions without restoring the former 250KB operational growth allowance.
+// tolerances. The restart-stable direct-session checkpoint measured 9,428,615B
+// on local macOS; the total cap preserves 32KB for small reviewed additions
+// without restoring the former 250KB operational growth allowance.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_460_376;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_641_831;
