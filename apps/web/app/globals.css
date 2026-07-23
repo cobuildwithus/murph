@@ -59,6 +59,27 @@
   animation: marquee 30s linear infinite;
 }
 
+@keyframes panel-swap {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-panel-swap {
+  animation: panel-swap 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-panel-swap {
+    animation: none;
+  }
+}
+
 @media print {
   @page {
     size: 1600px 900px;

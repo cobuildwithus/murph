@@ -15,48 +15,16 @@ pnpm verify:acceptance
 ```
 
 For a local Codex parent, those commands automatically use Crabbox's direct
-`blacksmith-testbox` provider when `MURPH_CRABBOX_BLACKSMITH=1` or an existing
-`MURPH_CRABBOX_LEASE_ID` is configured and both CLIs are available. CI,
+`blacksmith-testbox` provider when `MURPH_CRABBOX_BLACKSMITH=1` is configured
+and both CLIs are available. CI,
 non-Codex callers, and unconfigured or unavailable CLIs retain the existing
 local shared-host path. Within that path, canonical acceptance intentionally
 selects the bounded composed profile on hosts with at least 12 logical CPUs;
 ordinary commands and smaller hosts keep their conservative shared-host caps.
-`MURPH_VERIFY_EXECUTOR=crabbox` explicitly requests a fresh one-shot Testbox
-without another target variable.
-
-## Warm one task lease by default
-
-When a task is likely to need CPU-heavy remote verification and Blacksmith is
-already authenticated, start the task's Testbox warmup as soon as the scope is
-known so provisioning and hydration can overlap local editing and review:
-
-```bash
-crabbox warmup --profile murph-verification --provider blacksmith-testbox
-```
-
-Keep the printed Testbox ID or Crabbox slug in the current task context, then
-reuse that exact lease for every canonical remote check the task needs:
-
-```bash
-MURPH_CRABBOX_LEASE_ID=<testbox-id-or-slug> pnpm test:diff <paths>
-MURPH_CRABBOX_LEASE_ID=<testbox-id-or-slug> pnpm verify:acceptance
-```
-
-Use one lease per agent/worktree. Never share a lease concurrently across
-worktrees because Blacksmith sync mirrors the invoking checkout and can replace
-another task's files. Reuse the task lease through final verification, then stop
-the exact lease created by this task even if no remote command ultimately ran:
-
-```bash
-crabbox stop --provider blacksmith-testbox <testbox-id-or-slug>
-```
-
-Only stop a lease whose ownership by the current task is proven. The profile's
-idle timeout is fallback cleanup, not the normal task-completion path. Use a
-fresh one-shot run only when the user requests independent clean-machine proof,
-the existing lease is unusable, or the task has no owned warm lease. Warmup is
-lifecycle setup only; verification still runs through the canonical `pnpm`
-commands above, never an ad-hoc remote command.
+Every canonical remote check creates a fresh one-shot Testbox whose hydration
+route is pinned by the dispatcher. Reusable lease IDs are rejected because the
+available lease metadata does not prove the Blacksmith organization that
+installed the root-owned trust entrypoint.
 
 ## Environment and sync boundary
 
@@ -68,6 +36,13 @@ commands above, never an ad-hoc remote command.
 - Never add `--allow-env`, `--env-from-profile`, broad env globs, `.env` files,
   Vercel tokens, provider tokens, model keys, or product credentials. Blacksmith
   Testbox deliberately rejects Crabbox environment forwarding.
+- The dispatcher launches the local Crabbox and Blacksmith CLIs with only
+  non-secret host path, account, terminal, and XDG config variables. Do not
+  weaken that allowlist to accommodate a credential-bearing local environment.
+- Canonical delegation pins the Blacksmith organization, `main` ref, workflow,
+  and hydration job before the Testbox is created and hydrated. Do not warm a
+  lease separately or replace those arguments with mutable local profile or
+  config routing.
 - Blacksmith can sync Git-tracked and untracked non-ignored paths. The dispatcher
   admits only modified tracked files, tracked renames/deletions, ignored files,
   and new files whose current contents are fully staged. Ordinary untracked,
@@ -78,8 +53,16 @@ commands above, never an ad-hoc remote command.
 - Fully staged new source and modified tracked content leave the host so the
   Testbox verifies the exact candidate change. Never stage private data to bypass
   the Git-state refusal.
-- The remote bootstrap independently discards its process environment before
-  reconstructing deterministic test-only values for pnpm and the verifier.
+- The default-branch workflow installs a root-owned verification entrypoint
+  outside the synced workspace before opening the delegated session. That
+  trusted copy erases ambient Actions/Blacksmith state before candidate code
+  starts; the candidate bootstrap then independently reconstructs deterministic
+  test-only values for pnpm and the verifier and fails closed without the
+  trusted-entry marker.
+- Changes to `.github/workflows/crabbox.yml` or the trusted entrypoint use local
+  verification until the exact trust root lands on the default branch. Run a
+  post-landing remote proof afterward; do not claim the pre-landing Testbox
+  exercised the new boundary.
 - Canonical completion verification does not need Vercel development variables.
   When a separate direct scenario truly requires Vercel development state, set
   `MURPH_VERIFY_REQUIRES_VERCEL_ENV=1` and keep that command local.
@@ -95,9 +78,6 @@ MURPH_VERIFY_EXECUTOR=local pnpm verify:acceptance
 
 # Force a fresh one-shot Blacksmith Testbox and fail rather than falling back.
 MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance
-
-# Reuse an already-warmed Testbox ID or Crabbox slug.
-MURPH_CRABBOX_LEASE_ID=<testbox-id-or-slug> pnpm test:diff <paths>
 ```
 
 Blacksmith owns machine provisioning, workflow hydration, Git-managed sync,

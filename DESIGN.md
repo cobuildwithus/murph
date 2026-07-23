@@ -325,13 +325,29 @@ phrase, and an optional mono metadata line. Product-specific inline artwork can
 sit behind the content when one quiet, familiar visual cue replaces explanatory
 copy; keep it flat, `aria-hidden`, and subordinate to the text. Selected cards
 normally use the sage selection tint and warm border, but a quiet accent drawn
-from product-specific artwork can carry through the border, tint, and radio.
+from product-specific artwork can carry through the border, tint, and selection
+check. Keep the semantic radio visually hidden and place the visible check at
+the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
 Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
+
+### Group Usage Funding
+Use `GroupUsageFundingCard` as the public entry surface for one-time group usage
+credit. Lead with the group name, one concise sentence explaining that the
+credit belongs to the group, and one primary action. Do not add a decorative
+status badge; retain `Open Murph` as the quiet secondary action.
+
+Use `HostedUsageTopUpDialog` for amount selection. Present the fixed offers as
+large choice cards, then one primary `Continue to checkout` action and a plain
+cancel action. The title and one short support sentence carry the explanation;
+do not repeat plan mechanics or payment detail across multiple paragraphs.
+Stack amount cards and actions on narrow screens, preserve visible focus and
+selection states, and render the production components on both the Components
+and Sections tabs of `/design` for review.
 
 ### Spinner
 Use the shared `Spinner` for compact pending feedback inside buttons or beside a
@@ -402,7 +418,7 @@ Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room 
 
 ### Don't:
 - **Don't** use ring charts, gamification, or "great job!" messages — these are the generic-health-app tell Murph explicitly rejects.
-- **Don't** use gray boxes, corporate tables, or hero-metric templates — these are the SaaS-dashboard cliché.
+- **Don't** use gray boxes, gray-gridded corporate data tables, or hero-metric templates — these are the SaaS-dashboard cliché. A warm, purposeful comparison IS allowed when it genuinely clarifies a choice (e.g. Murph vs a general chatbot): keep it on cream/sand paper surfaces, use serif + mono type with hairline `#c4a882` dividers instead of a gray grid, and let one side carry the sage affirmative treatment.
 - **Don't** use blue, teal, purple, or neon as UI accent color. Sage is the only affirmative accent.
 - **Don't** use `#000`, `#fff`, or untinted gray. Every neutral is tinted warm.
 - **Don't** cast drop shadows on cards. Flat-paper rule.

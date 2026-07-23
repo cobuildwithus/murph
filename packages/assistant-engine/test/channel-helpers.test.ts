@@ -4,7 +4,11 @@ import {
   serializeHostedEmailThreadTarget,
 } from '@murphai/runtime-state'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantVoiceMemoMusicModelId,
+  assistantVoiceMemoMusicOutputFormat,
+  type AssistantResponseMedia,
+} from '@murphai/operator-config/assistant-cli-contracts'
 
 import type { ConversationRef } from '../src/assistant/conversation-ref.ts'
 import { ASSISTANT_CHANNEL_ADAPTERS } from '../src/assistant/channels/descriptors.ts'
@@ -1007,6 +1011,76 @@ describe('channel helper seams', () => {
     expect(String(telegramFetch.mock.calls[0]?.[0])).toContain(
       'https://api.elevenlabs.io/',
     )
+  })
+
+  it('preserves Telegram text when song preparation fails without a transcript', async () => {
+    const sendTelegram = vi.fn().mockResolvedValue({
+      providerMessageId: 'telegram-text-message',
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
+    const telegramFetch = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.startsWith('https://api.elevenlabs.io/')) {
+        return new Response('music unavailable', { status: 503 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+
+    const delivery = await ASSISTANT_CHANNEL_ADAPTERS.telegram.send(
+      {
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', 'telegram-chat'),
+        explicitTarget: null,
+        idempotencyKey: 'telegram-requested-song-failure',
+        identityId: null,
+        media: [
+          createVoiceMemoMedia({
+            filename: 'requested-song.mp3',
+            transcript: null,
+            transport: {
+              generation: {
+                durationMs: 18_000,
+                forceInstrumental: false,
+                kind: 'elevenlabs_music',
+                modelId: assistantVoiceMemoMusicModelId,
+                outputFormat: assistantVoiceMemoMusicOutputFormat,
+                prompt: 'A warm original song.',
+              },
+              kind: 'telegram_generation',
+            },
+          }),
+        ],
+        message: 'Here is the note that goes with your song.',
+        replyToMessageId: null,
+      },
+      {
+        sendTelegram,
+        telegramVoiceMemoRuntime: {
+          env: {
+            ELEVENLABS_API_KEY: 'elevenlabs-key',
+            TELEGRAM_API_BASE_URL: 'https://telegram.test',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation: telegramFetch,
+        },
+      },
+    )
+
+    expect(sendTelegram).toHaveBeenCalledOnce()
+    expect(sendTelegram).toHaveBeenCalledWith({
+      idempotencyKey: 'telegram-requested-song-failure',
+      message: 'Here is the note that goes with your song.',
+      replyToMessageId: null,
+      target: 'telegram-chat',
+    })
+    expect(delivery).toMatchObject({
+      providerMessageId: 'telegram-text-message',
+      providerMessageIds: ['telegram-text-message'],
+      target: 'telegram-chat',
+      targetKind: 'thread',
+    })
+    expect(telegramFetch).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to the voice transcript after Telegram accepts text but rejects audio', async () => {

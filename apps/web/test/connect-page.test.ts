@@ -1677,8 +1677,50 @@ test("SourceCard stacks connection-reset content vertically at the base breakpoi
 
   assert.match(
     ordinaryMarkup,
-    /class="flex flex-1 items-center gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
+    /class="flex flex-1 items-end gap-4 sm:flex-col sm:items-stretch sm:gap-0"/u,
   );
+  assert.match(
+    ordinaryMarkup,
+    /class="ml-auto flex shrink-0 flex-col items-stretch gap-2 self-end sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(ordinaryMarkup, /aria-label="Garmin connection is not available yet"[^>]+self-end/u);
+
+  const connectedMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    ...cardProps,
+    source: {
+      connected: true,
+      description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+      disconnectConnectionId: "dsc_garmin",
+      id: "garmin",
+      logo,
+      name: "Garmin",
+    },
+  }));
+
+  assert.match(
+    connectedMarkup,
+    /class="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(connectedMarkup, /aria-label="Disconnect Garmin"[^>]+self-end/u);
+
+  const actionErrorMarkup = renderToStaticMarkup(createElement(SourceCard, {
+    ...cardProps,
+    errorMessage: "Garmin could not open. Please try again.",
+    source: {
+      connectTarget: "garmin",
+      description: "Garmin workouts, sleep, stress, heart, body battery, and activity data.",
+      id: "garmin",
+      logo,
+      name: "Garmin",
+    },
+  }));
+
+  assert.match(actionErrorMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
+  assert.match(
+    actionErrorMarkup,
+    /class="flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(actionErrorMarkup, /aria-label="Connect Garmin"[^>]+self-end/u);
 });
 
 test("SourceCard does not promise unavailable Strava recovery connections", async () => {
@@ -1775,6 +1817,25 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
   // the shared horizontal row under the card's overflow-hidden.
   assert.match(appDownloadMarkup, /class="flex flex-1 flex-col items-stretch gap-3 sm:gap-0"/u);
   assert.doesNotMatch(appDownloadMarkup, /items-center gap-4/u);
+  assert.match(
+    appDownloadMarkup,
+    /class="flex w-full shrink-0 flex-col items-stretch gap-2 self-stretch sm:mt-auto sm:shrink"/u,
+  );
+  assert.match(appDownloadMarkup, /aria-label="Download app for Apple Health"[^>]+self-end/u);
+});
+
+test("connect source card design study renders the production action states", async () => {
+  const { ConnectSourceCardStudy } = await import("../app/design/connect-source-card-study");
+  const markup = renderToStaticMarkup(createElement(ConnectSourceCardStudy));
+
+  assert.match(markup, /id="connect-source-card-actions"/u);
+  assert.match(markup, /aria-label="Disconnect Garmin"/u);
+  assert.match(markup, /aria-label="Download app for Apple Health"/u);
+  assert.match(markup, /aria-label="Connect Fitbit"/u);
+  assert.match(markup, /aria-label="Sign in to connect Oura"/u);
+  assert.match(markup, /Whoop needs a fresh connection/u);
+  assert.match(markup, /aria-label="Disconnect account"/u);
+  assert.match(markup, /Peloton could not open\. Please try again\./u);
 });
 
 test("ConnectPage lets active reconnect rows win over stale reconnectable rows", async () => {
@@ -2172,7 +2233,7 @@ test("ConnectSourcesGrid ignores unmatched pending device connect intents while 
   await rendered.cleanup();
 });
 
-test("ConnectSourcesGrid starts a configured Garmin target and redirects to the returned link", async () => {
+test("ConnectSourcesGrid explains Garmin Historical Data before starting the connection", async () => {
   const fetch = vi.fn(async (
     _input: RequestInfo | URL,
     _init?: RequestInit,
@@ -2186,6 +2247,8 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
   vi.stubGlobal("fetch", fetch);
   const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    garminHistoricalDataVoiceMemoSrc:
+      "/audio/garmin-historical-data-memos/grandpa.mp3",
     sources: [
       {
         connectTarget: "garmin",
@@ -2209,6 +2272,36 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
     rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
   });
 
+  assert.equal(fetch.mock.calls.length, 0);
+  assert.match(rendered.container.textContent ?? "", /Turn on Historical Data/);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /When Garmin opens, turn on Historical Data before approving\./,
+  );
+  assert.ok(
+    rendered.container.querySelector(
+      "audio[src='/audio/garmin-historical-data-memos/grandpa.mp3']",
+    ),
+    "expected the member's picked-voice Garmin reminder",
+  );
+
+  const dialogButtons = [...rendered.container.querySelectorAll("button")]
+    .map((button) => button.textContent?.trim())
+    .filter((label) => label === "Cancel" || label === "Continue to Garmin");
+  assert.deepEqual(dialogButtons, ["Cancel", "Continue to Garmin"]);
+
+  const continueButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue to Garmin");
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+  });
+
   assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/garmin/start");
   assert.deepEqual(fetch.mock.calls[0]?.[1], {
     body: JSON.stringify({ connectTarget: "garmin" }),
@@ -2221,6 +2314,93 @@ test("ConnectSourcesGrid starts a configured Garmin target and redirects to the 
     keepalive: false,
   });
   assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+
+  await rendered.cleanup();
+});
+
+test("ConnectSourcesGrid preserves a Garmin device connect intent through preflight and consent", async () => {
+  const claim = "dc_12345678901234567890123456789012";
+  let attempts = 0;
+  const fetch = vi.fn(async (
+    input: RequestInfo | URL,
+    _init?: RequestInit,
+  ) => {
+    void _init;
+    assert.equal(input, `/device/connect/${claim}`);
+    attempts += 1;
+    if (attempts === 1) {
+      return Response.json({
+        error: {
+          code: "HOSTED_CONSENT_REQUIRED",
+          details: {
+            missingScopes: ["launch.health-data"],
+          },
+          message: "Accept the current Murph legal consent before continuing.",
+        },
+      }, { status: 403 });
+    }
+
+    return Response.json({
+      authorizationUrl: "https://junction.example.test/link/garmin",
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+
+  const { ConnectSourcesGrid } = await import("../app/(dashboard)/connect/connect-page-client");
+  const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
+    initialConnectIntent: {
+      claim,
+      connectSource: "garmin",
+    },
+    sources: [
+      {
+        description: "Workouts, sleep, stress, heart rate, and body battery.",
+        id: "garmin",
+        logo: {
+          className: "size-11 object-contain",
+          height: 44,
+          src: "/brand-logos/connect/garmin.png",
+          width: 44,
+        },
+        name: "Garmin",
+      },
+    ],
+  }));
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 0);
+    assert.match(rendered.container.textContent ?? "", /Turn on Historical Data/);
+  });
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Garmin/);
+
+  const continueButton = [...rendered.container.querySelectorAll("button")]
+    .find((button) => button.textContent === "Continue to Garmin");
+  assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 1);
+    assert.match(rendered.container.textContent ?? "", /Before you connect Garmin/);
+  });
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Turn on Historical Data/);
+
+  const consentButton = rendered.container.querySelector("[data-hosted-legal-consent-card='true']");
+  assert.ok(consentButton instanceof rendered.window.HTMLButtonElement);
+
+  await act(async () => {
+    consentButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    assert.equal(fetch.mock.calls.length, 2);
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+  });
+  assert.equal(fetch.mock.calls[0]?.[0], `/device/connect/${claim}`);
+  assert.equal(fetch.mock.calls[1]?.[0], `/device/connect/${claim}`);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Turn on Historical Data/);
 
   await rendered.cleanup();
 });
@@ -3453,11 +3633,11 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
     _init?: RequestInit,
   ) => {
     void _init;
-    if (input === "/api/connect-sources/garmin/start") {
+    if (input === "/api/connect-sources/oura/start") {
       connectAttempts += 1;
       if (connectAttempts > 1) {
         return Response.json({
-          authorizationUrl: "https://junction.example.test/link/garmin",
+          authorizationUrl: "https://junction.example.test/link/oura",
         });
       }
 
@@ -3480,16 +3660,16 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
     sources: [
       {
-        connectTarget: "garmin",
-        description: "Workouts, sleep, stress, heart rate, and body battery.",
-        id: "garmin",
+        connectTarget: "oura",
+        description: "Sleep, readiness, activity, temperature, and heart rate.",
+        id: "oura",
         logo: {
           className: "size-11 object-contain",
           height: 44,
-          src: "/brand-logos/connect/garmin.png",
+          src: "/brand-logos/connect/oura.png",
           width: 44,
         },
-        name: "Garmin",
+        name: "Oura",
       },
     ],
   }));
@@ -3500,7 +3680,7 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 1);
-    assert.match(rendered.container.textContent ?? "", /Before you connect Garmin/);
+    assert.match(rendered.container.textContent ?? "", /Before you connect Oura/);
   });
 
   assert.equal(rendered.assign.mock.calls.length, 0);
@@ -3524,7 +3704,7 @@ test("ConnectSourcesGrid opens the consent dialog when connect start needs conse
 
   await vi.waitFor(() => {
     assert.equal(fetch.mock.calls.length, 2);
-    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/garmin");
+    assert.equal(rendered.assign.mock.calls[0]?.[0], "https://junction.example.test/link/oura");
   });
 
   await rendered.cleanup();
@@ -3546,16 +3726,16 @@ test("ConnectSourcesGrid rejects malformed connect responses before redirecting"
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
     sources: [
       {
-        connectTarget: "garmin",
-        description: "Workouts, sleep, stress, heart rate, and body battery.",
-        id: "garmin",
+        connectTarget: "oura",
+        description: "Sleep, readiness, activity, temperature, and heart rate.",
+        id: "oura",
         logo: {
           className: "size-11 object-contain",
           height: 44,
-          src: "/brand-logos/connect/garmin.png",
+          src: "/brand-logos/connect/oura.png",
           width: 44,
         },
-        name: "Garmin",
+        name: "Oura",
       },
     ],
   }));
@@ -3586,16 +3766,16 @@ test("ConnectSourcesGrid rejects unsafe connect response URLs before redirecting
   const rendered = await renderClientComponent(createElement(ConnectSourcesGrid, {
     sources: [
       {
-        connectTarget: "garmin",
-        description: "Workouts, sleep, stress, heart rate, and body battery.",
-        id: "garmin",
+        connectTarget: "oura",
+        description: "Sleep, readiness, activity, temperature, and heart rate.",
+        id: "oura",
         logo: {
           className: "size-11 object-contain",
           height: 44,
-          src: "/brand-logos/connect/garmin.png",
+          src: "/brand-logos/connect/oura.png",
           width: 44,
         },
-        name: "Garmin",
+        name: "Oura",
       },
     ],
   }));

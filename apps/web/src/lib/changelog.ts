@@ -142,7 +142,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-07-18",
     title: "Replies that know what they are answering",
     summary:
-      "Murph can anchor a reply or reaction to the exact message it means, guide automatic iPhone meal capture more reliably, and celebrate an eligible first plan with a short original song. Medical-record imports and cold replies also recover with less friction.",
+      "Murph can anchor a reply or reaction to the exact message it means and guide automatic iPhone meal capture more reliably. Medical-record imports and cold replies also recover with less friction.",
     items: [
       {
         id: "native-replies-to-exact-message",
@@ -171,18 +171,6 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Set up meal capture",
           prompt: "Help me set up automatic meal capture on my iPhone.",
         },
-      },
-      {
-        id: "first-plan-launch-song",
-        kind: "improvement",
-        priority: 4,
-        title: "Your first plan can get its own launch song",
-        summary:
-          "After an eligible first habit or experiment and its finite support are safely saved, Murph now includes a short original launch song alongside the practical confirmation and next touchpoint.",
-        details:
-          "The text confirmation always comes first. A no-music preference, sensitive context, time-sensitive help, an unsupported route, or a generation failure skips the song without blocking the plan or its reminders.",
-        relevanceTags: ["onboarding", "music", "plans", "delight"],
-        sourcePullRequests: [787],
       },
       {
         id: "medical-records-import-recovery",

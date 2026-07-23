@@ -15,6 +15,7 @@ import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
+  GarminHistoricalDataDialog,
 } from "./connect-page-dialogs";
 import {
   createConnectCallbackNotice,
@@ -50,12 +51,23 @@ interface HostedDeviceSyncDisconnectResponse {
   warning?: { historicalResetIncomplete?: boolean; message: string };
 }
 
+type ConnectStartOptions = {
+  garminHistoricalDataConfirmed?: boolean;
+  intentClaim?: string;
+};
+
+type GarminHistoricalDataRequest = {
+  intentClaim?: string;
+  source: ConnectSource;
+};
+
 export type { ConnectCallbackInput, InitialDeviceConnectIntent } from "./connect-page-types";
 export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 
 export function ConnectSourcesGrid({
   authenticated = true,
   deviceConnectRecoveryContactAction = null,
+  garminHistoricalDataVoiceMemoSrc = null,
   initialCallback = null,
   initialConnectIntent = null,
   initialLoadError = null,
@@ -64,6 +76,7 @@ export function ConnectSourcesGrid({
 }: {
   authenticated?: boolean;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
+  garminHistoricalDataVoiceMemoSrc?: string | null;
   initialCallback?: ConnectCallbackInput;
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
@@ -83,6 +96,8 @@ export function ConnectSourcesGrid({
   const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
+  const [garminHistoricalDataRequest, setGarminHistoricalDataRequest] =
+    useState<GarminHistoricalDataRequest | null>(null);
   const [showWhoopAppleHealthFallback, setShowWhoopAppleHealthFallback] = useState(false);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
@@ -130,8 +145,14 @@ export function ConnectSourcesGrid({
   // When this load carries a connect intent that the effect below will auto-redirect, show a
   // pending-redirect dialog. Seeded on mount and cleared only if that redirect attempt fails.
   const [connectIntentRedirectName, setConnectIntentRedirectName] = useState<string | null>(
-    () => resolveConnectIntentRedirectSource(activeConnectIntent, displaySources, authenticated)?.name
-      ?? null,
+    () => {
+      const source = resolveConnectIntentRedirectSource(
+        activeConnectIntent,
+        displaySources,
+        authenticated,
+      );
+      return source && !requiresGarminHistoricalDataPreflight(source) ? source.name : null;
+    },
   );
 
   useEffect(() => {
@@ -160,26 +181,45 @@ export function ConnectSourcesGrid({
 
   const startConnection = useCallback(async (
     source: ConnectSource,
-    options: { intentClaim?: string } = {},
+    options: ConnectStartOptions = {},
   ) => {
     if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
       return;
     }
 
     setInitialConnectIntentDismissed(true);
-    setPendingSourceId(source.id);
     setActionError(null);
     setNotice(null);
     setConsentRequest(null);
     setConnectIntentRecovery(null);
     setShowWhoopAppleHealthFallback(false);
 
+    if (
+      requiresGarminHistoricalDataPreflight(source)
+      && !options.garminHistoricalDataConfirmed
+    ) {
+      setPendingSourceId(null);
+      setGarminHistoricalDataRequest({
+        ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
+        source,
+      });
+      return;
+    }
+
+    setGarminHistoricalDataRequest(null);
+    setPendingSourceId(source.id);
+
     try {
-      const authorizationUrl = await requestConnectionAuthorizationUrl(source, options);
+      const authorizationUrl = await requestConnectionAuthorizationUrl(source, {
+        ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
+      });
       window.location.assign(authorizationUrl);
     } catch (error) {
       if (isHostedConsentRequiredError(error)) {
         setConsentRequest({
+          ...(options.garminHistoricalDataConfirmed
+            ? { garminHistoricalDataConfirmed: true }
+            : {}),
           ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
           source,
         });
@@ -220,15 +260,36 @@ export function ConnectSourcesGrid({
       return;
     }
 
-    initialConnectIntentAttemptedRef.current = true;
-    stripDeviceConnectIntentParams();
-
     const source = resolveConnectIntentRedirectSource(activeConnectIntent, displaySources, authenticated);
     if (!source) {
+      initialConnectIntentAttemptedRef.current = true;
+      stripDeviceConnectIntentParams();
       return;
     }
 
     let cancelled = false;
+    if (requiresGarminHistoricalDataPreflight(source)) {
+      void Promise.resolve().then(() => {
+        if (cancelled || initialConnectIntentAttemptedRef.current) {
+          return;
+        }
+
+        initialConnectIntentAttemptedRef.current = true;
+        stripDeviceConnectIntentParams();
+        setConnectIntentRedirectName(null);
+        setInitialConnectIntentDismissed(true);
+        setGarminHistoricalDataRequest({
+          intentClaim: activeConnectIntent.claim,
+          source,
+        });
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    initialConnectIntentAttemptedRef.current = true;
+    stripDeviceConnectIntentParams();
     void requestConnectionAuthorizationUrl(source, { intentClaim: activeConnectIntent.claim })
       .then((authorizationUrl) => {
         if (cancelled) {
@@ -403,9 +464,34 @@ export function ConnectSourcesGrid({
         }}
         onAccepted={async (source) => {
           await startConnection(source, {
+            ...(consentRequest?.garminHistoricalDataConfirmed
+              ? { garminHistoricalDataConfirmed: true }
+              : {}),
             ...(consentRequest?.intentClaim
               ? { intentClaim: consentRequest.intentClaim }
               : {}),
+          });
+        }}
+      />
+
+      <GarminHistoricalDataDialog
+        open={Boolean(garminHistoricalDataRequest)}
+        voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
+        onOpenChange={(open) => {
+          if (!open) {
+            setGarminHistoricalDataRequest(null);
+          }
+        }}
+        onContinue={() => {
+          const request = garminHistoricalDataRequest;
+          if (!request) {
+            return;
+          }
+
+          setGarminHistoricalDataRequest(null);
+          void startConnection(request.source, {
+            garminHistoricalDataConfirmed: true,
+            ...(request.intentClaim ? { intentClaim: request.intentClaim } : {}),
           });
         }}
       />
@@ -438,6 +524,10 @@ export function ConnectSourcesGrid({
 
     </section>
   );
+}
+
+export function requiresGarminHistoricalDataPreflight(source: ConnectSource): boolean {
+  return source.id === "garmin" && source.requiresReconnect !== true;
 }
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {

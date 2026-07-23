@@ -1,5 +1,10 @@
 import { HOSTED_FAMILY_PLAN_DISPLAY } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedFamilyOwnerSnapshot } from "@/src/lib/hosted-onboarding/family-plan";
+import type {
+  HostedUsageTopUpActivePurchase,
+  HostedUsageTopUpOffer,
+  HostedUsageTopUpReturn,
+} from "./hosted-usage-top-up-dialog";
 
 import {
   HostedFamilyManager,
@@ -7,7 +12,14 @@ import {
   type FamilyManagerMember,
 } from "./hosted-family-settings-actions";
 
-export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSnapshot }) {
+export function HostedFamilySettings(props: {
+  ownerSnapshot: HostedFamilyOwnerSnapshot;
+  usageTopUpActiveMemberId?: string | null;
+  usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
+  usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
+  usageTopUpReturnMemberId?: string | null;
+}) {
   const snapshot = props.ownerSnapshot;
 
   const members: FamilyManagerMember[] = snapshot.members.map((member) => ({
@@ -44,6 +56,11 @@ export function HostedFamilySettings(props: { ownerSnapshot: HostedFamilyOwnerSn
           planCode: plan.code,
           priceLabel: `$${Math.round(plan.recurringAmountUsdCents / 100)}/mo`,
         }))}
+        usageTopUpActiveMemberId={props.usageTopUpActiveMemberId}
+        usageTopUpActivePurchase={props.usageTopUpActivePurchase}
+        usageTopUpOffers={props.usageTopUpOffers ?? []}
+        usageTopUpPurchaseReturn={props.usageTopUpPurchaseReturn}
+        usageTopUpReturnMemberId={props.usageTopUpReturnMemberId}
       />
     </div>
   );

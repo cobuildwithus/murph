@@ -20,6 +20,7 @@ interface HostedUsageTopUpActivePurchase {
   restartAt?: string;
   retryAllowed: boolean;
   status: HostedUsageTopUpPurchaseStatus;
+  targetConflict?: true;
   url?: string;
 }
 
@@ -31,10 +32,12 @@ interface HostedUsageTopUpReturn {
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
   checkoutUrl?: string;
+  deferTerminalRefreshUntilClose?: boolean;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];
   purchaseReturn?: HostedUsageTopUpReturn | null;
-  scope?: "group" | "personal";
+  scope?: "family" | "group" | "personal";
+  targetLabel?: string;
 }
 
 interface HostedUsageTopUpPurchaseResponse {
@@ -64,7 +67,7 @@ function readPurchaseResponse(value: unknown): HostedUsageTopUpPurchaseResponse 
       value.url !== null &&
       typeof value.url !== "string")
   ) {
-    throw new Error("Could not open Stripe right now. Try again.");
+    throw new Error("Checkout didn’t open. Try again.");
   }
 
   return {
@@ -87,7 +90,7 @@ function readCheckoutUrl(value: string): string {
     }
     return url.toString();
   } catch {
-    throw new Error("Could not open Stripe right now. Try again.");
+    throw new Error("Checkout didn’t open. Try again.");
   }
 }
 
@@ -116,8 +119,9 @@ function readStatusContent(input: {
   canRetryCheckout: boolean;
   pollKind: "dormant" | "checking" | "exhausted" | "failed";
   returnedFromSuccessfulCheckout: boolean;
-  scope?: "group" | "personal";
+  scope?: "family" | "group" | "personal";
   status: HostedUsageTopUpPurchaseStatus | null;
+  targetLabel?: string;
   targetConflict?: boolean;
 }): { message: string; title: string } {
   if (input.targetConflict) {
@@ -183,7 +187,7 @@ function readStatusContent(input: {
       input.canResumeCheckout
         ? "You already have a usage-credit checkout in progress. Resume it or cancel it before starting a new one."
         : input.canRetryCheckout
-          ? "Checkout is open, but its Stripe link isn’t available here. Retry to recover it or cancel the checkout."
+          ? "Checkout is open, but the payment page isn’t available here. Retry to recover it or cancel the checkout."
           : "An existing usage-credit checkout is open, but it can’t be resumed from this account right now. You can cancel it.",
     );
   }
@@ -195,7 +199,7 @@ function readStatusContent(input: {
     return content(
       "Checkout not open yet",
       input.canRetryCheckout
-        ? `Stripe checkout ${input.pollKind === "exhausted" ? "still " : ""}hasn’t opened. You can safely retry with the same purchase.`
+        ? `The payment page ${input.pollKind === "exhausted" ? "still " : ""}hasn’t opened. You can safely retry with the same purchase.`
         : "This purchase is still being reconciled. Checkout is not available right now.",
     );
   }
@@ -216,6 +220,8 @@ function readStatusContent(input: {
         "Usage added",
         input.scope === "group"
           ? "This group's available usage has been updated."
+          : input.scope === "family" && input.targetLabel
+            ? `The available usage for ${input.targetLabel} has been updated.`
           : "Your available usage has been updated.",
       );
     case "expired":
@@ -226,10 +232,10 @@ function readStatusContent(input: {
         "The payment did not complete. No usage was added.",
       );
     case "payment_pending":
-      return content("Confirming payment", "Payment submitted. Stripe is confirming it.");
+      return content("Confirming payment", "Payment submitted. We’re confirming it.");
     case null:
     case "reconciling":
-      return content("Confirming payment", "Confirming your payment with Stripe…");
+      return content("Confirming payment", "We’re confirming your payment…");
   }
 }
 
@@ -266,7 +272,7 @@ function readReturnKey(
 
 function createClientRequestKey(): string {
   if (!globalThis.crypto?.randomUUID) {
-    throw new Error("Could not open Stripe right now. Try again.");
+    throw new Error("Checkout didn’t open. Try again.");
   }
   return globalThis.crypto.randomUUID();
 }

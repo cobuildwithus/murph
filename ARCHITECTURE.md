@@ -648,11 +648,18 @@ purchase-derived idempotency key, permits identical creation retries for a
 derived 30-minute window, and fences ambiguity through its frozen 90-minute
 expiry. The financial movements described above use only signed
 `refund_adjustment` and `dispute_adjustment` ledger entries; there are no
-separate reversal or restoration kinds. Personal and hosted-group funding use
-the same purchase lifecycle. Group funding resolves the existing opaque join
+separate reversal or restoration kinds. Personal, hosted-group, and
+Family-member funding use the same purchase lifecycle. Group funding resolves
+the existing opaque join
 code to the group's synthetic `HostedMember`, which remains the beneficiary;
 it adds no group wallet, usage account, or separate funding code. The
-authenticated contributor remains the payer. A deleted payer can detach only
+authenticated contributor remains the payer. Family funding authorizes the
+owner, active group billing, and selected active unsuspended direct member at
+new-purchase creation, then freezes the Family group and member selectors in
+the return scope. Exact request-key replay and Stripe reconciliation continue
+against that frozen purchase even if membership later changes; a fresh request
+must pass current Family authority again. Family funding adds no wallet,
+ledger, or webhook branch. A deleted payer can detach only
 from a terminal cross-owner purchase after the existing reconciliation-version
 fence advances and encrypted provider references are cleared. That advance
 makes payer-era preparation retry against the detached row, while retained

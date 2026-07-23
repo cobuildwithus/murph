@@ -258,13 +258,16 @@ async function sendTelegramVoiceMemoDelivery(input: {
       voiceMemoRuntimeDependencies,
     )
   } catch (error) {
-    if (!fallbackText) {
+    const preparationFallbackText = fallbackText
+      ? composeVoiceMemoFallbackText(text, fallbackText)
+      : text
+    if (!preparationFallbackText) {
       throw error
     }
     const deliveredFallback = await sendTelegramTextDelivery({
       dependencies: input.dependencies,
-      idempotencyKey: null,
-      message: composeVoiceMemoFallbackText(text, fallbackText),
+      idempotencyKey: fallbackText ? null : input.idempotencyKey ?? null,
+      message: preparationFallbackText,
       replyToMessageId: input.replyToMessageId ?? null,
       target: input.candidate.target,
     })

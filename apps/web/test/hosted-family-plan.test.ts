@@ -107,6 +107,7 @@ import {
   writeHostedAccountGroupStripeBillingTx,
   parseHostedFamilyInviteStartToken,
   readHostedFamilyAccessForMember,
+  resolveHostedFamilyUsageCreditCheckoutTargetTx,
   resolveHostedFamilyInviteTokenForInbound,
   removeHostedFamilyMemberTx,
   updateHostedFamilyMemberPlan,
@@ -302,6 +303,157 @@ describe("hosted Family plan", () => {
       previousHostedOnboardingPublicBaseUrl,
     );
     clearHostedOnboardingEnvCache();
+  });
+
+  it("authorizes an active unsuspended Family beneficiary against group billing", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findUnique
+      .mockResolvedValueOnce({ memberId: "member_mom", status: "active" })
+      .mockResolvedValueOnce({
+        member: { suspendedAt: null, threadContainer: null },
+        memberId: "member_mom",
+        status: "active",
+      });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toEqual({
+      beneficiaryMemberId: "member_mom",
+      groupId: "hbag_family",
+      stripeCustomerId: "cus_family",
+    });
+    expect(tx.hostedAccountGroup.findUnique).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        billingStatus: true,
+        id: true,
+        ownerMemberId: true,
+        suspendedAt: true,
+      }),
+      where: { ownerMemberId: "member_owner" },
+    });
+    expect(tx.hostedAccountGroupMembership.findUnique).toHaveBeenNthCalledWith(1, {
+      select: { memberId: true, status: true },
+      where: {
+        groupId_memberId: {
+          groupId: "hbag_family",
+          memberId: "member_mom",
+        },
+      },
+    });
+    expect(tx.hostedAccountGroupMembership.findUnique).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      member: {
+        suspendedAt: new Date("2026-07-22T12:00:00.000Z"),
+        threadContainer: null,
+      },
+    },
+    {
+      member: { suspendedAt: null, threadContainer: { memberId: "member_mom" } },
+    },
+  ])("rejects an ineligible Family usage-credit beneficiary", async ({ member }) => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findUnique
+      .mockResolvedValueOnce({ memberId: "member_mom", status: "active" })
+      .mockResolvedValueOnce({
+        member,
+        memberId: "member_mom",
+        status: "active",
+      });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+  });
+
+  it("rejects a foreign Family selector before locking its member row", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findUnique.mockResolvedValueOnce(null);
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_foreign",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Family beneficiary removed after selector binding", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findUnique
+      .mockResolvedValueOnce({ memberId: "member_mom", status: "active" })
+      .mockResolvedValueOnce({
+        member: { suspendedAt: null, threadContainer: null },
+        memberId: "member_mom",
+        status: "removed",
+      });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      billingStatus: HostedBillingStatus.past_due,
+      label: "inactive",
+      suspendedAt: null,
+    },
+    {
+      billingStatus: HostedBillingStatus.active,
+      label: "suspended",
+      suspendedAt: new Date("2026-07-22T12:00:00.000Z"),
+    },
+  ])("rejects an $label Family owner group for usage-credit checkout", async ({
+    billingStatus,
+    suspendedAt,
+  }) => {
+    const tx = createTxMock({
+      group: {
+        billingStatus,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt,
+      },
+    });
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
+    expect(tx.hostedAccountGroupMembership.findUnique).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("rejects Family usage-credit checkout without current group Stripe billing", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupMembership.findUnique
+      .mockResolvedValueOnce({ memberId: "member_mom", status: "active" })
+      .mockResolvedValueOnce({
+        member: { suspendedAt: null, threadContainer: null },
+        memberId: "member_mom",
+        status: "active",
+      });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValueOnce(null);
+
+    await expect(resolveHostedFamilyUsageCreditCheckoutTargetTx({
+      beneficiaryMemberId: "member_mom",
+      ownerMemberId: "member_owner",
+      tx,
+    })).resolves.toBeNull();
   });
 
   it("creates owner family groups without storing seat capacity on the group", async () => {
@@ -4646,6 +4798,7 @@ function createPendingInvite(overrides: Partial<{
   inviteCode: string;
   planCode: "edge" | "pulse";
   status: string;
+  targetLabel: string | null;
   targetEmailEncrypted: string | null;
   targetEmailLookupKey: string | null;
   targetPhoneLookupKey: string | null;
