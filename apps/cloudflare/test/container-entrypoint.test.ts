@@ -103,13 +103,19 @@ import {
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
-import { HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER } from "../src/runner-conversation-warmth.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
 const nativeFetch = globalThis.fetch;
 const hostedContainerRunRequestBodyLimitBytes = 8 * 1024 * 1024;
 const TEST_SNAPSHOT_PATH_HASH_SECRET = "a".repeat(64);
+
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
 
 beforeEach(() => {
   vi.unstubAllGlobals();
@@ -398,7 +404,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("publishes settled conversation warmth in invocation headers and health", async () => {
+  it("publishes settled conversation warmth in health", async () => {
     mocks.runHostedWorkspaceInvocation.mockImplementationOnce(async (_job, options) => {
       options.onConversationActivityObserved?.();
       return buildWorkspaceRunnerResult();
@@ -410,31 +416,36 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const invocation = await sendHostedContainerJsonRequest({
+    await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildWorkspaceJobBody()),
       path: "/internal/workspace-invocation",
       port: address.port,
     });
-    const completedAtEpochMs = Number(
-      invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER],
-    );
-    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
 
     const health = await sendHostedContainerGetRequest({
       path: "/health",
       port: address.port,
     });
-    expect(health.json).toMatchObject({
+    const healthJson = requireRecord(health.json, "health response");
+    const completedAtEpochMs = healthJson
+      .conversationWarmActivityCompletedAtEpochMs;
+    expect(Number.isSafeInteger(completedAtEpochMs)).toBe(true);
+    expect(healthJson).toMatchObject({
       conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
     });
 
-    const maintenance = await sendHostedContainerJsonRequest({
+    await sendHostedContainerJsonRequest({
       body: JSON.stringify(buildWorkspaceJobBody()),
       path: "/internal/workspace-invocation",
       port: address.port,
     });
-    expect(maintenance.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER])
-      .toBe(String(completedAtEpochMs));
+    const healthAfterMaintenance = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    expect(healthAfterMaintenance.json).toMatchObject({
+      conversationWarmActivityCompletedAtEpochMs: completedAtEpochMs,
+    });
   });
 
   it("starts conversation warmth when the observed invocation settles", async () => {
@@ -476,9 +487,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       vi.setSystemTime(settledAtEpochMs);
       releaseInvocation.resolve();
-      const invocation = await invocationPromise;
-      expect(invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER])
-        .toBe(String(settledAtEpochMs));
+      await invocationPromise;
 
       const healthAfterSettlement = await sendHostedContainerGetRequest({
         path: "/health",
@@ -511,9 +520,14 @@ describe("startHostedContainerEntrypoint", () => {
       port: address.port,
     });
     expect(invocation.status).toBe(500);
-    expect(Number.isSafeInteger(Number(
-      invocation.headers[HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER],
-    ))).toBe(true);
+    const health = await sendHostedContainerGetRequest({
+      path: "/health",
+      port: address.port,
+    });
+    const healthJson = requireRecord(health.json, "health response");
+    expect(Number.isSafeInteger(
+      healthJson.conversationWarmActivityCompletedAtEpochMs,
+    )).toBe(true);
   });
 
   it("drains deferred usage completions before clean shutdown exit", async () => {

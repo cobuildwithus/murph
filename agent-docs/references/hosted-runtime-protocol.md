@@ -1198,11 +1198,15 @@ controls how often an idle shell is reconsidered, while
 `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` is the post-completion conversation warm
 lease. The assistant runtime observes only fresh staged conversation input or
 recovered conversation input admitted to the provider. The container process
-publishes that observation as a private completion watermark, and RunnerContainer
-persists the derived bounded lease in Durable Object storage so DO reconstruction
-cannot shorten it. Replay, system-lane work, device sync, and generic maintenance
-do not mint or slide the lease. Cleanup fails closed when lease storage, child
-health, or the wake-versus-destroy race cannot be resolved. Plain-text Linq plus
+publishes that observation as a private completion watermark in its health
+response. At each lifecycle expiry RunnerContainer derives the remaining lease
+from that live child watermark, re-arms the platform timeout while the lease or
+active work remains, and destroys the shell after expiry. Durable Object
+reconstruction reads the same resident process; a replacement process starts
+without inherited warmth. Replay, system-lane work, device sync, and generic
+maintenance do not mint or slide the lease. Missing old-child metadata, child
+health failure, and the wake-versus-destroy race retain and re-arm fail closed.
+Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
 and attachment projection status are logged, and their artifacts remain

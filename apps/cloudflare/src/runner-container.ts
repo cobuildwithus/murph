@@ -22,10 +22,6 @@ import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
 import {
-  HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER,
-  HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-} from "./runner-conversation-warmth.ts";
-import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName as resolveHostedExecutionRunnerContainerNameFromIdentity,
   type HostedRunnerContainerIdentitySource,
@@ -329,20 +325,10 @@ interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
 }
 
-interface RunnerContainerStorageLike {
-  delete(key: string): Promise<boolean>;
-  get<T>(key: string): Promise<T | undefined>;
-  put<T>(key: string, value: T): Promise<void>;
-}
-
 interface RunnerContainerHealth {
   activeJobCount: number;
-  conversationWarmActivityCompletedAtEpochMs: number | null;
+  conversationWarmActivityCompletedAtEpochMs: number | null | undefined;
 }
-
-type RunnerConversationWarmLeaseRead =
-  | { kind: "available"; warmUntilEpochMs: number | null }
-  | { kind: "unavailable"; warmUntilEpochMs: null };
 
 interface RunnerActiveOperationRecord {
   attemptId: string;
@@ -408,7 +394,6 @@ export class RunnerContainer extends Container {
   sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs({}));
 
   protected readonly environment: RunnerContainerEnvironmentSource;
-  private readonly storage: RunnerContainerStorageLike;
   private lifecycleLock: Promise<void> = Promise.resolve();
   private lifecycleLockPendingCount = 0;
   private containerStartedAtMs: number | null = null;
@@ -431,7 +416,6 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
-    this.storage = (state as { storage: RunnerContainerStorageLike }).storage;
     this.envVars = buildRunnerContainerEnvVars();
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
@@ -451,15 +435,11 @@ export class RunnerContainer extends Container {
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    await this.withLifecycleLock(async () => {
-      try {
-        await this.stopWarmContainer({
-          reason: "destroy-instance",
-        });
-      } finally {
-        await this.deleteConversationWarmUntilBestEffort();
-      }
-    });
+    await this.withLifecycleLock(async () =>
+      this.stopWarmContainer({
+        reason: "destroy-instance",
+      })
+    );
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
@@ -939,12 +919,13 @@ export class RunnerContainer extends Container {
         this.lifecycleLockPendingCount > 1
         || this.containerInteractionGeneration !== interactionGenerationAtExpiry
       ) {
+        this.renewPlatformActivityTimeout("activity-expired-interaction-race");
         return;
       }
       const activeOperation = this.workspaceInvocationActiveOperation;
       if (activeOperation) {
         this.lastActivityExpiryAtMs = Date.now();
-        this.noteRunnerActivity("activity-expired-active-operation");
+        this.renewPlatformActivityTimeout("activity-expired-active-operation");
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -983,14 +964,8 @@ export class RunnerContainer extends Container {
         }
       }
 
-      this.lastActivityExpiryAtMs = Date.now();
-      const warmLease = await this.readConversationWarmUntilForCleanup(
-        this.lastActivityExpiryAtMs,
-      );
-      if (warmLease.kind === "unavailable" || warmLease.warmUntilEpochMs !== null) {
-        return;
-      }
-
+      const activityExpiryAtMs = Date.now();
+      this.lastActivityExpiryAtMs = activityExpiryAtMs;
       let status: string | null;
       try {
         status = await readRunnerContainerStatusWithTimeout(
@@ -998,10 +973,11 @@ export class RunnerContainer extends Container {
           RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
         );
       } catch (error) {
-        this.logConversationWarmthFailure(
+        this.logLifecycleCleanupFailure(
           "Hosted execution container could not verify lifecycle state during activity expiry.",
           error,
         );
+        this.renewPlatformActivityTimeout("activity-expired-status-unavailable");
         return;
       }
       if (isRunnerContainerStopped(status)) {
@@ -1012,30 +988,36 @@ export class RunnerContainer extends Container {
       try {
         health = await this.readWorkspaceInvocationHealth();
       } catch (error) {
-        this.logConversationWarmthFailure(
+        this.logLifecycleCleanupFailure(
           "Hosted execution container could not verify runner health during activity expiry.",
           error,
         );
+        this.renewPlatformActivityTimeout("activity-expired-health-unavailable");
+        return;
+      }
+      if (health.activeJobCount > 0) {
+        this.renewPlatformActivityTimeout("activity-expired-active-child");
         return;
       }
       if (
-        health.activeJobCount > 0
-        || this.lifecycleLockPendingCount > 1
+        this.lifecycleLockPendingCount > 1
         || this.containerInteractionGeneration !== interactionGenerationAtExpiry
       ) {
+        this.renewPlatformActivityTimeout("activity-expired-interaction-race");
         return;
       }
-      const recoveredLease =
-        await this.recordConversationWarmActivityBestEffort(
-          health.conversationWarmActivityCompletedAtEpochMs,
-          { fallbackOnMissing: false },
-        );
+      const conversationWarmActivityCompletedAtEpochMs =
+        health.conversationWarmActivityCompletedAtEpochMs;
+      if (conversationWarmActivityCompletedAtEpochMs === undefined) {
+        this.renewPlatformActivityTimeout("activity-expired-old-child");
+        return;
+      }
       if (
-        recoveredLease.kind === "unavailable"
-        || recoveredLease.warmUntilEpochMs !== null
-        || this.lifecycleLockPendingCount > 1
-        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+        conversationWarmActivityCompletedAtEpochMs !== null
+        && conversationWarmActivityCompletedAtEpochMs
+          > activityExpiryAtMs - readRunnerContainerIdleTtlMs(this.environment)
       ) {
+        this.renewPlatformActivityTimeout("activity-expired-conversation-warm");
         return;
       }
 
@@ -1049,12 +1031,17 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: this.currentLogContext?.userId,
       });
-      await this.stopWarmContainer({
+      const destroyed = await this.stopWarmContainer({
         expectedInteractionGeneration: interactionGenerationAtExpiry,
         failClosed: false,
         reason: "activity-expired",
       });
-      await this.deleteConversationWarmUntilBestEffort();
+      if (
+        !destroyed
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        this.renewPlatformActivityTimeout("activity-expired-cleanup-retained");
+      }
     });
   }
 
@@ -1240,7 +1227,6 @@ export class RunnerContainer extends Container {
         void stoppedContainer.catch(() => undefined);
       }
       this.noteRunnerActivity("runner-response-received");
-      await this.recordConversationWarmActivityFromResponseBestEffort(response);
 
       if (!response.ok) {
         const runnerError = await classifyHostedRunnerContainerErrorResponse(response);
@@ -1381,7 +1367,8 @@ export class RunnerContainer extends Container {
     const conversationWarmActivityCompletedAtEpochMs =
       payload.conversationWarmActivityCompletedAtEpochMs;
     if (
-      conversationWarmActivityCompletedAtEpochMs !== null
+      conversationWarmActivityCompletedAtEpochMs !== undefined
+      && conversationWarmActivityCompletedAtEpochMs !== null
       && (
         typeof conversationWarmActivityCompletedAtEpochMs !== "number"
         || !Number.isSafeInteger(conversationWarmActivityCompletedAtEpochMs)
@@ -2086,129 +2073,7 @@ export class RunnerContainer extends Container {
     this.containerInteractionGeneration += 1;
   }
 
-  private async recordConversationWarmActivityFromResponseBestEffort(
-    response: Response,
-  ): Promise<void> {
-    const raw = response.headers.get(HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER);
-    if (raw === "none") {
-      return;
-    }
-    const parsed = raw !== null && /^[0-9]+$/u.test(raw)
-      ? Number(raw)
-      : null;
-    const completedAtEpochMs =
-      typeof parsed === "number"
-      && Number.isSafeInteger(parsed)
-      && parsed >= 0
-        ? parsed
-        : null;
-    await this.recordConversationWarmActivityBestEffort(
-      completedAtEpochMs,
-      { fallbackOnMissing: true },
-    );
-  }
-
-  private async recordConversationWarmActivityBestEffort(
-    completedAtEpochMs: number | null,
-    options: { fallbackOnMissing: boolean },
-  ): Promise<RunnerConversationWarmLeaseRead> {
-    if (completedAtEpochMs === null && !options.fallbackOnMissing) {
-      return { kind: "available", warmUntilEpochMs: null };
-    }
-    const nowMs = Date.now();
-    const existing = await this.readConversationWarmUntilForCleanup(nowMs);
-    if (existing.kind === "unavailable") {
-      return existing;
-    }
-    const conversationActivityAtMs = Math.min(
-      completedAtEpochMs ?? nowMs,
-      nowMs,
-    );
-    const conversationWarmTtlMs = readRunnerContainerIdleTtlMs(this.environment);
-    const candidateWarmUntilEpochMs = Math.min(
-      nowMs + conversationWarmTtlMs,
-      conversationActivityAtMs + conversationWarmTtlMs,
-    );
-    const warmUntilEpochMs = Math.max(
-      existing.warmUntilEpochMs ?? 0,
-      candidateWarmUntilEpochMs,
-    );
-    if (warmUntilEpochMs <= nowMs) {
-      return { kind: "available", warmUntilEpochMs: null };
-    }
-    try {
-      await this.storage.put(
-        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-        warmUntilEpochMs,
-      );
-      return { kind: "available", warmUntilEpochMs };
-    } catch (error) {
-      this.logConversationWarmthFailure(
-        "Hosted execution container could not persist conversation warmth.",
-        error,
-      );
-      return { kind: "unavailable", warmUntilEpochMs: null };
-    }
-  }
-
-  private async readConversationWarmUntilForCleanup(
-    nowMs: number,
-  ): Promise<RunnerConversationWarmLeaseRead> {
-    let stored: unknown;
-    try {
-      stored = await this.storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY);
-    } catch (error) {
-      this.logConversationWarmthFailure(
-        "Hosted execution container could not read conversation warmth.",
-        error,
-      );
-      return { kind: "unavailable", warmUntilEpochMs: null };
-    }
-    if (stored === undefined) {
-      return { kind: "available", warmUntilEpochMs: null };
-    }
-    if (
-      typeof stored !== "number"
-      || !Number.isSafeInteger(stored)
-      || stored <= nowMs
-    ) {
-      await this.deleteConversationWarmUntilBestEffort();
-      return { kind: "available", warmUntilEpochMs: null };
-    }
-    const maximumWarmUntilEpochMs =
-      nowMs + readRunnerContainerIdleTtlMs(this.environment);
-    if (stored <= maximumWarmUntilEpochMs) {
-      return { kind: "available", warmUntilEpochMs: stored };
-    }
-    try {
-      await this.storage.put(
-        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-        maximumWarmUntilEpochMs,
-      );
-    } catch (error) {
-      this.logConversationWarmthFailure(
-        "Hosted execution container could not clamp conversation warmth.",
-        error,
-      );
-    }
-    return {
-      kind: "available",
-      warmUntilEpochMs: maximumWarmUntilEpochMs,
-    };
-  }
-
-  private async deleteConversationWarmUntilBestEffort(): Promise<void> {
-    try {
-      await this.storage.delete(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY);
-    } catch (error) {
-      this.logConversationWarmthFailure(
-        "Hosted execution container could not clear conversation warmth.",
-        error,
-      );
-    }
-  }
-
-  private logConversationWarmthFailure(message: string, error: unknown): void {
+  private logLifecycleCleanupFailure(message: string, error: unknown): void {
     emitHostedExecutionStructuredLog({
       component: "container",
       error,

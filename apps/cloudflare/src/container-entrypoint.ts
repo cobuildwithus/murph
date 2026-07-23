@@ -61,9 +61,6 @@ import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "./runner-container-error-codes.ts";
 import {
-  HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER,
-} from "./runner-conversation-warmth.ts";
-import {
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationDirect,
 } from "./hosted-workspace-invocation.ts";
 import {
@@ -364,12 +361,6 @@ export async function startHostedContainerEntrypoint(input: {
       if (conversationActivityObservedForInvocation) {
         conversationWarmActivityCompletedAtEpochMs = Date.now();
       }
-      if (!response.headersSent && !response.destroyed) {
-        setHostedConversationWarmActivityResponseHeader(
-          response,
-          conversationWarmActivityCompletedAtEpochMs,
-        );
-      }
     };
 
     try {
@@ -568,13 +559,6 @@ export async function startHostedContainerEntrypoint(input: {
       const isWorkspaceInvocationAbortRequest =
         request.method === "POST"
         && requestUrl.pathname === HOSTED_CONTAINER_WORKSPACE_INVOCATION_ABORT_PATH;
-
-      if (isWorkspaceInvocationRequest) {
-        setHostedConversationWarmActivityResponseHeader(
-          response,
-          conversationWarmActivityCompletedAtEpochMs,
-        );
-      }
 
       if (
         !isWorkspaceInvocationRequest
@@ -1284,16 +1268,6 @@ function writeJsonResponse(
   response.statusCode = statusCode;
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(payload));
-}
-
-function setHostedConversationWarmActivityResponseHeader(
-  response: ServerResponse,
-  completedAtEpochMs: number | null,
-): void {
-  response.setHeader(
-    HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER,
-    completedAtEpochMs === null ? "none" : String(completedAtEpochMs),
-  );
 }
 
 // Best-effort dispatch telemetry stamped by the Durable Object onto the runner

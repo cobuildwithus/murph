@@ -41,10 +41,6 @@ import {
   HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE,
 } from "../src/runner-container-error-codes.ts";
 import {
-  HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER,
-  HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-} from "../src/runner-conversation-warmth.ts";
-import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
 
@@ -596,7 +592,7 @@ describe("RunnerContainer", () => {
     expect(healthCallCount).toBe(0);
   });
 
-  it("keeps a legacy identity-blind rejected wake unconfirmed while health reports active work", async () => {
+  it("keeps legacy active-count liveness authoritative when warmth metadata is absent", async () => {
     const { container } = createContainerDouble({
       containerFetch: vi.fn(async (url: string) => {
         if (url.endsWith("/internal/runtime-wake")) {
@@ -609,8 +605,9 @@ describe("RunnerContainer", () => {
         }
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
-            ...createRunnerHealthResult(),
             activeJobCount: 1,
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
           }), {
             headers: {
               "content-type": "application/json; charset=utf-8",
@@ -2592,6 +2589,7 @@ describe("RunnerContainer", () => {
     vi.useFakeTimers();
 
     try {
+      const renewActivityTimeout = vi.fn();
       const { container, destroy } = createContainerDouble({
         initialStatus: "running",
       });
@@ -2599,6 +2597,7 @@ describe("RunnerContainer", () => {
       vi.setSystemTime(new Date("2026-06-04T04:10:00.000Z"));
       container.onStart();
       Object.assign(container, {
+        renewActivityTimeout,
         workspaceInvocationActiveOperation: {
           attemptId: "attempt_evt_activity_expiry_active",
           leaseGeneration: "11",
@@ -2611,6 +2610,7 @@ describe("RunnerContainer", () => {
       await container.onActivityExpired();
 
       expect(destroy).not.toHaveBeenCalled();
+      expect(renewActivityTimeout).toHaveBeenCalledOnce();
       expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
         expect.objectContaining({
           component: "container",
@@ -2796,7 +2796,6 @@ describe("RunnerContainer", () => {
           return new Response(JSON.stringify(createRunnerResult()), {
             headers: {
               "content-type": "application/json; charset=utf-8",
-              [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: "none",
             },
             status: 200,
           });
@@ -5367,6 +5366,7 @@ describe("RunnerContainer", () => {
   });
 
   it("does best-effort cleanup on activity expiry when destroy throws", async () => {
+    const renewActivityTimeout = vi.fn();
     const destroy = vi.fn(async () => {
       throw new Error("destroy failed");
     });
@@ -5374,6 +5374,7 @@ describe("RunnerContainer", () => {
       destroy,
       initialStatus: "running",
     });
+    Object.assign(container, { renewActivityTimeout });
 
     vi.useFakeTimers();
     try {
@@ -5384,6 +5385,7 @@ describe("RunnerContainer", () => {
       vi.useRealTimers();
     }
     expect(destroy).toHaveBeenCalledTimes(1);
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
   });
 
   it("fails closed before reusing a warm shell after best-effort cleanup does not settle", async () => {
@@ -5719,215 +5721,157 @@ describe("RunnerContainer", () => {
     expect(container.sleepAfter).toBe("300s");
   });
 
-  it("persists conversation warmth while maintenance responses do not extend it", async () => {
-    vi.useFakeTimers();
-    try {
-      const startedAtMs = Date.parse("2026-07-22T10:00:00.000Z");
-      vi.setSystemTime(startedAtMs);
-      let invocationCount = 0;
-      const { container, storage } = createContainerDouble({
-        env: {
-          HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
-          HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
-        },
-        containerFetch: vi.fn(async (url: string) => {
-          if (url.endsWith("/health")) {
-            return new Response(JSON.stringify(createRunnerHealthResult()), {
-              headers: { "content-type": "application/json; charset=utf-8" },
-              status: 200,
-            });
-          }
-          invocationCount += 1;
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-              [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: invocationCount === 1
-                ? String(startedAtMs)
-                : "none",
-            },
-            status: 200,
-          });
-        }),
-      });
-
-      await container.invoke({
-        job: { kind: "workspace-invocation", request: createRunnerRequest("evt_warm") },
-        userId: "member_123",
-      });
-      const warmUntilEpochMs = startedAtMs + 1_200_000;
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(warmUntilEpochMs);
-
-      vi.setSystemTime(startedAtMs + 300_000);
-      await container.invoke({
-        job: { kind: "workspace-invocation", request: createRunnerRequest("evt_maintenance") },
-        userId: "member_123",
-      });
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(warmUntilEpochMs);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps a legacy child response warm for one bounded conversation lease", async () => {
-    vi.useFakeTimers();
-    try {
-      const nowMs = Date.parse("2026-07-22T11:00:00.000Z");
-      vi.setSystemTime(nowMs);
-      const { container, storage } = createContainerDouble({
-        env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000" },
-        containerFetch: vi.fn(async (url: string) => {
-          if (url.endsWith("/health")) {
-            return new Response(JSON.stringify(createRunnerHealthResult()), {
-              headers: { "content-type": "application/json; charset=utf-8" },
-              status: 200,
-            });
-          }
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: { "content-type": "application/json; charset=utf-8" },
-            status: 200,
-          });
-        }),
-      });
-
-      await container.invoke({
-        job: { kind: "workspace-invocation", request: createRunnerRequest("evt_legacy") },
-        userId: "member_123",
-      });
-
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(nowMs + 1_200_000);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("clamps a future child watermark to one conversation lease", async () => {
+  it("re-arms each conversation-warm expiry and destroys at the first check after the lease", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const nowMs = Date.parse("2026-07-22T11:30:00.000Z");
-      const conversationTtlMs = 1_200_000;
-      vi.setSystemTime(nowMs);
-      const { container, storage } = createContainerDouble({
-        env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(conversationTtlMs) },
-        containerFetch: vi.fn(async (url: string) => {
-          if (url.endsWith("/health")) {
-            return new Response(JSON.stringify(createRunnerHealthResult()), {
-              headers: { "content-type": "application/json; charset=utf-8" },
-              status: 200,
-            });
-          }
-          return new Response(JSON.stringify(createRunnerResult()), {
-            headers: {
-              "content-type": "application/json; charset=utf-8",
-              [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: String(
-                nowMs + (10 * conversationTtlMs),
-              ),
-            },
-            status: 200,
-          });
-        }),
-      });
-
-      await container.invoke({
-        job: {
-          kind: "workspace-invocation",
-          request: createRunnerRequest("evt_future_warmth"),
-        },
-        userId: "member_123",
-      });
-
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(nowMs + conversationTtlMs);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("clamps an oversized stored lease without destroying the warm shell", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      const nowMs = Date.parse("2026-07-22T11:45:00.000Z");
-      const conversationTtlMs = 1_200_000;
-      vi.setSystemTime(nowMs);
-      const storage = createContainerStorageDouble();
-      await storage.put(
-        HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-        nowMs + (10 * conversationTtlMs),
-      );
-      const { container, containerFetch, destroy } = createContainerDouble({
-        env: { HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: String(conversationTtlMs) },
-        initialStatus: "running",
-        storage,
-      });
-
-      await container.onActivityExpired();
-
-      expect(containerFetch).not.toHaveBeenCalled();
-      expect(destroy).not.toHaveBeenCalled();
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(nowMs + conversationTtlMs);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("recovers conversation warmth from health after Durable Object reconstruction", async () => {
-    vi.useFakeTimers();
     try {
       const activityAtMs = Date.parse("2026-07-22T12:00:00.000Z");
-      vi.setSystemTime(activityAtMs + 60_000);
-      const health = {
-        ...createRunnerHealthResult(),
-        conversationWarmActivityCompletedAtEpochMs: activityAtMs,
-      };
-      const { container, destroy, storage } = createContainerDouble({
+      let expiryArmed = true;
+      const renewActivityTimeout = vi.fn(() => {
+        expiryArmed = true;
+      });
+      const { container, destroy } = createContainerDouble({
         env: {
           HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
           HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
         },
         initialStatus: "running",
-        containerFetch: vi.fn(async () => new Response(JSON.stringify(health), {
+        containerFetch: vi.fn(async () => new Response(JSON.stringify({
+          ...createRunnerHealthResult(),
+          conversationWarmActivityCompletedAtEpochMs: activityAtMs,
+        }), {
           headers: { "content-type": "application/json; charset=utf-8" },
           status: 200,
         })),
       });
+      Object.assign(container, { renewActivityTimeout });
+      const deliverExpiryAt = async (nowMs: number) => {
+        expect(expiryArmed).toBe(true);
+        expiryArmed = false;
+        vi.setSystemTime(nowMs);
+        await container.onActivityExpired();
+      };
 
-      await container.onActivityExpired();
+      for (let minute = 1; minute < 20; minute += 1) {
+        await deliverExpiryAt(activityAtMs + (minute * 60_000));
+        expect(destroy).not.toHaveBeenCalled();
+        expect(renewActivityTimeout).toHaveBeenCalledTimes(minute);
+      }
 
-      expect(destroy).not.toHaveBeenCalled();
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBe(activityAtMs + 1_200_000);
+      await deliverExpiryAt(activityAtMs + 1_200_000);
 
-      vi.setSystemTime(activityAtMs + 1_200_001);
-      await container.onActivityExpired();
       expect(destroy).toHaveBeenCalledOnce();
-      await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-        .resolves.toBeUndefined();
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(19);
+      expect(expiryArmed).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("fails closed when conversation warmth storage cannot be read", async () => {
-    const storage = createContainerStorageDouble({
-      async get() {
-        throw new Error("storage unavailable");
+  it("destroys maintenance-only work at the first short-cadence expiry", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, destroy } = createContainerDouble({
+      env: {
+        HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+        HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: "60000",
       },
+      initialStatus: "running",
     });
+    Object.assign(container, { renewActivityTimeout });
+
+    await container.onActivityExpired();
+
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(renewActivityTimeout).not.toHaveBeenCalled();
+  });
+
+  it("re-arms cleanup when a legacy child omits the optional warmth watermark", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({
+        activeJobCount: 0,
+        hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+        ok: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })),
+    });
+    Object.assign(container, { renewActivityTimeout });
+
+    await container.onActivityExpired();
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("re-arms cleanup when child health is unavailable", async () => {
+    const renewActivityTimeout = vi.fn();
+    const { container, destroy } = createContainerDouble({
+      initialStatus: "running",
+      containerFetch: vi.fn(async () => {
+        throw new Error("health unavailable");
+      }),
+    });
+    Object.assign(container, { renewActivityTimeout });
+
+    await container.onActivityExpired();
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("re-arms cleanup when container status is unavailable", async () => {
+    const renewActivityTimeout = vi.fn();
     const { container, containerFetch, destroy } = createContainerDouble({
       initialStatus: "running",
-      storage,
+      getState: vi.fn(async () => {
+        throw new Error("status unavailable");
+      }),
     });
+    Object.assign(container, { renewActivityTimeout });
 
     await container.onActivityExpired();
 
     expect(containerFetch).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+  });
+
+  it("does not transfer conversation warmth to a replacement child", async () => {
+    const storage = createContainerStorageDouble();
+    const activityAtMs = Date.now();
+    const warmChild = createContainerDouble({
+      initialStatus: "running",
+      storage,
+      containerFetch: vi.fn(async () => new Response(JSON.stringify({
+        ...createRunnerHealthResult(),
+        conversationWarmActivityCompletedAtEpochMs: activityAtMs,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })),
+    });
+    const renewActivityTimeout = vi.fn();
+    Object.assign(warmChild.container, { renewActivityTimeout });
+
+    await warmChild.container.onActivityExpired();
+
+    expect(warmChild.destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
+
+    const replacement = createContainerDouble({
+      initialStatus: "running",
+      storage,
+    });
+    await replacement.container.onActivityExpired();
+
+    expect(replacement.destroy).toHaveBeenCalledOnce();
+    await expect(storage.list()).resolves.toEqual(new Map());
   });
 
   it("does not destroy reconstructed state while the child reports active work", async () => {
+    const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       initialStatus: "running",
       containerFetch: vi.fn(async () => new Response(JSON.stringify({
@@ -5938,10 +5882,12 @@ describe("RunnerContainer", () => {
         status: 200,
       })),
     });
+    Object.assign(container, { renewActivityTimeout });
 
     await container.onActivityExpired();
 
     expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledOnce();
   });
 
   it("does not destroy when a runtime wake races the expiry health check", async () => {
@@ -5967,10 +5913,12 @@ describe("RunnerContainer", () => {
       }
       throw new Error(`Unexpected runner request URL: ${url}`);
     });
+    const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       containerFetch,
       initialStatus: "running",
     });
+    Object.assign(container, { renewActivityTimeout });
 
     const expiry = container.onActivityExpired();
     await healthStarted.promise;
@@ -5984,6 +5932,7 @@ describe("RunnerContainer", () => {
     await expect(wake).resolves.toMatchObject({ kind: "accepted" });
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
+    expect(renewActivityTimeout).toHaveBeenCalledTimes(2);
   });
 
   it("does not destroy when a runtime wake races the final status check", async () => {
@@ -6019,11 +5968,13 @@ describe("RunnerContainer", () => {
       }
       throw new Error(`Unexpected runner request URL: ${url}`);
     });
+    const renewActivityTimeout = vi.fn();
     const { container, destroy } = createContainerDouble({
       containerFetch,
       getState,
       initialStatus: "running",
     });
+    Object.assign(container, { renewActivityTimeout });
 
     const expiry = container.onActivityExpired();
     await finalStatusStarted.promise;
@@ -6036,39 +5987,7 @@ describe("RunnerContainer", () => {
 
     await expect(expiry).resolves.toBeUndefined();
     expect(destroy).not.toHaveBeenCalled();
-  });
-
-  it("clears corrupt warmth and destroys an otherwise idle shell", async () => {
-    const storage = createContainerStorageDouble();
-    await storage.put(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY, "corrupt");
-    const { container, destroy } = createContainerDouble({
-      initialStatus: "running",
-      storage,
-    });
-
-    await container.onActivityExpired();
-
-    expect(destroy).toHaveBeenCalledOnce();
-    await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-      .resolves.toBeUndefined();
-  });
-
-  it("lets explicit destruction override a conversation warm lease", async () => {
-    const storage = createContainerStorageDouble();
-    await storage.put(
-      HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY,
-      Date.now() + 1_200_000,
-    );
-    const { container, destroy } = createContainerDouble({
-      initialStatus: "running",
-      storage,
-    });
-
-    await container.destroyInstance();
-
-    expect(destroy).toHaveBeenCalledOnce();
-    await expect(storage.get(HOSTED_CONVERSATION_WARM_UNTIL_STORAGE_KEY))
-      .resolves.toBeUndefined();
+    expect(renewActivityTimeout).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -6816,7 +6735,6 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
     return new Response(JSON.stringify(createRunnerResult()), {
       headers: {
         "content-type": "application/json; charset=utf-8",
-        [HOSTED_CONVERSATION_WARM_ACTIVITY_HEADER]: "none",
       },
       status: 200,
     });
