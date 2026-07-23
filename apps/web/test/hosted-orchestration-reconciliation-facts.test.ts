@@ -1416,7 +1416,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
   });
 
-  it("uses an accepted meal capture as engagement for its due closeout", async () => {
+  it("uses an accepted meal capture as member-wide engagement for a generic due automation wake", async () => {
     mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
       nextWakeAt: "2026-05-20T11:59:59.000Z",
       nextWakeReason: "assistant_due",
