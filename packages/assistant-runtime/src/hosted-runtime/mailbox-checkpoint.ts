@@ -228,6 +228,12 @@ export function buildHostedMailboxImportRedactedStatus(
 ): HostedRuntimeRedactedJson {
   return {
     hostedMailboxBlockedCount: importResult.blocked.length,
+    ...(importResult.consumedSeqByLane.conversation === null
+      ? {}
+      : {
+          hostedMailboxConversationConsumedSeq:
+            importResult.consumedSeqByLane.conversation,
+        }),
     hostedMailboxConversationImportedSeq: importResult.state.watermarks.conversation,
     hostedMailboxFetchedCount: importResult.fetchedCount,
     hostedMailboxImportedCount: importResult.importedCount,
