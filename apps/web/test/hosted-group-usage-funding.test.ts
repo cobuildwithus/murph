@@ -69,6 +69,7 @@ describe("hosted group usage funding", () => {
   it.each([
     [3_000_000n, "healthy", 66],
     [900_000n, "low", 20],
+    [1n, "low", 0],
     [0n, "exhausted", 0],
     [9_000_000n, "healthy", 100],
   ] as const)("projects %s remaining as %s without exposing accounting", async (

@@ -168,6 +168,8 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("share the returned remainingPercent and periodEnd");
     expect(MURPH_GROUP_TOOL.description)
+      .toContain("when remainingPercent is absent, share the state and periodEnd instead");
+    expect(MURPH_GROUP_TOOL.description)
       .toContain("Never infer or disclose internal currency accounting");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("contributor identity, purchase history, or payment status");
