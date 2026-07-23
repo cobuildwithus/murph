@@ -298,7 +298,7 @@ function PlanUsageBand(props: {
   const forecast = status.forecast
     ? `At your recent pace, included usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
-  const usageCreditBalance = projectUsageCreditBalance(
+  const hasUsageCredit = hasPositiveUsageCreditBalance(
     props.usageCreditBalanceUsdMicros,
   );
   const usageTopUpDialog = (
@@ -340,17 +340,9 @@ function PlanUsageBand(props: {
               {` · ${status.remainingPercent}% remaining`}
             </span>
           </p>
-          {usageCreditBalance ? (
-            <p className="text-sm text-muted-foreground">
-              <span className="font-medium tabular-nums text-foreground">
-                {usageCreditBalance}
-              </span>{" "}
-              usage credit remaining
-            </p>
-          ) : null}
           {status.status === "exhausted" ? (
             <p className="text-sm text-pretty text-muted-foreground">
-              {usageCreditBalance
+              {hasUsageCredit
                 ? "You've used this period's included usage. Murph will use your remaining usage credit."
                 : props.usageTopUpOffers.length > 0
                 ? "You've used this period's included usage and any usage credit. Add usage to continue."
@@ -462,27 +454,12 @@ function formatHostedBillingDate(value: Date): string {
   }).format(value);
 }
 
-function projectUsageCreditBalance(
+function hasPositiveUsageCreditBalance(
   value: string | null | undefined,
-): string | null {
+): boolean {
   if (typeof value !== "string" || !/^[0-9]+$/u.test(value)) {
-    return null;
+    return false;
   }
 
-  const balanceUsdMicros = BigInt(value);
-  if (balanceUsdMicros === 0n) {
-    return null;
-  }
-  const wholeCents = balanceUsdMicros / 10_000n;
-  if (wholeCents === 0n) {
-    return "<$0.01";
-  }
-
-  const dollars = wholeCents / 100n;
-  const cents = wholeCents % 100n;
-  const groupedDollars = dollars
-    .toString()
-    .replace(/\B(?=(?:[0-9]{3})+(?![0-9]))/gu, ",");
-
-  return `$${groupedDollars}.${cents.toString().padStart(2, "0")}`;
+  return BigInt(value) > 0n;
 }

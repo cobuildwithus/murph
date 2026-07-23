@@ -27,6 +27,13 @@ const DESIGN_PERSONAL_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   usedPercent: 35,
 };
 
+const DESIGN_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  ...DESIGN_PERSONAL_USAGE_STATUS,
+  remainingPercent: 0,
+  status: "exhausted",
+  usedPercent: 100,
+};
+
 function GroupUsageFundingStudy() {
   return (
     <div
@@ -53,12 +60,48 @@ function GroupUsageFundingStudy() {
 function PersonalUsageCreditOwnerStudy() {
   return (
     <div
-      className="rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
+      className="flex flex-col gap-6 rounded-3xl border border-border bg-background px-4 py-8 sm:px-8"
       data-design-study="personal-usage-credit-owner"
       id="personal-usage-credit-owner"
     >
-      <p className="mb-4 text-sm text-muted-foreground">
-        Static owner-layout preview. Billing actions are disabled here.
+      <p className="text-sm text-muted-foreground">
+        Static owner-layout preview with purchased credit present. The exact
+        balance is omitted, and billing actions are disabled here.
+      </p>
+      <PersonalUsageCreditState
+        balanceUsdMicros="8429999"
+        label="Included usage active"
+        state="active-with-credit"
+        usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
+      />
+      <PersonalUsageCreditState
+        balanceUsdMicros="8429999"
+        label="Included usage exhausted, credit remains"
+        state="exhausted-with-credit"
+        usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
+      />
+      <PersonalUsageCreditState
+        label="Included usage and credit exhausted"
+        state="exhausted-without-credit"
+        usageStatus={DESIGN_EXHAUSTED_USAGE_STATUS}
+      />
+    </div>
+  );
+}
+
+function PersonalUsageCreditState(props: {
+  balanceUsdMicros?: string;
+  label: string;
+  state: string;
+  usageStatus: HostedPlanUsageAvailableStatus;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-3"
+      data-design-state={props.state}
+    >
+      <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        {props.label}
       </p>
       <div inert>
         <HostedBillingSettings
@@ -66,8 +109,8 @@ function PersonalUsageCreditOwnerStudy() {
           billingStatus="active"
           currentBillingPhase="paid"
           currentBillingPlanCode="launch_monthly"
-          usageCreditBalanceUsdMicros="8429999"
-          usageStatus={DESIGN_PERSONAL_USAGE_STATUS}
+          usageCreditBalanceUsdMicros={props.balanceUsdMicros}
+          usageStatus={props.usageStatus}
           usageTopUpOffers={DESIGN_USAGE_OFFERS}
         />
       </div>

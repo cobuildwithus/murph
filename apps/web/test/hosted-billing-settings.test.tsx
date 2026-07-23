@@ -207,36 +207,40 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
-  test("shows an exhausted state without inventing a forecast", async () => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+  test.each([undefined, "0", "invalid"])(
+    "shows an exhausted state without inventing a forecast for credit value %s",
+    async (usageCreditBalanceUsdMicros) => {
+      const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      usageStatus: buildUsageStatus({
-        remainingPercent: 0,
-        status: "exhausted",
-        usedPercent: 100,
-      }),
-    }));
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        usageCreditBalanceUsdMicros,
+        usageStatus: buildUsageStatus({
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+      }));
 
-    assert.match(markup, /100% used/);
-    assert.match(markup, /0% remaining/);
-    assert.match(markup, /You&#x27;ve used this period&#x27;s available usage\. Murph pauses new usage until more capacity is available/);
-    assert.doesNotMatch(markup, /recent pace/);
-  });
+      assert.match(markup, /100% used/);
+      assert.match(markup, /0% remaining/);
+      assert.match(markup, /You&#x27;ve used this period&#x27;s available usage\. Murph pauses new usage until more capacity is available/);
+      assert.doesNotMatch(markup, /recent pace/);
+    },
+  );
 
   test.each([
     {
       balanceUsdMicros: "8429999",
-      visibleBalance: /\$8\.42/,
+      hiddenBalance: /\$8\.42/,
     },
     {
       balanceUsdMicros: "9999",
-      visibleBalance: /&lt;\$0\.01/,
+      hiddenBalance: /&lt;\$0\.01/,
     },
   ])("does not call all capacity exhausted while positive usage credit remains", async ({
     balanceUsdMicros,
-    visibleBalance,
+    hiddenBalance,
   }) => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -257,14 +261,15 @@ describe("HostedBillingSettings", () => {
       }],
     }));
 
-    assert.match(markup, visibleBalance);
+    assert.doesNotMatch(markup, hiddenBalance);
+    assert.doesNotMatch(markup, /usage credit remaining/);
     assert.match(markup, /Murph will use your remaining usage credit/);
     assert.doesNotMatch(markup, /included usage and any usage credit/);
     assert.doesNotMatch(markup, /Add usage to continue/);
     assert.doesNotMatch(markup, /pauses new usage/);
   });
 
-  test("shows purchased usage separately and offers a top-up at any utilization", async () => {
+  test("keeps included usage and top-up actions clear without showing an exact credit balance", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -295,8 +300,8 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /1% used/);
     assert.match(markup, /99% remaining/);
-    assert.match(markup, /\$8\.42/);
-    assert.match(markup, /usage credit remaining/);
+    assert.doesNotMatch(markup, /\$8\.42/);
+    assert.doesNotMatch(markup, /usage credit remaining/);
     assert.match(markup, /Add usage/);
     const addUsageButton = markup.match(/<button[^>]*>Add usage<\/button>/u)?.[0];
     assert.ok(addUsageButton);
@@ -363,23 +368,6 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /aria-label="Edge included AI usage"/);
     assert.match(markup, /Add usage/);
-  });
-
-  test("shows a positive sub-cent credit without rounding it to zero", async () => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
-
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      billingStatus: "active",
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: "9999",
-      usageStatus: buildUsageStatus(),
-    }));
-
-    assert.match(markup, /&lt;\$0\.01/);
-    assert.match(markup, /usage credit remaining/);
-    assert.doesNotMatch(markup, /\$0\.00 usage credit remaining/);
   });
 
   test("keeps unavailable and forecast-free usage states honest", async () => {

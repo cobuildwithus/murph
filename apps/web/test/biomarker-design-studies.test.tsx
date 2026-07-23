@@ -121,6 +121,15 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
   expect(sectionsMarkup).toContain("Pulse included AI usage");
   expect(sectionsMarkup).toContain("Static owner-layout preview");
+  expect(sectionsMarkup).toContain("Included usage active");
+  expect(sectionsMarkup).toContain("Included usage exhausted, credit remains");
+  expect(sectionsMarkup).toContain("Included usage and credit exhausted");
+  expect(sectionsMarkup).toContain(
+    "Murph will use your remaining usage credit",
+  );
+  expect(sectionsMarkup).toContain("Add usage to continue");
+  expect(sectionsMarkup).not.toContain("$8.42");
+  expect(sectionsMarkup).not.toContain("usage credit remaining");
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 
