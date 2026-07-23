@@ -46,8 +46,8 @@ export interface HostedContainerSshKey {
 
 const DEFAULT_CONTAINER_INSTANCE_TYPE: HostedContainerInstanceType = {
   disk_mb: 6000,
-  memory_mib: 3072,
-  vcpu: 1,
+  memory_mib: 6144,
+  vcpu: 2,
 };
 const DEFAULT_CONTAINER_MAX_INSTANCES = 1000;
 const DEFAULT_CONTAINER_SSH_KEY_NAME = "local-debug";

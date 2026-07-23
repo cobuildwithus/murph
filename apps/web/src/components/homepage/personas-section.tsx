@@ -39,7 +39,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
       },
       {
         from: "murph",
-        text: "Your mattress temp’s held steady according to 8 Sleep, so probably not. The jump lines up with the magnesium nights. 5 days left to be sure.",
+        text: "Your mattress temp’s held steady according to 8 Sleep, so probably not. The jump lines up with the magnesium nights. 5 days left to see if the pattern holds.",
       },
     ],
     result: {
@@ -133,7 +133,7 @@ const PERSONAS: ReadonlyArray<Persona> = [
       },
       {
         from: "murph",
-        text: "Try a 2pm cutoff for a week? If your HRV holds, we’ll know it’s the caffeine, not the stress.",
+        text: "Try a 2pm cutoff for a week? Then we’ll see whether the pattern holds.",
       },
     ],
     result: {
