@@ -52,16 +52,30 @@ export interface HostedAssistantInputSource extends AssistantInputSource {
   readSelectedInputIds(): string[];
 }
 
+export type HostedConversationActivityObservation =
+  | "not_observed"
+  | "observed"
+  | "uncertain";
+
 export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
   assistantInputIds: readonly string[];
   vaultRoot: string;
-}): Promise<string | null> {
+}): Promise<{
+  conversationActivity: HostedConversationActivityObservation;
+  currentInputId: string | null;
+}> {
   const inputIds = uniqueStrings(input.assistantInputIds);
-  if (
-    inputIds.length === 0
-    || inputIds.length !== input.assistantInputIds.length
-  ) {
-    return null;
+  if (inputIds.length === 0) {
+    return {
+      conversationActivity: "not_observed",
+      currentInputId: null,
+    };
+  }
+  if (inputIds.length !== input.assistantInputIds.length) {
+    return {
+      conversationActivity: "uncertain",
+      currentInputId: null,
+    };
   }
   let events: AssistantInputEventRecord[];
   try {
@@ -70,8 +84,20 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       vaultRoot: input.vaultRoot,
     });
   } catch {
-    return null;
+    return {
+      conversationActivity: "uncertain",
+      currentInputId: null,
+    };
   }
+  if (events.length !== inputIds.length) {
+    return {
+      conversationActivity: "uncertain",
+      currentInputId: null,
+    };
+  }
+  const conversationActivity = events.some(isHostedConversationActivityInputEvent)
+    ? "observed"
+    : "not_observed";
   let batch: AssistantInputEventRecord[];
   try {
     batch = selectHostedAssistantInputEventBatch({
@@ -79,11 +105,27 @@ export async function resolveHostedCurrentInputIdForAcceptedInputs(input: {
       limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     });
   } catch {
-    return null;
+    return {
+      conversationActivity,
+      currentInputId: null,
+    };
   }
-  return batch.length === events.length
-    ? batch.at(-1)?.inputId ?? null
-    : null;
+  return {
+    conversationActivity,
+    currentInputId: batch.length === events.length
+      ? batch.at(-1)?.inputId ?? null
+      : null,
+  };
+}
+
+function isHostedConversationActivityInputEvent(
+  event: AssistantInputEventRecord,
+): boolean {
+  return event.sourceRef.kind === "inbox-capture"
+    || (
+      event.sourceRef.kind === "hosted-mailbox"
+      && event.sourceRef.lane === "conversation"
+    );
 }
 
 export function createHostedAssistantInputSource(input: {

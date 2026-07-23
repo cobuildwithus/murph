@@ -252,6 +252,7 @@ export function createHostedConversationMailboxImportItem(input: {
   item: HostedMailboxResolvedImportItem,
   context?: {
     latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+    onConversationActivityObserved?: (() => void) | null;
     onConversationInputStaged?: (() => void) | null;
     runtimeAttemptId?: string | null;
     signal?: AbortSignal | null;
@@ -262,6 +263,7 @@ export function createHostedConversationMailboxImportItem(input: {
       ...input,
       item,
       latencyMilestones: context?.latencyMilestones ?? null,
+      onConversationActivityObserved: context?.onConversationActivityObserved ?? null,
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: context?.runtimeAttemptId ?? null,
       signal: context?.signal ?? null,
@@ -276,6 +278,7 @@ export async function importHostedConversationMailboxItem(input: {
   item: HostedMailboxResolvedImportItem;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
   onDecodedConversationWake?(wake: HostedExecutionConversationMessageWake): void;
+  onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: (() => void) | null;
   runtime: HostedConversationMailboxRuntime;
   runtimeAttemptId?: string | null;
@@ -392,6 +395,9 @@ export async function importHostedConversationMailboxItem(input: {
       pendingIndexEnsuredAtEpochMs,
       stagedAtEpochMs: Date.now(),
     });
+    notifyConversationInputStagedBestEffort(
+      input.onConversationActivityObserved ?? null,
+    );
     if (foregroundAssistantInputId) {
       notifyConversationInputStagedBestEffort(input.onConversationInputStaged ?? null);
     }
