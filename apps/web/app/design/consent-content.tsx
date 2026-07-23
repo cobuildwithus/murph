@@ -56,14 +56,13 @@ export function ConsentContent() {
           Consent
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Launch consent uses one explicit action with no preselected controls. Optional
-          feature consent keeps its separate just-in-time flow.
+          One explicit launch action. Optional feature consent stays just in time.
         </p>
       </div>
 
       <Separator />
 
-      <section className="flex flex-col gap-6">
+      <section className="flex scroll-mt-24 flex-col gap-6" id="launch-consent">
         <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
           Launch consent
         </h2>
