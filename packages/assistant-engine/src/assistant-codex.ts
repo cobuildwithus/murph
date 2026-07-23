@@ -70,6 +70,10 @@ import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
+  createXSearchTurnState,
+  type XSearchToolRuntime,
+} from './assistant-codex/x-search-tool.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -166,6 +170,9 @@ export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
+export type {
+  XSearchToolRuntime,
+} from './assistant-codex/x-search-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -474,6 +481,7 @@ export interface CodexAppServerTurnInput {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  xSearchRuntime?: XSearchToolRuntime | null
   workingDirectory: string
 }
 
@@ -665,6 +673,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    xSearchRuntime: input.xSearchRuntime ?? null,
     workingDirectory,
   }
 
@@ -2782,6 +2791,9 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
+  // Trusted turn-scoped murph.x_search provider-call ceiling: one counter per
+  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  const xSearchTurnState = createXSearchTurnState()
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
   const subagentDroppedUsageThreadIds = new Set<string>()
@@ -3899,6 +3911,11 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          xSearchRuntime:
+            dynamicToolRequest.kind === 'x-search'
+              ? input.xSearchRuntime ?? null
+              : null,
+          xSearchTurnState,
         })
         return result
       },

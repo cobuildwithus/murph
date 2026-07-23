@@ -4,6 +4,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedTranscriptionUsageRecord,
+  buildHostedXaiSearchUsageRecord,
   parseAssistantUsageRecord,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
@@ -954,6 +955,93 @@ describe("hosted AI usage allowance pricing", () => {
         combinedCostUsdMicros: -1,
       },
     })).toThrow("pricing is missing");
+  });
+
+  it("prices xAI x_search from the exact provider-reported cost ticks", () => {
+    const usage = buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      providerRequestId: "resp_abc123",
+      usage: {
+        cached_input_tokens: 0,
+        cost_in_usd_ticks: 37_756_000,
+        input_tokens: 1_234,
+        output_tokens: 640,
+        reasoning_tokens: 120,
+      },
+    });
+
+    expect(usage).toMatchObject({
+      featureKey: "x-search",
+      provider: "xai",
+      rawUsageJson: {
+        cost_in_usd_ticks: 37_756_000,
+      },
+    });
+    // 37,756,000 ticks / 10,000 ticks-per-micro = 3,775.6 micros → ceil 3,776
+    // ($0.0037756 booked as $0.003776).
+    expect(priceHostedAiUsageForAllowance(usage)).toEqual({
+      costUsdMicros: 3_776n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        providerCost: {
+          costInUsdTicks: "37756000",
+          usdTicksPerUsdMicro: "10000",
+        },
+        pricingSource: "https://docs.x.ai/developers/pricing",
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        tokenPricingBasis: "standard",
+      },
+      pricingVersion: "xai-x-search-pricing-2026-07-23",
+    });
+  });
+
+  it("prices an exact-multiple xAI tick count without rounding up", () => {
+    const usage = buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      usage: { cost_in_usd_ticks: 50_000_000 },
+    });
+
+    const priced = priceHostedAiUsageForAllowance(usage);
+    expect(priced.costUsdMicros).toBe(5_000n);
+    expect(priced.counted).toBe(true);
+  });
+
+  it("fails closed on xAI x_search rows without a valid provider-reported cost", () => {
+    const base = buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      usage: { cost_in_usd_ticks: 37_756_000 },
+    });
+
+    for (const malformed of [
+      {
+        // Missing cost ticks entirely: must not price as free.
+        ...base,
+        rawUsageJson: { input_tokens: 1_234 },
+      },
+      {
+        // Foreign rawUsageJson key: strict matcher must not accept the row.
+        ...base,
+        rawUsageJson: { cost_in_usd_ticks: 37_756_000, durationMs: 72_500 },
+      },
+      {
+        // Token columns must stay null on the exact-cost branch.
+        ...base,
+        inputTokens: 1_234,
+      },
+      {
+        // Non-integer cost ticks.
+        ...base,
+        rawUsageJson: { cost_in_usd_ticks: 3_775.6 },
+      },
+    ] satisfies AssistantUsageRecord[]) {
+      expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
+        "pricing is missing",
+      );
+    }
   });
 
   it("prices ElevenLabs TTS by character count for allowance accounting", () => {

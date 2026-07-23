@@ -24,6 +24,7 @@ import {
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
+  buildHostedXaiSearchUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
 
 import { readHostedExecutionEnvironment } from "./env.ts";
@@ -83,6 +84,13 @@ import {
   isAllowedElevenLabsRequest,
   parseHostedElevenLabsRequestBody,
 } from "./runner-egress-elevenlabs.ts";
+import {
+  DEFAULT_XAI_API_BASE_URL,
+  HOSTED_XAI_MAX_BODY_BYTES,
+  HOSTED_XAI_MAX_RESPONSE_BODY_BYTES,
+  parseHostedXaiRequestBody,
+  readHostedXaiResponseMetadata,
+} from "./runner-egress-xai.ts";
 import {
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "./deploy-smoke-live-model.ts";
@@ -144,6 +152,7 @@ export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
   transcribe: CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
   webControlPlane: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.webControlPlane,
   workspaceSnapshotStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.workspaceSnapshotStore,
+  xai: "api.x.ai",
 } as const;
 
 const OPENAI_EGRESS_POLICY = [
@@ -395,6 +404,7 @@ export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutbound
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe]: handleHostedRunnerOpenInternetOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore]: handleHostedRunnerInternalOutbound,
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai]: handleHostedRunnerXaiOutbound,
   // Hosted-local rewrites loopback provider bases to this container-reachable
   // host. Send it through the multiplexer so provider policy still applies.
   "host.docker.internal": handleHostedRunnerOpenInternetOutbound,
@@ -416,6 +426,7 @@ export async function handleHostedRunnerOpenInternetOutbound(
     await maybeHandleHostedDataApiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleHostedTranscribeRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleElevenLabsRequest({ ctx, env, request, url, userId })
+    ?? await maybeHandleXaiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleOpenAiRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleExaRequest({ ctx, env, request, url, userId })
     ?? await maybeHandleMapboxRequest({ ctx, env, request, url, userId })
@@ -616,6 +627,23 @@ export async function handleHostedRunnerElevenLabsOutbound(
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
     await maybeHandleElevenLabsRequest({
+      ctx: _ctx,
+      env,
+      request,
+      url,
+      userId: readHostedRunnerBoundUserId(request),
+    }),
+  );
+}
+
+export async function handleHostedRunnerXaiOutbound(
+  request: Request,
+  env: RunnerOutboundEnvironmentSource,
+  _ctx: HostedRunnerOutboundContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  return await requireHandledProviderEgress(
+    await maybeHandleXaiRequest({
       ctx: _ctx,
       env,
       request,
@@ -1445,6 +1473,177 @@ function recordHostedElevenLabsMusicUsage(input: {
       },
       level: "warn",
       message: "Hosted ElevenLabs Music usage recording failed; delivery unaffected.",
+      phase: "wake.running",
+    });
+  });
+}
+
+async function maybeHandleXaiRequest(input: {
+  ctx?: HostedRunnerOutboundContext;
+  env: RunnerOutboundEnvironmentSource;
+  request: Request;
+  url: URL;
+  userId: string | null;
+}): Promise<Response | null> {
+  const providerBase = readProviderBaseConfig(
+    input.env.XAI_API_BASE_URL,
+    DEFAULT_XAI_API_BASE_URL,
+    input.env,
+  );
+  const pathMatch = readProviderPathMatch(input.url, providerBase);
+  if (!pathMatch) {
+    if (isKnownProviderHost(input.url, providerBase)) {
+      return disallowedProviderEgress();
+    }
+    return null;
+  }
+  const { pathnameSuffix } = pathMatch;
+  if (input.request.method !== "POST" || pathnameSuffix !== "/v1/responses") {
+    return disallowedProviderEgress();
+  }
+  if (!hasBearerCredentialSentinel(input.request.headers)) {
+    return disallowedProviderEgress();
+  }
+
+  const startedAt = Date.now();
+  const authorization = await authorizeHostedProviderEgress({
+    ...input,
+    providerKind: "xai",
+  });
+  if (!authorization.authorized) {
+    return unauthorizedProviderEgress({
+      authorization,
+      providerKind: "xai",
+      request: input.request,
+      startedAt,
+      url: input.url,
+    });
+  }
+
+  const requestBody = await readBoundedRequestBody(
+    input.request,
+    HOSTED_XAI_MAX_BODY_BYTES,
+  );
+  if (requestBody === null) {
+    return new Response("Payload Too Large", { status: 413 });
+  }
+  const providerRequest = parseHostedXaiRequestBody({
+    body: requestBody,
+    contentType: input.request.headers.get("content-type"),
+  });
+  if (providerRequest === null) {
+    return disallowedProviderEgress();
+  }
+
+  const token = readRequiredInterceptSecret(input.env.XAI_API_KEY, "XAI_API_KEY");
+  const headers = stripHostedProviderUpstreamHeaders(input.request.headers);
+  headers.set("content-type", "application/json");
+  headers.set("authorization", `Bearer ${token}`);
+  const response = await fetchAuthorizedProviderUpstream({
+    authorization,
+    providerKind: "xai",
+    request: input.request,
+    startedAt,
+    upstreamRequest: await createHostedRunnerUpstreamRequest(
+      input.request,
+      createProviderUpstreamUrl(input.url, pathMatch),
+      headers,
+      {
+        body: requestBody,
+      },
+    ),
+    url: input.url,
+  });
+  if (!response.ok) {
+    // Never bill a failed provider call: non-ok responses pass through
+    // without a usage record.
+    return response;
+  }
+
+  // The billing basis (usage.cost_in_usd_ticks) is in the response body, so
+  // buffer it, record usage, and hand the engine a new response carrying the
+  // same payload.
+  const responseBody = await readBoundedRequestBody(
+    response,
+    HOSTED_XAI_MAX_RESPONSE_BODY_BYTES,
+  );
+  if (responseBody === null) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        providerKind: "xai",
+        responseStatus: response.status,
+      },
+      level: "warn",
+      message: "Hosted xAI response exceeded the buffered body limit; no usage recorded.",
+      phase: "wake.running",
+    });
+    return new Response("Hosted xAI response too large.", { status: 502 });
+  }
+  const responseMetadata = readHostedXaiResponseMetadata(responseBody);
+  const usageRecording = recordHostedXaiSearchUsage({
+    env: input.env,
+    memberId: authorization.userId,
+    model: providerRequest.model,
+    providerRequestId: responseMetadata.providerRequestId,
+    usage: responseMetadata.usage,
+  });
+  if (typeof input.ctx?.waitUntil === "function") {
+    input.ctx.waitUntil(usageRecording);
+  } else {
+    await usageRecording;
+  }
+  // The buffered body may differ from the wire encoding (fetch decompresses),
+  // so drop the stale entity headers before re-wrapping.
+  const responseHeaders = new Headers(response.headers);
+  responseHeaders.delete("content-encoding");
+  responseHeaders.delete("content-length");
+  return new Response(responseBody, {
+    headers: responseHeaders,
+    status: response.status,
+    statusText: response.statusText,
+  });
+}
+
+function recordHostedXaiSearchUsage(input: {
+  env: RunnerOutboundEnvironmentSource;
+  memberId: string | null;
+  model: string;
+  providerRequestId: string | null;
+  usage: Record<string, unknown> | null;
+}): Promise<void> {
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted xAI search usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(input.env));
+    const record = buildHostedXaiSearchUsageRecord({
+      memberId: input.memberId,
+      model: input.model,
+      providerRequestId: input.providerRequestId,
+      usage: input.usage,
+    });
+    await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "xai",
+      },
+      level: "warn",
+      message: "Hosted xAI search usage recording failed; response delivery unaffected.",
       phase: "wake.running",
     });
   });

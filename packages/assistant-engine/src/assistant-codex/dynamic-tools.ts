@@ -200,6 +200,17 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import {
+  executeXSearchDynamicTool,
+  MURPH_X_SEARCH_TOOL,
+  parseXSearchArguments,
+} from './dynamic-tools/x-search.js'
+import type {
+  XSearchToolArgs,
+  XSearchToolRuntime,
+  XSearchTurnState,
+} from './x-search-tool.js'
+export { MURPH_X_SEARCH_TOOL } from './dynamic-tools/x-search.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -1137,6 +1148,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
+  MURPH_X_SEARCH_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -1193,6 +1205,7 @@ export interface MurphDynamicToolAvailability {
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  xSearchAvailable?: boolean | null
 }
 
 type AvailabilityPredicate = (
@@ -1231,6 +1244,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
+    [MURPH_X_SEARCH_TOOL, defaultOff((a) => a.xSearchAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
@@ -1889,6 +1903,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'x-search'
+      args: XSearchToolArgs
+    }
+  | {
       kind: 'computer-open'
       args: ComputerOpenToolArgs
     }
@@ -1933,6 +1951,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-x-search-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -2187,6 +2209,20 @@ export function readMurphDynamicToolRequest(
 
       return {
         kind: 'generate-song',
+        args: parsed.args,
+      }
+    }
+    case MURPH_X_SEARCH_TOOL.name: {
+      const parsed = parseXSearchArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-x-search-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'x-search',
         args: parsed.args,
       }
     }
@@ -2511,6 +2547,8 @@ export async function executeMurphDynamicToolRequest(input: {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  xSearchRuntime?: XSearchToolRuntime | null
+  xSearchTurnState?: XSearchTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -2541,6 +2579,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
+    case 'invalid-x-search-arguments':
+      return toolTextResult(false, 'invalid X search arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
@@ -2960,6 +3000,14 @@ export async function executeMurphDynamicToolRequest(input: {
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'x-search': {
+      return await executeXSearchDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        args: input.request.args,
+        xSearchRuntime: input.xSearchRuntime ?? null,
+        xSearchTurnState: input.xSearchTurnState ?? null,
       })
     }
     case 'connected-apps-manage':

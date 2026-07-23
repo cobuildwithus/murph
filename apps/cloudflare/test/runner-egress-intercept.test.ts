@@ -29,6 +29,7 @@ import {
   handleHostedRunnerOpenAiOutbound,
   handleHostedRunnerOpenInternetOutbound,
   handleHostedRunnerTelegramOutbound,
+  handleHostedRunnerXaiOutbound,
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
   HOSTED_OPENAI_CACHE_DIAGNOSTIC_EVENT_CODE,
   HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS,
@@ -126,6 +127,23 @@ function createHostedExaResearchScoutRequestBody(
       until: "2026-06-17T00:00:00.000Z",
       maxCandidates,
     }),
+    ...overrides,
+  };
+}
+
+function createHostedXaiResponsesRequestBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    input: "Search X for recent posts about sleep science and return strict JSON.",
+    max_output_tokens: 2_048,
+    model: "grok-4.5",
+    store: false,
+    tools: [{
+      from_date: "2026-07-16",
+      to_date: "2026-07-23",
+      type: "x_search",
+    }],
     ...overrides,
   };
 }
@@ -241,6 +259,9 @@ describe("hostedRunnerIntercept", () => {
       .toBe(handleHostedRunnerLinqOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.telegram])
       .toBe(handleHostedRunnerTelegramOutbound);
+    expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai).toBe("api.x.ai");
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai])
+      .toBe(handleHostedRunnerXaiOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["graph.facebook.com"]).toBeUndefined();
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
@@ -1602,6 +1623,373 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(403);
     }
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("injects xAI credentials and records x_search usage with the provider-reported cost", async () => {
+    const upstreamPayload = {
+      id: "resp_xai_123",
+      output: [{ content: [{ text: '{"posts":[]}', type: "output_text" }], type: "message" }],
+      usage: {
+        cost_in_usd_ticks: 987_654_321,
+        input_tokens: 900,
+        input_tokens_details: { cached_tokens: 100 },
+        num_sources_used: 3,
+        output_tokens: 120,
+        output_tokens_details: { reasoning_tokens: 40 },
+        total_tokens: 1_020,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: true, usageId: "usage_1" });
+      }
+      return Response.json(upstreamPayload, {
+        headers: { "x-request-id": "xai-req-1" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const requestBody = createHostedXaiResponsesRequestBody();
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.x.ai/v1/responses", {
+        body: JSON.stringify(requestBody),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`,
+          cookie: "session=user-supplied-cookie",
+          "content-type": "application/json",
+          "proxy-authorization": "Bearer user-supplied-proxy-token",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        validateRuntimeWriteFence,
+        XAI_API_KEY: "xai-worker-secret",
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateRuntimeWriteFence).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      generation: "7",
+      userId: "member_123",
+    });
+    const forwarded = findFetchCall(fetchMock, "api.x.ai")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.url).toBe("https://api.x.ai/v1/responses");
+    expect(forwardedRequest.headers.get("authorization")).toBe("Bearer xai-worker-secret");
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(forwardedRequest.headers.has(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe(false);
+    expect(await forwardedRequest.clone().json()).toEqual(requestBody);
+    // The engine still receives the buffered provider payload intact.
+    expect(await response.clone().json()).toEqual(upstreamPayload);
+    expect(response.headers.get("x-request-id")).toBe("xai-req-1");
+
+    await Promise.all(waitUntilPromises);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      apiKeyEnv: "XAI_API_KEY",
+      baseUrl: "https://api.x.ai",
+      credentialSource: "platform",
+      featureKey: "x-search",
+      memberId: "member_123",
+      provider: "xai",
+      providerName: "xAI",
+      providerRequestId: "resp_xai_123",
+      rawUsageJson: {
+        cost_in_usd_ticks: 987_654_321,
+        input_tokens: 900,
+        input_tokens_details: { cached_tokens: 100 },
+        output_tokens: 120,
+        output_tokens_details: { reasoning_tokens: 40 },
+      },
+      requestedModel: "grok-4.5",
+      surface: "hosted-runner",
+      triggerKind: "x-search",
+      usageExtractionSourcePath: "xai.responses",
+      usageExtractionVersion: "xai-x-search-v1",
+    });
+    expect(usageBody.usage.turnId).toMatch(/^turn_xai_search_[0-9a-f]{32}$/u);
+    expect(usageBody.usage.usageId).toBe(`${String(usageBody.usage.turnId)}.attempt-1`);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({
+          providerKind: "xai",
+          writeFenceValidationMode: "exact_headers",
+        }),
+        message: "Hosted runner provider egress completed.",
+      }),
+    );
+  });
+
+  it("does not record xAI usage when the provider call fails", async () => {
+    for (const status of [429, 503]) {
+      const fetchMock = vi.fn<typeof fetch>(async () =>
+        new Response("upstream unavailable", { status })
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const waitUntilPromises: Promise<unknown>[] = [];
+
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.x.ai/v1/responses", {
+          body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          validateRuntimeWriteFence: async () => true,
+          XAI_API_KEY: "xai-worker-secret",
+        }),
+        {
+          containerId: "member_123--v-version_1",
+          waitUntil: (promise) => {
+            waitUntilPromises.push(promise);
+          },
+        },
+      );
+
+      expect(response.status).toBe(status);
+      await Promise.all(waitUntilPromises);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    }
+  });
+
+  it("still records xAI usage when the completed response omits the usage object", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: true, usageId: "usage_1" });
+      }
+      return Response.json({ output: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.x.ai/v1/responses", {
+        body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        validateRuntimeWriteFence: async () => true,
+        XAI_API_KEY: "xai-worker-secret",
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.clone().json()).toEqual({ output: [] });
+    await Promise.all(waitUntilPromises);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    // The call was billed by the provider even without a usage echo, so the
+    // record posts with whatever is present; pricing treats missing ticks as
+    // uncounted.
+    expect(usageBody.usage).toMatchObject({
+      featureKey: "x-search",
+      provider: "xai",
+      requestedModel: "grok-4.5",
+    });
+    expect(usageBody.usage.rawUsageJson).toBeNull();
+    expect(usageBody.usage.providerRequestId).toBeNull();
+  });
+
+  it("rejects xAI egress outside the responses route and sentinel contract", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+    const validBody = JSON.stringify(createHostedXaiResponsesRequestBody());
+
+    for (const request of [
+      // wrong method
+      new Request("https://api.x.ai/v1/responses", {
+        headers: BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+        method: "GET",
+      }),
+      // wrong path
+      new Request("https://api.x.ai/v1/chat/completions", {
+        body: validBody,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      // non-https known host
+      new Request("http://api.x.ai/v1/responses", {
+        body: validBody,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      // user-supplied bearer instead of the sentinel
+      new Request("https://api.x.ai/v1/responses", {
+        body: validBody,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          authorization: "Bearer user-supplied-token",
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      // missing authorization entirely
+      new Request("https://api.x.ai/v1/responses", {
+        body: validBody,
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    ]) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          validateRuntimeWriteFence: async () => true,
+          XAI_API_KEY: "xai-worker-secret",
+        }),
+        { containerId: "member_123--v-version_1" },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects xAI request bodies outside the fixed x_search shape", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const invalidBodies = [
+      // foreign tool entry
+      createHostedXaiResponsesRequestBody({
+        tools: [{ type: "web_search" }],
+      }),
+      // extra tool entry alongside x_search
+      createHostedXaiResponsesRequestBody({
+        tools: [{ type: "x_search" }, { type: "code_execution" }],
+      }),
+      // undocumented tool filter key
+      createHostedXaiResponsesRequestBody({
+        tools: [{ enable_image_understanding: true, type: "x_search" }],
+      }),
+      // store must be false
+      createHostedXaiResponsesRequestBody({ store: true }),
+      // missing model
+      (() => {
+        const { model: _model, ...rest } = createHostedXaiResponsesRequestBody();
+        return rest;
+      })(),
+      // missing input
+      (() => {
+        const { input: _input, ...rest } = createHostedXaiResponsesRequestBody();
+        return rest;
+      })(),
+      // unknown top-level key
+      createHostedXaiResponsesRequestBody({ metadata: { a: "b" } }),
+      // handle list over the documented cap
+      createHostedXaiResponsesRequestBody({
+        tools: [{
+          allowed_x_handles: Array.from({ length: 21 }, (_, i) => `handle${i}`),
+          type: "x_search",
+        }],
+      }),
+    ];
+
+    for (const body of invalidBodies) {
+      const response = await hostedRunnerIntercept(
+        new Request("https://api.x.ai/v1/responses", {
+          body: JSON.stringify(body),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+            "content-type": "application/json",
+          },
+          method: "POST",
+        }),
+        createInterceptEnv({
+          validateRuntimeWriteFence: async () => true,
+          XAI_API_KEY: "xai-worker-secret",
+        }),
+        { containerId: "member_123--v-version_1" },
+      );
+      expect(response.status).toBe(403);
+    }
+
+    // Non-JSON content types never reach upstream either.
+    const nonJsonResponse = await hostedRunnerIntercept(
+      new Request("https://api.x.ai/v1/responses", {
+        body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "text/plain",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        validateRuntimeWriteFence: async () => true,
+        XAI_API_KEY: "xai-worker-secret",
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+    expect(nonJsonResponse.status).toBe(403);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects oversized xAI request bodies before upstream fetch", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("unexpected"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.x.ai/v1/responses", {
+        body: JSON.stringify(createHostedXaiResponsesRequestBody({
+          input: "x".repeat(33 * 1024),
+        })),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        validateRuntimeWriteFence: async () => true,
+        XAI_API_KEY: "xai-worker-secret",
+      }),
+      { containerId: "member_123--v-version_1" },
+    );
+
+    expect(response.status).toBe(413);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -6808,6 +7196,8 @@ function createInterceptEnv(input: {
     runnerContainerName: string;
     userId: string;
   }) => Promise<WorkerProviderEgressCredentialValidationResult>;
+  XAI_API_BASE_URL?: string;
+  XAI_API_KEY?: string;
 }): RunnerOutboundEnvironmentSource {
   return {
     ...createHostedExecutionTestEnv(),
@@ -6864,6 +7254,8 @@ function createInterceptEnv(input: {
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
+    XAI_API_BASE_URL: input.XAI_API_BASE_URL,
+    XAI_API_KEY: input.XAI_API_KEY,
     USER_RUNNER: {
       getByName: () => ({
         validateRuntimeProviderEgressCredential:

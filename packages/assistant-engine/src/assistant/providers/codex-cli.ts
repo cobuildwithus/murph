@@ -9,6 +9,9 @@ import {
   createVoiceMemoToolRuntimeFromEnv,
 } from '../../assistant-codex/generate-voice-memo-tool.js'
 import {
+  createXSearchToolRuntimeFromEnv,
+} from '../../assistant-codex/x-search-tool.js'
+import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
@@ -187,6 +190,12 @@ export async function executeCodexAssistantTurnAttempt(
     publicFetchImpl: input.publicInternetFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
+  // Null when XAI_API_KEY is absent; the executor then fails closed with a
+  // not-configured result instead of attempting a provider call.
+  const xSearchRuntime = createXSearchToolRuntimeFromEnv({
+    env: input.env ?? process.env,
+    fetchImpl: input.providerFetch ?? fetch,
+  })
   const codexProcessEnv = prepareAssistantDirectCliEnv(input.env)
   const codexConfigOverrides = [
     ...(mergeCodexConfigOverrides({
@@ -266,6 +275,7 @@ export async function executeCodexAssistantTurnAttempt(
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
+    xSearchRuntime,
     workingDirectory: input.workingDirectory,
   } as const
 

@@ -73,7 +73,8 @@ const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
   "TOGETHER_API_KEY",
   "VENICE_API_KEY",
   "VLLM_API_KEY",
-  "XAI_API_KEY",
+  // XAI_API_KEY left this list when xAI became a real intercepted provider
+  // (x_search); it is now an optional worker secret.
 ] as const;
 
 const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
