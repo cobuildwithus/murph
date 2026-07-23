@@ -28,6 +28,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -292,7 +293,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
-  const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
+  let existingMemberEffectiveActive = existingMember && !existingMemberSuspended
     ? await readActiveHostedMemberAccess({
         memberId: existingMember.id,
         prisma: input.prisma,
@@ -537,6 +538,20 @@ export async function planHostedOnboardingLinqWebhook(input: {
         routeStage: "ignored-family-invite-token",
       }),
     );
+  }
+
+  if (existingMember && !existingMemberEffectiveActive) {
+    // The member row is also the home-route owner. Reclassify only after any
+    // activation ahead of this request commits, and keep invite or mailbox
+    // writes inside that same single-owner boundary.
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    existingMemberEffectiveActive = await readActiveHostedMemberAccess({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
   }
 
   if (existingMember && existingMemberEffectiveActive) {
