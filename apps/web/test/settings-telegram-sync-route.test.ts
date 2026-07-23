@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   buildHostedTelegramBotLink: vi.fn(),
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
   getPrisma: vi.fn(),
-  lockHostedMemberRow: vi.fn(),
   prismaClient: {
     label: "test-prisma",
     $transaction: vi.fn(),
@@ -38,17 +37,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-channel-sync", () => ({
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx:
     mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx,
 }));
-
-vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
-  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/shared")>(
-    "@/src/lib/hosted-onboarding/shared",
-  );
-
-  return {
-    ...actual,
-    lockHostedMemberRow: mocks.lockHostedMemberRow,
-  };
-});
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
   signalHostedMailboxAppendRuntime: mocks.signalHostedMailboxAppendRuntime,
@@ -139,7 +127,6 @@ describe("settings telegram sync route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireFreshPrivyMemberAuthForHostedAppSession).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.requirePrivyMemberAuth).toHaveBeenCalledWith(expect.any(Request));
-    expect(mocks.lockHostedMemberRow).toHaveBeenCalledWith(mocks.prismaClient, "member_123");
     expect(mocks.upsertHostedMemberTelegramRoutingBindingTx).toHaveBeenCalledWith({
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -152,8 +139,10 @@ describe("settings telegram sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.telegram.sync",
     });
-    expect(mocks.lockHostedMemberRow.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.upsertHostedMemberTelegramRoutingBindingTx.mock.invocationCallOrder[0]
+    expect(
+      mocks.upsertHostedMemberTelegramRoutingBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mock.invocationCallOrder[0]
       ?? Number.POSITIVE_INFINITY,
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({

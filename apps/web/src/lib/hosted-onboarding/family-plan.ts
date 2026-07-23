@@ -3075,6 +3075,29 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
   let telegramBindingWritten = false;
   const writeTelegramBinding = async (): Promise<void> => {
     telegramBindingAttempted = true;
+    if (lookup.status === "found") {
+      const lockedLookup = await resolveHostedMemberRoutingByTelegramUserId({
+        prisma: input.tx,
+        telegramUserId: input.telegramUserId,
+      });
+      if (lockedLookup.status === "ambiguous") {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_TELEGRAM_IDENTITY_AMBIGUOUS",
+          httpStatus: 409,
+          message: "That Telegram account is linked to multiple hosted members. Contact support before accepting this family invite.",
+        });
+      }
+      if (
+        lockedLookup.status !== "found"
+        || lockedLookup.lookup.core.id !== member.id
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+          httpStatus: 403,
+          message: "This family invite was opened from a different Telegram account.",
+        });
+      }
+    }
     await upsertHostedMemberTelegramRoutingBindingTx({
       memberId: member.id,
       prisma: input.tx,

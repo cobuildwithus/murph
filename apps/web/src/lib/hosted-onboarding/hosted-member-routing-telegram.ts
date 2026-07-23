@@ -15,9 +15,9 @@ import {
   buildHostedMemberRoutingPrivateColumns,
   readHostedMemberRoutingTelegramPrivateState,
 } from "./member-private-codecs";
-import { lockHostedMemberRoutingStateTx } from "./hosted-member-routing-state";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "./shared";
 
 export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
@@ -32,14 +32,11 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
+  await lockHostedMemberRow(input.prisma, input.memberId);
   await assertHostedMemberTelegramRoutingBindingAvailableTx({
     memberId: input.memberId,
     prisma: input.prisma,
     telegramUserId: input.telegramUserId,
-  });
-  await lockHostedMemberRoutingStateTx({
-    memberId: input.memberId,
-    prisma: input.prisma,
   });
   const existingRouting = await input.prisma.hostedMemberRouting.findUnique({
     where: {

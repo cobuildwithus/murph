@@ -941,7 +941,7 @@ describe("hosted Family plan", () => {
     );
     expect(tx.$queryRaw).toHaveBeenNthCalledWith(
       3,
-      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
       acceptedMemberId,
     );
     expect(tx.$queryRaw.mock.invocationCallOrder[2]).toBeLessThan(
@@ -997,7 +997,7 @@ describe("hosted Family plan", () => {
     );
     expect(tx.$queryRaw).toHaveBeenNthCalledWith(
       4,
-      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
       acceptedMemberId,
     );
     expect(tx.$queryRaw.mock.invocationCallOrder[3]).toBeLessThan(
@@ -1108,7 +1108,7 @@ describe("hosted Family plan", () => {
         targetTelegramUsernameLookupKey: acceptedInvite.targetTelegramUsernameLookupKey,
       })
       .mockResolvedValueOnce(acceptedInvite);
-    tx.hostedMemberRouting.findMany.mockResolvedValueOnce([{
+    tx.hostedMemberRouting.findMany.mockResolvedValue([{
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
       linqHomeLineAssignedAt: null,
@@ -1175,13 +1175,89 @@ describe("hosted Family plan", () => {
     );
     expect(tx.$queryRaw).toHaveBeenNthCalledWith(
       2,
-      expect.arrayContaining([expect.stringContaining('FROM "hosted_member_routing"')]),
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
       "member_mom",
     );
     expect(tx.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
       tx.hostedMemberRouting.upsert.mock.invocationCallOrder[0]
       ?? Number.POSITIVE_INFINITY,
     );
+  });
+
+  it("rejects a stale family webhook after its Telegram identity is relinked", async () => {
+    const tx = createTxMock();
+    const acceptedInvite = {
+      ...createPendingInvite({
+        inviteCode: "invite_telegram",
+        targetTelegramUsernameLookupKey: createHostedTelegramUsernameLookupKey("@Dad_User"),
+      }),
+      acceptedByMemberId: "member_mom",
+      status: "accepted",
+    };
+    tx.hostedAccountGroupInvite.findUnique
+      .mockResolvedValueOnce({
+        acceptedByMemberId: acceptedInvite.acceptedByMemberId,
+        expiresAt: acceptedInvite.expiresAt,
+        status: acceptedInvite.status,
+        targetTelegramUsernameLookupKey: acceptedInvite.targetTelegramUsernameLookupKey,
+      })
+      .mockResolvedValueOnce(acceptedInvite);
+    tx.hostedMemberRouting.findMany
+      .mockResolvedValueOnce([{
+        linqChatIdEncrypted: null,
+        linqChatLookupKey: null,
+        linqHomeLineAssignedAt: null,
+        linqParticipantContactKind: null,
+        linqParticipantContactLookupKey: null,
+        linqRecipientPhoneEncrypted: null,
+        linqRecipientPhoneLookupKey: null,
+        member: {
+          billingStatus: HostedBillingStatus.not_started,
+          createdAt: new Date("2026-06-18T12:00:00.000Z"),
+          id: "member_mom",
+          suspendedAt: null,
+          updatedAt: new Date("2026-06-18T12:00:00.000Z"),
+        },
+        memberId: "member_mom",
+        pendingLinqChatIdEncrypted: null,
+        pendingLinqChatLookupKey: null,
+        pendingLinqParticipantContactEncrypted: null,
+        pendingLinqParticipantContactKind: null,
+        pendingLinqParticipantContactLookupKey: null,
+        pendingLinqParticipantContactObservedAt: null,
+        pendingLinqRecipientPhoneEncrypted: null,
+        pendingLinqRecipientPhoneLookupKey: null,
+        replyAliasLookupKey: null,
+        telegramUserIdEncrypted: "encrypted:456",
+        telegramUserLookupKey: createHostedTelegramUserLookupKey("456"),
+      }])
+      .mockResolvedValueOnce([]);
+    tx.hostedAccountGroupMembership.findFirst.mockResolvedValueOnce({
+      group: acceptedInvite.group,
+      groupId: "hbag_family",
+      memberId: "member_mom",
+      role: "member",
+      status: "active",
+    });
+
+    await expect(acceptHostedFamilyInviteFromTelegramTx({
+      telegramThreadId: "123",
+      telegramUserId: "456",
+      telegramUsername: null,
+      text: "/start family_invite_telegram",
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+    });
+
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_mom",
+    );
+    expect(tx.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupInvite.updateMany).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupMembership.upsert).not.toHaveBeenCalled();
   });
 
   it("rejects an accepted explicit Telegram token from a different stable account", async () => {

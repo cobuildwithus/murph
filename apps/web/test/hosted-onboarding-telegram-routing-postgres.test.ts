@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import type { Prisma, PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 import { describe, expect, it } from "vitest";
 
 import {
-  lockHostedMemberRoutingStateTx,
   readHostedMemberRoutingState,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
@@ -13,6 +16,12 @@ import {
   resolveHostedMemberAssistantNotificationRoute,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
+import {
+  parseHostedTelegramWebhookUpdate,
+} from "@/src/lib/hosted-onboarding/telegram";
+import {
+  planHostedOnboardingTelegramWebhook,
+} from "@/src/lib/hosted-onboarding/webhook-provider-telegram";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -20,6 +29,7 @@ const runPostgresConcurrencyProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const telegramThreadId = "456:business:setup";
 const telegramUserId = "456";
+const replacementTelegramUserId = "789";
 const transactionOptions = {
   maxWait: 10_000,
   timeout: 15_000,
@@ -52,23 +62,23 @@ describe.skipIf(!runPostgresConcurrencyProof)(
   () => {
     it.each([
       {
-        contenderThreadId: null,
-        owner: "inbound thread",
-        ownerThreadId: telegramThreadId,
+        owner: "inbound planner",
+        updateId: 710_001,
       },
       {
-        contenderThreadId: telegramThreadId,
-        owner: "identity sync",
-        ownerThreadId: null,
+        owner: "identity-only sync",
+        updateId: 710_002,
       },
     ])(
-      "retains the observed thread when the $owner writer acquires the row lock first",
-      async ({ contenderThreadId, ownerThreadId }) => {
+      "retains the observed thread when the $owner acquires the member lock first",
+      async ({ owner: lockOwner, updateId }) => {
         const fixtureId = randomUUID();
         const memberId = `member_telegram_routing_${fixtureId}`;
         const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
         const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
         const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+        const update = buildDirectTelegramUpdate(updateId);
+        const inboundOwnsLock = lockOwner === "inbound planner";
         const ownerWritten = createDeferred();
         const releaseOwner = createDeferred();
         const contenderPid = createDeferred<number>();
@@ -76,6 +86,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         await observer.hostedMember.create({
           data: {
+            billingStatus: HostedBillingStatus.active,
             id: memberId,
           },
         });
@@ -89,16 +100,22 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         );
 
         const ownerTransaction = owner.$transaction(async (tx) => {
-          await lockHostedMemberRoutingStateTx({
-            memberId,
-            prisma: tx,
-          });
-          await upsertHostedMemberTelegramRoutingBindingTx({
-            memberId,
-            prisma: tx,
-            telegramThreadId: ownerThreadId,
-            telegramUserId,
-          });
+          if (inboundOwnsLock) {
+            const plan = await planHostedOnboardingTelegramWebhook({
+              prisma: tx,
+              update,
+            });
+            expect(plan.response).toEqual({
+              ok: true,
+              reason: "wake-appended-active-member",
+            });
+          } else {
+            await upsertHostedMemberTelegramRoutingBindingTx({
+              memberId,
+              prisma: tx,
+              telegramUserId,
+            });
+          }
           ownerWritten.resolve();
           await releaseOwner.promise;
         }, transactionOptions);
@@ -107,12 +124,22 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           await Promise.race([ownerWritten.promise, ownerTransaction]);
           contenderTransaction = contender.$transaction(async (tx) => {
             contenderPid.resolve(await readBackendPid(tx));
-            await upsertHostedMemberTelegramRoutingBindingTx({
-              memberId,
-              prisma: tx,
-              telegramThreadId: contenderThreadId,
-              telegramUserId,
-            });
+            if (inboundOwnsLock) {
+              await upsertHostedMemberTelegramRoutingBindingTx({
+                memberId,
+                prisma: tx,
+                telegramUserId,
+              });
+            } else {
+              const plan = await planHostedOnboardingTelegramWebhook({
+                prisma: tx,
+                update,
+              });
+              expect(plan.response).toEqual({
+                ok: true,
+                reason: "wake-appended-active-member",
+              });
+            }
           }, transactionOptions);
 
           await waitForBlockedBackend({
@@ -144,6 +171,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             kind: "thread",
             target: telegramThreadId,
           });
+          await expect(observer.hostedMailboxItem.count({
+            where: {
+              kind: "conversation.message",
+              userId: memberId,
+            },
+          })).resolves.toBe(1);
         } finally {
           releaseOwner.resolve();
           await Promise.allSettled([
@@ -159,8 +192,115 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         }
       },
     );
+
+    it("does not let a stale inbound account undo a completed Settings relink", async () => {
+      const fixtureId = randomUUID();
+      const memberId = `member_telegram_relink_${fixtureId}`;
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const owner = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const contender = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const update = buildDirectTelegramUpdate(710_003);
+      const ownerWritten = createDeferred();
+      const releaseOwner = createDeferred();
+      const contenderPid = createDeferred<number>();
+      let contenderTransaction: Promise<void> | null = null;
+
+      await observer.hostedMember.create({
+        data: {
+          billingStatus: HostedBillingStatus.active,
+          id: memberId,
+        },
+      });
+      await observer.$transaction(
+        (tx) => upsertHostedMemberTelegramRoutingBindingTx({
+          memberId,
+          prisma: tx,
+          telegramUserId,
+        }),
+        transactionOptions,
+      );
+
+      const ownerTransaction = owner.$transaction(async (tx) => {
+        await upsertHostedMemberTelegramRoutingBindingTx({
+          memberId,
+          prisma: tx,
+          telegramUserId: replacementTelegramUserId,
+        });
+        ownerWritten.resolve();
+        await releaseOwner.promise;
+      }, transactionOptions);
+
+      try {
+        await Promise.race([ownerWritten.promise, ownerTransaction]);
+        contenderTransaction = contender.$transaction(async (tx) => {
+          contenderPid.resolve(await readBackendPid(tx));
+          const plan = await planHostedOnboardingTelegramWebhook({
+            prisma: tx,
+            update,
+          });
+          expect(plan.response).toEqual({
+            ignored: true,
+            ok: true,
+            reason: "telegram-binding-changed",
+          });
+        }, transactionOptions);
+
+        await waitForBlockedBackend({
+          observer,
+          pid: await contenderPid.promise,
+        });
+        releaseOwner.resolve();
+        await expect(ownerTransaction).resolves.toBeUndefined();
+        await expect(contenderTransaction).resolves.toBeUndefined();
+
+        const routing = await readHostedMemberRoutingState({
+          memberId,
+          prisma: observer,
+        });
+        expect(routing?.telegramUserId).toBe(replacementTelegramUserId);
+        expect(routing?.telegramThreadId).toBeNull();
+        await expect(observer.hostedMailboxItem.count({
+          where: {
+            kind: "conversation.message",
+            userId: memberId,
+          },
+        })).resolves.toBe(0);
+      } finally {
+        releaseOwner.resolve();
+        await Promise.allSettled([
+          ownerTransaction,
+          ...(contenderTransaction ? [contenderTransaction] : []),
+        ]);
+        await observer.hostedMember.deleteMany({
+          where: {
+            id: memberId,
+          },
+        });
+        await disconnectClients([observer, owner, contender]);
+      }
+    });
   },
 );
+
+function buildDirectTelegramUpdate(updateId: number) {
+  return parseHostedTelegramWebhookUpdate(JSON.stringify({
+    message: {
+      business_connection_id: "setup",
+      chat: {
+        id: Number(telegramUserId),
+        type: "private",
+      },
+      date: 1_774_522_600,
+      from: {
+        first_name: "Test",
+        id: Number(telegramUserId),
+      },
+      message_id: updateId,
+      text: "hello",
+    },
+    update_id: updateId,
+  }));
+}
 
 async function readBackendPid(tx: Prisma.TransactionClient): Promise<number> {
   const rows = await tx.$queryRaw<Array<{ pid: number }>>`

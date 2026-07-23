@@ -2776,6 +2776,13 @@ describe("hosted-member-store", () => {
       telegramUserId: "456",
     });
 
+    expect(queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_123",
+    );
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      findMany.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(findMany).toHaveBeenCalledWith({
       where: {
         telegramUserLookupKey: {
@@ -3006,9 +3013,11 @@ describe("hosted-member-store", () => {
       },
     ]);
     const executeRaw = vi.fn().mockResolvedValue(0);
+    const queryRaw = vi.fn().mockResolvedValue([]);
     const upsert = vi.fn().mockResolvedValue({});
     const prisma = {
       $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
       hostedMemberRouting: {
         findMany,
         upsert,
@@ -3040,6 +3049,9 @@ describe("hosted-member-store", () => {
         memberId: true,
       },
     });
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      findMany.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
     expect(upsert).not.toHaveBeenCalled();
   });
 

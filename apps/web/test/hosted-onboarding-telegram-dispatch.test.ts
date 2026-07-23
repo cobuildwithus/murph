@@ -988,6 +988,114 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedMemberRoutingUpsert).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores a stale direct webhook after the Telegram identity is relinked", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn()
+      .mockResolvedValueOnce({
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_123",
+          suspendedAt: null,
+        },
+        memberId: "member_telegram_123",
+      })
+      .mockResolvedValueOnce(null);
+    const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+        upsert: hostedMemberRoutingUpsert,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          business_connection_id: "biz-stale",
+          chat: {
+            id: 123,
+            type: "private",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 657,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "telegram-binding-changed",
+    });
+
+    const queryRaw = prisma.$queryRaw as ReturnType<typeof vi.fn>;
+    expect(queryRaw).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.stringContaining('from "hosted_member"')]),
+      "member_telegram_123",
+    );
+    expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      hostedMemberRoutingFindUnique.mock.invocationCallOrder[1]
+      ?? Number.POSITIVE_INFINITY,
+    );
+    expect(hostedMemberRoutingUpsert).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stale group webhook after the Telegram identity is relinked", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const hostedMemberRoutingFindUnique = vi.fn()
+      .mockResolvedValueOnce({
+        member: {
+          billingStatus: HostedBillingStatus.active,
+          id: "member_telegram_123",
+          suspendedAt: null,
+        },
+        memberId: "member_telegram_123",
+      })
+      .mockResolvedValueOnce(null);
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: hostedMemberRoutingFindUnique,
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: {
+            id: -100123,
+            type: "group",
+          },
+          date: 1_774_522_600,
+          from: {
+            first_name: "Alice",
+            id: 456,
+          },
+          message_id: 1,
+          text: "hello",
+        },
+        update_id: 658,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "telegram-binding-changed",
+    });
+
+    expect(mocks.ensureHostedThreadContainerRouteTx).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("preserves a richer persisted Telegram thread target when a later webhook only carries a plain DM thread", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const existingTelegramPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
@@ -2067,7 +2175,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       });
     }
 
-    expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(cases.length * 3);
+    expect(hostedMemberRoutingFindUnique).toHaveBeenCalledTimes(cases.length * 4);
   });
 
   it("rejects malformed Telegram message payloads before receipt persistence", async () => {
@@ -2163,7 +2271,7 @@ function withPrismaTransaction<T extends Record<string, unknown>>(
 ): T & TelegramWebhookPrismaHarness {
   const prismaWithTransaction = prisma as T & TelegramWebhookPrismaHarness;
   prismaWithTransaction.$executeRaw = async () => 0;
-  prismaWithTransaction.$queryRaw = async () => [];
+  prismaWithTransaction.$queryRaw = vi.fn(async () => []);
   prismaWithTransaction.$transaction = async (
     callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
   ) => callback(prismaWithTransaction);
