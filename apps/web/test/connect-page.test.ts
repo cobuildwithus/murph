@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import type { HTMLAttributes, ReactNode } from "react";
-import { act, createElement } from "react";
+import { act, Children, createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
@@ -347,6 +347,59 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
 
   assert.doesNotMatch(markup, />St</);
   assert.doesNotMatch(markup, />Ap</);
+});
+
+test("ConnectPage maps the WHOOP setup Messages option at the server boundary", async () => {
+  mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+    {
+      href: "sms:+15550100001?body=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "text",
+      label: "Messages",
+    },
+  ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readWhoopSyncContactAction(page), {
+    href: "sms:+15550100001?body=Help%20me%20finish%20setting%20up%20WHOOP",
+    kind: "imessage",
+    label: "Text Murph",
+  });
+});
+
+test("ConnectPage preserves the WHOOP setup Telegram option at the server boundary", async () => {
+  mocks.resolveHostedMurphContactOptions.mockResolvedValueOnce([
+    {
+      href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+      kind: "telegram",
+      label: "Telegram",
+      rel: "noopener noreferrer",
+      target: "_blank",
+    },
+  ]);
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.deepEqual(readWhoopSyncContactAction(page), {
+    href: "https://t.me/withmurph_bot?text=Help%20me%20finish%20setting%20up%20WHOOP",
+    kind: "telegram",
+    label: "Text Murph",
+    rel: "noopener noreferrer",
+    target: "_blank",
+  });
+});
+
+test("ConnectPage fails open when the WHOOP setup contact route cannot resolve", async () => {
+  mocks.resolveHostedMurphContactOptions.mockRejectedValueOnce(
+    new Error("contact routing unavailable"),
+  );
+
+  const { default: ConnectPage } = await import("../app/(dashboard)/connect/page");
+  const page = await ConnectPage();
+
+  assert.equal(readWhoopSyncContactAction(page), null);
 });
 
 test("filterConnectSourcesForSearch matches source names, ids, and descriptions", async () => {
@@ -3919,6 +3972,19 @@ test("ConnectPage shows fallback callback errors with the original source label"
   assert.match(markup, /Unable to finish connection/);
   assert.match(markup, /We could not finish connecting Garmin\./);
 });
+
+function readWhoopSyncContactAction(page: ReactNode): unknown {
+  assert.ok(isValidElement<{ children?: ReactNode }>(page));
+  const connectSourcesGrid = Children.toArray(page.props.children).find((child) => {
+    if (!isValidElement(child)) {
+      return false;
+    }
+    return "whoopSyncContactAction" in (child.props as Record<string, unknown>);
+  });
+
+  assert.ok(isValidElement(connectSourcesGrid));
+  return (connectSourcesGrid.props as Record<string, unknown>).whoopSyncContactAction;
+}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

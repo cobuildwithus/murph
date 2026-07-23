@@ -180,6 +180,11 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.innerHTML).toContain("Get your full sync");
   expect(render.container.innerHTML).toContain("Download Murph and sign in");
   expect(render.container.innerHTML).toContain("Turn on Apple Health in WHOOP");
+  const setupDialogContent = render.container.querySelector('[data-dialog="open"] > div');
+  expect(setupDialogContent?.classList.contains("max-h-[calc(100dvh-2rem)]")).toBe(true);
+  expect(setupDialogContent?.classList.contains("max-w-[calc(100%-2rem)]")).toBe(true);
+  expect(setupDialogContent?.classList.contains("overflow-y-auto")).toBe(true);
+  expect(setupDialogContent?.classList.contains("sm:max-w-md")).toBe(true);
   expect(render.container.innerHTML).toContain(
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );

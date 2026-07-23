@@ -74,3 +74,12 @@ Updated: 2026-07-22
 - Fresh desktop and mobile evidence was captured from this branch by opening
   `/design?tab=components#whoop-completion-dialog` and activating its direct
   `Preview capacity fallback` control.
+- The substantive preliminary specialist pass returned three accepted
+  findings. The setup dialog now keeps a one-rem viewport gutter and scrolls
+  within short viewports; server-boundary tests cover Messages, Telegram, and
+  contact-route failure; generated lean and full archive tests prove the three
+  required design-guidance files are present.
+- Direct responsive proof passes at 1440x1000, 390x844, 320x568, and 844x390.
+  The short viewports scroll internally, all voice/download/contact controls
+  are keyboard reachable, Escape dismisses the dialog, and focus returns to
+  the direct capacity-preview trigger.
