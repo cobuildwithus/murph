@@ -229,7 +229,6 @@ function stringifyFixtureStoredSummary(
     resourceClass: "generic",
     sourceFamily: "event",
     sourceKind: "observation:steps",
-    title: "Fixture Steps",
     unit: "count",
     value: 1,
   };
@@ -389,7 +388,7 @@ test("stored activity candidates preserve non-associative ranking and exact-dupl
           recordedAt: "2026-06-03T10:00:00.000Z",
           resourceType: "measurement",
           sourceKind: "observation:steps",
-          title: "private alpha title",
+          title: "private alpha\n\ttitle",
           unit: "count",
           value: 9_100,
         }),
@@ -698,7 +697,7 @@ test("stored activity evidence is strict, strips private internals, and fails cl
   const metricEvidence = parsedRow?.metricCandidates;
   const sessionEvidence = parsedRow?.sessions;
   assert.equal(metricEvidence?.length, 1);
-  assert.equal(metricEvidence?.[0]?.title, "private-title-marker");
+  assert.equal(Object.hasOwn(metricEvidence?.[0] ?? {}, "title"), false);
   assert.match(metricEvidence?.[0]?.candidateKey ?? "", /^activity-metric-candidate:\d{10}$/u);
   assert.match(metricEvidence?.[0]?.exactKey ?? "", /^activity-metric-exact:\d{10}$/u);
   assert.equal(sessionEvidence?.length, 1);
@@ -752,7 +751,8 @@ test("stored activity evidence is strict, strips private internals, and fails cl
   assert.ok(Array.isArray(metricCandidates));
   const firstEvidence = metricCandidates[0];
   assert.ok(firstEvidence && typeof firstEvidence === "object" && !Array.isArray(firstEvidence));
-  (firstEvidence as Record<string, unknown>).unexpected = true;
+  assert.equal(Object.hasOwn(firstEvidence, "title"), false);
+  (firstEvidence as Record<string, unknown>).title = "private-title-marker";
   assert.equal(
     parseStoredWearableActivityRow(JSON.stringify(stored)),
     null,

@@ -694,7 +694,7 @@ function projectedActivityMetricCandidates(
     recordIds: [candidate.candidateKey],
     sourceFamily: candidate.sourceFamily,
     sourceKind: candidate.sourceKind,
-    title: candidate.title,
+    title: null,
     unit: candidate.unit,
     value: candidate.value,
   }));

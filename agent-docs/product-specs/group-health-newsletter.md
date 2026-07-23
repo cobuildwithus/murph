@@ -197,24 +197,20 @@ explicitly chose that challenge metric.
 
 Express durations in human units. Use "about 30 minutes of movement a day"
 instead of raw minute totals when the returned fact's semantic owner identifies
-the value as broad movement. An `activity-days.v0` record owns broad movement
-only when its `data.metricSemantics` is exactly `"broad-movement"`. The weekly
-aggregator omits unmarked or differently marked activity records; a
-current-chat consumer must likewise treat them as ambiguous and unusable, not
-zero. Prepared `activity-minutes` therefore represents marked broad movement.
-Treat `workout-minutes` as exercise only when it represents the canonical
-combined workout-day rollup, averaged over recorded workout days. Legacy or
-otherwise ambiguous activity values must not be relabeled as movement or
-exercise or used for cross-person comparisons. Distinct same-day workouts add
-in the canonical rollup, while mirrored copies count once; consumers never
+the value as broad movement. New `activity-days.v0` producers mark that value
+as `"broad-movement"`, while new `workout-days.v0` producers mark their
+canonical combined rollup as `"canonical-workout-day"`. Distinct same-day
+workouts add in that rollup, while mirrored copies count once; consumers never
 repair a value by replacing one workout with another or summing raw records
 independently.
 
-Only `workout-days.v0` records carrying the exact
-`canonical-workout-day` semantic marker contribute canonical workout counts or
-minutes to newsletter statistics. Unmarked legacy records remain readable for
-wire and snapshot compatibility, but the weekly aggregator omits them rather
-than presenting a previously selected source aggregate as a complete day.
+The marker rollout is producer-first. During its bounded compatibility phase,
+the weekly reader still accepts unmarked legacy rows so existing groups do not
+lose data before their snapshots are refreshed. Deploy the marker-preserving
+Web parser before the marker-producing runner, refresh every current grantor
+through the existing maintenance wake, and prove the legacy population has
+drained. Exact-marker rejection belongs to the subsequent consumer release,
+not this compatibility phase.
 
 Newsletter `prepare` excludes the open local calendar day from every weekly
 average. Each returned stat reports `observedDayCount`, sorted `observedDates`,

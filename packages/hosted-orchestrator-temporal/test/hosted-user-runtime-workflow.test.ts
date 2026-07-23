@@ -71,6 +71,43 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     expect(runtime.executionRequests).toHaveLength(1);
   });
 
+  it("wakes signal-only idle workflows for fresh system mailbox signals", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(
+      reconciliationFacts(),
+      reconciliationFacts({
+        mailboxLag: [mailboxLag({ lane: "system" })],
+      }),
+    );
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(mailboxSignal({
+        lane: "system",
+        mailboxItemId: "mailbox_system_test",
+      }));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.reconciliationRequests).toEqual([
+      { userId: "member_test" },
+      { userId: "member_test" },
+    ]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+  });
+
   it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {
     const runtime = new FakeWorkflowRuntime();
     const machine = createMachine(runtime, {

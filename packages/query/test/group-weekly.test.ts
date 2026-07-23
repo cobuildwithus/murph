@@ -5,7 +5,7 @@ import { buildSharedGroupWeeklyMembers } from "../src/group-weekly.ts";
 const CANONICAL_WORKOUT_DAY_SEMANTICS = "canonical-workout-day" as const;
 
 describe("buildSharedGroupWeeklyMembers", () => {
-  it("keeps broad activity and workout minutes distinct and omits prior-week claims", () => {
+  it("keeps activity and workout minutes distinct while reading legacy unmarked rows", () => {
     const [member] = buildSharedGroupWeeklyMembers({
       members: [{
         displayName: "Member A",
@@ -15,8 +15,7 @@ describe("buildSharedGroupWeeklyMembers", () => {
             projectionScopeKey: "activity-days.v0",
             records: [
               dailyMetric("2026-07-06", "activity-minutes", 60, "minutes", "broad-movement"),
-              dailyMetric("2026-07-07", "activity-minutes", 0, "minutes", "broad-movement"),
-              dailyMetric("2026-07-07", "activity-minutes", 74, "minutes"),
+              dailyMetric("2026-07-07", "activity-minutes", 40, "minutes"),
             ],
           },
           {
@@ -27,7 +26,7 @@ describe("buildSharedGroupWeeklyMembers", () => {
             projectionScopeKey: "workout-days.v0",
             records: [
               workoutDay("2026-07-06", 60),
-              unmarkedWorkoutDay("2026-07-07", 55),
+              unmarkedWorkoutDay("2026-07-07", 40),
             ],
           },
         ],
@@ -37,9 +36,9 @@ describe("buildSharedGroupWeeklyMembers", () => {
     });
 
     expect(member?.weeklyStats).toEqual([
-      weeklyStat("activity-minutes", 30, ["2026-07-06", "2026-07-07"], "minutes"),
-      weeklyStat("workout-count", 1, ["2026-07-06"], "count"),
-      weeklyStat("workout-minutes", 60, ["2026-07-06"], "minutes"),
+      weeklyStat("activity-minutes", 50, ["2026-07-06", "2026-07-07"], "minutes"),
+      weeklyStat("workout-count", 1, ["2026-07-06", "2026-07-07"], "count"),
+      weeklyStat("workout-minutes", 50, ["2026-07-06", "2026-07-07"], "minutes"),
     ]);
     expect(member?.weeklyStats).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ stream: "steps" }),

@@ -243,7 +243,6 @@ describe('assistant skill assets', () => {
     expect(daily).toContain('current-local-day totals as provisional and say "so far."')
     expect(daily).toContain('not proof of failed provider sync or import')
     expect(shared).toContain('its cause is unverified')
-    expect(shared).toMatch(/"broad-movement".+"canonical-workout-day"/u)
     expect(shared).toContain('current-local-day value as provisional: say "so far"')
   })
 

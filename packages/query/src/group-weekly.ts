@@ -3,9 +3,6 @@ import {
   type OverviewWeeklySampleSummary,
 } from "./overview-weekly-stats.ts";
 
-const BROAD_ACTIVITY_MINUTES_SEMANTICS = "broad-movement";
-const CANONICAL_WORKOUT_DAY_SEMANTICS = "canonical-workout-day";
-
 interface SharedGroupWeeklyMemberInput {
   displayName: string | null;
   memberId: string;
@@ -18,14 +15,12 @@ interface SharedGroupWeeklyMemberInput {
 interface SharedGroupDailyMetricData {
   date: string;
   metricKey: string;
-  metricSemantics?: string;
   unit: string | null;
   value: number;
 }
 
 interface SharedGroupWorkoutDayData {
   date: string;
-  metricSemantics?: string;
   workoutCount: number;
   workoutMinutes: number;
 }
@@ -130,13 +125,6 @@ function appendDailySampleSummaries(input: {
 }): void {
   const data = input.record.data;
   if (isDailyMetricData(data)) {
-    if (
-      input.projectionScopeKey === "activity-days.v0"
-      && data.metricKey === "activity-minutes"
-      && data.metricSemantics !== BROAD_ACTIVITY_MINUTES_SEMANTICS
-    ) {
-      return;
-    }
     input.summaries.push(dailySummary({
       date: data.date,
       stream: data.metricKey,
@@ -146,10 +134,7 @@ function appendDailySampleSummaries(input: {
     return;
   }
   if (isWorkoutDayData(data)) {
-    if (
-      input.projectionScopeKey !== "workout-days.v0"
-      || data.metricSemantics !== CANONICAL_WORKOUT_DAY_SEMANTICS
-    ) {
+    if (input.projectionScopeKey !== "workout-days.v0") {
       return;
     }
     input.summaries.push(
@@ -246,10 +231,6 @@ function isDailyMetricData(
     && typeof data.date === "string"
     && "metricKey" in data
     && typeof data.metricKey === "string"
-    && (
-      !("metricSemantics" in data)
-      || typeof data.metricSemantics === "string"
-    )
     && "unit" in data
     && (typeof data.unit === "string" || data.unit === null)
     && "value" in data
@@ -261,10 +242,6 @@ function isWorkoutDayData(
 ): data is SharedGroupWorkoutDayData {
   return "date" in data
     && typeof data.date === "string"
-    && (
-      !("metricSemantics" in data)
-      || typeof data.metricSemantics === "string"
-    )
     && "workoutCount" in data
     && typeof data.workoutCount === "number"
     && "workoutMinutes" in data

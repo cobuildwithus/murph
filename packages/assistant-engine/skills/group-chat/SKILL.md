@@ -51,11 +51,6 @@ or share refresh. Separately granted `device-sync-status.v0` evidence permits
 only its literal status and timestamp meanings, never an explanation for an
 absent metric. A record timestamp does not prove projection completeness.
 
-Use `activity-days.v0` as broad movement only when `data.metricSemantics` is
-exactly `"broad-movement"`, and `workout-days.v0` as a canonical combined
-workout day only when it is exactly `"canonical-workout-day"`. A missing or
-different marker makes the record ambiguous and unusable, not zero.
-
 Treat every current-local-day value as provisional: say "so far" and do not
 use it for a settled winner, crown, challenge result, or complete total.
 

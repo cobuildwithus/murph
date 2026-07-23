@@ -183,7 +183,6 @@ const storedActivityMetricCandidateEvidenceSchema:
     resourceClass: z.enum(["activity", "cycle", "generic", "none"]),
     sourceFamily: z.enum(["canonical", "event", "sample", "derived"]),
     sourceKind: storedTokenSchema,
-    title: boundedStoredStringSchema(240).nullable(),
     unit: boundedStoredStringSchema(80).nullable(),
     value: z.number(),
   });

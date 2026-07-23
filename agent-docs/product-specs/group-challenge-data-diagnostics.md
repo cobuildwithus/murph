@@ -164,12 +164,12 @@ usable metric; its cause is unverified. It does not prove that the private vault
 lacks a workout, that a provider failed to sync, that import failed, or that
 snapshot refresh failed. Even a current `device-sync-status.v0` record supports
 only its literal source status and timestamps, never a causal claim about the
-missing metric. An `activity-days.v0` record is usable as broad movement only
-when its `data.metricSemantics` is exactly `"broad-movement"`; an unmarked or
-differently marked record is ambiguous and unusable, not zero. A
-`workout-days.v0` record is likewise usable as the canonical combined workout
-day only when `data.metricSemantics` is exactly `"canonical-workout-day"`.
-Distinct workouts on one day add in that canonical workout-day rollup; Murph
+missing metric. New `activity-days.v0` broad-movement rows carry
+`"broad-movement"`; new `workout-days.v0` canonical combined rows carry
+`"canonical-workout-day"`. During the producer-first compatibility release,
+readers continue accepting legacy unmarked rows until the bounded snapshot
+refresh is complete; exact-marker rejection ships only after that drain.
+Distinct workouts on one day add in the canonical workout-day rollup; Murph
 must never explain or correct a day by replacing one workout's minutes with
 another's.
 
@@ -324,26 +324,29 @@ to a bundle that restores or consumes legacy local projections; disable the Web
 producer/read path and forward-fix instead. There is no cleanup wake, local
 drain, or foreground reconciliation step in either deployment or rollback.
 
-The later canonical activity-semantics correction has a separate rollout
-order. Deploy Cloudflare and the runner bundle from the exact release commit
-first with immediate container rollout, confirm the deployed bundle fingerprint,
-then deploy Web from the same commit immediately. The new runner emits the
-`broad-movement` and `canonical-workout-day` markers; the new Web consumer
-rejects unmarked activity and workout rows as ambiguous instead of scoring
-them. During the short forward skew, an old Web version may omit the new marker,
-so the converged consumer can temporarily withhold that stat until a marked
-replacement arrives. Do not deploy Web first: an old warm runner can continue
-publishing the legacy summary shape.
+The canonical activity-semantics correction uses two small releases instead of
+a rollout flag or another state owner:
 
-There is no bulk backfill for existing unmarked group snapshots. Each snapshot
-converges on the grantor's next ordinary private-runtime projection offer;
-browser replicas rebuild on their normal access/refresh path. Query SQLite,
-browser replicas, and group snapshots are derived and rebuildable, and this
-correction has no canonical or PostgreSQL migration. The corrected runner is
-the rollback floor because rolling it back reintroduces legacy daily summary
-production. Post-deploy, verify the exact runner fingerprint, exercise one
-ordinary projection refresh, and confirm that the resulting workout and
-movement rows carry their distinct markers before accepting group comparisons.
+1. Deploy the compatibility release to Web first. Its parser and encrypted
+   snapshot store preserve the optional `broad-movement` and
+   `canonical-workout-day` markers while readers still accept unmarked legacy
+   rows.
+2. Deploy Cloudflare from the same commit with
+   `container_rollout=immediate`, prove the runner fingerprint, and confirm one
+   ordinary projection carries both markers.
+3. Use the existing operator maintenance surface to wake current checkpointed
+   grantors in canary and bounded batches. That durable mailbox wake reuses the
+   ordinary Temporal, runtime checkpoint, and idle projection paths; it is not
+   a new backfill service. Retry failures and verify from aggregate evidence
+   that every current activity/workout snapshot was replaced after the
+   producer cutover.
+4. Only after the legacy population is zero, deploy the separate strict
+   consumer release that rejects missing or wrong markers.
+
+Browser replicas rebuild on their normal access/refresh path. Query SQLite,
+browser replicas, and group snapshots are derived and rebuildable, so this
+correction has no canonical or PostgreSQL migration. Do not add read-triggered
+cross-member fanout, polling, a scheduler, or persisted rollout state.
 
 ## Acceptance cases
 

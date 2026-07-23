@@ -146,7 +146,6 @@ function buildStoredActivityMetricCandidates(
       resourceClass: activityMetricResourceClass(candidate),
       sourceFamily: candidate.sourceFamily,
       sourceKind: candidate.sourceKind,
-      title: candidate.title,
       unit: candidate.unit,
       value: candidate.value,
     }];

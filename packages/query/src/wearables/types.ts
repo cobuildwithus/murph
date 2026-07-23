@@ -159,7 +159,6 @@ export interface WearableActivityMetricCandidateEvidence {
   resourceClass: WearableActivityMetricResourceClass;
   sourceFamily: WearableCandidateSourceFamily;
   sourceKind: string;
-  title: string | null;
   unit: string | null;
   value: number;
 }
