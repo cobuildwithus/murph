@@ -28,6 +28,7 @@ import {
 } from "@murphai/contracts";
 import {
   readAssistantContextSnapshotState,
+  recordHostedMailboxAssistantInputItem,
   resolveAssistantSession,
   saveAssistantSession,
   type RunAssistantAutomationPassInput,
@@ -11242,6 +11243,10 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
         "251",
       );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationHandledThroughSeq,
+        undefined,
+      );
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "251");
     } finally {
       await removeTempRoot(vaultRoot);
@@ -16154,7 +16159,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
-        { hasCandidate: true, indexComplete: false },
+        { hasCandidate: false, indexComplete: false },
       );
       assert.equal(events.includes("snapshot:idle_shutdown"), false);
 
@@ -25442,6 +25447,11 @@ describe("hosted workspace runtime entrypoint", () => {
               item: item.item,
               vaultRoot,
             });
+            await recordHostedMailboxAssistantInputItem({
+              inputId: pendingInputId,
+              mailboxItemId: item.item.id,
+              vault: vaultRoot,
+            });
             assert.ok(await resolveHostedPendingAssistantInputWakeAt({ vaultRoot }));
             foregroundImported.resolve();
             return {
@@ -25510,6 +25520,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, yieldedRetryWakeAt);
       assert.equal(checkpoint.nextWakeAt, yieldedRetryWakeAt);
       assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
+      assert.deepEqual(checkpoint.handledConversationMailboxItemIds, [
+        "mailbox_item_entrypoint_device_sync_pending_retry",
+      ]);
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });

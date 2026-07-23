@@ -21,7 +21,7 @@ import {
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
-  compactHostedPendingAssistantInputIds,
+  compactHostedUnresolvedAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
   hasHostedProviderCleanupRecoveryCompleted,
@@ -159,6 +159,12 @@ export function createHostedWorkspaceRuntimeBridgeJobOptions(
           attemptId: input.request.attemptId,
           expectedWorkspaceVersion:
             checkpointInput.expectedWorkspaceVersion ?? input.request.workspaceVersion,
+          ...(checkpointInput.handledConversationMailboxItemIds === undefined
+            ? {}
+            : {
+                handledConversationMailboxItemIds:
+                  [...checkpointInput.handledConversationMailboxItemIds],
+              }),
           inboxMediaRetentionWakeAt: Object.hasOwn(checkpointInput, "inboxMediaRetentionWakeAt")
             ? checkpointInput.inboxMediaRetentionWakeAt ?? null
             : input.request.workspace?.inboxMediaRetentionWakeAt ?? null,
@@ -425,7 +431,7 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      const pendingInputIds = await compactHostedPendingAssistantInputIds({
+      const pendingInputIds = await compactHostedUnresolvedAssistantInputIds({
         signal: input.signal,
         vaultRoot: input.vaultRoot,
       });

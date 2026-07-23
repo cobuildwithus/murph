@@ -19,6 +19,30 @@ describe('assistant reply bubble prompt guidance', () => {
       )
 
       expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
+      expect(layers.prompt).toContain('murph.send_progress_update')
+      expect(layers.prompt).toContain(
+        'including every `---` bubble',
+      )
+    },
+  )
+
+  it.each(['linq', 'telegram'])(
+    'keeps bubbles and uses sparse progress guidance for %s groups',
+    (channel) => {
+      const layers = buildAssistantSystemPromptLayers(
+        createPromptInput({ channel, conversationScope: 'group' }),
+      )
+
+      expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
+      expect(layers.prompt).toContain('murph.send_progress_update')
+      expect(layers.prompt).toContain('including every `---` bubble')
+      expect(layers.prompt).toContain(
+        'use `murph.send_progress_update` much more sparingly than in a direct conversation',
+      )
+      expect(layers.prompt).toContain(
+        'Skip group progress for challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences.',
+      )
+      expect(layers.prompt).not.toContain('Do not leave the member silent')
     },
   )
 

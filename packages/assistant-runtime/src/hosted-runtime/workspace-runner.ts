@@ -155,6 +155,7 @@ export type HostedWorkspaceSnapshotCheckpointRequestBuilderInput =
     }
   ) & {
     expectedWorkspaceVersion?: string;
+    handledConversationMailboxItemIds?: string[];
     idleCheckpointTrigger?: HostedWorkspaceCheckpointRequest["idleCheckpointTrigger"];
     inboxMediaRetentionWakeAt?: string | null;
     nextWakeAt?: string | null;
@@ -196,6 +197,7 @@ interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
   assistantInputBatchFull(): boolean;
   assistantInputBatchRemaining(): number;
+  conversationConsumedSeq(): string | null;
   discardMailboxPostCheckpointEffects(): void;
   hasRuntimeStateDirty(): boolean;
   latestAssistantInputBatch(): HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -268,9 +270,8 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   browserVaultReplicaRefreshRequested?: true;
   deviceSyncMaintenanceRan?: true;
   // Failed foreground reply count for this pass. Present only when the pass
-  // ran the foreground assistant reply phase; gates the durable conversation
-  // consumed-watermark ack (only a clean pass with zero failed replies and no
-  // pending foreground assistant input may advance it).
+  // ran the foreground assistant reply phase; selected-prefix repair uses it
+  // to distinguish clean completion from retryable reply work.
   foregroundReplyFailed?: number | null;
   // Ephemeral provenance for an assistant wake created by work selected in
   // this invocation. This is never persisted; the runner and outer hot-wake
@@ -444,6 +445,12 @@ export function createHostedWorkspaceCheckpointRequestBuilder(
           ? { browserVaultReplicaRef: metadata.browserVaultReplicaRef ?? null }
           : {}),
         expectedWorkspaceVersion: metadata.expectedWorkspaceVersion,
+        ...(input.handledConversationMailboxItemIds === undefined
+          ? {}
+          : {
+              handledConversationMailboxItemIds:
+                [...input.handledConversationMailboxItemIds],
+            }),
         ...(input.idleCheckpointTrigger
           ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
           : {}),
@@ -544,6 +551,12 @@ function buildHostedWorkspaceSnapshotCheckpointRequest(input: {
       : {}),
     expectedWorkspaceVersion:
       input.requestInput.expectedWorkspaceVersion ?? input.metadata.expectedWorkspaceVersion,
+    ...(input.requestInput.handledConversationMailboxItemIds === undefined
+      ? {}
+      : {
+          handledConversationMailboxItemIds:
+            [...input.requestInput.handledConversationMailboxItemIds],
+        }),
     ...(input.requestInput.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.requestInput.idleCheckpointTrigger }
       : {}),
@@ -1191,6 +1204,16 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       result: assistantPhaseResult,
       vaultRoot: input.vaultRoot,
     });
+    if (hostedConversationReplayFloorNeedsCheckpoint({
+      conversationConsumedSeq: checkpointRequestSession.conversationConsumedSeq(),
+      latestMailboxImport:
+        checkpointRequestSession.latestMailboxImport() ?? initialMailboxImport,
+    })) {
+      // A replay-only restore may have no other dirty state. Force the existing
+      // idle checkpoint so Web can stamp exact terminal mailbox rows and derive
+      // the contiguous replay floor in the snapshot transaction.
+      checkpointRequestSession.markRuntimeStateDirty();
+    }
     mailboxPostCheckpointEffectsFinished = scheduleHostedMailboxPostCheckpointEffectsAndLogBestEffort({
       checkpointRequestBuilder: checkpointRequestSession,
       input,
@@ -2640,6 +2663,26 @@ async function reconcilePendingAssistantInputWake(input: {
   }
 }
 
+function hostedConversationReplayFloorNeedsCheckpoint(input: {
+  conversationConsumedSeq: string | null;
+  latestMailboxImport: HostedMailboxImportCheckpointResult;
+}): boolean {
+  const consumedSeq = parseHostedConversationMailboxSeq(input.conversationConsumedSeq);
+  const importedSeq = parseHostedConversationMailboxSeq(
+    input.latestMailboxImport.state.watermarks.conversation,
+  );
+  if (consumedSeq === null || importedSeq === null || importedSeq <= consumedSeq) {
+    return false;
+  }
+  return true;
+}
+
+function parseHostedConversationMailboxSeq(value: string | null): bigint | null {
+  return value !== null && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? BigInt(value)
+    : null;
+}
+
 async function notifyPendingForegroundAssistantInputWake(input: {
   now?: (() => string) | null;
   runtimeWakeSignal: RuntimeWakeSignal | null;
@@ -2765,6 +2808,7 @@ function createHostedWorkspaceCheckpointRequestSession(
   );
   let expectedWorkspaceVersion: string | null = null;
   const mailboxPostCheckpointEffects: HostedMailboxPostCheckpointEffect[] = [];
+  let conversationConsumedSeq: bigint | null = null;
   let latestAssistantInputBatch: HostedWorkspaceRunnerAssistantInputBatch | null = null;
   let latestMailboxImport: HostedMailboxImportCheckpointResult | null = null;
   let latestWorkspace: HostedWorkspaceState | null = null;
@@ -2784,6 +2828,9 @@ function createHostedWorkspaceCheckpointRequestSession(
         1,
         assistantInputBatchLimit - assistantInputBatchOccupancy(),
       );
+    },
+    conversationConsumedSeq() {
+      return conversationConsumedSeq?.toString() ?? null;
     },
     createRequest(input) {
       const requestInput = expectedWorkspaceVersion === null
@@ -2830,6 +2877,18 @@ function createHostedWorkspaceCheckpointRequestSession(
     },
     recordCheckpointResult(result, recordOptions) {
       latestMailboxImport = result;
+      const importedConsumedSeq = parseHostedConversationMailboxSeq(
+        result.importResult.consumedSeqByLane?.conversation ?? null,
+      );
+      if (
+        importedConsumedSeq !== null
+        && (
+          conversationConsumedSeq === null
+          || importedConsumedSeq > conversationConsumedSeq
+        )
+      ) {
+        conversationConsumedSeq = importedConsumedSeq;
+      }
       const freshBatchLimit = assistantInputFreshBatchLimit();
       if (
         recordOptions?.captureAssistantInputBatch !== false

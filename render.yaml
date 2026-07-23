@@ -4,6 +4,7 @@ services:
     runtime: node
     region: virginia
     plan: standard
+    numInstances: 2
     autoDeployTrigger: "off"
     maxShutdownDelaySeconds: 300
     buildCommand: "pnpm install --frozen-lockfile && pnpm --dir packages/hosted-orchestrator-temporal build"

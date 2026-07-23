@@ -230,6 +230,12 @@ export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
   },
 } as const
 
+const MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL = {
+  ...MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  description:
+    'Send one brief, natural user-visible progress update to the current group only when reply-critical work will leave the room waiting noticeably through genuinely long research, content inspection, or several substantive tool steps. Use this much more sparingly than in a direct conversation. Skip challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences. Never use it for a setup-status or transition preamble. Send at most one short group progress update, report only real progress, and continue the work immediately. Do not use it for final conclusions.',
+} as const
+
 export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
   namespace: 'murph',
   name: 'attach_response_media',
@@ -679,7 +685,7 @@ export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
   namespace: 'murph',
   name: 'group',
   description:
-    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. Use action="post_join_offer" only after read_shared showed each requested scope as not_granted for at least one participant affected by that scope who has neither declined it nor already received an offer for it. Existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
+    'Read current consent-aware shared group facts or post one server-authored additive permission offer after the turn has started. For either action, request one to three unique exact projectionScopes. Use action="post_join_offer" only after read_shared showed each requested scope as not_granted for at least one participant affected by that scope whose challenge-page state contains neither an explicit decline nor a handled offer action for that exact participant and scope. A handled action for one participant never covers another. Existing membership and other grants remain unchanged. Web owns the complete consent copy, accepted gestures, and customize link. The trusted host resolves current authority and route; never supply member, share, group, runtime, mailbox, session, route, display-name, or offer-text fields.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1157,6 +1163,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
   | typeof MURPH_GROUP_SHARED_READ_TOOL
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
 
@@ -1182,6 +1189,7 @@ export interface MurphDynamicToolAvailability {
   messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
+  progressUpdateMode?: 'direct' | 'group'
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
@@ -1243,6 +1251,12 @@ export function resolveMurphDynamicTools(
   const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
     (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
   )
+  if (availability.progressUpdateMode === 'group') {
+    const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
+    if (progressToolIndex >= 0) {
+      tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
+    }
+  }
   if (
     availability.groupAvailable !== true &&
     availability.groupSharedReadAvailable === true

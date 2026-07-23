@@ -18,6 +18,16 @@ export interface HostedPageAuthSnapshot {
   session: HostedAppSession | null;
 }
 
+export type HostedDashboardLayoutAuthSnapshot =
+  | {
+      pageAuth: HostedPageAuthSnapshot;
+      sidebarAuth: HostedSidebarAuthSnapshot;
+      status: "ready";
+    }
+  | {
+      status: "unavailable";
+    };
+
 function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
   return {
     authenticated: false,
@@ -29,6 +39,21 @@ function buildAnonymousHostedPageAuthSnapshot(): HostedPageAuthSnapshot {
 const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnapshot> => {
   const session = await getHostedAppSessionForPublicPageAuth();
 
+  return buildHostedPageAuthSnapshot(session);
+});
+
+const resolveHostedDashboardPageAuthSnapshot = cache(
+  async (): Promise<HostedPageAuthSnapshot> => {
+    const { getHostedAppSession } = await import("./app-session");
+    const session = await getHostedAppSession();
+
+    return buildHostedPageAuthSnapshot(session);
+  },
+);
+
+function buildHostedPageAuthSnapshot(
+  session: HostedAppSession | null,
+): HostedPageAuthSnapshot {
   if (!session) {
     return buildAnonymousHostedPageAuthSnapshot();
   }
@@ -38,14 +63,43 @@ const resolveHostedPageAuthSnapshot = cache(async (): Promise<HostedPageAuthSnap
     authenticatedMember: session.member,
     session,
   };
-});
+}
 
 export async function getHostedPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
   return resolveHostedPageAuthSnapshot();
 }
 
+export async function getHostedDashboardLayoutAuthSnapshot(): Promise<HostedDashboardLayoutAuthSnapshot> {
+  try {
+    const pageAuth = await resolveHostedDashboardPageAuthSnapshot();
+
+    return {
+      pageAuth,
+      sidebarAuth: pageAuth.authenticated
+        ? {
+            authenticated: true,
+            label: null,
+          }
+        : anonymousHostedSidebarAuthSnapshot,
+      status: "ready",
+    };
+  } catch (error) {
+    if (!isHostedSessionStoreUnavailableError(error)) {
+      throw error;
+    }
+
+    console.warn("Hosted app session store unavailable during dashboard layout auth.", {
+      code: getErrorStringField(error, "code"),
+      name: getErrorStringField(error, "name"),
+    });
+    return {
+      status: "unavailable",
+    };
+  }
+}
+
 export async function getHostedDashboardPageAuthSnapshot(): Promise<HostedPageAuthSnapshot> {
-  const auth = await getHostedPageAuthSnapshot();
+  const auth = await resolveHostedDashboardPageAuthSnapshot();
   await redirectHostedDashboardCheckoutIfNeeded(auth);
   return auth;
 }

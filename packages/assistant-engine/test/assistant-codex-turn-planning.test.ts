@@ -1712,6 +1712,9 @@ describe('assistant Codex turn planning', () => {
       groupSharedReader,
       groupTool: null,
     }
+    const progressDelivery = {
+      send: vi.fn(async () => ({ kind: 'sent' as const, source: 'model' as const })),
+    }
 
     const resolveGroupPlan = (scheduledOccurrence = false) =>
       resolveAssistantRouteTurnPlan({
@@ -1726,6 +1729,7 @@ describe('assistant Codex turn planning', () => {
           },
         },
         hostedToolContext,
+        progressDelivery,
         input: {
           ...createMessageInput(),
           ...(scheduledOccurrence
@@ -1776,8 +1780,43 @@ describe('assistant Codex turn planning', () => {
         },
       },
     })
+    expect(groupTools[0]?.description).toContain(
+      'a handled offer action for that exact participant and scope',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'A handled action for one participant never covers another.',
+    )
+    expect(groupTools[0]?.description).not.toContain(
+      'already received an offer',
+    )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    expect(attendedPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    const groupProgressTool = attendedPlan.dynamicTools.find(
+      (tool) =>
+        tool.namespace === 'murph' && tool.name === 'send_progress_update',
+    )
+    expect(groupProgressTool?.description).toContain(
+      'Use this much more sparingly than in a direct conversation.',
+    )
+    expect(groupProgressTool?.description).toContain(
+      'Skip challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences.',
+    )
+    expect(groupProgressTool?.description).not.toContain(
+      'even when each lookup is routine',
+    )
+    expect(attendedPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(attendedPlan.systemPrompt).toContain(
+      'use `murph.send_progress_update` much more sparingly than in a direct conversation',
+    )
+    expect(attendedPlan.systemPrompt).toContain(
+      'including every `---` bubble',
+    )
 
     const directPlan = await resolveAssistantRouteTurnPlan({
       executionContext: {
@@ -1791,6 +1830,7 @@ describe('assistant Codex turn planning', () => {
         },
       },
       hostedToolContext,
+      progressDelivery,
       input: {
         ...createMessageInput(),
         scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
@@ -1811,6 +1851,29 @@ describe('assistant Codex turn planning', () => {
     })
     expect(directPlan.dynamicTools).not.toContainEqual(
       expect.objectContaining({ namespace: 'murph', name: 'group' }),
+    )
+    expect(directPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    const directProgressTool = directPlan.dynamicTools.find(
+      (tool) =>
+        tool.namespace === 'murph' && tool.name === 'send_progress_update',
+    )
+    expect(directProgressTool?.description).toContain(
+      'even when each lookup is routine',
+    )
+    expect(directProgressTool?.description).not.toContain(
+      'Use this much more sparingly than in a direct conversation.',
+    )
+    expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(directPlan.systemPrompt).toContain(
+      'including every `---` bubble',
+    )
+    expect(directPlan.systemPrompt).not.toContain(
+      'much more sparingly than in a direct conversation',
     )
   })
 

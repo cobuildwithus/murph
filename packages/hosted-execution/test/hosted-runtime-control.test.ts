@@ -1878,6 +1878,7 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1894,6 +1895,7 @@ describe("hosted runtime control contracts", () => {
     })).toEqual({
       attemptId: "attempt_1",
       expectedWorkspaceVersion: "4",
+      handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       leaseGeneration: "9",
       nextWakeAt: null,
@@ -1994,6 +1996,36 @@ describe("hosted runtime control contracts", () => {
         generatedAt: "not-a-date",
       },
     })).toThrow(/replicaRef\.generatedAt must be a valid ISO-8601 timestamp/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      handledConversationMailboxItemIds: ["not a mailbox item id"],
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      snapshotRef: null,
+    })).toThrow(/must be a mailbox item id/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      handledConversationMailboxItemIds: ["item_duplicate", "item_duplicate"],
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      snapshotRef: null,
+    })).toThrow(/must not contain duplicates/u);
+
+    expect(() => parseHostedWorkspaceCheckpointRequest({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      handledConversationMailboxItemIds: Array.from(
+        { length: 257 },
+        (_, index) => `item_${index}`,
+      ),
+      leaseGeneration: "9",
+      reason: "idle_shutdown",
+      snapshotRef: null,
+    })).toThrow(/must contain at most 256 ids/u);
 
     expect(() => parseHostedWorkspaceCheckpointRequest({
       attemptId: "attempt_1",

@@ -620,8 +620,44 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-checkpoint replay floor. Accepted Linq reply delivery carries the finer
-delivery-time consume authority: the runtime reports
+checkpoint replay floor. The system lane advances that floor from its
+checkpointed handled-through status. At the conversation lane's successful
+`idle_shutdown` checkpoint, the runtime instead carries up to 256 exact mailbox
+item ids whose local inputs have terminal evidence. In the same transaction as
+the accepted snapshot CAS, Web stamps `consumed_at` only on matching same-user
+live `conversation.message` rows at or below the snapshot's imported watermark,
+then advances `consumed_seq` only to the item immediately before the first
+remaining live unstamped row. Thus a terminal item at sequence 20 cannot move
+the floor across an unresolved item at sequence 19. A missing event, missing
+input-to-mailbox mapping, missing row, malformed sequence, retryable reply
+failure, checkpoint conflict, or transaction rollback fails closed without
+acknowledging that item or crossing its gap. Status-only assistant or
+canonical-runtime checkpoints never stamp conversation rows.
+
+The local hosted pending-input index uses schema v2 for this exact-ack protocol.
+Terminal conversation ids stay in the checkpointed snapshot until a later
+mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
+checks terminal evidence so those retained ids do not schedule another reply.
+When more exact ids are pending than the checkpoint request cap, v2 persists a
+batch cursor in the same snapshot and rotates later checkpoints through the
+remaining ids. It never deletes an id merely because it was selected, so a
+blocked earlier sequence cannot make the first batch permanently starve later
+terminal rows.
+On first compaction of a deployed v1 index, the runtime preserves every input
+id that v1 still records and recovers an omitted retained event only when its
+terminal evidence already proves handling completed. V1 did not record whether
+an omitted nonterminal event had once been admitted and later dropped or had
+always been context-only while auto-reply was unavailable. Those ambiguous
+events are therefore categorically nonreplyable; enabling a channel later must
+not resurrect them as stale outbound work. This fail-closed migration can leave
+a bounded legacy admitted input unreplied, but it cannot send an unsolicited
+historical message. Exact terminal item stamps are idempotent, and repeated
+idle checkpoints safely resend them until the durable floor confirms the
+accepted transaction.
+
+Accepted Linq reply delivery carries an earlier copy of the same exact-item
+consume authority:
+the runtime reports
 `answeredMailboxItemIds`, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
@@ -632,6 +668,31 @@ restore or restart from re-replying to an already-handled message without a
 side table or lane high-water advance past gaps. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
+
+`handledConversationMailboxItemIds` is an additive Cloudflare-to-Web checkpoint
+extension. Deploy the Cloudflare worker and runner bundle first with immediate
+container rollout, verify the managed runner fingerprint, and only then deploy
+Web. The old Web parser tolerates and ignores the new field, while the new
+runner retains terminal local ids until `consumedSeqByLane` confirms them, so
+that producer-first window is replay-safe. If Web lands first, an old runner
+sends no exact ids; Web stamps none and therefore cannot repair Telegram
+progress until the runner converges, but it does not infer acknowledgement from
+the old local index.
+
+The v2 pending-index envelope is not readable by the preceding v1-only runner.
+The first accepted workspace snapshot containing v2 is therefore a hard runner
+rollback floor for that workspace; operationally, treat the new runner bundle
+as the fleet rollback floor before admitting production traffic. After that
+point, Web may roll back while the v2-capable runner remains deployed, but the
+runner must be forward-fixed rather than restored below this floor. Returning
+to a v1-only runner requires an explicit offline workspace migration that
+preserves unresolved IDs and the exact batch cursor; incident-time Web-first
+rollback is not sufficient. Already-advanced server floors remain valid because
+they were derived from exact row stamps in an accepted snapshot transaction.
+After rollout, verify that conversation lane floors converge toward
+checkpointed imported prefixes and run a Telegram reply across a controlled
+reload with no duplicate reply or multi-minute stall.
+
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,

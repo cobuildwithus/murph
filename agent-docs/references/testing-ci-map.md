@@ -264,7 +264,8 @@ exact admitted group thread.
 - The current fixture/scenario lane still validates manifests and command-surface coverage, not end-to-end package orchestration.
 - Hosted Temporal orchestration has package, route, focused web/Cloudflare
   coverage, a local Signal-With-Start smoke script, and a root Render
-  Background Worker Blueprint for the worker process. The hosted-local E2E
+  Background Worker Blueprint for two worker processes on one Task Queue. The
+  hosted-local E2E
   suite now includes `temporal-orchestration`, which starts managed local
   Temporal, signals through web, queries the workflow, and proves the worker
   reaches Cloudflare ensure-processing. The hosted Temporal package has retired
