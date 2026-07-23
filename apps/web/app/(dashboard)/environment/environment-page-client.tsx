@@ -4,13 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { HABITAT_DECLINED_VALUE } from "@murphai/contracts";
 import {
   ArrowRight,
-  BedDouble,
-  BriefcaseBusiness,
-  House,
   Lightbulb,
-  MessageCircle,
-  ShieldCheck,
-  Wind,
 } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -38,23 +32,16 @@ import {
 
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
-const EMPTY_STATE_BENEFITS = [
-  {
-    icon: BedDouble,
-    title: "Sleep conditions",
-    text: "Temperature, darkness, noise, air and what changes through the night.",
-  },
-  {
-    icon: Wind,
-    title: "Air and light",
-    text: "Ventilation, damp, smoke, daylight and the lighting you live with.",
-  },
-  {
-    icon: BriefcaseBusiness,
-    title: "Daily setup",
-    text: "Your workspace, breaks, discomfort and the equipment already within reach.",
-  },
-] as const;
+const EMPTY_HABITAT_VALUES: HabitatValues = {};
+const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
+const EMPTY_HABITAT_NOTES = EMPTY_HABITAT_SCENE.categories.map((category) =>
+  deriveCategoryNote(category, EMPTY_HABITAT_VALUES),
+);
+const EMPTY_HABITAT_GRADE = overallGrade(EMPTY_HABITAT_NOTES);
+const EMPTY_HABITAT_COVERAGE = resolveEnvironmentCoverage(
+  EMPTY_HABITAT_SCENE,
+  EMPTY_HABITAT_VALUES,
+);
 
 export default function EnvironmentPageClient({
   contactAction,
@@ -76,13 +63,6 @@ export default function EnvironmentPageClient({
   const coverage = useMemo(
     () => resolveEnvironmentCoverage(scene, values),
     [scene, values],
-  );
-  const noteByCategoryId = useMemo(
-    () => new Map(notes.map((note) => [note.id, note])),
-    [notes],
-  );
-  const isEmpty = Object.values(values).every(
-    (aspectValues) => Object.keys(aspectValues).length === 0,
   );
   const location = readableLocation(values);
   const conditions = useEnvironmentConditions(location);
@@ -127,58 +107,17 @@ export default function EnvironmentPageClient({
     );
   }
 
-  if (isEmpty) {
-    return (
-      <EnvironmentShell actions={<ShareEnvironmentButton />}>
-        <EnvironmentEmptyState contactAction={contactAction} />
-      </EnvironmentShell>
-    );
-  }
-
-  const nextChecks = buildNextChecks(scene, notes);
-  const nightNoise = values["sleep-environment"]?.night_noise;
-
   return (
     <EnvironmentShell actions={<ShareEnvironmentButton />}>
-      <EnvironmentHero
-        grade={grade}
-        known={coverage.known}
-        total={coverage.total}
+      <EnvironmentReport
+        values={values}
+        scene={scene}
         notes={notes}
-        context={{
-          location: contextValue(values["home-location"]?.location),
-          areaType: contextValue(values["home-location"]?.area_type),
-          weather: conditions.weather,
-          nights: contextValue(nightNoise),
-          outdoorAir: conditions.outdoorAir,
-        }}
+        grade={grade}
+        coverage={coverage}
+        contactAction={contactAction}
+        conditions={conditions}
       />
-
-      {grade.letter === null || coverage.coverage < 100 ? (
-        <EnvironmentCaptureCard
-          contactAction={contactAction}
-          known={coverage.known}
-          total={coverage.total}
-        />
-      ) : null}
-
-      {contactAction ? (
-        <NextChecksStrip items={nextChecks} chatHref={contactAction.href} />
-      ) : null}
-
-      <div className="space-y-6">
-        {scene.categories.map((category) => {
-          const note = noteByCategoryId.get(category.id);
-          return note ? (
-            <CategoryCard
-              key={category.id}
-              category={category}
-              note={note}
-              chatHref={contactAction?.href ?? null}
-            />
-          ) : null;
-        })}
-      </div>
     </EnvironmentShell>
   );
 }
@@ -213,85 +152,82 @@ export function EnvironmentEmptyState({
   contactAction: MurphContactOption | null;
 }) {
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-card">
-      <div className="grid lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="px-6 py-9 sm:px-10 sm:py-12">
-          <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-            <ShieldCheck className="size-3.5" aria-hidden="true" />
-            Private to you
-          </span>
-          <h2 className="mt-5 max-w-xl font-serif text-3xl font-semibold tracking-[-0.03em] text-foreground sm:text-4xl">
-            Your surroundings shape your health every day.
-          </h2>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
-            Give Murph a quick tour of the place where you sleep, breathe and
-            work. Murph will remember the useful details, spot the strongest
-            levers, and avoid recommending things that do not fit your life.
-          </p>
-          <div className="mt-7 flex flex-wrap items-center gap-3">
-            <EnvironmentVoiceCapture contactAction={contactAction} />
-            {contactAction ? (
-              <Button
-                size="lg"
-                variant="outline"
-                render={
-                  <a
-                    href={contactAction.href}
-                    target={contactAction.target}
-                    rel={contactAction.rel}
-                  />
-                }
-                nativeButton={false}
-              >
-                <MessageCircle className="size-4" aria-hidden="true" />
-                Tell Murph in chat
-              </Button>
-            ) : null}
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            About two minutes. No questionnaire, and missing information never
-            lowers your grade.
-          </p>
-        </div>
+    <EnvironmentReport
+      values={EMPTY_HABITAT_VALUES}
+      scene={EMPTY_HABITAT_SCENE}
+      notes={EMPTY_HABITAT_NOTES}
+      grade={EMPTY_HABITAT_GRADE}
+      coverage={EMPTY_HABITAT_COVERAGE}
+      contactAction={contactAction}
+      conditions={{ outdoorAir: "Not known", weather: "Not known" }}
+    />
+  );
+}
 
-        <div className="border-t border-border bg-muted/25 px-6 py-8 sm:px-8 lg:border-l lg:border-t-0">
-          <div className="flex items-center gap-3">
-            <span className="flex size-10 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <House className="size-5" aria-hidden="true" />
-            </span>
-            <div>
-              <p className="font-serif text-lg font-semibold text-foreground">
-                What Murph learns
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Conditions and constraints, not a shopping list.
-              </p>
-            </div>
-          </div>
-          <div className="mt-6 space-y-5">
-            {EMPTY_STATE_BENEFITS.map((benefit) => {
-              const Icon = benefit.icon;
-              return (
-                <div key={benefit.title} className="flex gap-3">
-                  <Icon
-                    className="mt-0.5 size-4 shrink-0 text-primary"
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {benefit.title}
-                    </p>
-                    <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
-                      {benefit.text}
-                    </p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+function EnvironmentReport({
+  values,
+  scene,
+  notes,
+  grade,
+  coverage,
+  contactAction,
+  conditions,
+}: {
+  values: HabitatValues;
+  scene: ReturnType<typeof resolveHabitatScene>;
+  notes: ReturnType<typeof deriveCategoryNote>[];
+  grade: ReturnType<typeof overallGrade>;
+  coverage: ReturnType<typeof resolveEnvironmentCoverage>;
+  contactAction: MurphContactOption | null;
+  conditions: { outdoorAir: string; weather: string };
+}) {
+  const nextChecks = buildNextChecks(scene, notes);
+  const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
+
+  return (
+    <>
+      <EnvironmentHero
+        grade={grade}
+        known={coverage.known}
+        total={coverage.total}
+        notes={notes}
+        context={{
+          location: contextValue(values["home-location"]?.location),
+          areaType: contextValue(values["home-location"]?.area_type),
+          weather: conditions.weather,
+          nights: contextValue(
+            values["sleep-environment"]?.night_noise,
+          ),
+          outdoorAir: conditions.outdoorAir,
+        }}
+      />
+
+      {grade.letter === null || coverage.coverage < 100 ? (
+        <EnvironmentCaptureCard
+          contactAction={contactAction}
+          known={coverage.known}
+          total={coverage.total}
+        />
+      ) : null}
+
+      {contactAction ? (
+        <NextChecksStrip items={nextChecks} chatHref={contactAction.href} />
+      ) : null}
+
+      <div className="space-y-6">
+        {scene.categories.map((category) => {
+          const note = noteByCategoryId.get(category.id);
+          return note ? (
+            <CategoryCard
+              key={category.id}
+              category={category}
+              note={note}
+              chatHref={contactAction?.href ?? null}
+            />
+          ) : null;
+        })}
       </div>
-    </section>
+    </>
   );
 }
 
@@ -312,14 +248,16 @@ export function EnvironmentCaptureCard({
         </span>
         <div>
           <h2 className="font-serif text-lg font-semibold text-foreground">
-            {known < total / 2
+            {known === 0
+              ? "Build your environment report in one take"
+              : known < total / 2
               ? "A little more context will make this useful"
               : "Fill the important gaps in one take"}
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Murph knows {known} of {total} core facts. Speak naturally while
-            moving through five short topics; clear facts are saved
-            automatically.
+            {known === 0
+              ? "Walk through sleep, air, light, recovery and work. Murph turns clear details into the category coverage, grade and next steps below."
+              : `Murph knows ${known} of ${total} core facts. Speak naturally while moving through five short topics; clear facts are saved automatically.`}
           </p>
         </div>
       </div>

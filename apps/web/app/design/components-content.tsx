@@ -829,9 +829,9 @@ export function ComponentsContent() {
         >
           <Section title="Environment empty state">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Production zero-data state with the guided voice walkthrough and
-              conversational fallback. The prompts collect one primary home
-              without adding a questionnaire to onboarding.
+              Production zero-data report. It preserves the grade, coverage,
+              next checks and illustrated categories from the populated page,
+              then places the guided voice walkthrough in context.
             </p>
             <EnvironmentEmptyState
               contactAction={{

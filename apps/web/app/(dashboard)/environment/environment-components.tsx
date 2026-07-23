@@ -389,7 +389,9 @@ export function EnvironmentHero({
             </p>
             {grade.pct === null ? (
               <p className="mt-1 max-w-xs text-sm font-medium leading-snug text-foreground">
-                Not enough information for a fair grade
+                {known === 0
+                  ? "A few facts unlock your first fair grade"
+                  : "Not enough information for a fair grade"}
               </p>
             ) : (
               <button
@@ -414,7 +416,9 @@ export function EnvironmentHero({
           <p className="text-xs text-muted-foreground">Coverage</p>
           <div className="mt-2 flex items-baseline justify-between gap-4">
             <p className="text-sm font-medium text-foreground">
-              Murph knows {known} of {total}
+              {known === 0
+                ? "Start with five short topics"
+                : `Murph knows ${known} of ${total}`}
             </p>
             <p className="font-serif text-2xl font-semibold text-foreground">
               {coverage}%
@@ -1055,7 +1059,7 @@ export function NextChecksStrip({
                       <button
                         type="button"
                         onClick={() => dismiss(item.fact.indicatorId)}
-                        className="absolute -right-1.5 -top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
+                        className="absolute right-1.5 top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
                         aria-label={`Hide ${item.fact.label}`}
                       />
                     }
