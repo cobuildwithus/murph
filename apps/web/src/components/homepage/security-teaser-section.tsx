@@ -54,7 +54,7 @@ export function SecurityTeaserSection() {
 
           <div className="mt-6 border-t border-[#3a4a1e]/20 pt-5">
             <Link
-              className="inline-flex items-center gap-2 text-[0.875rem] font-medium text-[#2d3436] underline decoration-[#3a4a1e]/30 underline-offset-4 transition-colors hover:text-[#3a4a1e] hover:decoration-[#3a4a1e]"
+              className="inline-flex items-center gap-2 text-[0.875rem] font-medium text-[#2d3436] underline decoration-[#3a4a1e]/30 underline-offset-4 transition-colors hover:text-[#3a4a1e] hover:decoration-[#3a4a1e] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:[outline-color:#3a4a1e]"
               href="/consumer-health-data-privacy-policy"
             >
               Consumer Health Data Privacy Notice
