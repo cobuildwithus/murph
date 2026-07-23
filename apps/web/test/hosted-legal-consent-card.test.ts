@@ -192,7 +192,7 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
     expect(container.textContent).toContain("Before you start");
     expect(container.textContent).toContain("Terms of Service");
     expect(container.textContent).toContain("Consumer Health Data Notice");
-    expect(container.textContent).toContain("contracted AI and other service providers");
+    expect(container.textContent).toContain("never sells health data");
     expect(container.textContent).toContain("I authorize Murph to collect, use, and process");
   });
 

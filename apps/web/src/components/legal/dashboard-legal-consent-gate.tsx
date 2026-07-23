@@ -45,14 +45,13 @@ export function DashboardLegalConsentGate({
       <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
         {isUpdate ? (
           <>
-            We updated Murph&apos;s terms, privacy disclosures, health data notice,
-            and AI safety boundaries. You can still connect and sync devices now.
-            Accept the current documents to restore protected dashboard features.
+            We updated Murph&apos;s legal documents. Accept the current versions
+            to get your full dashboard back.
           </>
         ) : (
           <>
-            Review and accept the remaining current documents to connect health
-            sources and use protected dashboard features.
+            Accept the remaining documents to connect health sources and use
+            your full dashboard.
           </>
         )}
       </p>
@@ -62,9 +61,7 @@ export function DashboardLegalConsentGate({
         className="mt-7"
         initialStatus={initialStatus}
         launchDescription={
-          isUpdate
-            ? "Review and accept both items to restore protected dashboard features."
-            : "Review and accept each remaining item to continue."
+          isUpdate ? "Two quick items." : "Accept each remaining item to continue."
         }
         launchTitle={isUpdate ? "Current documents" : "Required documents"}
         onAccepted={onAccepted}
