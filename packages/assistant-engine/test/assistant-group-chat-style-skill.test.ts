@@ -14,6 +14,29 @@ async function readNormalizedGroupChatSkill(): Promise<string> {
 }
 
 describe('assistant group-chat style guidance', () => {
+  it('completes explicitly requested compound media actions without fake provider limits', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Default to one assistant-authored response per turn.',
+    )
+    expect(normalized).toContain(
+      'Tool-owned effects the group explicitly requests, such as a contact card plus a song, may accompany it.',
+    )
+    expect(normalized).toContain(
+      'If the group explicitly requests a song plus another supported action, complete both in the current turn.',
+    )
+    expect(normalized).toContain(
+      'If an answer or first-reply contact card is pending without that explicit song request, skip the song.',
+    )
+    expect(normalized).toContain(
+      'never invent a provider limitation to justify an assistant choice',
+    )
+    expect(normalized).not.toContain(
+      'it cannot share the turn with the contact card',
+    )
+  })
+
   it('keeps emoji use occasional instead of habitual', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
@@ -54,13 +77,13 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Exactly one assistant response or dispatch per turn.',
+      'Default to one assistant-authored response per turn.',
     )
     expect(normalized).toContain(
       'Natural `---` bubbles inside that response are allowed.',
     )
     expect(normalized).toContain(
-      'Never send a separate status or permission-card companion follow-up',
+      'Never send a separate unrequested status or permission-card companion follow-up',
     )
     expect(normalized).not.toContain('Exactly one message per turn.')
   })

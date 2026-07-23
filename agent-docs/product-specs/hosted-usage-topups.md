@@ -76,7 +76,8 @@ An eligible paid Pulse or Edge member can:
 4. Continue to Stripe-hosted Checkout.
 5. Return to Settings with an honest pending state while webhook fulfillment
    completes.
-6. See a separately labeled usage-credit amount after the verified grant.
+6. See that remaining usage credit will carry work past included-usage
+   exhaustion without exposing an exact balance.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -133,14 +134,11 @@ Included usage remains the existing bounded percentage. Buying credit must not
 make that percentage move backward or expose the internal dollar value of a
 plan's included allowance.
 
-Purchased value appears separately, for example:
-
-- `100% of included usage used`
-- `$8.42 usage credit remaining`
-
-The value is rounded down for display to whole cents while accounting stays in
-integer USD micros. Copy must call it **usage credit**, never cash, wallet
-funds, account balance, or refundable dollars.
+Settings does not render the exact purchased-credit balance. When included
+usage is exhausted and purchased credit remains, it may say that Murph will use
+the remaining **usage credit**. It must not call that capacity cash, wallet
+funds, an account balance, or refundable dollars. Accounting stays in integer
+USD micros behind the web-owned projection.
 
 Settings may show a quiet **Add usage** action at any utilization for an
 eligible paid member. Home and assistant surfaces should surface the action
