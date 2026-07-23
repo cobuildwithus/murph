@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { HostedLaunchConsentActions } from "@/src/components/legal/hosted-launch-consent-actions";
 import { HostedLaunchConsentPrompt } from "@/src/components/legal/hosted-legal-consent-card";
 import { Separator } from "@/src/components/ui/separator";
 import type { HostedConsentScopeStatus } from "@/src/lib/legal/consent";
@@ -68,11 +69,13 @@ export function ConsentContent() {
         </h2>
         <div className="grid gap-6 lg:grid-cols-2">
           <PreviewFrame label="Compact · onboarding dialog">
-            <HostedLaunchConsentPrompt
-              documents={DESIGN_LAUNCH_DOCUMENTS}
-              onContinue={previewContinue}
-              pending={interactivePending}
-            />
+            <HostedLaunchConsentActions onDecline={() => {}}>
+              <HostedLaunchConsentPrompt
+                documents={DESIGN_LAUNCH_DOCUMENTS}
+                onContinue={previewContinue}
+                pending={interactivePending}
+              />
+            </HostedLaunchConsentActions>
           </PreviewFrame>
 
           <div className="flex flex-col gap-3">
