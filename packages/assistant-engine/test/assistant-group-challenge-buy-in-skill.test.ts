@@ -30,10 +30,14 @@ describe('assistant group challenge buy-in guidance', () => {
       challengeRaw.indexOf('Get the quick roll call'),
     )
     expect(challenge).toContain(
-      'ask each intended participant to say they are in or react positively',
+      'ask each intended participant to reply "in" or like this message',
     )
     expect(challenge).toContain(
-      'A reaction counts when you can actually attribute it to that person and proposal',
+      'keep the member-facing instruction concrete: "like this message."',
+    )
+    expect(challenge).not.toContain('react positively')
+    expect(challenge).toContain(
+      'Do not prepend a setup-status, progress, or transition sentence',
     )
     expect(challenge).toContain(
       "We're ready once [pending name] checks in. In: [confirmed names]. Waiting on: [pending name].",
@@ -122,8 +126,9 @@ describe('assistant group challenge buy-in guidance', () => {
       'group membership or data sharing alone is not a yes to every challenge',
     )
     expect(groupChat).toContain(
-      'a clear reply or an attributable positive reaction is enough',
+      'reply "in" or like the roll-call message',
     )
+    expect(groupChat).not.toContain('positive reaction')
     expect(groupChat).toContain(
       'do not wake a silent member up to find that they were automatically entered either',
     )
