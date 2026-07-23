@@ -27,6 +27,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Conversation Consumed-Watermark Rollout
+
+The exact conversation acknowledgement release changes the durable hosted
+pending-input file from v1 to cursor-bearing v2. Deploy the Cloudflare Worker
+and runner bundle first with `container_rollout=immediate`, require managed
+container smoke to report the exact new runner fingerprint, and only then
+deploy Web. Old Web ignores the additive checkpoint field, so producer-first
+skew is safe.
+
+The first accepted workspace snapshot containing the v2 pending-input envelope
+is a hard rollback floor for that workspace because the preceding v1-only
+runner cannot read it. Treat the new runner as the production fleet floor before
+admitting turns: after traffic begins, forward-fix the runner rather than
+rolling it back. Web may roll back independently while the v2-capable runner
+stays deployed. Restoring a v1-only runner requires a separate offline workspace
+migration that preserves unresolved input IDs and the batch cursor; Web-first
+rollback alone is not recovery proof.
+
+After both deploys, verify the managed runner fingerprint, confirm conversation
+lane consumed floors converge toward imported prefixes, and run one Telegram
+reply across a controlled reload with no duplicate reply or multi-minute stall.
+
 ## Shared Message Targeting Rollout
 
 The first release with shared exact-message reply and reaction targeting must
@@ -333,7 +355,7 @@ Hosted generated-image uploads additionally need optional Worker-owned Cloudflar
 Core execution tuning:
 
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
-- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
 - `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
   both runner Container `authorized_keys` entries for Wrangler SSH debugging.
@@ -353,7 +375,7 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production `wrangler.jsonc` sets `1200000`) and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns. The exact assistant wake projected by the current foreground phase may run once before the floor without checkpointing; inherited or committed wakes and durability barriers remain checkpoint-first. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `1200000`) and controls the post-completion warm lease minted only by observed conversation activity. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
@@ -450,7 +472,7 @@ Device-sync provider runtime overrides:
 
 If the selected GitHub environment already defines container sizing overrides, update these existing vars there as well:
 
-- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":1,"memory_mib":3072,"disk_mb":6000}`
+- `CF_CONTAINER_INSTANCE_TYPE={"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES=1000`
 
 When hosted email sender identity is configured, deploy automation renders one native `send_email` binding named `HOSTED_EMAIL` and constrains it with `allowed_sender_addresses` to that resolved sender address. Hosted email outbound send no longer requires a runtime Cloudflare account id or email-send API token inside the Worker.

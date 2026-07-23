@@ -24,6 +24,7 @@ export interface HostedExecutionWorkerEnvironment {
   runnerCommitTimeoutMs: number;
   runnerReadyTimeoutMs: number;
   runnerIdleTtlMs: number;
+  runnerLifecycleReevaluationMs: number;
   webControlTimeoutMs: number;
 }
 
@@ -58,6 +59,13 @@ export function readHostedExecutionWorkerEnvironment(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS),
     300_000,
     "HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS",
+  );
+  const runnerLifecycleReevaluationMs = parsePositiveInteger(
+    normalizeHostedExecutionString(
+      source.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS,
+    ),
+    runnerIdleTtlMs,
+    "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS",
   );
   const idleCheckpointDelayMs = parsePositiveInteger(
     normalizeHostedExecutionString(source.HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS),
@@ -152,6 +160,7 @@ export function readHostedExecutionWorkerEnvironment(
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerIdleTtlMs,
+    runnerLifecycleReevaluationMs,
     webControlTimeoutMs,
   };
 }

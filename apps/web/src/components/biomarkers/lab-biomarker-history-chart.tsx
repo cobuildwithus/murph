@@ -46,6 +46,11 @@ const RANGE_LINE_STYLE = {
   strokeOpacity: 0.5,
 } as const;
 
+// Recharts needs a positive seed before ResizeObserver reports the container.
+// Keep the real chart height, but use a non-constraining width so the initial
+// render cannot widen a narrow page before the responsive measurement lands.
+const RESPONSIVE_INITIAL_DIMENSION = { height: 320, width: 1 };
+
 export function LabBiomarkerHistoryChart({
   ariaDescribedBy,
   displayName,
@@ -53,6 +58,7 @@ export function LabBiomarkerHistoryChart({
   referenceRange = null,
   referenceRangeLabel = null,
   referenceRangeSourceLabel = null,
+  referenceRangeTitle = "Latest lab range",
   unit,
 }: {
   ariaDescribedBy?: string;
@@ -61,6 +67,7 @@ export function LabBiomarkerHistoryChart({
   referenceRange?: LabBiomarkerChartRange | null;
   referenceRangeLabel?: string | null;
   referenceRangeSourceLabel?: string | null;
+  referenceRangeTitle?: string;
   unit: string | null;
 }) {
   const data = useMemo(
@@ -86,6 +93,7 @@ export function LabBiomarkerHistoryChart({
   const rangeLabel = range ? referenceRangeLabel?.trim() || null : null;
   const rangeSourceLabel = rangeLabel ? referenceRangeSourceLabel?.trim() || null : null;
   const rangeIsBand = range !== null && range.low !== null && range.high !== null;
+  const yDomain = resolveYDomain(range);
 
   return (
     <div className="min-w-0">
@@ -97,22 +105,22 @@ export function LabBiomarkerHistoryChart({
               ? "h-2 w-5 shrink-0 border-y border-dashed border-primary/50"
               : "h-0 w-5 shrink-0 border-t border-dashed border-primary/50"}
           />
-          <span>Latest lab range</span>
+          <span>{referenceRangeTitle}</span>
           <span className="font-mono tabular-nums text-foreground">{rangeLabel}</span>
           {rangeSourceLabel ? (
-            <>
-              <span aria-hidden="true" className="text-border">/</span>
-              <span>{rangeSourceLabel}</span>
-            </>
+            <span className="min-w-0">
+              <span aria-hidden="true" className="mr-2 text-border">/</span>
+              {rangeSourceLabel}
+            </span>
           ) : null}
         </div>
       ) : null}
       <ChartContainer
         aria-describedby={ariaDescribedBy}
-        aria-label={`${displayName} results over time${rangeLabel ? `; latest lab range ${rangeLabel}${rangeSourceLabel ? ` from ${rangeSourceLabel}` : ""}` : ""}`}
+        aria-label={`${displayName} results over time${rangeLabel ? `; ${referenceRangeTitle.toLowerCase()} ${rangeLabel}${rangeSourceLabel ? ` from ${rangeSourceLabel}` : ""}` : ""}`}
         className="h-72 w-full sm:h-80"
         config={chartConfig}
-        initialDimension={{ height: 320, width: 760 }}
+        initialDimension={RESPONSIVE_INITIAL_DIMENSION}
         role="img"
       >
         <LineChart
@@ -134,7 +142,7 @@ export function LabBiomarkerHistoryChart({
           />
           <YAxis
             axisLine={false}
-            domain={["auto", "auto"]}
+            domain={yDomain}
             padding={range ? { bottom: 16, top: 16 } : undefined}
             tickFormatter={(value) => formatLabNumber(Number(value))}
             tickLine={false}
@@ -209,6 +217,27 @@ function normalizeRange(
   }
 
   return { high, low };
+}
+
+function resolveYDomain(
+  range: LabBiomarkerChartRange | null,
+): ["auto", "auto"] | [
+  (dataMinimum: number) => number,
+  (dataMaximum: number) => number,
+] {
+  if (!range || (range.low !== null && range.high !== null)) {
+    return ["auto", "auto"];
+  }
+
+  const bound = range.low ?? range.high;
+  if (bound === null) {
+    return ["auto", "auto"];
+  }
+
+  return [
+    (dataMinimum) => Math.min(dataMinimum, bound),
+    (dataMaximum) => Math.max(dataMaximum, bound),
+  ];
 }
 
 function resolveTimeDomain(times: readonly number[]): [number, number] | ["dataMin", "dataMax"] {

@@ -50,6 +50,35 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('allows natural bubbles inside one group response without companion follow-ups', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Exactly one assistant response or dispatch per turn.',
+    )
+    expect(normalized).toContain(
+      'Natural `---` bubbles inside that response are allowed.',
+    )
+    expect(normalized).toContain(
+      'Never send a separate status or permission-card companion follow-up',
+    )
+    expect(normalized).not.toContain('Exactly one message per turn.')
+  })
+
+  it('lets a server-owned permission card stand alone', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'never send a companion confirmation that the card is available, posted, or ready',
+    )
+    expect(normalized).toContain(
+      'When the server-owned card is the turn\'s only useful user-facing outcome, call `murph.finish_without_reply`.',
+    )
+    expect(normalized).toContain(
+      'send only that content in the assistant response and do not mention the card',
+    )
+  })
+
   it('targets laugh reactions at the laughable instead of a laughter token', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 

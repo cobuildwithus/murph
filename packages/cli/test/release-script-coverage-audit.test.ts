@@ -2951,6 +2951,9 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         '.crabbox.yaml',
         'profile: murph-verification\nprovider: blacksmith-testbox\nblacksmith:\n  ref: main\n',
       )
+      writeHarnessFile(harnessRoot, 'agent-docs/FRONTEND.md', 'frontend workflow\n')
+      writeHarnessFile(harnessRoot, 'PRODUCT.md', 'product guidance\n')
+      writeHarnessFile(harnessRoot, 'DESIGN.md', 'design guidance\n')
       execFileSync('git', ['add', '.'], { cwd: harnessRoot })
       execFileSync('git', ['commit', '-q', '-m', 'base'], { cwd: harnessRoot })
       const baseHead = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -3045,25 +3048,38 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         currentBaseHead: baseHead,
         currentReviewedHead: firstHead,
       })
+      const packagedEvidencePath =
+        'review-gpt-pr-context/rendered-evidence/01-desktop.png'
       expect(
         execFileSync(
           'unzip',
           ['-p', preliminary.zipPath, 'review-gpt-pr-context/rendered-evidence.txt'],
           { encoding: 'utf8' },
         ),
-      ).toBe('audit-packages/desktop.png\n')
+      ).toBe(`${packagedEvidencePath}\n`)
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', preliminary.zipPath, packagedEvidencePath],
+          { encoding: 'utf8' },
+        ),
+      ).toBe('redacted rendered evidence\n')
       const preliminaryEntries = listZipEntries(preliminary.zipPath)
       expect(preliminaryEntries).toEqual(
         expect.arrayContaining([
+          'agent-docs/FRONTEND.md',
+          'PRODUCT.md',
+          'DESIGN.md',
           'agent-docs/prompts/prompt-review.md',
           'agent-docs/prompts/frontend-review.md',
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
-          'audit-packages/desktop.png',
+          packagedEvidencePath,
           'review-gpt-pr-context/review-phase.json',
           'review-gpt-pr-context/rendered-evidence.txt',
         ]),
       )
+      expect(preliminaryEntries).not.toContain('audit-packages/desktop.png')
       expect(preliminaryEntries).not.toContain(
         'review-gpt-pr-context/review-round.json',
       )
@@ -3148,7 +3164,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
       expect(listZipEntries(roundOne.zipPath)).toEqual(
         expect.arrayContaining([
           '.crabbox.yaml',
-          'audit-packages/desktop.png',
+          'review-gpt-pr-context/rendered-evidence/01-desktop.png',
           'review-gpt-pr-context/rendered-evidence.txt',
         ]),
       )
@@ -3158,7 +3174,7 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           ['-p', roundOne.zipPath, 'review-gpt-pr-context/rendered-evidence.txt'],
           { encoding: 'utf8' },
         ),
-      ).toBe('audit-packages/desktop.png\n')
+      ).toBe('review-gpt-pr-context/rendered-evidence/01-desktop.png\n')
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
 
       const roundTwo = invokePackager('round-two', currentHead, {

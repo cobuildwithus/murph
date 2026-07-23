@@ -45,8 +45,14 @@ review_gpt_is_ancestor() {
 review_gpt_add_rendered_evidence() {
   local evidence_manifest="$review_gpt_pr_context_dir/rendered-evidence.txt"
   local evidence_absolute_path
+  local evidence_index=0
+  local evidence_package_dir="$review_gpt_pr_context_dir/rendered-evidence"
+  local evidence_package_name
+  local evidence_package_path
   local evidence_path
 
+  rm -rf "$evidence_package_dir"
+  mkdir -p "$evidence_package_dir"
   : > "$evidence_manifest"
   while IFS= read -r evidence_path; do
     [[ -z "$evidence_path" ]] && continue
@@ -86,8 +92,14 @@ review_gpt_add_rendered_evidence() {
         exit 1
         ;;
     esac
-    printf '%s\n' "$evidence_path" >> "$evidence_manifest"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_path"
+    evidence_index=$((evidence_index + 1))
+    printf -v evidence_package_name '%02d-%s' \
+      "$evidence_index" \
+      "$(basename "$evidence_path")"
+    evidence_package_path="$evidence_package_dir/$evidence_package_name"
+    cp -- "$evidence_path" "$evidence_package_path"
+    printf '%s\n' "$evidence_package_path" >> "$evidence_manifest"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_package_path"
   done <<< "$review_gpt_rendered_evidence_paths"
 }
 
@@ -231,7 +243,7 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
       printf '  "currentReviewedHead": "%s"\n' "$review_gpt_head_oid"
       printf '}\n'
     } > "$review_gpt_pr_context_dir/review-phase.json"
-    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/review-phase.json"$'\n'"agent-docs/FRONTEND.md"$'\n'"PRODUCT.md"$'\n'"DESIGN.md"$'\n'"agent-docs/prompts/prompt-review.md"$'\n'"agent-docs/prompts/frontend-review.md"$'\n'"agent-docs/prompts/coverage-write.md"
   else
     review_gpt_require_available_commit "first-reviewed head" "$review_gpt_first_reviewed_head"
     review_gpt_require_available_commit "current reviewed head" "$review_gpt_head_oid"

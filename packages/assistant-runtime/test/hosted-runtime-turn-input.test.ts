@@ -1084,7 +1084,10 @@ describe("selectHostedAssistantInputIds", () => {
     await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: inputIds,
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      conversationActivity: "observed",
+      currentInputId: null,
+    });
   });
 
   it("does not select mismatched pending input during fresh foreground selection", async () => {
@@ -1361,6 +1364,18 @@ describe("selectHostedAssistantInputIds", () => {
 });
 
 describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
+  it("does not treat a generic provider input as conversation activity", async () => {
+    const vaultRoot = await createTempVault();
+
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [],
+      vaultRoot,
+    })).resolves.toEqual({
+      conversationActivity: "not_observed",
+      currentInputId: null,
+    });
+  });
+
   it("uses the terminal input id of an exact-successor batch", async () => {
     const vaultRoot = await createTempVault();
     const first = await upsertAssistantInputEvent({
@@ -1387,7 +1402,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: [second.inputId, first.inputId],
       vaultRoot,
-    })).resolves.toBe(second.inputId);
+    })).resolves.toEqual({
+      conversationActivity: "observed",
+      currentInputId: second.inputId,
+    });
   });
 
   it("fails closed instead of crossing a causal-sequence gap", async () => {
@@ -1416,7 +1434,10 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: [first.inputId, afterGap.inputId],
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      conversationActivity: "observed",
+      currentInputId: null,
+    });
   });
 
   it("fails closed when an accepted input event is missing", async () => {
@@ -1425,7 +1446,40 @@ describe("resolveHostedCurrentInputIdForAcceptedInputs", () => {
     await expect(resolveHostedCurrentInputIdForAcceptedInputs({
       assistantInputIds: ["ain_00000000000000000000000000000000"],
       vaultRoot,
-    })).resolves.toBeNull();
+    })).resolves.toEqual({
+      conversationActivity: "uncertain",
+      currentInputId: null,
+    });
+  });
+
+  it("does not treat recovered system-lane input as conversation activity", async () => {
+    const vaultRoot = await createTempVault();
+    const staged = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ lane: "system" }),
+    });
+
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [staged.inputId],
+      vaultRoot,
+    })).resolves.toMatchObject({
+      conversationActivity: "not_observed",
+    });
+  });
+
+  it("treats recovered inbox captures as conversation activity", async () => {
+    const vaultRoot = await createTempVault();
+    const staged = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({ sourceKind: "inbox-capture" }),
+    });
+
+    await expect(resolveHostedCurrentInputIdForAcceptedInputs({
+      assistantInputIds: [staged.inputId],
+      vaultRoot,
+    })).resolves.toMatchObject({
+      conversationActivity: "observed",
+    });
   });
 });
 
@@ -1454,6 +1508,7 @@ function createAssistantInputEvent(input: {
   dedupeKey?: string;
   eventId?: string;
   itemId?: string;
+  lane?: "conversation" | "system";
   laneSeq?: string;
   messageId?: string;
   occurredAt?: string;
@@ -1462,6 +1517,7 @@ function createAssistantInputEvent(input: {
   replyTarget?: string | null;
   routeAuthority?: boolean;
   source?: string;
+  sourceKind?: "hosted-mailbox" | "inbox-capture";
   text?: string;
   threadId?: string;
   threadIsDirect?: boolean;
@@ -1507,18 +1563,25 @@ function createAssistantInputEvent(input: {
           service: null,
         }
       : null,
-    sourceRef: {
-      ...(input.causalSeq === undefined ? {} : { causalSeq: input.causalSeq }),
-      dedupeKey: input.dedupeKey ?? "dedupe_selected",
-      eventId: input.eventId ?? "evt_selected",
-      itemId: input.itemId ?? "item_selected",
-      kind: "hosted-mailbox" as const,
-      lane: "conversation" as const,
-      laneSeq: input.laneSeq ?? "42",
-      payloadSchema: "murph.hosted-mailbox-payload.v1",
-      payloadSource: "inline" as const,
-      source: "hosted-mailbox" as const,
-      wakeSchema: "murph.hosted-execution-wake.v1",
-    },
+    sourceRef: input.sourceKind === "inbox-capture"
+      ? {
+          captureId: "capture_selected",
+          kind: "inbox-capture" as const,
+          source,
+          version: null,
+        }
+      : {
+          ...(input.causalSeq === undefined ? {} : { causalSeq: input.causalSeq }),
+          dedupeKey: input.dedupeKey ?? "dedupe_selected",
+          eventId: input.eventId ?? "evt_selected",
+          itemId: input.itemId ?? "item_selected",
+          kind: "hosted-mailbox" as const,
+          lane: input.lane ?? "conversation",
+          laneSeq: input.laneSeq ?? "42",
+          payloadSchema: "murph.hosted-mailbox-payload.v1",
+          payloadSource: "inline" as const,
+          source: "hosted-mailbox" as const,
+          wakeSchema: "murph.hosted-execution-wake.v1",
+        },
   };
 }

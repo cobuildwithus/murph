@@ -471,6 +471,7 @@ function labRow(): BrowserVaultLabResultRow {
     referenceRange: null,
     rowSchema: "murph.browser-vault.lab-result-row.v1",
     sourceLabel: "Lab result",
+    specimenKind: "serum",
     textValue: null,
     unit: "%",
     value: 5.6,

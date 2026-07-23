@@ -397,6 +397,16 @@ pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child.
 
+When a joined-group request reaches a dirty warm runtime, the mailbox prefetch
+may import it before the routine idle checkpoint only when the entire fetched
+prefix contains pre-checkpoint-safe system wakes. One shared import context
+revalidates the decoded request target throughout that pre-checkpoint pass,
+including pre-assistant follow-up imports and foreground reruns; a
+consented-member request remains checkpoint-gated regardless of which import
+observes it. Import kicks the existing detached controller; it does not start or
+advance the at-least-180-second idle snapshot. Any unrelated system wake in
+that prefix keeps the whole system prefix checkpoint-gated.
+
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
 the exact membership generation, runtime fence, expiry, and original private
@@ -405,6 +415,23 @@ to the bound private runtime. The first committed completion wins. The private
 runtime treats it as correlated untrusted data and may run one output-only
 follow-up after current route validation; it cannot recurse into Assistant Ask
 or invoke side-effecting tools.
+
+If that joined-group completion and private input are both pending, the
+completion uses the existing foreground-causal mailbox lane only when its
+occurrence timestamp predates the oldest pending input. A fresh turn derives
+that cutoff from the bounded accepted-input batch it already owns. A pass with
+no fresh batch reads the existing complete pending-input index. Both paths use
+the input's `occurredAt`, not its later receipt time. Missing, incomplete, or
+invalid evidence fails closed without backfill or compaction on the foreground
+reply path; existing background maintenance remains the only repair owner. The
+completion then owns the next assistant pass, and the existing output-only
+continuation composes and durably queues one natural Murph response under its
+stable idempotency key before the still-pending input runs on the next pass. A
+newer completion does not overtake older personal input. This ordering contract
+ends at durable intent creation; ordinary carrier retry ordering remains scoped
+to one assistant turn so a retrying Ask send cannot block all newer personal
+replies. The mailbox
+remains transport, not an Ask-specific delivery coordinator.
 
 The signed group-tool Web route returns the deterministic opaque request id in
 `x-murph-assistant-ask-request-id` on both accepted and sanitized failed Ask
@@ -593,8 +620,44 @@ the same transaction as the product/control-plane mutation that made work
 necessary. Large payloads use `HostedMailboxPayload`; lane sequence allocation
 uses `HostedMailboxLaneCounter`.
 `HostedMailboxLaneCounter` also carries the durable per-lane `consumed_seq`
-checkpoint replay floor. Accepted Linq reply delivery carries the finer
-delivery-time consume authority: the runtime reports
+checkpoint replay floor. The system lane advances that floor from its
+checkpointed handled-through status. At the conversation lane's successful
+`idle_shutdown` checkpoint, the runtime instead carries up to 256 exact mailbox
+item ids whose local inputs have terminal evidence. In the same transaction as
+the accepted snapshot CAS, Web stamps `consumed_at` only on matching same-user
+live `conversation.message` rows at or below the snapshot's imported watermark,
+then advances `consumed_seq` only to the item immediately before the first
+remaining live unstamped row. Thus a terminal item at sequence 20 cannot move
+the floor across an unresolved item at sequence 19. A missing event, missing
+input-to-mailbox mapping, missing row, malformed sequence, retryable reply
+failure, checkpoint conflict, or transaction rollback fails closed without
+acknowledging that item or crossing its gap. Status-only assistant or
+canonical-runtime checkpoints never stamp conversation rows.
+
+The local hosted pending-input index uses schema v2 for this exact-ack protocol.
+Terminal conversation ids stay in the checkpointed snapshot until a later
+mailbox fetch returns a `consumedSeqByLane` floor covering them; the wake probe
+checks terminal evidence so those retained ids do not schedule another reply.
+When more exact ids are pending than the checkpoint request cap, v2 persists a
+batch cursor in the same snapshot and rotates later checkpoints through the
+remaining ids. It never deletes an id merely because it was selected, so a
+blocked earlier sequence cannot make the first batch permanently starve later
+terminal rows.
+On first compaction of a deployed v1 index, the runtime preserves every input
+id that v1 still records and recovers an omitted retained event only when its
+terminal evidence already proves handling completed. V1 did not record whether
+an omitted nonterminal event had once been admitted and later dropped or had
+always been context-only while auto-reply was unavailable. Those ambiguous
+events are therefore categorically nonreplyable; enabling a channel later must
+not resurrect them as stale outbound work. This fail-closed migration can leave
+a bounded legacy admitted input unreplied, but it cannot send an unsolicited
+historical message. Exact terminal item stamps are idempotent, and repeated
+idle checkpoints safely resend them until the durable floor confirms the
+accepted transaction.
+
+Accepted Linq reply delivery carries an earlier copy of the same exact-item
+consume authority:
+the runtime reports
 `answeredMailboxItemIds`, and the signed delivery callback stamps matching
 same-user `conversation.message` rows with `HostedMailboxItem.consumedAt`.
 The mailbox fetch response returns both `consumedSeqByLane` and each item's
@@ -605,6 +668,31 @@ restore or restart from re-replying to an already-handled message without a
 side table or lane high-water advance past gaps. A container rollout SIGTERM
 additionally makes the runtime treat the idle window as elapsed and run its
 normal `idle_shutdown` checkpoint inside the termination grace period.
+
+`handledConversationMailboxItemIds` is an additive Cloudflare-to-Web checkpoint
+extension. Deploy the Cloudflare worker and runner bundle first with immediate
+container rollout, verify the managed runner fingerprint, and only then deploy
+Web. The old Web parser tolerates and ignores the new field, while the new
+runner retains terminal local ids until `consumedSeqByLane` confirms them, so
+that producer-first window is replay-safe. If Web lands first, an old runner
+sends no exact ids; Web stamps none and therefore cannot repair Telegram
+progress until the runner converges, but it does not infer acknowledgement from
+the old local index.
+
+The v2 pending-index envelope is not readable by the preceding v1-only runner.
+The first accepted workspace snapshot containing v2 is therefore a hard runner
+rollback floor for that workspace; operationally, treat the new runner bundle
+as the fleet rollback floor before admitting production traffic. After that
+point, Web may roll back while the v2-capable runner remains deployed, but the
+runner must be forward-fixed rather than restored below this floor. Returning
+to a v1-only runner requires an explicit offline workspace migration that
+preserves unresolved IDs and the exact batch cursor; incident-time Web-first
+rollback is not sufficient. Already-advanced server floors remain valid because
+they were derived from exact row stamps in an accepted snapshot transaction.
+After rollout, verify that conversation lane floors converge toward
+checkpointed imported prefixes and run a Telegram reply across a controlled
+reload with no duplicate reply or multi-minute stall.
+
 Hosted Linq and Telegram conversation webhook routes read the raw body and
 verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
@@ -1195,8 +1283,23 @@ The runtime stages decoded conversation rows as assistant input and marks the
 active invocation dirty. Foreground runtime work may defer intermediate checkpoints.
 The active invocation remains dirty until the runtime-owned
 idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds.
-RunnerContainer never records
-pending checkpoint intent. Activity expiry is cleanup-only. Plain-text Linq plus
+RunnerContainer never records pending checkpoint intent. Activity expiry is
+cleanup-only and uses two clocks: `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS`
+controls how often an idle shell is reconsidered, while
+`HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` is the post-completion conversation warm
+lease. The assistant runtime observes only fresh staged conversation input or
+recovered conversation input admitted to the provider. The container process
+publishes that observation as a private completion watermark in its health
+response. At each lifecycle expiry RunnerContainer derives the remaining lease
+from that live child watermark, re-arms the platform timeout while the lease or
+active work remains, and destroys the shell after expiry. Durable Object
+reconstruction reads the same resident process; a replacement process starts
+without inherited warmth. Replay, system-lane work, device sync, and generic
+maintenance do not mint or slide the lease. An inactive old child missing the
+watermark has no current conversation lease and is cleanup-eligible; its active
+work count remains independently authoritative. Child health failure and the
+wake-versus-destroy race retain and re-arm fail closed.
+Plain-text Linq plus
 attachment-free Telegram and WhatsApp input skips projection and cannot be
 delayed by projection initialization or history scans. Linq links, direct email,
 and attachment projection status are logged, and their artifacts remain

@@ -493,7 +493,7 @@ jobs:
       CF_BUNDLES_BUCKET: ${{ vars.CF_BUNDLES_BUCKET }}
       CF_BUNDLES_PREVIEW_BUCKET: ${{ vars.CF_BUNDLES_PREVIEW_BUCKET }}
       CF_COMPATIBILITY_DATE: ${{ vars.CF_COMPATIBILITY_DATE }}
-      CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{"vcpu":1,"memory_mib":3072,"disk_mb":6000}' }}
+      CF_CONTAINER_INSTANCE_TYPE: ${{ vars.CF_CONTAINER_INSTANCE_TYPE || '{"vcpu":2,"memory_mib":6144,"disk_mb":6000}' }}
       CF_CONTAINER_MAX_INSTANCES: ${{ vars.CF_CONTAINER_MAX_INSTANCES || '1000' }}
       CF_CONTAINER_SSH_KEY_NAME: ${{ vars.CF_CONTAINER_SSH_KEY_NAME }}
       CF_CONTAINER_SSH_PUBLIC_KEY: ${{ vars.CF_CONTAINER_SSH_PUBLIC_KEY }}
@@ -516,6 +516,7 @@ jobs:
       HOSTED_CRYPTO_ENV: ${{ vars.HOSTED_CRYPTO_ENV }}
       HOSTED_EXECUTION_RUNNER_ENV_PROFILES: ${{ vars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES || 'exa,hosted-email,linq,mapbox,telegram' }}
       HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS }}
+      HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS: ${{ vars.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS }}
       HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT || 'production' }}
       HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_PROJECT_NAME }}
       HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG: ${{ vars.HOSTED_EXECUTION_VERCEL_OIDC_TEAM_SLUG }}
@@ -866,6 +867,7 @@ jobs:
             printf -- '- Deploy strategy: `%s`\n' "direct"
             printf -- '- Container rollout: `%s`\n' "${DEPLOY_SUMMARY_CONTAINER_ROLLOUT}"
             printf -- '- Runner idle TTL: `%s`\n' "${HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS:-environment default}"
+            printf -- '- Runner lifecycle reevaluation: `%s`\n' "${HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS:-environment default}"
             printf -- '- Worker name: `%s`\n' "${CF_WORKER_NAME}"
             printf -- '- Worker URL: `%s`\n' "${CF_PUBLIC_BASE_URL:-not-set}"
             printf -- '- Container instance type: `%s`\n' "${CF_CONTAINER_INSTANCE_TYPE}"
