@@ -311,6 +311,27 @@ test("HomeDataLoadAlert retries the current dashboard route", async () => {
   }
 });
 
+test("DashboardCriticalLoadError refreshes the unavailable dashboard layout", async () => {
+  const { DashboardCriticalLoadError } = await import(
+    "../src/components/dashboard/dashboard-critical-load-error"
+  );
+  const rendered = await renderClientComponent(
+    createElement(DashboardCriticalLoadError),
+  );
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("DashboardError keeps a critical auth failure in a retryable dashboard state", async () => {
   const reset = vi.fn();
   const { default: DashboardError } = await import(

@@ -10,9 +10,11 @@ export function HomeDataLoadAlert() {
 
   return (
     <Alert variant="destructive">
-      <AlertTitle>Some dashboard details are unavailable</AlertTitle>
+      <AlertTitle className="text-foreground">
+        Some dashboard details are unavailable
+      </AlertTitle>
       <AlertDescription>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 text-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>
             Murph could not load every section right now. Try again to refresh
             the missing details.
