@@ -213,7 +213,7 @@ function classifyMurphContactCardAuthorizationError(error: unknown): string {
     : "UNKNOWN_ERROR";
 }
 
-function logMurphContactCardRequest(input: {
+function logMurphContactCardRequest(details: {
   app: string | null;
   authOutcome: "authorized" | "rejected";
   avatarId: string | null;
@@ -223,14 +223,14 @@ function logMurphContactCardRequest(input: {
   webview: boolean;
 }): void {
   console.info("Hosted Murph contact-card request.", {
-    app: input.app,
+    app: details.app,
     ...sanitizeHostedOnboardingStructuredLogDetails({
-      authOutcome: input.authOutcome,
-      authority: input.source,
-      avatarId: input.avatarId,
-      errorCode: input.errorCode,
-      memberIdSuffix: toHostedOnboardingLogIdSuffix(input.memberId),
-      webview: input.webview,
+      authOutcome: details.authOutcome,
+      authority: details.source,
+      avatarId: details.avatarId,
+      errorCode: details.errorCode,
+      memberIdSuffix: toHostedOnboardingLogIdSuffix(details.memberId),
+      webview: details.webview,
     }),
   });
 }
