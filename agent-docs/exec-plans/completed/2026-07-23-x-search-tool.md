@@ -42,16 +42,15 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    `annotations[].type="url_citation"` establishes same-response x_search evidence,
    and every relayed post's globally unique numeric status id must match a
    `url_citation.url` in that response. xAI citations use
-   `https://x.com/i/status/<id>` while the model-authored JSON carries the display
-   handle. **Attribution scope:** the citation proves post identity only — xAI
+   `https://x.com/i/status/<id>`. **Attribution scope:** the citation proves post identity only — xAI
    supplies no attribution metadata (the annotation `title` is the URL repeated),
    so no model-authored handle is trusted or relayed. Accepted results are
    normalized to the provider-evidenced handle-less `https://x.com/i/status/<id>`
    form and carry no author field; `profile_posts` scope is owned solely by the
    request's `allowed_x_handles`, which the provider enforces. The product
    promises post-level citation, not account attribution.
-   Invalid JSON fails; a post without a canonical
-   `https://x.com/<handle>/status/<id>` URL keeps the existing drop behavior; zero valid
+   Invalid JSON fails; a post whose URL is not a
+   canonical X status URL keeps the existing drop behavior; zero valid
    posts with completed x_search evidence returns an explicit no-results failure.
 3. **Billing follows the existing egress pattern exactly** (`runner-egress-intercept.ts`,
    like ElevenLabs/transcription): the interceptor injects the credential, buffers the

@@ -58,9 +58,11 @@ const X_SEARCH_RESULT_DISCLAIMER =
 const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses'
 const DAY_MS = 24 * 60 * 60 * 1000
 
-// Only canonical public post URLs are relayed; twitter.com is normalized to
-// x.com. Anything else from the provider is dropped, and the author handle is
-// always re-derived from the validated URL rather than trusted separately.
+// Only canonical public post URLs are parsed; twitter.com and any handle
+// segment are accepted purely to extract the numeric status id. Anything else
+// from the provider is dropped. No author handle is trusted, derived, or
+// relayed: accepted results are normalized to the provider-evidenced
+// handle-less x.com/i/status/<id> form.
 const X_POST_URL_PATTERN =
   /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{1,15})\/status\/([0-9]{1,25})$/u
 const UNSAFE_RESULT_CHARACTERS =
