@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  assertHostedHistoricalLaunchConsentGranted,
   buildCurrentHostedConsentDocumentVersions,
   buildHostedConsentStatus,
   hasHostedHistoricalLaunchConsent,
@@ -255,6 +256,31 @@ describe("hosted legal consent registry", () => {
       ],
       now,
     }))).toBe(true);
+  });
+
+  it("uses surface-neutral copy when historical launch consent is missing", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      hostedConsentGrant: { findMany },
+    } as unknown as Parameters<
+      typeof assertHostedHistoricalLaunchConsentGranted
+    >[0]["prisma"];
+
+    await expect(assertHostedHistoricalLaunchConsentGranted({
+      memberId: "member_1",
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_CONSENT_REQUIRED",
+      details: {
+        missingScopes: ["launch.legal", "launch.health-data"],
+      },
+      httpStatus: 403,
+      message: "Accept the Murph legal consent before continuing.",
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      orderBy: [{ scope: "asc" }],
+      where: { memberId: "member_1" },
+    });
   });
 
   it("keeps current launch consent valid when a historical removed scope exists", () => {

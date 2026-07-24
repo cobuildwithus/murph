@@ -7,6 +7,7 @@ import {
   type HostedVaultShareFixedProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -20,6 +21,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   appendHostedGroupJoinConfirmationTx: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 
@@ -293,6 +296,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
       kind: "terminal-skip",
     });
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
@@ -360,6 +364,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     // Joining always shares the memory-backed preferred display name, so consent gates
     // every join, and the only automatic grant is profile-name.v0.
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledTimes(1);
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
@@ -1026,6 +1031,32 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScope: SLEEP_SCOPE,
     }));
     expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    // Reaction joins have no consent UI, so a historical launch grant is enough;
+    // the current-version gate stays on web joins only.
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(1);
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+  });
+
+  it("fails a join offer closed when launch consent was never granted", async () => {
+    const tx = buildTx({ activeGroupGrantCount: 0 });
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the Murph legal consent before continuing.",
+    }));
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+    });
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
   it("appends a reaction-specific private confirmation for a first offer join", async () => {
