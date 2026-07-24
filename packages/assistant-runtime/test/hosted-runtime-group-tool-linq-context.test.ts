@@ -39,6 +39,108 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it("forwards telegram current-turn sender evidence channel-qualified", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_shared",
+      result: { status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["1234567890", "1234567890", "9876543210"],
+    });
+
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      currentTurnSender: {
+        channel: "telegram",
+        handles: ["1234567890", "9876543210"],
+      },
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("overwrites model-supplied telegram sender evidence", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_shared",
+      result: { status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["1234567890"],
+    });
+
+    await groupTool.request({
+      action: "read_shared",
+      currentTurnSender: { channel: "telegram", handles: ["999999999"] },
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("fails closed when both linq and telegram sender evidence are present", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_shared",
+      result: { status: "ok" },
+    });
+    // One group runtime is bound to a single provider thread, so evidence from
+    // two namespaces is a contradiction Web must never be asked to resolve.
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: ROUTE_AUTHORITY,
+        }),
+      ],
+      telegramSenderHandles: ["1234567890"],
+    });
+
+    await groupTool.request({
+      action: "read_shared",
+      currentTurnSender: { channel: "telegram", handles: ["forged"] },
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
+  it("drops overlong telegram sender handles before transport", async () => {
+    const request = vi.fn().mockResolvedValue({
+      action: "read_shared",
+      result: { status: "ok" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [],
+      telegramSenderHandles: ["x".repeat(513)],
+    });
+
+    await groupTool.request({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+
+    expect(request).toHaveBeenLastCalledWith({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    });
+  });
+
   it("injects the wake-derived linq thread into chat-scoped actions only", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "share_contact_card",

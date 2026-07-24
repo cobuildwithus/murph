@@ -3924,6 +3924,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               messageId: "telegram_message",
               threadId: "telegram_group_chat",
             },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: "telegram",
+              mediaGroupId: null,
+              replyContext: null,
+              senderHandle: "1234567890",
+              senderUsername: "alice_example",
+            },
           };
         }
         return {
@@ -4133,8 +4141,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [telegramInputId],
-        operation: async (executionContext) =>
-          await executionContext.hosted?.automationTool?.request(
+        operation: async (executionContext) => {
+          // Telegram group evidence must survive operation-scope
+          // reconstruction and reach Web channel-qualified.
+          await executionContext.hosted?.groupTool?.request({
+            action: "read_shared",
+            projectionScopes: [{ projectionKind: "steps-days.v0" }],
+          });
+          return await executionContext.hosted?.automationTool?.request(
             buildGroupNewsletterAutomationSaveRequest({
               configuration: {
                 delivery: "current_chat",
@@ -4147,8 +4161,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 kind: "cron",
               },
             }),
-          ),
+          );
+        },
         turnEnvironment: null,
+      });
+      expect(groupRequestMock).toHaveBeenCalledWith({
+        action: "read_shared",
+        currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
         action: "save",

@@ -705,6 +705,43 @@ describe("parseHostedExecutionEvent", () => {
     ).toThrow(/channel is invalid/i);
   });
 
+  it("preserves telegram group sender identity through the wake parser", () => {
+    const wake = {
+      eventId: "evt_telegram_group",
+      kind: "conversation.message",
+      message: {
+        channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: "member_container",
+          threadId: "chat_group",
+        },
+        telegramMessage: {
+          from: "1234567890",
+          messageId: "message-1",
+          schema: "murph.hosted-telegram-message.v1",
+          senderUsername: "alice_example",
+          text: "hello group",
+          threadId: "chat_group",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-07-24T00:00:00.000Z",
+      userId: "member_container",
+    };
+
+    const parsed = parseHostedExecutionWake(wake);
+    expect(parsed.kind).toBe("conversation.message");
+    if (parsed.kind !== "conversation.message") {
+      throw new Error("Expected a conversation message wake.");
+    }
+    if (parsed.message.channel !== "telegram") {
+      throw new Error("Expected a telegram conversation message wake.");
+    }
+    expect(parsed.message.telegramMessage.from).toBe("1234567890");
+    expect(parsed.message.telegramMessage.senderUsername).toBe("alice_example");
+  });
+
   it("rejects legacy provider message event kinds", () => {
     expect(() =>
       parseHostedExecutionEvent({

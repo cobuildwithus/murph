@@ -431,6 +431,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
           from: {
             first_name: "Alice",
             id: 456,
+            username: "Alice_Example",
           },
           message_id: 2,
           text: "set up our weekly health newsletter",
@@ -465,8 +466,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             },
             telegramMessage: expect.objectContaining({
               // Group inbound carries the webhook-authenticated sender so the
-              // assistant can tell participants apart.
+              // assistant can tell participants apart. The display-only
+              // username is normalized for consistent addressing.
               from: "456",
+              senderUsername: "alice_example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
               threadIsDirect: false,
