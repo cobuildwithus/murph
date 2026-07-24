@@ -554,15 +554,6 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    if (effect.payload.template === "invite_signup") {
-      queueHostedLinqContactCardShareAfterInviteSignup({
-        chatId: result.chatId ?? effect.payload.chatId,
-        memberId: effect.payload.memberId,
-        prisma: options.prisma,
-        scheduleAfterResponse: options.scheduleAfterResponse,
-        service: effect.payload.service ?? null,
-      });
-    }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
       chatId: result.chatId ?? effect.payload.chatId,
       effect: deliveryEffect,
@@ -642,29 +633,32 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
 }
 
 /**
- * After the invite-signup reply lands, share Murph's first-party `.vcf` into
- * the same thread so text-first members can save the contact without visiting
- * the web app. Direct and group threads are both eligible; the share module
- * owns the iMessage-only gate and the per-chat throttle reservation. Best
- * effort:
+ * After the delivery lifecycle confirms an invite-signup reply reached the
+ * handset, share Murph's first-party `.vcf` into that thread so text-first
+ * members can save the contact without visiting the web app. Direct, group,
+ * and fallback-created threads are eligible; the share module owns the
+ * iMessage-only gate and the per-chat throttle reservation. Best effort:
  * a share failure never fails or delays the reply delivery, and the request
  * signal is deliberately not forwarded because the share may run after the
  * response completes.
  */
-function queueHostedLinqContactCardShareAfterInviteSignup(input: {
-  chatId: string;
+export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input: {
+  chatId: string | null;
   memberId: string;
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   service: string | null;
-}): void {
-  const { chatId, memberId } = input;
-  if (!isHostedLinqContactCardAutoShareEligible({ service: input.service })) {
+}): Promise<void> | void {
+  if (
+    !input.chatId
+    || !isHostedLinqContactCardAutoShareEligible({ service: input.service })
+  ) {
     return;
   }
+  const { chatId, memberId } = input;
   if (!isHostedLinqTransportPrismaClient(input.prisma)) {
-    // Invite-signup drains run on the root client; a transactional client
-    // could close before this post-response share runs.
+    // Receipt ingestion and accepted-milestone replay run on the root client;
+    // a transactional client could close before this post-response share runs.
     console.warn("Hosted Linq contact-card share skipped inside a transaction.", {
       chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
     });
@@ -701,7 +695,7 @@ function queueHostedLinqContactCardShareAfterInviteSignup(input: {
     input.scheduleAfterResponse(task);
     return;
   }
-  void task();
+  return task();
 }
 
 function buildHostedLinqContactCardShareLogDetails(
@@ -875,7 +869,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
     // Milestone and consequence commit atomically: a replayed failure must
     // never mark the delivery terminally failed while leaving the member/day
     // marked sent, or the planner suppresses retries for the rest of the day.
-    await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+    const milestone = await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
       const milestone = await markHostedLinqDeliveryAcceptedTx({
         idempotencyKey: input.effect.effectId,
         linqChatId: input.chatId,
@@ -896,7 +890,16 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           prisma,
         });
       }
+      return milestone;
     });
+    if (milestone.restoreOnboardingLink) {
+      await queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+        chatId: milestone.restoreOnboardingLink.linqChatId,
+        memberId: milestone.restoreOnboardingLink.memberId,
+        prisma: input.prisma,
+        service: milestone.restoreOnboardingLink.service,
+      });
+    }
   } catch (error) {
     console.warn("Hosted Linq delivery accepted recording failed.", {
       errorName: error instanceof Error ? error.name : "UnknownError",

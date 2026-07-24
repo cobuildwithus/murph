@@ -133,6 +133,9 @@ const mocks = vi.hoisted(() => {
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
+    shareMurphHostedLinqContactCardVcfToChat: vi.fn().mockResolvedValue({
+      status: "sent",
+    }),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -235,6 +238,17 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   return {
     ...actual,
     claimHostedLinqDeliveryProviderDispatchTx: mocks.claimHostedLinqDeliveryProviderDispatchTx,
+  };
+});
+
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/linq-contact-card-share")
+  >("@/src/lib/hosted-onboarding/linq-contact-card-share");
+  return {
+    ...actual,
+    shareMurphHostedLinqContactCardVcfToChat:
+      mocks.shareMurphHostedLinqContactCardVcfToChat,
   };
 });
 
@@ -607,6 +621,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       status: 204,
     });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "sent",
+    });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -639,6 +656,300 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { chatId: "chat_signup_direct", threadKind: "direct" },
+    { chatId: "chat_signup_group", threadKind: "group" },
+  ])(
+    "shares a delivered invite_signup contact card exactly once in the correlated $threadKind chat",
+    async ({ chatId }: { chatId: string }) => {
+      const effectId = "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z";
+      const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+        providerEventCreateCounts: [1, 0],
+        receiptUpdateCounts: [1],
+        sourceRef: effectId,
+        template: "invite_signup",
+      });
+      const scheduledTasks: Array<() => Promise<void>> = [];
+      const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
+        scheduledTasks.push(task);
+      });
+      const event = buildHostedLinqProviderReceiptEvent({
+        chatId,
+        eventId: `evt_delivered_${chatId}`,
+        eventType: "message.delivered",
+        messageId: `provider_msg_${chatId}`,
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(event),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "recorded-linq-provider-event:message.delivered",
+      });
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(event),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        duplicate: true,
+        ignored: true,
+        ok: true,
+        reason: "duplicate-linq-provider-event",
+      });
+
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+      expect(scheduledTasks).toHaveLength(1);
+      const [scheduledTask] = scheduledTasks;
+      if (!scheduledTask) {
+        throw new Error("Expected a delivered-signup contact-card task.");
+      }
+      await scheduledTask();
+
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith({
+        chatId,
+        idempotencyKeyPrefix: "signup-contact-card",
+        memberId: "member_123",
+        prisma,
+      });
+    },
+  );
+
+  it("shares a delivered invite_signup_fallback contact card once in the newly created chat", async () => {
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      providerEventCreateCounts: [1, 0],
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      template: "invite_signup_fallback",
+    });
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
+      scheduledTasks.push(task);
+    });
+    const event = buildHostedLinqProviderReceiptEvent({
+      chatId: "chat_fallback",
+      eventId: "evt_delivered_fallback",
+      eventType: "message.delivered",
+      messageId: "provider_msg_fallback",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify(event),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "recorded-linq-provider-event:message.delivered",
+    });
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify(event),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      duplicate: true,
+      ignored: true,
+      ok: true,
+      reason: "duplicate-linq-provider-event",
+    });
+
+    expect(scheduledTasks).toHaveLength(1);
+    const [scheduledTask] = scheduledTasks;
+    if (!scheduledTask) {
+      throw new Error("Expected a delivered-fallback contact-card task.");
+    }
+    await scheduledTask();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_fallback",
+        memberId: "member_123",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      eventId: "evt_sent_signup",
+      eventType: "message.sent" as const,
+      expectedScheduledTaskCount: 0,
+      label: "message.sent",
+      providerEventCreateCounts: [1],
+      receiptUpdateCounts: [1],
+    },
+    {
+      eventId: "evt_failed_signup",
+      eventType: "message.failed" as const,
+      expectedScheduledTaskCount: 1,
+      label: "message.failed",
+      providerEventCreateCounts: [1],
+      receiptUpdateCounts: [1],
+    },
+    {
+      eventId: "evt_duplicate_signup",
+      eventType: "message.delivered" as const,
+      expectedScheduledTaskCount: 0,
+      label: "duplicate",
+      providerEventCreateCounts: [0],
+      receiptUpdateCounts: [1],
+    },
+    {
+      createdAt: "2026-03-26T11:59:00.000Z",
+      eventId: "evt_stale_signup",
+      eventType: "message.delivered" as const,
+      expectedScheduledTaskCount: 0,
+      label: "stale",
+      providerEventCreateCounts: [1],
+      receiptUpdateCounts: [0],
+    },
+    {
+      createdAt: "2026-03-26T12:00:02.000Z",
+      eventId: "evt_non_advancing_signup",
+      eventType: "message.delivered" as const,
+      expectedScheduledTaskCount: 0,
+      label: "non-advancing",
+      providerEventCreateCounts: [1],
+      receiptUpdateCounts: [0],
+    },
+  ])(
+    "does not share for a $label signup delivery event",
+    async ({
+      createdAt,
+      eventId,
+      eventType,
+      expectedScheduledTaskCount,
+      providerEventCreateCounts,
+      receiptUpdateCounts,
+    }: {
+      createdAt?: string;
+      eventId: string;
+      eventType: "message.delivered" | "message.failed" | "message.sent";
+      expectedScheduledTaskCount: number;
+      providerEventCreateCounts: readonly number[];
+      receiptUpdateCounts: readonly number[];
+    }) => {
+      const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+        providerEventCreateCounts,
+        receiptUpdateCounts,
+        sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+        template: "invite_signup",
+      });
+      const scheduledTasks: Array<() => Promise<void>> = [];
+      const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
+        scheduledTasks.push(task);
+      });
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(buildHostedLinqProviderReceiptEvent({
+          chatId: "chat_signup_no_share",
+          createdAt,
+          eventId,
+          eventType,
+          messageId: "provider_msg_no_share",
+        })),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+      });
+
+      expect(scheduledTasks).toHaveLength(expectedScheduledTaskCount);
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not share a delivered signup contact card over SMS", async () => {
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      template: "invite_signup",
+    });
+    const scheduleAfterResponse = vi.fn();
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: JSON.stringify(buildHostedLinqProviderReceiptEvent({
+        chatId: "chat_signup_sms",
+        eventId: "evt_delivered_signup_sms",
+        eventType: "message.delivered",
+        messageId: "provider_msg_signup_sms",
+        service: "sms",
+      })),
+      scheduleAfterResponse,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+    });
+
+    expect(scheduleAfterResponse).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps delivered signup receipt handling successful when the card share fails", async () => {
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockRejectedValueOnce(
+      new Error("share failed"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
+      sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
+      template: "invite_signup",
+    });
+    const scheduledTasks: Array<() => Promise<void>> = [];
+    const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
+      scheduledTasks.push(task);
+    });
+
+    try {
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: JSON.stringify(buildHostedLinqProviderReceiptEvent({
+          chatId: "chat_signup_share_failure",
+          eventId: "evt_delivered_signup_share_failure",
+          eventType: "message.delivered",
+          messageId: "provider_msg_signup_share_failure",
+        })),
+        scheduleAfterResponse,
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ignored: true,
+        ok: true,
+        reason: "recorded-linq-provider-event:message.delivered",
+      });
+
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+      expect(scheduledTasks).toHaveLength(1);
+      const [scheduledTask] = scheduledTasks;
+      if (!scheduledTask) {
+        throw new Error("Expected a delivered-signup contact-card task.");
+      }
+      await expect(scheduledTask()).resolves.toBeUndefined();
+      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+      expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+      expect(scheduleAfterResponse).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        "Hosted Linq contact-card share failed.",
+        expect.objectContaining({ operation: "share_contact_card_vcf" }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it.each(["sms", "RCS"] as const)(
@@ -9255,15 +9566,21 @@ function buildHostedLinqWebhookBody(input: {
 }
 
 function buildHostedLinqProviderReceiptEvent(input: {
+  chatId?: string | null;
   createdAt?: string;
   eventId: string;
-  eventType: "message.delivered" | "message.failed";
+  eventType: "message.delivered" | "message.failed" | "message.sent";
   messageId: string;
+  service?: string;
 }): HostedLinqWebhookEvent {
+  const service = input.service ?? "iMessage";
   return {
     api_version: "v3",
     created_at: input.createdAt ?? "2026-03-26T12:00:02.000Z",
     data: {
+      ...(input.chatId === null
+        ? {}
+        : { chat_id: input.chatId ?? "chat_123" }),
       error: input.eventType === "message.failed"
         ? {
             code: "30007",
@@ -9272,13 +9589,63 @@ function buildHostedLinqProviderReceiptEvent(input: {
         : undefined,
       message_id: input.messageId,
       phone_number: "+15550000000",
-      service: "iMessage",
+      service,
     },
     event_id: input.eventId,
     event_type: input.eventType,
     trace_id: "trace_delivery_receipt",
     webhook_version: "2026-02-03",
   } as HostedLinqWebhookEvent;
+}
+
+function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
+  providerEventCreateCounts?: readonly number[];
+  receiptUpdateCounts?: readonly number[];
+  sourceRef: string;
+  template: "invite_signup" | "invite_signup_fallback";
+}): HostedOnboardingLinqWebhookPrismaFixture {
+  const providerEventCreateCounts = input.providerEventCreateCounts ?? [1];
+  const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({
+    count: providerEventCreateCounts[providerEventCreateCounts.length - 1] ?? 1,
+  });
+  for (const count of providerEventCreateCounts) {
+    hostedLinqProviderEventCreateMany.mockResolvedValueOnce({ count });
+  }
+
+  const receiptUpdateCounts = input.receiptUpdateCounts ?? [1];
+  const hostedLinqDeliveryUpdateMany = vi.fn().mockResolvedValue({
+    count: receiptUpdateCounts[receiptUpdateCounts.length - 1] ?? 1,
+  });
+  for (const count of receiptUpdateCounts) {
+    hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count });
+  }
+
+  const prisma = asPrismaTransactionClient({
+    hostedLinqAlert: {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    hostedLinqDelivery: {
+      findFirst: vi.fn().mockResolvedValue({
+        id: "hld_signup_receipt",
+        idempotencyKey: null,
+        phoneNumberLookupKey: null,
+        sourceRef: input.sourceRef,
+        template: input.template,
+      }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      updateMany: hostedLinqDeliveryUpdateMany,
+    },
+    hostedLinqLine: buildHostedLinqLineFixture({
+      phoneNumber: "+15550000000",
+    }),
+    hostedLinqProviderEvent: {
+      createMany: hostedLinqProviderEventCreateMany,
+    },
+  });
+  prisma.$transaction = vi.fn(async (
+    operation: (transaction: HostedOnboardingLinqWebhookPrismaFixture) => Promise<unknown>,
+  ) => operation(prisma));
+  return prisma;
 }
 
 function requireParsedHostedLinqProviderEvent(event: HostedLinqWebhookEvent) {
