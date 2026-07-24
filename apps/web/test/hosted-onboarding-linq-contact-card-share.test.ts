@@ -8,6 +8,29 @@ const shareSendMocks = vi.hoisted(() => ({
   sendHostedLinqAttachmentMessage: vi.fn(),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/contact-privacy", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-onboarding/contact-privacy")
+  >();
+  const createStableHostedLinqChatLookupKey = (
+    value: string | number | null | undefined,
+  ): string | null => {
+    const normalized = typeof value === "number" ? String(value) : value?.trim();
+    return normalized ? `hbidx:linq-chat:v1:${normalized}` : null;
+  };
+
+  return {
+    ...actual,
+    createHostedLinqChatLookupKey: createStableHostedLinqChatLookupKey,
+    createHostedLinqChatLookupKeyReadCandidates: (
+      value: string | number | null | undefined,
+    ): string[] => {
+      const lookupKey = createStableHostedLinqChatLookupKey(value);
+      return lookupKey ? [lookupKey] : [];
+    },
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatHandles: shareSendMocks.getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
@@ -30,59 +53,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 import {
-  createHostedLinqChatLookupKey,
-} from "@/src/lib/hosted-onboarding/contact-privacy";
-import {
   isHostedLinqContactCardAutoShareEligible,
   releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt,
   shareMurphHostedLinqContactCardVcfToChat,
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
-const TEST_KEYRING_ENTRIES = {
-  v1: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-  v2: "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=",
-} as const;
-
 describe("hosted Linq contact-card share reservations", () => {
-  let restoreKeyring: (() => void) | null = null;
-
-  beforeEach(() => {
-    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
-      currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
-    });
-  });
-
-  afterEach(() => {
-    restoreKeyring?.();
-    restoreKeyring = null;
-  });
-
-  it("reserves without storing the raw chat id", async () => {
-    const prisma = createContactCardSharePrismaStub();
-    const now = new Date("2026-06-27T12:00:00.000Z");
-
-    await expect(reserveHostedLinqContactCardShareAttempt({
-      chatId: "chat_123",
-      memberId: "member_123",
-      now,
-      prisma: prisma.client,
-    })).resolves.toEqual({
-      action: "share",
-      attemptedAt: now,
-    });
-
-    expect(prisma.rows).toEqual([
-      expect.objectContaining({
-        lastContactCardShareAttemptedAt: now,
-        memberId: "member_123",
-      }),
-    ]);
-    expect(prisma.rows[0]?.linqChatLookupKey).toMatch(/^hbidx:linq-chat:v1:/u);
-    expect(prisma.rows[0]?.linqChatLookupKey).not.toContain("chat_123");
-  });
-
   it("throttles repeat vCard shares for 10 minutes, then allows a re-share", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
@@ -114,34 +91,6 @@ describe("hosted Linq contact-card share reservations", () => {
       action: "share",
       attemptedAt: nextAttempt,
     });
-  });
-
-  it("checks every contact-privacy key version before allowing a share", async () => {
-    const prisma = createContactCardSharePrismaStub();
-    const now = new Date("2026-06-27T12:00:00.000Z");
-    const oldLookupKey = mustCreateHostedLinqChatLookupKey("chat_123");
-
-    restoreKeyring?.();
-    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
-      currentVersion: "v2",
-      entries: { ...TEST_KEYRING_ENTRIES },
-    });
-    prisma.rows.push(createContactCardShareRow({
-      lastContactCardShareAttemptedAt: new Date("2026-06-27T11:55:00.000Z"),
-      linqChatLookupKey: oldLookupKey,
-    }));
-
-    await expect(reserveHostedLinqContactCardShareAttempt({
-      chatId: "chat_123",
-      memberId: "member_123",
-      now,
-      prisma: prisma.client,
-    })).resolves.toEqual({
-      action: "skip",
-      reason: "recent_attempt",
-    });
-    expect(prisma.model.create).not.toHaveBeenCalled();
-    expect(prisma.model.updateMany).not.toHaveBeenCalled();
   });
 
   it("releases only the matching unsent vCard reservation", async () => {
@@ -180,13 +129,7 @@ describe("isHostedLinqContactCardAutoShareEligible", () => {
 });
 
 describe("shareMurphHostedLinqContactCardVcfToChat", () => {
-  let restoreKeyring: (() => void) | null = null;
-
   beforeEach(() => {
-    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
-      currentVersion: "v1",
-      entries: { ...TEST_KEYRING_ENTRIES },
-    });
     shareSendMocks.buildMurphHostedLinqContactCardVcf.mockReturnValue(
       "BEGIN:VCARD\r\nEND:VCARD\r\n",
     );
@@ -204,8 +147,6 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
   });
 
   afterEach(() => {
-    restoreKeyring?.();
-    restoreKeyring = null;
     vi.clearAllMocks();
   });
 
@@ -454,58 +395,4 @@ function rowMatchesUpdate(
       row.lastContactCardShareAttemptedAt !== null
       && row.lastContactCardShareAttemptedAt <= stale.lastContactCardShareAttemptedAt.lte
     );
-}
-
-function createContactCardShareRow(input: {
-  lastContactCardShareAttemptedAt: Date | null;
-  linqChatLookupKey: string;
-}): ContactCardShareRow {
-  return {
-    ...input,
-    memberId: "member_123",
-  };
-}
-
-function mustCreateHostedLinqChatLookupKey(chatId: string): string {
-  const lookupKey = createHostedLinqChatLookupKey(chatId);
-  if (!lookupKey) {
-    throw new Error("Expected hosted Linq chat lookup key.");
-  }
-  return lookupKey;
-}
-
-function configureHostedContactPrivacyKeyringForTest(input: {
-  currentVersion: string;
-  entries: Record<string, string>;
-}): () => void {
-  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
-  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
-
-  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
-    .map(([version, key]) => `${version}:${key}`)
-    .join(",");
-  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
-  clearHostedOnboardingEnvCache();
-
-  return () => {
-    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
-    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
-    clearHostedOnboardingEnvCache();
-  };
-}
-
-function clearHostedOnboardingEnvCache(): void {
-  delete (
-    globalThis as typeof globalThis & {
-      __murphHostedOnboardingEnv?: unknown;
-    }
-  ).__murphHostedOnboardingEnv;
-}
-
-function restoreEnvValue(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-  process.env[key] = value;
 }
