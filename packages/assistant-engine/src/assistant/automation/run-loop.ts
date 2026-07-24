@@ -993,9 +993,16 @@ export async function runAssistantAutomationPass(
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     scanResult.replies.replied > 0
+  // A held-only reply scan replied to nothing and only armed a group
+  // burst-hold wake; the caller's selected-input deferral would otherwise
+  // starve due cron work for the length of the hold.
+  const heldOnlyReplyScan =
+    scanResult.replies.considered === 0 &&
+    scanResult.replies.nextWakeAt !== null
   const shouldDeferCronByCaller =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
+    !heldOnlyReplyScan &&
     input.shouldDeferCron?.() === true
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller

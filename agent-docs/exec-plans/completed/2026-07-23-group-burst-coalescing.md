@@ -22,30 +22,27 @@ In group chats, a burst of N inbound messages produces N serial Murph replies:
 Before opening an auto-reply turn whose pending batch is group-thread inbound
 conversation messages (conversation directness = not direct), hold until the
 newest pending message is >= 5s old OR the oldest pending message is >= 15s
-old, whichever comes first. New arrivals during the hold join the batch and
-reset the 5s clock. The hold is an in-process bounded wait at the automation
-scan seam in `packages/assistant-engine` (engine-owned pure hold decision +
-two-phase channel parking: ready channels proceed first, then held channels
-resume after the earliest residual wait and re-list so late arrivals join).
-Parking the whole channel preserves its cursor ordering while unrelated
-channels proceed. No persisted state, new wake scheduling, or cross-package
-contract changes; if the process dies mid-hold the existing wake backstops
-re-deliver. System/automation mailbox items and direct conversations are never
-held.
+old, whichever comes first. A held group defers to the existing runtime wake
+owner: the scanner skips it without advancing its source cursor and merges the
+hold's resume time into the scan result's reply wake (`replies.nextWakeAt`),
+which the run loop and hosted maintenance already project into the runtime's
+next wake. Selection is frozen per pass, so a mid-hold arrival lands in a later
+pass, re-lists old plus new messages, and recomputes the hold (extension). The
+hold fails open when a later same-source candidate is already visible, and a
+held-only pass no longer defers due cron work. No in-process sleeping, no
+persisted state, no new wake owner. System/automation mailbox items and direct
+conversations are never held.
 
 ### B. Last-wins steered finals in groups
 
-When `resolveAssistantConversationScope(...) === 'group'`, superseded steered
-finals (`precedingResponseSegments` in
-`packages/assistant-engine/src/assistant/local-service.ts`) are dropped:
-not delivered and not persisted as assistant transcript entries. The provider
-thread naturally retains them as working context. A short static line in the
-group-scope system prompt section tells the model that an answer finished
-before a steered group message arrives is replaced only by a later completed
-answer, and that replacement must stand alone. If the model instead chooses
-`finish_without_reply`, the last completed answer is promoted through the
-normal final-reply delivery and transcript path so silence cannot discard an
-owed answer.
+The Codex adapter already owns final-answer selection: `canApplyNoReplyPatch`
+refuses `finish_without_reply` while a completed answer is still owed, and a
+trailing completed answer stays the final response unless a newer completed
+answer supersedes it. The delivery layer adds only the group-scope policy:
+when `resolveAssistantConversationScope(...) === 'group'`, superseded steered
+finals (`precedingResponseSegments`) are suppressed from delivery and vault
+transcript persistence; direct scope keeps per-segment delivery unchanged. The
+group system prompt states these semantics in static thread-stable text.
 
 ### C. Thread-when-stale reply-target guidance
 

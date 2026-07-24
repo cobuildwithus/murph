@@ -1552,7 +1552,51 @@ describe('assistant automation scanner', () => {
     )
   })
 
-  it('extends the group hold and includes a late arrival when the input source refreshes', async () => {
+  it('defers a fresh group burst to the wake owner without advancing the cursor', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const first = createCaptureSummary({
+      captureId: 'capture-group-burst-first',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const inputSource = createAssistantInputSourceForCaptures([first])
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    const stateUpdates: AssistantAutomationState[] = []
+
+    const heldResult = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => burstStartedAt + 1_000,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: next.autoReply.map((entry) => ({ ...entry })),
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(stateUpdates).toEqual([])
+    expect(heldResult.replies.considered).toBe(0)
+    expect(heldResult.replies.nextWakeAt).toBe(
+      new Date(burstStartedAt + 5_000).toISOString(),
+    )
+  })
+
+  it('admits a mid-hold arrival on the next pass and coalesces it into one turn', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
     const first = createCaptureSummary({
       captureId: 'capture-group-burst-first',
@@ -1568,8 +1612,7 @@ describe('assistant automation scanner', () => {
       receivedAt: new Date(burstStartedAt + 3_000).toISOString(),
       threadIsDirect: false,
     })
-    const captures = [first]
-    const inputSource = createAssistantInputSourceForCaptures(captures)
+    const inputSource = createAssistantInputSourceForCaptures([first, second])
     const actualGrouping = await vi.importActual<
       typeof import('../src/assistant/automation/grouping.ts')
     >('../src/assistant/automation/grouping.ts')
@@ -1578,30 +1621,32 @@ describe('assistant automation scanner', () => {
     const scanner = await vi.importActual<
       typeof import('../src/assistant/automation/scanner.ts')
     >('../src/assistant/automation/scanner.ts')
-    let now = burstStartedAt + 1_000
-    const sleep = vi.fn(async (delayMs: number) => {
-      if (sleep.mock.calls.length === 1) {
-        captures.push(second)
-      }
-      now += delayMs
+    const state = createAutomationState({
+      autoReplyChannels: ['telegram'],
     })
 
-    await scanner.scanAssistantAutomationOnce({
+    const stillHeldResult = await scanner.scanAssistantAutomationOnce({
       inboxServices: createInboxServices(),
       inputSource,
-      now: () => now,
-      sleep,
-      state: createAutomationState({
-        autoReplyChannels: ['telegram'],
-      }),
+      now: () => burstStartedAt + 4_000,
+      state,
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(sleep.mock.calls).toEqual([
-      [4_000, undefined],
-      [3_000, undefined],
-    ])
-    expect(inputSource.listInputCandidates).toHaveBeenCalledTimes(3)
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
+    expect(stillHeldResult.replies.nextWakeAt).toBe(
+      new Date(burstStartedAt + 8_000).toISOString(),
+    )
+
+    const releasedResult = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => burstStartedAt + 9_000,
+      state,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(releasedResult.replies.nextWakeAt).toBeNull()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1616,7 +1661,78 @@ describe('assistant automation scanner', () => {
     )
   })
 
-  it('parks only the held channel until its residual group hold expires', async () => {
+  it('fails open when a later same-source candidate waits behind a held group', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const heldGroupInput = createCaptureSummary({
+      captureId: 'capture-held-group',
+      threadId: 'thread-held-group',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const laterSameSourceDirectInput = createCaptureSummary({
+      captureId: 'capture-later-direct',
+      threadId: 'thread-later-direct',
+      createdAt: new Date(burstStartedAt + 1_000).toISOString(),
+      occurredAt: new Date(burstStartedAt + 1_000).toISOString(),
+      receivedAt: new Date(burstStartedAt + 1_000).toISOString(),
+    })
+    const inputSource = createAssistantInputSourceForCaptures([
+      heldGroupInput,
+      laterSameSourceDirectInput,
+    ])
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+    const stateUpdates: AssistantAutomationState[] = []
+
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => burstStartedAt + 2_000,
+      onStateProgress: async (next) => {
+        stateUpdates.push({
+          ...createAutomationState(),
+          autoReply: next.autoReply.map((entry) => ({ ...entry })),
+        })
+      },
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replies.nextWakeAt).toBeNull()
+    expect(
+      scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls.map(
+        ([call]) => call.context.inputIds,
+      ),
+    ).toEqual([
+      [
+        assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
+      ],
+      [
+        assistantInputCandidateFromInboxCapture(
+          laterSameSourceDirectInput,
+        ).event.inputId,
+      ],
+    ])
+    const finalState =
+      stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
+    expect(readAutoReplyCursor(finalState, 'telegram')).toEqual(
+      assistantInputCandidateFromInboxCapture(
+        laterSameSourceDirectInput,
+      ).event.cursor,
+    )
+  })
+
+  it('holds a group without delaying a ready group on another source', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
     const heldGroupInput = createCaptureSummary({
       captureId: 'capture-held-linq-group',
@@ -1636,21 +1752,10 @@ describe('assistant automation scanner', () => {
       occurredAt: new Date(burstStartedAt + 1_000).toISOString(),
       receivedAt: new Date(burstStartedAt - 10_000).toISOString(),
     })
-    const laterSameChannelInput = createCaptureSummary({
-      captureId: 'capture-later-linq',
-      source: 'linq',
-      externalId: 'linq:later-input',
-      threadId: 'thread-later-linq',
-      createdAt: new Date(burstStartedAt + 2_000).toISOString(),
-      occurredAt: new Date(burstStartedAt + 2_000).toISOString(),
-      receivedAt: new Date(burstStartedAt - 10_000).toISOString(),
-    })
-    const captures = [
+    const inputSource = createAssistantInputSourceForCaptures([
       heldGroupInput,
       readyOtherChannelInput,
-      laterSameChannelInput,
-    ]
-    const inputSource = createAssistantInputSourceForCaptures(captures)
+    ])
     const actualGrouping = await vi.importActual<
       typeof import('../src/assistant/automation/grouping.ts')
     >('../src/assistant/automation/grouping.ts')
@@ -1660,155 +1765,45 @@ describe('assistant automation scanner', () => {
       typeof import('../src/assistant/automation/scanner.ts')
     >('../src/assistant/automation/scanner.ts')
     const stateUpdates: AssistantAutomationState[] = []
-    let now = burstStartedAt + 1_000
-    const sleep = vi.fn(async (delayMs: number) => {
-      expect(scannerReplyMocks.processAssistantAutoReplyGroup)
-        .toHaveBeenCalledOnce()
-      expect(scannerReplyMocks.processAssistantAutoReplyGroup)
-        .toHaveBeenLastCalledWith(
-          expect.objectContaining({
-            context: expect.objectContaining({
-              inputIds: [
-                assistantInputCandidateFromInboxCapture(
-                  readyOtherChannelInput,
-                ).event.inputId,
-              ],
-            }),
-          }),
-        )
-      const parkedState =
-        stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
-      expect(readAutoReplyCursor(parkedState, 'linq')).toBeNull()
-      expect(readAutoReplyCursor(parkedState, 'telegram')).toEqual(
-        assistantInputCandidateFromInboxCapture(
-          readyOtherChannelInput,
-        ).event.cursor,
-      )
-      now += delayMs
-    })
 
-    await scanner.scanAssistantAutomationOnce({
+    const result = await scanner.scanAssistantAutomationOnce({
       inboxServices: createInboxServices(),
       inputSource,
-      now: () => now,
+      now: () => burstStartedAt + 1_000,
       onStateProgress: async (next) => {
         stateUpdates.push({
           ...createAutomationState(),
           autoReply: next.autoReply.map((entry) => ({ ...entry })),
         })
       },
-      sleep,
       state: createAutomationState({
         autoReplyChannels: ['linq', 'telegram'],
       }),
       vault: '/tmp/assistant-automation-vault',
     })
 
-    expect(sleep).toHaveBeenCalledOnce()
-    expect(sleep).toHaveBeenCalledWith(4_000, undefined)
-    expect(
-      scannerReplyMocks.processAssistantAutoReplyGroup.mock.calls.map(
-        ([call]) => call.context.inputIds,
-      ),
-    ).toEqual([
-      [
-        assistantInputCandidateFromInboxCapture(
-          readyOtherChannelInput,
-        ).event.inputId,
-      ],
-      [
-        assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
-      ],
-      [
-        assistantInputCandidateFromInboxCapture(
-          laterSameChannelInput,
-        ).event.inputId,
-      ],
-    ])
-    const finalState =
-      stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
-    expect(readAutoReplyCursor(finalState, 'linq')).toEqual(
-      assistantInputCandidateFromInboxCapture(laterSameChannelInput).event.cursor,
-    )
-  })
-
-  it('leaves a held group replayable when the scan aborts mid-hold', async () => {
-    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
-    const heldGroupInput = createCaptureSummary({
-      captureId: 'capture-abort-held-group',
-      createdAt: new Date(burstStartedAt).toISOString(),
-      occurredAt: new Date(burstStartedAt).toISOString(),
-      receivedAt: new Date(burstStartedAt).toISOString(),
-      threadIsDirect: false,
-    })
-    const inputSource = createAssistantInputSourceForCaptures([heldGroupInput])
-    const actualGrouping = await vi.importActual<
-      typeof import('../src/assistant/automation/grouping.ts')
-    >('../src/assistant/automation/grouping.ts')
-    groupingMocks.collectAssistantAutoReplyGroup
-      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
-    const scanner = await vi.importActual<
-      typeof import('../src/assistant/automation/scanner.ts')
-    >('../src/assistant/automation/scanner.ts')
-    const stateUpdates: AssistantAutomationState[] = []
-    const onStateProgress = async (
-      next: Pick<AssistantAutomationState, 'autoReply'>,
-    ) => {
-      stateUpdates.push({
-        ...createAutomationState(),
-        autoReply: next.autoReply.map((entry) => ({ ...entry })),
-      })
-    }
-    const controller = new AbortController()
-    let now = burstStartedAt + 1_000
-    const sleep = vi.fn(async () => {
-      controller.abort()
-    })
-    const state = createAutomationState({
-      autoReplyChannels: ['telegram'],
-    })
-
-    await scanner.scanAssistantAutomationOnce({
-      inboxServices: createInboxServices(),
-      inputSource,
-      now: () => now,
-      onStateProgress,
-      signal: controller.signal,
-      sleep,
-      state,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(sleep).toHaveBeenCalledOnce()
-    expect(scannerReplyMocks.processAssistantAutoReplyGroup).not.toHaveBeenCalled()
-    expect(stateUpdates).toEqual([])
-
-    now = burstStartedAt + 6_000
-    await scanner.scanAssistantAutomationOnce({
-      inboxServices: createInboxServices(),
-      inputSource,
-      now: () => now,
-      onStateProgress,
-      sleep,
-      state,
-      vault: '/tmp/assistant-automation-vault',
-    })
-
-    expect(sleep).toHaveBeenCalledOnce()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
           inputIds: [
-            assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
+            assistantInputCandidateFromInboxCapture(
+              readyOtherChannelInput,
+            ).event.inputId,
           ],
         }),
       }),
     )
+    expect(result.replies.nextWakeAt).toBe(
+      new Date(burstStartedAt + 5_000).toISOString(),
+    )
     const finalState =
       stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
+    expect(readAutoReplyCursor(finalState, 'linq')).toBeNull()
     expect(readAutoReplyCursor(finalState, 'telegram')).toEqual(
-      assistantInputCandidateFromInboxCapture(heldGroupInput).event.cursor,
+      assistantInputCandidateFromInboxCapture(
+        readyOtherChannelInput,
+      ).event.cursor,
     )
   })
 
@@ -7162,6 +7157,49 @@ describe('assistant auto-reply runtime', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('runs due cron during a held-only pass despite the caller deferral', async () => {
+    runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
+      currentTurnDeliveryIntentIds: [],
+      routing: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: null,
+        noAction: 0,
+        routed: 0,
+        skipped: 0,
+      },
+      replies: {
+        considered: 0,
+        failed: 0,
+        nextWakeAt: '2026-05-08T16:00:05.000Z',
+        replied: 0,
+        skipped: 0,
+      },
+    })
+    const shouldDeferCron = vi.fn().mockReturnValue(true)
+    const runLoop = await vi.importActual<
+      typeof import('../src/assistant/automation/run-loop.ts')
+    >('../src/assistant/automation/run-loop.ts')
+
+    const result = await runLoop.runAssistantAutomationPass({
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: {
+          memberId: 'member-test',
+          userEnvKeys: [],
+        },
+      },
+      requestId: 'request-hosted-queue-only-held-only',
+      shouldDeferCron,
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    // The held group replied to nothing; cron must not starve for the length
+    // of the burst hold, and the hold wake still reaches the pass result.
+    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    expect(result.nextWakeAt).toBe('2026-05-08T16:00:05.000Z')
   })
 
   it('passes runtime scope and background-yield policy into cron processing and status', async () => {

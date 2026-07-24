@@ -1506,29 +1506,11 @@ export async function sendAssistantMessageLocal(
           sharedPlan.conversationPolicy.audience,
         )
         const noReplySelected = providerResult.finalAction?.kind === 'none'
-        const providerFinalResponseMissing =
-          noReplySelected ||
-          (
-            normalizeNullableString(providerResult.response) === null &&
-            (providerResult.responseMedia ?? []).length === 0
-          )
-        const promotedGroupPrecedingResponse =
-          conversationScope === 'group' && providerFinalResponseMissing
-            ? providerResult.precedingResponseSegments?.at(-1) ?? null
-            : null
-        const finalResponseDeliveryContextOrdinal =
-          promotedGroupPrecedingResponse?.deliveryContextOrdinal ??
-          providerResult.responseDeliveryContextOrdinal
-        const finalTargetInputId = promotedGroupPrecedingResponse
-          ? promotedGroupPrecedingResponse.targetInputId ?? null
-          : providerResult.targetInputId
-        const finalResponseMedia = promotedGroupPrecedingResponse
-          ? promotedGroupPrecedingResponse.media ?? []
-          : providerResult.responseMedia ?? []
         const resolvedFinalReplyDeliveryContext =
           resolveAssistantReplyDeliveryContextForSegment({
             contexts: replyDeliveryContexts,
-            deliveryContextOrdinal: finalResponseDeliveryContextOrdinal,
+            deliveryContextOrdinal:
+              providerResult.responseDeliveryContextOrdinal,
           })
         if (
           resolvedFinalReplyDeliveryContext.invalidDeliveryContextOrdinal !==
@@ -1620,11 +1602,9 @@ export async function sendAssistantMessageLocal(
             vault: input.vault,
           })
         }
-        const rawFinalResponseText = promotedGroupPrecedingResponse
-          ? promotedGroupPrecedingResponse.response
-          : noReplySelected
-            ? null
-            : resolveAssistantProviderFinalResponseText(providerResult)
+        const rawFinalResponseText = noReplySelected
+          ? null
+          : resolveAssistantProviderFinalResponseText(providerResult)
         const finalResponseText =
           rawFinalResponseText === null
             ? null
@@ -1634,11 +1614,9 @@ export async function sendAssistantMessageLocal(
                 session: currentSession,
                 sharedPlan,
               })
-        const rawTranscriptResponseText = promotedGroupPrecedingResponse
-          ? promotedGroupPrecedingResponse.response
-          : noReplySelected
-            ? null
-            : providerResult.transcriptResponse
+        const rawTranscriptResponseText = noReplySelected
+          ? null
+          : providerResult.transcriptResponse
         const transcriptResponseText =
           rawTranscriptResponseText === null
             ? null
@@ -1649,7 +1627,7 @@ export async function sendAssistantMessageLocal(
                 sharedPlan,
               })
         const assistantTranscriptText = resolveAssistantProviderTranscriptText({
-          media: finalResponseMedia,
+          media: providerResult.responseMedia,
           response: transcriptResponseText,
         })
         const turnArtifactsStartedAt = Date.now()
@@ -1781,17 +1759,18 @@ export async function sendAssistantMessageLocal(
         let finalTargetResolutionError: ReturnType<
           typeof normalizeAssistantDeliveryError
         > | null = null
-        if (finalResponseText !== null && finalTargetInputId) {
+        if (finalResponseText !== null && providerResult.targetInputId) {
           try {
             finalDeliveryInput =
               await applyAssistantAcceptedMessageTargetToDeliveryInput({
                 acceptedInputIdsByDeliveryContextOrdinal,
                 action: 'native-reply',
-                deliveryContextOrdinal: finalResponseDeliveryContextOrdinal,
+                deliveryContextOrdinal:
+                  providerResult.responseDeliveryContextOrdinal,
                 input: finalReplyInput,
                 session: deliverySession,
                 sharedPlan,
-                targetInputId: finalTargetInputId,
+                targetInputId: providerResult.targetInputId,
               })
           } catch (error) {
             finalTargetResolutionError = normalizeAssistantDeliveryError(error)
@@ -1804,12 +1783,12 @@ export async function sendAssistantMessageLocal(
                   kind: 'failed' as const,
                   error: finalTargetResolutionError,
                   intentId: null,
-                  media: [...finalResponseMedia],
+                  media: [...(providerResult.responseMedia ?? [])],
                   session: deliverySession,
                 }
               : await dispatchAssistantReply({
                   input: finalDeliveryInput,
-                  media: finalResponseMedia,
+                  media: providerResult.responseMedia ?? [],
                   response: rawFinalResponseText ?? '',
                   session: deliverySession,
                   sharedPlan,

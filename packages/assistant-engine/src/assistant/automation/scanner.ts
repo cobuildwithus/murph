@@ -38,11 +38,11 @@ import {
 import {
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
+  earliestAssistantAutomationWakeAt,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
   type AssistantRunEvent,
-  waitForAbortOrTimeout,
 } from './shared.js'
 
 interface AssistantAutomationCandidate {
@@ -72,7 +72,6 @@ export async function scanAssistantAutomationOnce(input: {
   providerStallTimeoutMs?: number | null
   requestId?: string | null
   signal?: AbortSignal
-  sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>
   sessionMaxAgeMs?: number | null
   state: Pick<AssistantAutomationState, 'autoReply'>
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -110,7 +109,7 @@ export async function scanAssistantAutomationOnce(input: {
     }
   }
 
-  let candidates = await listAssistantReplyCandidates({
+  const candidates = await listAssistantReplyCandidates({
     autoReply: applyCanonicalWrites ? scanState.autoReply : [],
     inputSource: input.inputSource,
     limit: normalizeScanLimit(input.maxPerScan),
@@ -212,9 +211,9 @@ export async function scanAssistantAutomationOnce(input: {
     return stopReplyScan
   }
 
-  const parkedChannelResumeAt = new Map<string, number>()
+  let earliestGroupHoldResumeAt: number | null = null
   let stopReplyScan = false
-  let candidateIndex = indexAssistantAutomationCandidates(candidates)
+  const candidateIndex = indexAssistantAutomationCandidates(candidates)
   for (let index = 0; index < candidates.length; index += 1) {
     if (input.signal?.aborted) {
       break
@@ -222,10 +221,6 @@ export async function scanAssistantAutomationOnce(input: {
 
     const candidate = candidates[index]
     if (!candidate) {
-      continue
-    }
-    const channel = candidate.summary.source
-    if (parkedChannelResumeAt.has(channel)) {
       continue
     }
 
@@ -239,13 +234,26 @@ export async function scanAssistantAutomationOnce(input: {
       candidatesByInputId: candidateIndex.candidatesByInputId,
       items: group.items,
     })
-    index = group.endIndex
     const holdDecision = decideAssistantGroupBurstHoldForItems({
       items: groupItems,
       now: input.now?.() ?? Date.now(),
     })
-    if (!holdDecision.ready) {
-      parkedChannelResumeAt.set(channel, holdDecision.resumeAt)
+    index = group.endIndex
+    // A held group defers to the runtime wake owner instead of waiting in
+    // process: input selection freezes at pass start, so only a later pass can
+    // admit a mid-hold arrival into the batch. Skipping without processing
+    // keeps the source cursor behind the held group; fail open when a later
+    // same-source candidate is already visible so the hold never delays it.
+    if (
+      !holdDecision.ready &&
+      !candidates
+        .slice(index + 1)
+        .some((later) => later.summary.source === candidate.summary.source)
+    ) {
+      earliestGroupHoldResumeAt =
+        earliestGroupHoldResumeAt === null
+          ? holdDecision.resumeAt
+          : Math.min(earliestGroupHoldResumeAt, holdDecision.resumeAt)
       continue
     }
 
@@ -254,96 +262,11 @@ export async function scanAssistantAutomationOnce(input: {
       break
     }
   }
-
-  while (
-    !stopReplyScan &&
-    parkedChannelResumeAt.size > 0 &&
-    input.signal?.aborted !== true
-  ) {
-    const now = input.now?.() ?? Date.now()
-    let earliestParkedChannel: string | null = null
-    let earliestResumeAt = Number.POSITIVE_INFINITY
-    for (const [channel, resumeAt] of parkedChannelResumeAt) {
-      if (resumeAt < earliestResumeAt) {
-        earliestParkedChannel = channel
-        earliestResumeAt = resumeAt
-      }
-    }
-    if (earliestParkedChannel === null) {
-      break
-    }
-
-    await (input.sleep ?? sleepForAssistantGroupBurstHold)(
-      Math.max(0, earliestResumeAt - now),
-      input.signal,
+  if (earliestGroupHoldResumeAt !== null) {
+    replies.nextWakeAt = earliestAssistantAutomationWakeAt(
+      replies.nextWakeAt,
+      new Date(earliestGroupHoldResumeAt).toISOString(),
     )
-    if (input.signal?.aborted) {
-      break
-    }
-
-    candidates = await listAssistantReplyCandidates({
-      autoReply: applyCanonicalWrites
-        ? scanState.autoReply.filter(
-            (entry) => entry.channel === earliestParkedChannel,
-          )
-        : [],
-      inputSource: input.inputSource,
-      limit: normalizeScanLimit(input.maxPerScan),
-      signal: input.signal,
-      vault: input.vault,
-    })
-    candidateIndex = indexAssistantAutomationCandidates(candidates)
-    const phaseChannels = new Set([earliestParkedChannel])
-    const blockedChannels = new Set<string>()
-    const seenChannels = new Set<string>()
-    for (let index = 0; index < candidates.length; index += 1) {
-      if (input.signal?.aborted) {
-        break
-      }
-
-      const candidate = candidates[index]
-      if (!candidate) {
-        continue
-      }
-      const channel = candidate.summary.source
-      if (!phaseChannels.has(channel) || blockedChannels.has(channel)) {
-        continue
-      }
-      seenChannels.add(channel)
-
-      const group = await collectAssistantAutoReplyGroup({
-        inputSummaries: candidateIndex.inputSummaries,
-        inputCandidatesByInputId: candidateIndex.inputCandidatesByInputId,
-        startIndex: index,
-        vault: input.vault,
-      })
-      const groupItems = hydrateAssistantAutoReplyGroupItems({
-        candidatesByInputId: candidateIndex.candidatesByInputId,
-        items: group.items,
-      })
-      index = group.endIndex
-      const holdDecision = decideAssistantGroupBurstHoldForItems({
-        items: groupItems,
-        now: input.now?.() ?? Date.now(),
-      })
-      if (!holdDecision.ready) {
-        parkedChannelResumeAt.set(channel, holdDecision.resumeAt)
-        blockedChannels.add(channel)
-        continue
-      }
-
-      parkedChannelResumeAt.delete(channel)
-      stopReplyScan = await processGroupItems(groupItems)
-      if (stopReplyScan) {
-        break
-      }
-    }
-
-    for (const channel of phaseChannels) {
-      if (!seenChannels.has(channel)) {
-        parkedChannelResumeAt.delete(channel)
-      }
-    }
   }
 
   return {
@@ -404,20 +327,6 @@ function hydrateAssistantAutoReplyGroupItems(input: {
       item.inputCandidate ??
       null,
   }))
-}
-
-async function sleepForAssistantGroupBurstHold(
-  delayMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  if (signal) {
-    await waitForAbortOrTimeout(signal, delayMs)
-    return
-  }
-
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, delayMs)
-  })
 }
 
 export async function hasPendingAssistantAutoReplyInput(input: {
