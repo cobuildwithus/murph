@@ -107,7 +107,7 @@ export function GroupJoinAcceptForm(props: {
     () => new Set(
       props.alreadyActiveMember
         ? props.activeVaultShareProjectionScopes.map(buildHostedVaultShareProjectionScopeKey)
-        : [],
+        : props.permissions.map((permission) => permission.projectionScopeKey),
     ),
   );
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
@@ -180,7 +180,7 @@ export function GroupJoinAcceptForm(props: {
               Optional sharing
             </span>
             <p className="text-[13px] leading-5 text-muted-foreground">
-              Join either way. Change anytime.
+              Uncheck anything you don&apos;t want to share. Join either way. Change anytime.
             </p>
           </div>
           <div className="flex flex-col gap-2.5">
