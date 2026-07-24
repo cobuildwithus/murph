@@ -100,11 +100,13 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).toContain(
       'Keep ordinary replies flat. Use `murph.select_reply_target`',
     )
+    // The live-but-scrolled-past boundary is what separates a legitimate
+    // targeted reply from reviving a topic the room already left.
     expect(normalized).toContain(
-      'when the response addresses a message that is no longer the latest inbound, or when multiple conversations interleave.',
+      'when what you say answers a specific earlier message the room has scrolled past but not moved on from, or when several conversations are interleaved and a bare reply would look like it belongs to the wrong one.',
     )
     expect(normalized).toContain(
-      'A merged reply covering the whole recent burst stays flat.',
+      'When you are simply adding to the room rather than answering one message, stay flat.',
     )
     expect(normalized).toContain(
       'The selection applies to the whole response, including every `---` bubble.',
@@ -164,7 +166,7 @@ describe('assistant group-chat style guidance', () => {
       'After watching, say one thing or nothing.',
     )
     expect(normalized).toContain(
-      'You are answering a moment, not a backlog: never recap what you read, never work through it point by point, and never write a message whose job is to cover everything that arrived.',
+      'You are answering a moment, not a backlog: never recap what you read, never work through it point by point, and never write a message whose only job is coverage.',
     )
     expect(normalized).toContain(
       'Often a reaction alone is the better move.',
@@ -172,10 +174,32 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).toContain(
       'When what you say targets an earlier message, use the stale-message reply-target rule below.',
     )
-    // The digest framing this replaced is what pushed Murph toward one big
-    // catch-all reply per burst.
-    expect(normalized).not.toContain('answer the whole burst once')
-    expect(normalized).not.toContain('the ladder against the whole burst')
+    // The narrow multi-answer case is about people who asked, never about
+    // volume of unread messages.
+    expect(normalized).toContain(
+      'The one exception is people, not volume: if two people each asked you something that still needs an answer, answer both of them, briefly, in that one message.',
+    )
+  })
+
+  it('sanctions no wording that treats a volley as work to cover', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // Guard the whole family of digest framings, not just the exact sentences
+    // an earlier revision happened to use. Any permissive phrasing here lets
+    // the model synthesize one catch-all reply to a banter volley, which is
+    // the behavior this guidance exists to prevent.
+    for (const digestFraming of [
+      /answer(?:ing)? the whole burst/i,
+      /against the whole burst/i,
+      /everything that arrived/i,
+      /merged reply covering/i,
+      /burst-covering/i,
+      /answer once against/i,
+      /respond(?:ing)? to each (?:message|one)/i,
+      /reply to (?:all|each) of (?:them|the messages)/i,
+    ]) {
+      expect(normalized).not.toMatch(digestFraming)
+    }
   })
 
   it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {
