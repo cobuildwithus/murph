@@ -104,6 +104,51 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupPrompt).toContain(
+      'It does not withdraw an answer already completed in that turn; that answer still sends.',
+    )
+    expect(groupPrompt).toContain(
+      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+    )
+    expect(groupPrompt).toContain(
+      'Make it stand alone and carry forward anything still worth saying.',
+    )
+    expect(groupPrompt).toContain(
+      'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
+    )
+    // Watching must not turn into a catch-all digest of the burst.
+    expect(groupPrompt).toContain(
+      'Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point.',
+    )
+    expect(groupPrompt).not.toContain('everything that arrived')
+    expect(groupPrompt).toContain(
+      'Answer immediately when someone needs you or the beat is yours.',
+    )
+    expect(groupPrompt).toContain(
+      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+    )
+    expect(directPrompt).not.toContain(
+      'that answer still sends',
+    )
+    expect(directPrompt).not.toContain(
+      'that response replaces the earlier answer',
+    )
+    expect(groupPrompt).toContain(
+      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley',
+    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({

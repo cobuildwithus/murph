@@ -380,7 +380,7 @@ function buildStableRouteCapabilityPrompt(
     ),
     buildAssistantCliGuidanceText(input.cliAccess),
     conversationScope === "group"
-      ? "In this group, use the CLI only for public reference reads and group-owned state. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
+      ? "In this group, use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
       : null,
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
@@ -1140,8 +1140,10 @@ function buildAssistantTurnPriorityText(
 3. Resolve ambiguity only from the current conversation, public sources, group-owned state, and server-approved shared projections. Never inspect the room vault for a participant's personal evidence.
 4. Ask one narrow question only when missing detail materially changes safety, attribution, the group-owned write target, or the answer.
 5. Complete only public reads and authorized group-owned actions. Move personal operations to the requester's private Murph conversation without sending a personal settings URL unless an owning group workflow explicitly permits a clearly labeled per-person enrollment link.
-6. Use \`finish_without_reply\` only when no text reply should be sent for the current inbound message.
-7. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.`;
+6. Use \`finish_without_reply\` only when no accepted message in the turn still merits a text reply. It does not withdraw an answer already completed in that turn; that answer still sends.
+7. If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer. Make it stand alone and carry forward anything still worth saying.
+8. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.
+9. When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell \`sleep\` for a few seconds, never more than about 10, then look again. Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point. Answer immediately when someone needs you or the beat is yours. Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.`;
   }
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.
