@@ -40,12 +40,6 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
   signal?: AbortSignal;
 }): Promise<HostedTelegramGroupOfferCallbackResult> {
   const { callbackQuery } = input;
-  const kinds = readHostedTelegramGroupOfferCallbackKinds(callbackQuery.data);
-
-  if (!kinds) {
-    return { handled: false, reason: "unsupported-callback-data" };
-  }
-
   const answer = async (text: string | null): Promise<void> => {
     await answerHostedTelegramCallbackQueryBestEffort({
       callbackQueryId: callbackQuery.id,
@@ -53,6 +47,14 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
       text,
     });
   };
+
+  // Answer before every exit, including this one: an unanswered callback leaves
+  // the tapped button spinning in the member's client.
+  const kinds = readHostedTelegramGroupOfferCallbackKinds(callbackQuery.data);
+  if (!kinds) {
+    await answer(null);
+    return { handled: false, reason: "unsupported-callback-data" };
+  }
 
   // An inline-mode callback carries `inline_message_id` and no chat message, so
   // it can never be matched to a posted offer.

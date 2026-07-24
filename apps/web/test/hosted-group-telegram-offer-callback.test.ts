@@ -198,6 +198,26 @@ describe("hosted telegram group offer callback", () => {
     expect(mocks.acceptHostedGroupOfferAffirmation).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["an inline-mode callback", { message: undefined }],
+    ["a bot actor", { from: { id: 99, is_bot: true } }],
+    ["unrecognized callback data", { data: "murph:group:something-else" }],
+    ["an ambiguous identity", {}],
+  ])("answers the callback even when it refuses to grant for %s", async (_l, overrides) => {
+    if (Object.keys(overrides).length === 0) {
+      mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+        status: "ambiguous",
+      });
+    }
+
+    await handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery(overrides),
+      prisma,
+    });
+
+    expect(mocks.answerHostedTelegramCallbackQueryBestEffort).toHaveBeenCalledTimes(1);
+  });
+
   it("always answers the callback so the client spinner stops", async () => {
     await handleHostedTelegramGroupOfferCallback({
       callbackQuery: buildCallbackQuery(),
