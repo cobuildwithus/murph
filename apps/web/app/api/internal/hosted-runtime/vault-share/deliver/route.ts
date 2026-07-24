@@ -13,6 +13,9 @@ import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "@/src/lib/hosted-execution/logging";
 import {
+  HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
+} from "@/src/lib/hosted-vault-share/delivery-limits";
+import {
   hostedOnboardingError,
 } from "@/src/lib/hosted-onboarding/errors";
 import {
@@ -22,7 +25,6 @@ import {
 import { readOptionalJsonObject } from "@/src/lib/http";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
-const HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES = 16 * 1024;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_AGE_DAYS = 60;
 const HOSTED_VAULT_SHARE_DELIVER_MAX_RECORD_FUTURE_DAYS = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;

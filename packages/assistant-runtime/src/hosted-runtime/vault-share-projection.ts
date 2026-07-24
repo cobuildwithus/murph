@@ -28,7 +28,9 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
-  HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   type HostedVaultShareActivityDistanceProjectionSpec,
   type HostedVaultShareActivityMinutesProjectionSpec,
   type HostedVaultShareActivitySessionCountProjectionSpec,
@@ -36,6 +38,7 @@ import {
   type HostedVaultShareDailyMetricProjectionSpec,
   type HostedVaultShareProjectionKind,
   type HostedVaultShareProjectionScope,
+  type HostedVaultShareWorkout,
 } from "@murphai/hosted-execution/vault-share";
 import {
   type ProjectedWearableSleepSummary,
@@ -110,10 +113,16 @@ export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   timeZone?: string | null;
 };
 
-type ProjectableWorkoutLatestStartCandidate = {
-  latestStartLocalMs: number;
+type ProjectableWorkoutCandidate = {
   row: ActivitySessionProjectionRow;
+  startedAtMs: number;
   timeZone: string;
+  workout: HostedVaultShareWorkout;
+};
+
+type ActivitySessionProjectionReadResult = {
+  complete: boolean;
+  rows: ActivitySessionProjectionRow[];
 };
 
 type ProjectableProfileNameResolution = {
@@ -191,7 +200,10 @@ export async function offerHostedVaultShareProjectionBestEffort(input: {
 type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outcome"];
 
 export interface HostedVaultShareProjectionReadContext {
-  activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
+  activityRowsByVaultAndCutoff?: Map<
+    string,
+    Promise<ActivitySessionProjectionReadResult>
+  >;
 }
 
 type ProjectableRecordReader = (input: {
@@ -241,9 +253,9 @@ function resolveProjectableRecordReader(
       return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot);
     case "workout-days.v0":
       return ({ vaultRoot }) => readProjectableWorkoutDays(vaultRoot);
-    case "workout-latest-start-days.v0":
+    case "workouts.v0":
       return ({ context, vaultRoot }) =>
-        readProjectableWorkoutLatestStartDays(vaultRoot, context);
+        readProjectableWorkoutsDays(vaultRoot, context);
     default: {
       const activityMinutesSpec =
         getHostedVaultShareActivityMinutesProjectionSpec(projectionScope);
@@ -513,21 +525,28 @@ export async function readProjectableWorkoutDays(
   });
 }
 
-export async function readProjectableWorkoutLatestStartDays(
+export async function readProjectableWorkoutsDays(
   vaultRoot: string,
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const sourceReadFromDate = new Date(
-    nowMs - (HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS + 1) * DAY_MS,
-  ).toISOString().slice(0, 10);
-  const [rows, vaultTimeZone] = await Promise.all([
+  const sourceReadFromDate = shiftIsoDate(
+    new Date(nowMs).toISOString().slice(0, 10),
+    -HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
+  );
+  if (!sourceReadFromDate) {
+    return [];
+  }
+  const [activityRead, vaultTimeZone] = await Promise.all([
     readProjectableActivitySessionRows(vaultRoot, sourceReadFromDate, context),
     readProjectableVaultTimeZone(vaultRoot),
   ]);
-  return selectProjectableWorkoutLatestStartDays({
+  if (!activityRead.complete) {
+    return [];
+  }
+  return selectProjectableWorkoutsDays({
     nowMs,
-    rows,
+    rows: activityRead.rows,
     vaultTimeZone,
   });
 }
@@ -559,8 +578,12 @@ export async function readProjectableActivityMinutesDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
-  return selectProjectableActivityMinutesDays({ nowMs, rows, spec });
+  const activityRead = await readProjectableActivitySessionRows(
+    vaultRoot,
+    cutoffDate,
+    context,
+  );
+  return selectProjectableActivityMinutesDays({ nowMs, rows: activityRead.rows, spec });
 }
 
 export async function readProjectableActivityDistanceDays(
@@ -572,8 +595,12 @@ export async function readProjectableActivityDistanceDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
-  return selectProjectableActivityDistanceDays({ nowMs, rows, spec });
+  const activityRead = await readProjectableActivitySessionRows(
+    vaultRoot,
+    cutoffDate,
+    context,
+  );
+  return selectProjectableActivityDistanceDays({ nowMs, rows: activityRead.rows, spec });
 }
 
 export async function readProjectableActivitySessionCountDays(
@@ -585,8 +612,16 @@ export async function readProjectableActivitySessionCountDays(
   const cutoffDate = new Date(
     nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
   ).toISOString().slice(0, 10);
-  const rows = await readProjectableActivitySessionRows(vaultRoot, cutoffDate, context);
-  return selectProjectableActivitySessionCountDays({ nowMs, rows, spec });
+  const activityRead = await readProjectableActivitySessionRows(
+    vaultRoot,
+    cutoffDate,
+    context,
+  );
+  return selectProjectableActivitySessionCountDays({
+    nowMs,
+    rows: activityRead.rows,
+    spec,
+  });
 }
 
 export async function readProjectableHeartRateZoneDays(
@@ -796,19 +831,17 @@ export function selectProjectableWorkoutDays(
   return records;
 }
 
-export function selectProjectableWorkoutLatestStartDays(
+export function selectProjectableWorkoutsDays(
   input: {
     nowMs: number;
     rows: readonly ActivitySessionProjectionRow[];
     vaultTimeZone: string | null;
   },
 ): HostedVaultShareDeliveryRecord[] {
-  const cutoffMs =
-    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
   const vaultTimeZone = normalizeIanaTimeZone(input.vaultTimeZone);
   const candidatesByRow = new Map<
     ActivitySessionProjectionRow,
-    ProjectableWorkoutLatestStartCandidate
+    ProjectableWorkoutCandidate
   >();
 
   for (const row of input.rows) {
@@ -819,82 +852,191 @@ export function selectProjectableWorkoutLatestStartDays(
     if (typeof startedAt !== "string" || !isStrictIsoDateTime(startedAt)) {
       continue;
     }
+    const startedAtMs = Date.parse(startedAt);
+    if (!Number.isFinite(startedAtMs)) {
+      continue;
+    }
     const timeZone = normalizeIanaTimeZone(row.timeZone) ?? vaultTimeZone;
     if (!timeZone) {
       continue;
     }
 
     const localStart = readProjectableWorkoutLocalStart(startedAt, timeZone);
-    if (!localStart) {
+    const currentDate = readTimeZoneDate(input.nowMs, timeZone);
+    if (!localStart || !currentDate) {
       continue;
     }
-    if (localStart.date > formatTimeZoneDateTimeParts(input.nowMs, timeZone).dayKey) continue;
-    const dayMs = Date.parse(`${localStart.date}T00:00:00.000Z`);
-    if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
-      continue;
-    }
-
-    const projectionRow = { ...row, date: localStart.date };
-    candidatesByRow.set(projectionRow, {
-      latestStartLocalMs: localStart.localMs,
-      row: projectionRow,
-      timeZone,
-    });
-  }
-
-  const groups = new Map<string, ProjectableWorkoutLatestStartCandidate[]>();
-  for (const row of dedupeActivitySessionRows([...candidatesByRow.keys()])) {
-    const candidate = candidatesByRow.get(row);
-    if (!candidate) {
-      continue;
-    }
-    const group = groups.get(row.date) ?? [];
-    group.push(candidate);
-    groups.set(row.date, group);
-  }
-
-  const records: HostedVaultShareDeliveryRecord[] = [];
-  for (const [date, candidates] of [...groups.entries()].sort(
-    ([leftDate], [rightDate]) => rightDate.localeCompare(leftDate),
-  )) {
-    const latestStartLocalMs = Math.max(
-      ...candidates.map((candidate) => candidate.latestStartLocalMs),
+    const earliestDate = shiftIsoDate(
+      currentDate,
+      -(HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW - 1),
     );
     if (
-      !Number.isInteger(latestStartLocalMs)
-      || latestStartLocalMs < 0
-      || latestStartLocalMs >= DAY_MS
+      !earliestDate
+      || localStart.date < earliestDate
+      || localStart.date > currentDate
     ) {
       continue;
     }
 
-    records.push({
+    const kind = normalizeActivityKindToken(row.activityKind ?? "");
+    const minutes = row.durationMinutes;
+    if (
+      !kind
+      || kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
+      || typeof minutes !== "number"
+      || !Number.isFinite(minutes)
+      || minutes <= 0
+      || minutes > DAY_MAX_MINUTES
+    ) {
+      return [];
+    }
+
+    const projectionRow: ActivitySessionProjectionRow = {
+      ...row,
+      activityKind: kind,
+      date: localStart.date,
+      durationMinutes: minutes,
+    };
+    candidatesByRow.set(projectionRow, {
+      row: projectionRow,
+      startedAtMs,
+      timeZone,
+      workout: {
+        kind,
+        minutes,
+        startLocalMs: localStart.localMs,
+      },
+    });
+  }
+
+  const dedupedCandidates: ProjectableWorkoutCandidate[] = [];
+  for (const row of dedupeActivitySessionRows([...candidatesByRow.keys()])) {
+    const candidate = candidatesByRow.get(row);
+    if (candidate) {
+      dedupedCandidates.push(candidate);
+    }
+  }
+
+  const calendarTimeZone = selectWorkoutsCalendarTimeZone(
+    dedupedCandidates,
+    vaultTimeZone,
+  );
+  if (!calendarTimeZone) {
+    return [];
+  }
+  const calendarCurrentDate = readTimeZoneDate(input.nowMs, calendarTimeZone);
+  if (!calendarCurrentDate) {
+    return [];
+  }
+  const windowDates = readRecentIsoDates(
+    calendarCurrentDate,
+    HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW,
+  );
+  if (windowDates.length !== HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+    return [];
+  }
+  const windowDateSet = new Set(windowDates);
+
+  const groups = new Map<string, ProjectableWorkoutCandidate[]>();
+  for (const candidate of dedupedCandidates) {
+    if (!windowDateSet.has(candidate.row.date)) {
+      return [];
+    }
+    const group = groups.get(candidate.row.date) ?? [];
+    group.push(candidate);
+    if (group.length > HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY) {
+      return [];
+    }
+    groups.set(candidate.row.date, group);
+  }
+
+  return windowDates.map((date): HostedVaultShareDeliveryRecord => {
+    const candidates = groups.get(date) ?? [];
+    const workouts = candidates
+      .map((candidate) => candidate.workout)
+      .sort(compareHostedVaultShareWorkouts);
+    const provisional = date === calendarCurrentDate
+      || candidates.some((candidate) =>
+        date === readTimeZoneDate(input.nowMs, candidate.timeZone)
+      );
+
+    return {
       data: {
         date,
-        latestStartLocalMs,
-        ...(candidates.some(({ timeZone }) =>
-          date === formatTimeZoneDateTimeParts(input.nowMs, timeZone).dayKey
-        ) ? { provisional: true } : {}),
-        timeSemantics:
-          HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        ...(provisional ? { provisional: true } : {}),
+        timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+        workouts,
       },
       occurredAt: `${date}T00:00:00.000Z`,
       recordKey: date,
       ...sourceRevisionField(
-        deriveWorkoutLatestStartSourceRevision({
+        deriveWorkoutsSourceRevision({
           candidates,
           date,
-          latestStartLocalMs,
+          workouts,
         }),
       ),
-    });
+    };
+  });
+}
 
-    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
-      break;
-    }
+function selectWorkoutsCalendarTimeZone(
+  candidates: readonly ProjectableWorkoutCandidate[],
+  vaultTimeZone: string | null,
+): string | null {
+  const latestCandidate = [...candidates].sort((left, right) =>
+    right.startedAtMs - left.startedAtMs
+      || left.timeZone.localeCompare(right.timeZone)
+      || left.row.date.localeCompare(right.row.date)
+  )[0];
+  return latestCandidate?.timeZone ?? vaultTimeZone;
+}
+
+function readTimeZoneDate(
+  timestamp: number | string,
+  timeZone: string,
+): string | null {
+  try {
+    const dayKey = formatTimeZoneDateTimeParts(timestamp, timeZone).dayKey;
+    return isStrictIsoDate(dayKey) ? dayKey : null;
+  } catch {
+    return null;
   }
+}
 
-  return records;
+function readRecentIsoDates(currentDate: string, count: number): string[] {
+  const dates: string[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const date = shiftIsoDate(currentDate, -offset);
+    if (!date) {
+      return [];
+    }
+    dates.push(date);
+  }
+  return dates;
+}
+
+function shiftIsoDate(date: string, offsetDays: number): string | null {
+  if (!isStrictIsoDate(date) || !Number.isInteger(offsetDays)) {
+    return null;
+  }
+  const dateMs = Date.parse(`${date}T12:00:00.000Z`);
+  if (!Number.isFinite(dateMs)) {
+    return null;
+  }
+  const shiftedDate = new Date(dateMs + offsetDays * DAY_MS)
+    .toISOString()
+    .slice(0, 10);
+  return isStrictIsoDate(shiftedDate) ? shiftedDate : null;
+}
+
+function compareHostedVaultShareWorkouts(
+  left: HostedVaultShareWorkout,
+  right: HostedVaultShareWorkout,
+): number {
+  return left.startLocalMs - right.startLocalMs
+    || left.kind.localeCompare(right.kind)
+    || left.minutes - right.minutes;
 }
 
 function readProjectableWorkoutLocalStart(
@@ -1209,7 +1351,7 @@ async function readProjectableActivitySessionRows(
   vaultRoot: string,
   cutoffDate: string,
   context?: HostedVaultShareProjectionReadContext,
-): Promise<ActivitySessionProjectionRow[]> {
+): Promise<ActivitySessionProjectionReadResult> {
   if (context) {
     const cacheKey = `${vaultRoot}\u0000${cutoffDate}`;
     context.activityRowsByVaultAndCutoff ??= new Map();
@@ -1230,7 +1372,7 @@ async function readProjectableActivitySessionRows(
     limit: ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT,
   });
   if (entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT) {
-    return [];
+    return { complete: false, rows: [] };
   }
 
   const rows: ActivitySessionProjectionRow[] = [];
@@ -1238,13 +1380,13 @@ async function readProjectableActivitySessionRows(
   for (const entity of entities) {
     const row = toActivitySessionProjectionRow(entity);
     if (row) {
-      // Each selector applies its own date cutoff. The latest-start projection
+      // Each selector applies its own date cutoff. The workouts projection
       // first re-derives the local date from the selected timezone.
       rows.push(row);
     }
   }
 
-  return rows;
+  return { complete: true, rows };
 }
 
 function toActivitySessionProjectionRow(
@@ -1667,11 +1809,14 @@ function deriveCompositeMetricSeriesSourceRevision(
   return hashOpaqueSourceRevision({ revisions: revisions.sort() });
 }
 
-function deriveWorkoutLatestStartSourceRevision(input: {
-  candidates: readonly ProjectableWorkoutLatestStartCandidate[];
+function deriveWorkoutsSourceRevision(input: {
+  candidates: readonly ProjectableWorkoutCandidate[];
   date: string;
-  latestStartLocalMs: number;
+  workouts: readonly HostedVaultShareWorkout[];
 }): string | undefined {
+  if (input.candidates.length === 0) {
+    return undefined;
+  }
   const revisions = input.candidates.map((candidate) =>
     deriveMetricSeriesPointSourceRevision(candidate.row)
   );
@@ -1681,13 +1826,10 @@ function deriveWorkoutLatestStartSourceRevision(input: {
 
   return hashOpaqueSourceRevision({
     date: input.date,
-    latestStartLocalMs: input.latestStartLocalMs,
-    projectionKind: "workout-latest-start-days.v0",
+    projectionKind: "workouts.v0",
     revisions: revisions.sort(),
-    timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-    timeZones: sortedStrings(
-      input.candidates.map((candidate) => candidate.timeZone),
-    ),
+    timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+    workouts: input.workouts,
   });
 }
 

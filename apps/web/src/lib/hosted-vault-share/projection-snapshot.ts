@@ -19,7 +19,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA =
   "murph.hosted-vault-share.projection-snapshot.v1" as const;
 const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCOPE =
   "hosted-vault-share-projection-snapshot:v1";
-const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES = 32 * 1024;
+export const HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES = 32 * 1024;
 
 export interface HostedVaultShareProjectionSnapshotAuthority {
   destinationMemberId: string;

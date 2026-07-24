@@ -43,8 +43,8 @@ import {
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
 const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
 const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
-const WORKOUT_LATEST_START_SCOPE = hostedVaultShareProjectionKindToScope(
-	"workout-latest-start-days.v0",
+const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
+	"workouts.v0",
 );
 const RUNNING_MINUTES_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 	activityKind: "running",
@@ -149,7 +149,7 @@ describe("vault-share active-kinds route", () => {
 			ACTIVITY_SCOPE,
 			DEEP_SLEEP_SCOPE,
 			REM_SLEEP_SCOPE,
-			WORKOUT_LATEST_START_SCOPE,
+			WORKOUTS_SCOPE,
 		]);
 
 		const response = await activeKindsRoute.GET(buildRequest());
@@ -166,7 +166,7 @@ describe("vault-share active-kinds route", () => {
 			ACTIVITY_SCOPE,
 			DEEP_SLEEP_SCOPE,
 			REM_SLEEP_SCOPE,
-			WORKOUT_LATEST_START_SCOPE,
+			WORKOUTS_SCOPE,
 		]);
 
 		const response = await activeKindsRoute.GET(buildRequest(
@@ -174,7 +174,7 @@ describe("vault-share active-kinds route", () => {
 				ACTIVITY_SCOPE,
 				DEEP_SLEEP_SCOPE,
 				REM_SLEEP_SCOPE,
-				WORKOUT_LATEST_START_SCOPE,
+				WORKOUTS_SCOPE,
 			),
 		));
 
@@ -184,13 +184,13 @@ describe("vault-share active-kinds route", () => {
 				"activity-days.v0",
 				"deep-sleep-days.v0",
 				"rem-sleep-days.v0",
-				"workout-latest-start-days.v0",
+				"workouts.v0",
 			],
 			projectionScopes: [
 				ACTIVITY_SCOPE,
 				DEEP_SLEEP_SCOPE,
 				REM_SLEEP_SCOPE,
-				WORKOUT_LATEST_START_SCOPE,
+				WORKOUTS_SCOPE,
 			].sort((left, right) =>
 				buildHostedVaultShareProjectionScopeKey(left)
 					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))

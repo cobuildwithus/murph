@@ -2,6 +2,10 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
+  HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
   type HostedVaultShareDeliveryRecord,
 } from "@murphai/hosted-execution/vault-share";
@@ -21,6 +25,8 @@ import {
   readHostedGroupSharedDataByRuntimeMemberId,
 } from "@/src/lib/hosted-groups/group-store";
 import {
+  HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+  parseHostedVaultShareProjectionSnapshot,
   serializeHostedVaultShareProjectionSnapshot,
 } from "@/src/lib/hosted-vault-share/projection-snapshot";
 
@@ -29,15 +35,15 @@ const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
 const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
 const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
-const WORKOUT_LATEST_START_SCOPE = hostedVaultShareProjectionKindToScope(
-  "workout-latest-start-days.v0",
+const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
+  "workouts.v0",
 );
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
 const DEEP_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(DEEP_SLEEP_SCOPE);
 const REM_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(REM_SLEEP_SCOPE);
-const WORKOUT_LATEST_START_KEY = buildHostedVaultShareProjectionScopeKey(
-  WORKOUT_LATEST_START_SCOPE,
+const WORKOUTS_KEY = buildHostedVaultShareProjectionScopeKey(
+  WORKOUTS_SCOPE,
 );
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
 
@@ -46,7 +52,7 @@ type TestProjectionScope =
   | typeof STEPS_SCOPE
   | typeof DEEP_SLEEP_SCOPE
   | typeof REM_SLEEP_SCOPE
-  | typeof WORKOUT_LATEST_START_SCOPE
+  | typeof WORKOUTS_SCOPE
   | typeof DEVICE_SCOPE;
 
 beforeEach(() => {
@@ -149,6 +155,80 @@ function createPrisma(input: {
     transaction,
   };
 }
+
+describe("workouts.v0 snapshot bounds", () => {
+  it("keeps the maximum parser-valid seven-day workout snapshot within its byte limit", () => {
+    // This finite in-range value exercises the longest JSON number spelling used
+    // by the bounded duration field rather than relying only on integer minutes.
+    const maximumWidthMinutes = 0.0000030024105450300988;
+    expect(JSON.stringify(maximumWidthMinutes)).toHaveLength(24);
+
+    const records = Array.from(
+      { length: HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS },
+      (_, dayIndex): HostedVaultShareDeliveryRecord => {
+        const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
+        return {
+          data: {
+            date,
+            provisional: true,
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+            workouts: Array.from(
+              { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
+              (_, workoutIndex) => ({
+                kind: "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH),
+                minutes: maximumWidthMinutes,
+                startLocalMs: 86_399_999 - workoutIndex,
+              }),
+            ),
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+          sourceRevision: "A".repeat(
+            HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH,
+          ),
+        };
+      },
+    );
+
+    const serialized = snapshot({
+      id: "share_workouts_maximum",
+      memberId: "member_workouts_maximum",
+      projectionScope: WORKOUTS_SCOPE,
+      records,
+    });
+    const encoder = new TextEncoder();
+
+    const snapshotBytes = encoder.encode(serialized).byteLength;
+    expect(snapshotBytes).toBe(15_913);
+    expect(snapshotBytes).toBeLessThanOrEqual(
+      HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
+    );
+  });
+
+  it("rejects an oversized snapshot before parsing or publishing any records", () => {
+    const share = shareRow({
+      id: "share_workouts_oversized",
+      memberId: "member_workouts_oversized",
+      projectionScope: WORKOUTS_SCOPE,
+    });
+
+    expect(() =>
+      parseHostedVaultShareProjectionSnapshot({
+        plaintext: "x".repeat(
+          HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES + 1,
+        ),
+        share: {
+          destinationMemberId: share.destinationMemberId,
+          grantorMemberId: share.grantorMemberId,
+          id: share.id,
+          projectionKind: share.projectionKind,
+          projectionScope: WORKOUTS_SCOPE,
+          projectionScopeKey: share.projectionScopeKey,
+        },
+      })
+    ).toThrow(/snapshot is too large/u);
+  });
+});
 
 describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
   it("returns scoped participant keys and the complete matrix when names collide", async () => {
@@ -389,15 +469,15 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         sourceRevision: "B".repeat(32),
       }],
     });
-    const latestMidnight = snapshot({
-      id: "share_latest_a",
+    const workoutsAtMidnight = snapshot({
+      id: "share_workouts_a",
       memberId: "member_a",
-      projectionScope: WORKOUT_LATEST_START_SCOPE,
+      projectionScope: WORKOUTS_SCOPE,
       records: [{
         data: {
           date,
-          latestStartLocalMs: 0,
           timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+          workouts: [{ kind: "running", minutes: 30, startLocalMs: 0 }],
         },
         occurredAt: `${date}T00:00:00.000Z`,
         recordKey: date,
@@ -410,7 +490,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       projectionScope: DEEP_SLEEP_SCOPE,
       records: [],
     });
-    installCiphertexts({ deepEmpty, deepZero, latestMidnight, remAvailable });
+    installCiphertexts({ deepEmpty, deepZero, remAvailable, workoutsAtMidnight });
     const { prisma } = createPrisma({
       shares: [
         shareRow({
@@ -426,10 +506,10 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           projectionScope: REM_SLEEP_SCOPE,
         }),
         shareRow({
-          ciphertext: "latestMidnight",
-          id: "share_latest_a",
+          ciphertext: "workoutsAtMidnight",
+          id: "share_workouts_a",
           memberId: "member_a",
-          projectionScope: WORKOUT_LATEST_START_SCOPE,
+          projectionScope: WORKOUTS_SCOPE,
         }),
         shareRow({
           ciphertext: "deepEmpty",
@@ -443,9 +523,9 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           projectionScope: REM_SLEEP_SCOPE,
         }),
         shareRow({
-          id: "share_latest_c",
+          id: "share_workouts_c",
           memberId: "member_c",
-          projectionScope: WORKOUT_LATEST_START_SCOPE,
+          projectionScope: WORKOUTS_SCOPE,
         }),
       ],
     });
@@ -455,7 +535,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       projectionScopes: [
         DEEP_SLEEP_SCOPE,
         REM_SLEEP_SCOPE,
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       ],
       runtimeMemberId: RUNTIME_MEMBER_ID,
     });
@@ -465,7 +545,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     expect(result.requestedProjectionScopeKeys).toEqual([
       DEEP_SLEEP_KEY,
       REM_SLEEP_KEY,
-      WORKOUT_LATEST_START_KEY,
+      WORKOUTS_KEY,
     ]);
     expect(result.members).toHaveLength(3);
     for (const member of result.members) {
@@ -488,7 +568,11 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         {
           dataStatus: "available",
           grantStatus: "granted",
-          records: [{ data: { latestStartLocalMs: 0 } }],
+          records: [{
+            data: {
+              workouts: [{ kind: "running", minutes: 30, startLocalMs: 0 }],
+            },
+          }],
         },
       ],
     });

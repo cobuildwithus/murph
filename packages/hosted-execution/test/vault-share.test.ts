@@ -19,7 +19,9 @@ import {
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
-  HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
+  HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliveryRecord,
@@ -34,8 +36,8 @@ const STEPS_SCOPE = { projectionKind: "steps-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
 const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
 const WORKOUT_SCOPE = { projectionKind: "workout-days.v0" } as const;
-const WORKOUT_LATEST_START_SCOPE = {
-  projectionKind: "workout-latest-start-days.v0",
+const WORKOUTS_SCOPE = {
+  projectionKind: "workouts.v0",
 } as const;
 const HEART_RATE_ZONE_SCOPE = { projectionKind: "heart-rate-zones-days.v0" } as const;
 const PROFILE_SCOPE = { projectionKind: "profile-name.v0" } as const;
@@ -94,12 +96,23 @@ const VALID_WORKOUT_RECORD = {
   recordKey: "2026-07-03",
 };
 
-const VALID_WORKOUT_LATEST_START_RECORD = {
+const VALID_WORKOUTS_RECORD = {
   data: {
     date: "2026-07-03",
-    latestStartLocalMs: 18 * 60 * 60 * 1_000,
     timeSemantics:
-      HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+      HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+    workouts: [
+      {
+        kind: "running",
+        minutes: 45,
+        startLocalMs: 18 * 60 * 60 * 1_000,
+      },
+      {
+        kind: "strength-training",
+        minutes: 30,
+        startLocalMs: 19 * 60 * 60 * 1_000,
+      },
+    ],
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -185,7 +198,7 @@ describe("vault-share contracts", () => {
       "rem-sleep-days.v0",
       "activity-days.v0",
       "workout-days.v0",
-      "workout-latest-start-days.v0",
+      "workouts.v0",
       "heart-rate-zones-days.v0",
       "steps-days.v0",
       "max-heart-rate-days.v0",
@@ -941,34 +954,34 @@ describe("workout-days.v0 delivery records", () => {
   });
 });
 
-describe("workout-latest-start-days.v0 delivery records", () => {
-  it("parses the strict latest-local-start record shape", () => {
+describe("workouts.v0 delivery records", () => {
+  it("parses the strict day-keyed workout-array shape", () => {
     expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "workout-latest-start-days.v0",
-      records: [VALID_WORKOUT_LATEST_START_RECORD],
+      projectionKind: "workouts.v0",
+      records: [VALID_WORKOUTS_RECORD],
     })).toEqual({
-      projectionKind: "workout-latest-start-days.v0",
-      projectionScope: WORKOUT_LATEST_START_SCOPE,
-      records: [VALID_WORKOUT_LATEST_START_RECORD],
+      projectionKind: "workouts.v0",
+      projectionScope: WORKOUTS_SCOPE,
+      records: [VALID_WORKOUTS_RECORD],
     });
   });
 
   it("preserves the producer-owned provisional marker", () => {
     const record = {
-      ...VALID_WORKOUT_LATEST_START_RECORD,
+      ...VALID_WORKOUTS_RECORD,
       data: {
-        ...VALID_WORKOUT_LATEST_START_RECORD.data,
+        ...VALID_WORKOUTS_RECORD.data,
         provisional: true,
       },
     };
     expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "workout-latest-start-days.v0",
+      projectionKind: "workouts.v0",
       records: [record],
     }).records).toEqual([record]);
     for (const provisional of [false, "yes"] as const) {
       expect(() =>
         parseHostedVaultShareDeliverRequest({
-          projectionKind: "workout-latest-start-days.v0",
+          projectionKind: "workouts.v0",
           records: [{
             ...record,
             data: { ...record.data, provisional },
@@ -978,82 +991,180 @@ describe("workout-latest-start-days.v0 delivery records", () => {
     }
   });
 
-  it("accepts only integer local clock values within one day", () => {
-    for (const latestStartLocalMs of [0, 86_399_999]) {
-      expect(parseHostedVaultShareDeliveryRecord(
+  it("accepts settled observed-zero days and local-clock boundaries", () => {
+    const emptyRecord = {
+      ...VALID_WORKOUTS_RECORD,
+      data: {
+        ...VALID_WORKOUTS_RECORD.data,
+        workouts: [],
+      },
+    };
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workouts.v0",
+      records: [emptyRecord],
+    }).records).toEqual([emptyRecord]);
+
+    for (const startLocalMs of [0, 86_399_999]) {
+      const parsed = parseHostedVaultShareDeliveryRecord(
         {
-          ...VALID_WORKOUT_LATEST_START_RECORD,
+          ...VALID_WORKOUTS_RECORD,
           data: {
-            ...VALID_WORKOUT_LATEST_START_RECORD.data,
-            latestStartLocalMs,
+            ...VALID_WORKOUTS_RECORD.data,
+            workouts: [{
+              kind: "running",
+              minutes: 1,
+              startLocalMs,
+            }],
           },
         },
-        WORKOUT_LATEST_START_SCOPE,
-      ).data).toMatchObject({ latestStartLocalMs });
-    }
-
-    for (const latestStartLocalMs of [-1, 1.5, 86_400_000]) {
-      expect(() =>
-        parseHostedVaultShareDeliveryRecord(
-          {
-            ...VALID_WORKOUT_LATEST_START_RECORD,
-            data: {
-              ...VALID_WORKOUT_LATEST_START_RECORD.data,
-              latestStartLocalMs,
-            },
-          },
-          WORKOUT_LATEST_START_SCOPE,
-        )
-      ).toThrow(/latestStartLocalMs/u);
+        WORKOUTS_SCOPE,
+      );
+      expect(parsed.data).toMatchObject({
+        workouts: [{ startLocalMs }],
+      });
     }
   });
 
-  it("rejects date drift, semantic drift, and extra details", () => {
+  it("rejects one workout beyond the exported per-day bound instead of truncating the day", () => {
+    const workouts = Array.from(
+      { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1 },
+      (_, index) => ({
+        kind: "running",
+        minutes: 1,
+        startLocalMs: index,
+      }),
+    );
+
     expect(() =>
       parseHostedVaultShareDeliveryRecord(
         {
-          ...VALID_WORKOUT_LATEST_START_RECORD,
+          ...VALID_WORKOUTS_RECORD,
+          data: { ...VALID_WORKOUTS_RECORD.data, workouts },
+        },
+        WORKOUTS_SCOPE,
+      )
+    ).toThrow(
+      new RegExp(`at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY}`, "u"),
+    );
+  });
+
+  it("rejects invalid per-workout local clocks, durations, and kinds", () => {
+    for (const startLocalMs of [-1, 1.5, 86_400_000]) {
+      expect(() =>
+        parseHostedVaultShareDeliveryRecord(
+          {
+            ...VALID_WORKOUTS_RECORD,
+            data: {
+              ...VALID_WORKOUTS_RECORD.data,
+              workouts: [{
+                kind: "running",
+                minutes: 30,
+                startLocalMs,
+              }],
+            },
+          },
+          WORKOUTS_SCOPE,
+        )
+      ).toThrow(/startLocalMs/u);
+    }
+
+    for (const minutes of [0, -1, 1_441]) {
+      expect(() =>
+        parseHostedVaultShareDeliveryRecord(
+          {
+            ...VALID_WORKOUTS_RECORD,
+            data: {
+              ...VALID_WORKOUTS_RECORD.data,
+              workouts: [{ kind: "running", minutes, startLocalMs: 0 }],
+            },
+          },
+          WORKOUTS_SCOPE,
+        )
+      ).toThrow(/minutes/u);
+    }
+
+    for (const kind of [
+      "",
+      "Running",
+      "x".repeat(HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH + 1),
+    ]) {
+      expect(() =>
+        parseHostedVaultShareDeliveryRecord(
+          {
+            ...VALID_WORKOUTS_RECORD,
+            data: {
+              ...VALID_WORKOUTS_RECORD.data,
+              workouts: [{ kind, minutes: 30, startLocalMs: 0 }],
+            },
+          },
+          WORKOUTS_SCOPE,
+        )
+      ).toThrow(/kind/u);
+    }
+  });
+
+  it("rejects date drift, semantic drift, and undeclared details", () => {
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUTS_RECORD,
           recordKey: "2026-07-02",
         },
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       )
     ).toThrow(/recordKey/u);
     expect(() =>
       parseHostedVaultShareDeliveryRecord(
         {
-          ...VALID_WORKOUT_LATEST_START_RECORD,
+          ...VALID_WORKOUTS_RECORD,
           occurredAt: "2026-07-03T18:00:00.000Z",
         },
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       )
     ).toThrow(/workout date at UTC midnight/u);
     expect(() =>
       parseHostedVaultShareDeliveryRecord(
         {
-          ...VALID_WORKOUT_LATEST_START_RECORD,
+          ...VALID_WORKOUTS_RECORD,
           data: {
-            ...VALID_WORKOUT_LATEST_START_RECORD.data,
+            ...VALID_WORKOUTS_RECORD.data,
             timeSemantics: "utc.v0",
           },
         },
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       )
     ).toThrow(/timeSemantics is invalid/u);
     expect(() =>
       parseHostedVaultShareDeliveryRecord(
         {
-          ...VALID_WORKOUT_LATEST_START_RECORD,
+          ...VALID_WORKOUTS_RECORD,
           data: {
-            ...VALID_WORKOUT_LATEST_START_RECORD.data,
-            sport: "running",
+            ...VALID_WORKOUTS_RECORD.data,
+            timeZone: "UTC",
           },
         },
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       )
-    ).toThrow(/sport/u);
+    ).toThrow(/timeZone/u);
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUTS_RECORD,
+          data: {
+            ...VALID_WORKOUTS_RECORD.data,
+            workouts: [{
+              kind: "running",
+              minutes: 45,
+              provider: "device",
+              startLocalMs: 0,
+            }],
+          },
+        },
+        WORKOUTS_SCOPE,
+      )
+    ).toThrow(/provider/u);
   });
 });
-
 describe("activity-minutes-days.v1 selector delivery records", () => {
   it("parses a valid running minutes daily record", () => {
     expect(parseHostedVaultShareDeliverRequest({

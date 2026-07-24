@@ -14,10 +14,13 @@ import {
   HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+  HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
   hostedVaultShareProjectionKindToScope,
   parseHostedVaultShareDeliverRequest,
+  type HostedVaultShareDeliveryRecord,
   type HostedVaultShareDeliverRequest,
+  type HostedVaultShareWorkoutsDayData,
 } from "@murphai/hosted-execution/vault-share";
 import {
   selectMetricSeries,
@@ -34,7 +37,7 @@ import {
   readProjectableActivitySessionCountDays,
   readProjectableDailyMetricDays,
   readProjectableWorkoutDays,
-  readProjectableWorkoutLatestStartDays,
+  readProjectableWorkoutsDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
   selectProjectableActivityDistanceDays,
@@ -43,7 +46,7 @@ import {
   selectProjectableHeartRateZoneDays,
   selectProjectableSleepNights,
   selectProjectableWorkoutDays,
-  selectProjectableWorkoutLatestStartDays,
+  selectProjectableWorkoutsDays,
   type ActivitySessionProjectionRow,
 } from "../src/hosted-runtime/vault-share-projection.ts";
 import {
@@ -89,8 +92,8 @@ const WALKING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 const SAUNA_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "sauna",
 });
-const WORKOUT_LATEST_START_SCOPE = hostedVaultShareProjectionKindToScope(
-  "workout-latest-start-days.v0",
+const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
+  "workouts.v0",
 );
 
 const ACTIVITY_DAY = {
@@ -204,35 +207,52 @@ function activitySessionRow(input: {
   };
 }
 
-type LatestWorkoutStartRuling =
+type WorkoutsRuling =
   | { status: "missing" }
   | { status: "pending" }
   | {
-      latestStartLocalMs: number;
       qualifies: boolean;
       status: "settled";
+      workoutCount: number;
     };
 
-function scoreSettledLatestWorkoutStartDate(
+type WorkoutsRecord = HostedVaultShareDeliveryRecord & {
+  data: HostedVaultShareWorkoutsDayData;
+};
+
+function isWorkoutsRecord(
+  record: HostedVaultShareDeliveryRecord,
+): record is WorkoutsRecord {
+  return "workouts" in record.data;
+}
+
+function findWorkoutsRecord(
+  records: readonly HostedVaultShareDeliveryRecord[],
+  date: string,
+): WorkoutsRecord | undefined {
+  return records.find((record): record is WorkoutsRecord =>
+    isWorkoutsRecord(record) && record.data.date === date
+  );
+}
+
+function scoreSettledWorkoutsDate(
   records: HostedVaultShareDeliverRequest["records"],
   date: string,
   thresholdLocalMs: number,
-): LatestWorkoutStartRuling {
-  const record = records.find((candidate) =>
-    "date" in candidate.data
-    && candidate.data.date === date
-    && "latestStartLocalMs" in candidate.data
-  );
-  if (!record || !("latestStartLocalMs" in record.data)) {
+): WorkoutsRuling {
+  const record = findWorkoutsRecord(records, date);
+  if (!record) {
     return { status: "missing" };
   }
   if (record.data.provisional === true) {
     return { status: "pending" };
   }
   return {
-    latestStartLocalMs: record.data.latestStartLocalMs,
-    qualifies: record.data.latestStartLocalMs > thresholdLocalMs,
+    qualifies: record.data.workouts.some((workout) =>
+      workout.startLocalMs > thresholdLocalMs
+    ),
     status: "settled",
+    workoutCount: record.data.workouts.length,
   };
 }
 
@@ -872,42 +892,63 @@ describe("selectProjectableWorkoutDays", () => {
   });
 });
 
-describe("selectProjectableWorkoutLatestStartDays", () => {
+describe("selectProjectableWorkoutsDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
 
-  it("derives a date and local clock value from the canonical event timezone", () => {
-    const selected = selectProjectableWorkoutLatestStartDays({
+  it("emits one day-keyed record with every workout in canonical local-clock order", () => {
+    const selected = selectProjectableWorkoutsDays({
       nowMs,
-      rows: [activitySessionRow({
-        activityKind: "running",
-        date: "2026-07-04",
-        durationMinutes: 30,
-        recordIds: ["evt_local_date_crossing"],
-        startedAt: "2026-07-04T01:30:00.000Z",
-        timeZone: "America/Los_Angeles",
-      })],
+      rows: [
+        activitySessionRow({
+          activityKind: "strength-training",
+          date: "2026-07-04",
+          durationMinutes: 30,
+          recordIds: ["evt_local_strength"],
+          startedAt: "2026-07-04T02:00:00.000Z",
+          timeZone: "America/Los_Angeles",
+        }),
+        activitySessionRow({
+          activityKind: "running",
+          date: "2026-07-04",
+          durationMinutes: 45,
+          recordIds: ["evt_local_run"],
+          startedAt: "2026-07-04T01:30:00.000Z",
+          timeZone: "America/Los_Angeles",
+        }),
+      ],
       vaultTimeZone: "UTC",
     });
 
-    expect(selected).toEqual([{
+    expect(selected).toHaveLength(7);
+    expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
         date: "2026-07-03",
-        latestStartLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
         provisional: true,
-        timeSemantics:
-          HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+        workouts: [
+          {
+            kind: "running",
+            minutes: 45,
+            startLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
+          },
+          {
+            kind: "strength-training",
+            minutes: 30,
+            startLocalMs: 19 * 60 * 60 * 1_000,
+          },
+        ],
       },
       occurredAt: "2026-07-03T00:00:00.000Z",
       recordKey: "2026-07-03",
       sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-    }]);
+    });
     expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "workout-latest-start-days.v0",
+      projectionKind: "workouts.v0",
       records: selected,
     }).records).toEqual(selected);
   });
 
-  it("keeps a member behind group midnight pending and settles a later same-day threshold flip", () => {
+  it("keeps a member behind group midnight pending and settles a later threshold flip", () => {
     const date = "2026-07-04";
     const thresholdLocalMs = 18 * 60 * 60 * 1_000;
     const afterGroupMidnight = Date.parse("2026-07-04T10:30:00.000Z");
@@ -921,149 +962,210 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     const earlyWorkout = activitySessionRow({
       activityKind: "running",
       date,
+      durationMinutes: 30,
       recordIds: ["evt_member_behind_early"],
       startedAt: "2026-07-04T08:00:00.000Z",
       timeZone: "America/Los_Angeles",
     });
-    const initial = selectProjectableWorkoutLatestStartDays({
+    const initial = selectProjectableWorkoutsDays({
       nowMs: afterGroupMidnight,
       rows: [earlyWorkout],
       vaultTimeZone: "UTC",
     });
-    expect(initial[0]?.data).toMatchObject({
+    expect(findWorkoutsRecord(initial, date)?.data).toMatchObject({
       date,
-      latestStartLocalMs: 60 * 60 * 1_000,
       provisional: true,
+      workouts: [{ startLocalMs: 60 * 60 * 1_000 }],
     });
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: initial,
-      }).records,
-      date,
-      thresholdLocalMs,
-    )).toEqual({ status: "pending" });
+    expect(scoreSettledWorkoutsDate(initial, date, thresholdLocalMs)).toEqual({
+      status: "pending",
+    });
 
     const laterWorkout = activitySessionRow({
       activityKind: "cycling",
       date,
+      durationMinutes: 30,
       recordIds: ["evt_member_behind_later"],
       startedAt: "2026-07-05T02:00:00.000Z",
       timeZone: "America/Los_Angeles",
     });
-    const updatedButOpen = selectProjectableWorkoutLatestStartDays({
+    const updatedButOpen = selectProjectableWorkoutsDays({
       nowMs: Date.parse("2026-07-05T04:00:00.000Z"),
       rows: [earlyWorkout, laterWorkout],
       vaultTimeZone: "UTC",
     });
-    expect(updatedButOpen[0]?.data).toMatchObject({
-      date,
-      latestStartLocalMs: 19 * 60 * 60 * 1_000,
+    expect(findWorkoutsRecord(updatedButOpen, date)?.data).toMatchObject({
       provisional: true,
+      workouts: [
+        { startLocalMs: 60 * 60 * 1_000 },
+        { startLocalMs: 19 * 60 * 60 * 1_000 },
+      ],
     });
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: updatedButOpen,
-      }).records,
+    expect(scoreSettledWorkoutsDate(
+      updatedButOpen,
       date,
       thresholdLocalMs,
     )).toEqual({ status: "pending" });
 
-    const settled = selectProjectableWorkoutLatestStartDays({
+    const settled = selectProjectableWorkoutsDays({
       nowMs: Date.parse("2026-07-05T07:30:00.000Z"),
       rows: [earlyWorkout, laterWorkout],
       vaultTimeZone: "UTC",
     });
-    expect(settled[0]?.data).not.toHaveProperty("provisional");
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: settled,
-      }).records,
-      date,
-      thresholdLocalMs,
-    )).toEqual({
-      latestStartLocalMs: 19 * 60 * 60 * 1_000,
+    expect(findWorkoutsRecord(settled, date)?.data).not.toHaveProperty(
+      "provisional",
+    );
+    expect(scoreSettledWorkoutsDate(settled, date, thresholdLocalMs)).toEqual({
       qualifies: true,
       status: "settled",
+      workoutCount: 2,
     });
   });
 
-  it("settles a completed member-local date even while the group timezone is still on it", () => {
-    const nowMs = Date.parse("2026-07-04T11:00:00.000Z");
+  it("settles a member-ahead date even while a group timezone is still on it", () => {
+    const memberNowMs = Date.parse("2026-07-04T11:00:00.000Z");
     expect(
-      formatTimeZoneDateTimeParts(nowMs, "America/Los_Angeles").dayKey,
+      formatTimeZoneDateTimeParts(memberNowMs, "America/Los_Angeles").dayKey,
     ).toBe("2026-07-04");
     expect(
-      formatTimeZoneDateTimeParts(nowMs, "Pacific/Kiritimati").dayKey,
+      formatTimeZoneDateTimeParts(memberNowMs, "Pacific/Kiritimati").dayKey,
     ).toBe("2026-07-05");
 
-    const selected = selectProjectableWorkoutLatestStartDays({
-      nowMs,
+    const selected = selectProjectableWorkoutsDays({
+      nowMs: memberNowMs,
       rows: [activitySessionRow({
         activityKind: "running",
         date: "2026-07-04",
+        durationMinutes: 30,
         recordIds: ["evt_member_ahead_settled"],
         startedAt: "2026-07-04T05:00:00.000Z",
         timeZone: "Pacific/Kiritimati",
       })],
       vaultTimeZone: "UTC",
     });
-    expect(selected[0]?.data).not.toHaveProperty("provisional");
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: selected,
-      }).records,
+    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).not
+      .toHaveProperty("provisional");
+    expect(scoreSettledWorkoutsDate(
+      selected,
       "2026-07-04",
       18 * 60 * 60 * 1_000,
     )).toEqual({
-      latestStartLocalMs: 19 * 60 * 60 * 1_000,
       qualifies: true,
       status: "settled",
+      workoutCount: 1,
     });
   });
 
-  it("uses the event timezone for travel finality without disclosing either timezone", () => {
-    const nowMs = Date.parse("2026-07-04T15:30:00.000Z");
-    expect(formatTimeZoneDateTimeParts(nowMs, "Asia/Tokyo").dayKey)
+  it("uses the event timezone for travel finality without disclosing a timezone", () => {
+    const travelNowMs = Date.parse("2026-07-04T15:30:00.000Z");
+    expect(formatTimeZoneDateTimeParts(travelNowMs, "Asia/Tokyo").dayKey)
       .toBe("2026-07-05");
-    expect(formatTimeZoneDateTimeParts(nowMs, "America/Los_Angeles").dayKey)
-      .toBe("2026-07-04");
+    expect(formatTimeZoneDateTimeParts(
+      travelNowMs,
+      "America/Los_Angeles",
+    ).dayKey).toBe("2026-07-04");
 
-    const selected = selectProjectableWorkoutLatestStartDays({
-      nowMs,
+    const selected = selectProjectableWorkoutsDays({
+      nowMs: travelNowMs,
       rows: [activitySessionRow({
         activityKind: "running",
         date: "2026-07-04",
+        durationMinutes: 30,
         recordIds: ["evt_travel_event_zone"],
         startedAt: "2026-07-04T13:00:00.000Z",
         timeZone: "Asia/Tokyo",
       })],
       vaultTimeZone: "America/Los_Angeles",
     });
-    expect(selected[0]?.data).toMatchObject({
+    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).toMatchObject({
       date: "2026-07-04",
-      latestStartLocalMs: 22 * 60 * 60 * 1_000,
+      workouts: [{ startLocalMs: 22 * 60 * 60 * 1_000 }],
     });
-    expect(selected[0]?.data).not.toHaveProperty("provisional");
-    expect(JSON.stringify(selected)).not.toMatch(/timeZone|Asia\/Tokyo|Los_Angeles/u);
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: selected,
-      }).records,
-      "2026-07-04",
-      21 * 60 * 60 * 1_000,
-    )).toMatchObject({ qualifies: true, status: "settled" });
+    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).not
+      .toHaveProperty("provisional");
+    expect(JSON.stringify(selected)).not.toMatch(
+      /timeZone|Asia\/Tokyo|Los_Angeles/u,
+    );
   });
 
-  it("keeps the repeated DST day provisional until that member-local date closes", () => {
+  it("keeps the member calendar's current date provisional across travel zones", () => {
+    const travelNowMs = Date.parse("2026-07-04T16:00:00.000Z");
+    expect(formatTimeZoneDateTimeParts(
+      travelNowMs,
+      "America/Los_Angeles",
+    ).dayKey).toBe("2026-07-04");
+    expect(formatTimeZoneDateTimeParts(travelNowMs, "Asia/Tokyo").dayKey)
+      .toBe("2026-07-05");
+
+    const selected = selectProjectableWorkoutsDays({
+      nowMs: travelNowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "walking",
+          date: "2026-07-03",
+          durationMinutes: 20,
+          recordIds: ["evt_current_zone_anchor"],
+          startedAt: "2026-07-04T06:30:00.000Z",
+          timeZone: "America/Los_Angeles",
+        }),
+        activitySessionRow({
+          activityKind: "running",
+          date: "2026-07-04",
+          durationMinutes: 30,
+          recordIds: ["evt_closed_travel_date"],
+          startedAt: "2026-07-03T15:30:00.000Z",
+          timeZone: "Asia/Tokyo",
+        }),
+      ],
+      vaultTimeZone: "America/Los_Angeles",
+    });
+
+    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).toMatchObject({
+      provisional: true,
+      workouts: [{ kind: "running", startLocalMs: 30 * 60 * 1_000 }],
+    });
+  });
+
+  it("keeps the hidden timezone out of an otherwise identical source revision", () => {
+    const common = {
+      activityKind: "running",
+      date: "2026-07-03",
+      durationMinutes: 45,
+      observedAt: "2026-07-03T23:00:00.000Z",
+      recordIds: ["evt_timezone_opaque"],
+    };
+    const utc = selectProjectableWorkoutsDays({
+      nowMs: Date.parse("2026-07-04T12:00:00.000Z"),
+      rows: [activitySessionRow({
+        ...common,
+        startedAt: "2026-07-03T18:00:00.000Z",
+        timeZone: "UTC",
+      })],
+      vaultTimeZone: "UTC",
+    });
+    const newYork = selectProjectableWorkoutsDays({
+      nowMs: Date.parse("2026-07-04T12:00:00.000Z"),
+      rows: [activitySessionRow({
+        ...common,
+        startedAt: "2026-07-03T22:00:00.000Z",
+        timeZone: "America/New_York",
+      })],
+      vaultTimeZone: "America/New_York",
+    });
+
+    const utcRecord = findWorkoutsRecord(utc, "2026-07-03");
+    const newYorkRecord = findWorkoutsRecord(newYork, "2026-07-03");
+    expect(utcRecord?.data).toEqual(newYorkRecord?.data);
+    expect(utcRecord?.sourceRevision).toMatch(SOURCE_REVISION_PATTERN);
+    expect(utcRecord?.sourceRevision).toBe(newYorkRecord?.sourceRevision);
+  });
+
+  it("keeps both repeated-DST-hour workouts and settles only after the local date closes", () => {
     const rows = [
       activitySessionRow({
         activityKind: "running",
         date: "2026-11-01",
+        durationMinutes: 30,
         recordIds: ["evt_dst_before_fallback"],
         startedAt: "2026-11-01T05:15:00.000Z",
         timeZone: "America/New_York",
@@ -1071,90 +1173,90 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
       activitySessionRow({
         activityKind: "cycling",
         date: "2026-11-01",
+        durationMinutes: 30,
         recordIds: ["evt_dst_after_fallback"],
         startedAt: "2026-11-01T06:15:00.000Z",
         timeZone: "America/New_York",
       }),
     ];
-    const open = selectProjectableWorkoutLatestStartDays({
+    const open = selectProjectableWorkoutsDays({
       nowMs: Date.parse("2026-11-01T06:30:00.000Z"),
       rows,
       vaultTimeZone: "UTC",
     });
-    expect(open).toHaveLength(1);
-    expect(open[0]?.data).toMatchObject({
-      date: "2026-11-01",
-      latestStartLocalMs: 75 * 60 * 1_000,
+    expect(findWorkoutsRecord(open, "2026-11-01")?.data).toMatchObject({
       provisional: true,
+      workouts: [
+        { kind: "cycling", startLocalMs: 75 * 60 * 1_000 },
+        { kind: "running", startLocalMs: 75 * 60 * 1_000 },
+      ],
     });
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: open,
-      }).records,
+    expect(scoreSettledWorkoutsDate(
+      open,
       "2026-11-01",
       60 * 60 * 1_000,
     )).toEqual({ status: "pending" });
 
-    const settled = selectProjectableWorkoutLatestStartDays({
+    const settled = selectProjectableWorkoutsDays({
       nowMs: Date.parse("2026-11-02T05:30:00.000Z"),
       rows,
       vaultTimeZone: "UTC",
     });
-    expect(settled).toHaveLength(1);
-    expect(settled[0]?.data).not.toHaveProperty("provisional");
-    expect(scoreSettledLatestWorkoutStartDate(
-      parseHostedVaultShareDeliverRequest({
-        projectionKind: "workout-latest-start-days.v0",
-        records: settled,
-      }).records,
+    expect(findWorkoutsRecord(settled, "2026-11-01")?.data).not
+      .toHaveProperty("provisional");
+    expect(scoreSettledWorkoutsDate(
+      settled,
       "2026-11-01",
       60 * 60 * 1_000,
     )).toEqual({
-      latestStartLocalMs: 75 * 60 * 1_000,
       qualifies: true,
       status: "settled",
+      workoutCount: 2,
     });
   });
 
-  it("uses a validated vault timezone only when the event timezone is unavailable", () => {
-    const fallback = selectProjectableWorkoutLatestStartDays({
+  it("falls back only to a validated vault timezone and omits events with neither", () => {
+    const fallback = selectProjectableWorkoutsDays({
       nowMs,
       rows: [activitySessionRow({
         activityKind: "running",
         date: ACTIVITY_DAY.date,
+        durationMinutes: 30,
         recordIds: ["evt_vault_zone_fallback"],
         startedAt: "2026-07-03T22:00:00.000Z",
         timeZone: "Mars/Olympus",
       })],
       vaultTimeZone: "America/New_York",
     });
-    expect(fallback[0]?.data).toMatchObject({
-      date: ACTIVITY_DAY.date,
-      latestStartLocalMs: 18 * 60 * 60 * 1_000,
+    expect(findWorkoutsRecord(fallback, ACTIVITY_DAY.date)?.data).toMatchObject({
+      workouts: [{ startLocalMs: 18 * 60 * 60 * 1_000 }],
     });
 
-    const eventZoneWins = selectProjectableWorkoutLatestStartDays({
+    const eventZoneWins = selectProjectableWorkoutsDays({
       nowMs,
       rows: [activitySessionRow({
         activityKind: "running",
         date: ACTIVITY_DAY.date,
+        durationMinutes: 30,
         recordIds: ["evt_event_zone_wins"],
         startedAt: "2026-07-03T22:00:00.000Z",
         timeZone: "UTC",
       })],
       vaultTimeZone: "America/New_York",
     });
-    expect(eventZoneWins[0]?.data).toMatchObject({
-      date: ACTIVITY_DAY.date,
-      latestStartLocalMs: 22 * 60 * 60 * 1_000,
+    expect(findWorkoutsRecord(
+      eventZoneWins,
+      ACTIVITY_DAY.date,
+    )?.data).toMatchObject({
+      workouts: [{ startLocalMs: 22 * 60 * 60 * 1_000 }],
     });
 
-    expect(selectProjectableWorkoutLatestStartDays({
+    expect(selectProjectableWorkoutsDays({
       nowMs,
       rows: [activitySessionRow({
         activityKind: "running",
         date: ACTIVITY_DAY.date,
+        durationMinutes: 30,
         recordIds: ["evt_no_valid_zone"],
         startedAt: "2026-07-03T22:00:00.000Z",
         timeZone: "Mars/Olympus",
@@ -1163,261 +1265,220 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     })).toEqual([]);
   });
 
-  it("preserves exact threshold boundaries and excludes intervention sessions", () => {
-    const exactBoundary = selectProjectableWorkoutLatestStartDays({
-      nowMs,
-      rows: [activitySessionRow({
-        activityKind: "running",
-        date: ACTIVITY_DAY.date,
-        recordIds: ["evt_exact_boundary"],
-        startedAt: "2026-07-03T18:00:00.000Z",
-        timeZone: "UTC",
-      })],
-      vaultTimeZone: "UTC",
+  it("uses a strict any-workout threshold and excludes intervention sessions", () => {
+    const thresholdLocalMs = 18 * 60 * 60 * 1_000;
+    const exactBoundary = activitySessionRow({
+      activityKind: "running",
+      date: ACTIVITY_DAY.date,
+      durationMinutes: 30,
+      recordIds: ["evt_exact_boundary"],
+      startedAt: "2026-07-03T18:00:00.000Z",
+      timeZone: "UTC",
     });
-    expect(exactBoundary[0]?.data).toMatchObject({
-      latestStartLocalMs: 18 * 60 * 60 * 1_000,
+    const later = activitySessionRow({
+      activityKind: "cycling",
+      date: ACTIVITY_DAY.date,
+      durationMinutes: 20,
+      recordIds: ["evt_one_ms_later"],
+      startedAt: "2026-07-03T18:00:00.001Z",
+      timeZone: "UTC",
+    });
+    const intervention = activitySessionRow({
+      activityKind: "sauna",
+      date: ACTIVITY_DAY.date,
+      durationMinutes: 40,
+      isWorkout: true,
+      recordIds: ["evt_intervention_not_eligible"],
+      sourceKind: "intervention_session",
+      startedAt: "2026-07-03T23:00:00.000Z",
+      timeZone: "UTC",
     });
 
-    const justAfter = selectProjectableWorkoutLatestStartDays({
+    const boundaryOnly = selectProjectableWorkoutsDays({
       nowMs,
-      rows: [
-        activitySessionRow({
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          recordIds: ["evt_just_after_boundary"],
-          startedAt: "2026-07-03T18:00:00.001Z",
-          timeZone: "UTC",
-        }),
-        activitySessionRow({
-          activityKind: "sauna",
-          date: ACTIVITY_DAY.date,
-          recordIds: ["evt_intervention_after_boundary"],
-          sourceKind: "intervention_session",
-          startedAt: "2026-07-03T23:00:00.000Z",
-          timeZone: "UTC",
-        }),
-      ],
+      rows: [exactBoundary, intervention],
       vaultTimeZone: "UTC",
     });
-    expect(justAfter[0]?.data).toMatchObject({
-      latestStartLocalMs: 18 * 60 * 60 * 1_000 + 1,
+    expect(scoreSettledWorkoutsDate(
+      boundaryOnly,
+      ACTIVITY_DAY.date,
+      thresholdLocalMs,
+    )).toEqual({
+      qualifies: false,
+      status: "settled",
+      workoutCount: 1,
+    });
+
+    const withLater = selectProjectableWorkoutsDays({
+      nowMs,
+      rows: [exactBoundary, later, intervention],
+      vaultTimeZone: "UTC",
+    });
+    expect(findWorkoutsRecord(
+      withLater,
+      ACTIVITY_DAY.date,
+    )?.data.workouts).toEqual([
+      {
+        kind: "running",
+        minutes: 30,
+        startLocalMs: thresholdLocalMs,
+      },
+      {
+        kind: "cycling",
+        minutes: 20,
+        startLocalMs: thresholdLocalMs + 1,
+      },
+    ]);
+    expect(scoreSettledWorkoutsDate(
+      withLater,
+      ACTIVITY_DAY.date,
+      thresholdLocalMs,
+    )).toEqual({
+      qualifies: true,
+      status: "settled",
+      workoutCount: 2,
     });
   });
 
-  it("deduplicates overlapping activity aliases without collapsing different activities", () => {
-    const deduped = selectProjectableWorkoutLatestStartDays({
+  it("deduplicates overlapping provider copies before emitting the array", () => {
+    const selected = selectProjectableWorkoutsDays({
       nowMs,
       rows: [
         activitySessionRow({
           activityKind: "running",
           date: ACTIVITY_DAY.date,
-          durationMinutes: 60,
-          endedAt: "2026-07-03T19:00:00.000Z",
-          observedAt: "2026-07-03T20:00:00.000Z",
-          recordIds: ["evt_duplicate_preferred"],
+          durationMinutes: 45,
+          endedAt: "2026-07-03T18:45:00.000Z",
+          observedAt: "2026-07-03T19:00:00.000Z",
+          recordIds: ["evt_provider_copy_a"],
           startedAt: "2026-07-03T18:00:00.000Z",
           timeZone: "UTC",
         }),
         activitySessionRow({
           activityKind: "run",
           date: ACTIVITY_DAY.date,
-          durationMinutes: 60,
-          endedAt: "2026-07-03T19:00:30.000Z",
-          observedAt: "2026-07-03T19:30:00.000Z",
-          recordIds: ["evt_duplicate_shifted"],
-          startedAt: "2026-07-03T18:00:30.000Z",
+          durationMinutes: 45,
+          endedAt: "2026-07-03T18:46:00.000Z",
+          observedAt: "2026-07-03T19:05:00.000Z",
+          recordIds: ["evt_provider_copy_b"],
+          startedAt: "2026-07-03T18:01:00.000Z",
+          timeZone: "UTC",
+        }),
+        activitySessionRow({
+          activityKind: "strength-training",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 30,
+          recordIds: ["evt_distinct_strength"],
+          startedAt: "2026-07-03T20:00:00.000Z",
           timeZone: "UTC",
         }),
       ],
       vaultTimeZone: "UTC",
     });
-    expect(deduped[0]?.data).toMatchObject({
-      latestStartLocalMs: 18 * 60 * 60 * 1_000,
-    });
 
-    const distinctActivities = selectProjectableWorkoutLatestStartDays({
+    expect(findWorkoutsRecord(
+      selected,
+      ACTIVITY_DAY.date,
+    )?.data.workouts).toEqual([
+      {
+        kind: "run",
+        minutes: 45,
+        startLocalMs: 18 * 60 * 60 * 1_000 + 60 * 1_000,
+      },
+      {
+        kind: "strength-training",
+        minutes: 30,
+        startLocalMs: 20 * 60 * 60 * 1_000,
+      },
+    ]);
+  });
+
+  it("fails the whole projection when a deduplicated day exceeds the per-day bound", () => {
+    const rows = Array.from(
+      { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY + 1 },
+      (_, index) => activitySessionRow({
+        activityKind: "running",
+        date: ACTIVITY_DAY.date,
+        durationMinutes: 5,
+        recordIds: [`evt_daily_overflow_${index}`],
+        startedAt: new Date(
+          Date.parse("2026-07-03T00:00:00.000Z") + index * 10 * 60 * 1_000,
+        ).toISOString(),
+        timeZone: "UTC",
+      }),
+    );
+
+    expect(selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: "UTC",
+    })).toEqual([]);
+  });
+
+  it("fails closed rather than publishing a partial day when workout details are missing", () => {
+    expect(selectProjectableWorkoutsDays({
       nowMs,
       rows: [
         activitySessionRow({
           activityKind: "running",
           date: ACTIVITY_DAY.date,
-          durationMinutes: 120,
-          recordIds: ["evt_overlapping_run"],
-          startedAt: "2026-07-03T17:00:00.000Z",
+          durationMinutes: 30,
+          recordIds: ["evt_complete_workout"],
+          startedAt: "2026-07-03T18:00:00.000Z",
           timeZone: "UTC",
         }),
         activitySessionRow({
           activityKind: "cycling",
           date: ACTIVITY_DAY.date,
-          durationMinutes: 60,
-          recordIds: ["evt_overlapping_cycle"],
-          startedAt: "2026-07-03T18:30:00.000Z",
+          durationMinutes: null,
+          recordIds: ["evt_workout_without_duration"],
+          startedAt: "2026-07-03T20:00:00.000Z",
           timeZone: "UTC",
         }),
       ],
       vaultTimeZone: "UTC",
-    });
-    expect(distinctActivities[0]?.data).toMatchObject({
-      latestStartLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
-    });
+    })).toEqual([]);
   });
 
-  it("keeps one record per local date across DST and the seven-day window", () => {
-    const dstSelected = selectProjectableWorkoutLatestStartDays({
-      nowMs: Date.parse("2026-11-02T00:00:00.000Z"),
-      rows: [
-        activitySessionRow({
-          activityKind: "running",
-          date: "2026-11-01",
-          recordIds: ["evt_dst_first_0130"],
-          startedAt: "2026-11-01T05:30:00.000Z",
-          timeZone: "America/New_York",
-        }),
-        activitySessionRow({
-          activityKind: "cycling",
-          date: "2026-11-01",
-          recordIds: ["evt_dst_second_0130"],
-          startedAt: "2026-11-01T06:30:00.000Z",
-          timeZone: "America/New_York",
-        }),
-      ],
+  it("scores a settled empty array as observed zero but keeps a missing date unobserved", () => {
+    const selected = selectProjectableWorkoutsDays({
+      nowMs: Date.parse("2026-07-04T12:00:00.000Z"),
+      rows: [],
       vaultTimeZone: "UTC",
     });
-    expect(dstSelected).toHaveLength(1);
-    expect(dstSelected[0]?.data).toMatchObject({
-      date: "2026-11-01",
-      latestStartLocalMs: 90 * 60 * 1_000,
-    });
 
-    const dates = [
-      "2026-07-02",
-      "2026-07-03",
-      "2026-07-04",
-      "2026-07-05",
-      "2026-07-06",
-      "2026-07-07",
-      "2026-07-08",
-      "2026-07-09",
-    ];
-    const selected = selectProjectableWorkoutLatestStartDays({
-      nowMs: Date.parse("2026-07-10T00:00:00.000Z"),
-      rows: dates.map((date) => activitySessionRow({
-        activityKind: "running",
-        date,
-        recordIds: [`evt_window_${date}`],
-        startedAt: `${date}T18:00:00.000Z`,
-        timeZone: "UTC",
-      })),
-      vaultTimeZone: "UTC",
+    expect(selected).toHaveLength(7);
+    expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
+      date: "2026-07-03",
+      timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
+      workouts: [],
     });
-    expect(selected.map((record) => record.recordKey)).toEqual([
-      "2026-07-09",
-      "2026-07-08",
-      "2026-07-07",
-      "2026-07-06",
-      "2026-07-05",
-      "2026-07-04",
+    expect(scoreSettledWorkoutsDate(
+      selected,
       "2026-07-03",
-    ]);
+      18 * 60 * 60 * 1_000,
+    )).toEqual({
+      qualifies: false,
+      status: "settled",
+      workoutCount: 0,
+    });
+    expect(scoreSettledWorkoutsDate(
+      selected,
+      "2026-07-04",
+      18 * 60 * 60 * 1_000,
+    )).toEqual({ status: "pending" });
+    expect(scoreSettledWorkoutsDate(
+      selected,
+      "2026-06-27",
+      18 * 60 * 60 * 1_000,
+    )).toEqual({ status: "missing" });
   });
 
-  it("reads nested canonical workout timing and preserves existing activity selectors", async () => {
-    const vaultRoot = await createActivitySessionVault([{
-      schemaVersion: "murph.event.v1",
-      id: "evt_nested_workout_timing_01",
-      kind: "activity_session",
-      occurredAt: "2026-07-03T22:15:00.000Z",
-      dayKey: ACTIVITY_DAY.date,
-      recordedAt: "2026-07-03T23:05:00.000Z",
-      timeZone: "America/New_York",
-      startAt: "2026-07-03T12:00:00.000Z",
-      endAt: "2026-07-03T12:45:00.000Z",
-      activityType: "running",
-      distanceKm: 5,
-      durationMinutes: 45,
-      workout: {
-        startedAt: "2026-07-03T22:15:00.000Z",
-        endedAt: "2026-07-03T23:00:00.000Z",
-      },
-    }]);
-    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
-
-    try {
-      const latest = await readProjectableWorkoutLatestStartDays(vaultRoot);
-      expect(latest).toEqual([{
-        data: {
-          date: ACTIVITY_DAY.date,
-          latestStartLocalMs: 18 * 60 * 60 * 1_000 + 15 * 60 * 1_000,
-          provisional: true,
-          timeSemantics:
-            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-        },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-      }]);
-      expect(JSON.stringify(latest)).not.toMatch(
-        /endedAt|sport|provider|route|timeZone|2026-07-03T22:15/u,
-      );
-
-      // workout-days.v0 is metric-point-backed; this event-only fixture must
-      // not synthesize those points. Exercise its selector with its real inputs.
-      await expect(readProjectableWorkoutDays(vaultRoot)).resolves.toEqual([]);
-      expect(selectProjectableWorkoutDays(workoutRows({
-        date: ACTIVITY_DAY.date,
-        workoutCount: 1,
-        workoutMinutes: 45,
-      }))).toEqual([{
-        data: {
-          date: ACTIVITY_DAY.date,
-          metricSemantics:
-            HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
-          workoutCount: 1,
-          workoutMinutes: 45,
-        },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-      }]);
-
-      await expect(readProjectableActivityMinutesDays(
-        vaultRoot,
-        requireActivityMinutesSpec(RUNNING_SCOPE),
-      )).resolves.toEqual([{
-        data: {
-          activityKind: "running",
-          date: ACTIVITY_DAY.date,
-          sessionCount: 1,
-          sessionMinutes: 45,
-        },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
-      }]);
-      await expect(readProjectableActivityDistanceDays(
-        vaultRoot,
-        requireActivityDistanceSpec(RUNNING_DISTANCE_SCOPE),
-      )).resolves.toMatchObject([{
-        data: { sessionCount: 1, sessionDistanceMeters: 5_000 },
-      }]);
-      await expect(readProjectableActivitySessionCountDays(
-        vaultRoot,
-        requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
-      )).resolves.toMatchObject([{
-        data: { sessionCount: 1 },
-      }]);
-    } finally {
-      dateNow.mockRestore();
-      await rm(vaultRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("uses stored provider provenance to exclude Oura wellness sessions from workout starts", async () => {
+  it("requires durable workout evidence and excludes Oura wellness on a workout day", async () => {
     const vaultRoot = await createActivitySessionVault([
       {
         schemaVersion: "murph.event.v1",
-        id: "evt_oura_workout_before_wellness",
+        id: "evt_oura_workout",
         kind: "activity_session",
         occurredAt: "2026-07-03T18:30:00.000Z",
         dayKey: "2026-07-03",
@@ -1430,18 +1491,10 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
         },
         activityType: "running",
         durationMinutes: 45,
-        workout: {
-          sourceApp: "oura",
-          sourceWorkoutId: "oura-workout-1",
-          startedAt: "2026-07-03T18:30:00.000Z",
-          endedAt: "2026-07-03T19:15:00.000Z",
-          exercises: [],
-          metrics: {},
-        },
       },
       {
         schemaVersion: "murph.event.v1",
-        id: "evt_oura_wellness_after_workout",
+        id: "evt_oura_wellness",
         kind: "activity_session",
         occurredAt: "2026-07-03T21:30:00.000Z",
         dayKey: "2026-07-03",
@@ -1452,20 +1505,12 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
           resourceType: "session",
           resourceId: "oura-session-1",
         },
-        activityType: "breathing",
+        activityType: "meditation",
         durationMinutes: 30,
-        workout: {
-          sourceApp: "oura",
-          sourceWorkoutId: "oura-session-1",
-          startedAt: "2026-07-03T21:30:00.000Z",
-          endedAt: "2026-07-03T22:00:00.000Z",
-          exercises: [],
-          metrics: {},
-        },
       },
       {
         schemaVersion: "murph.event.v1",
-        id: "evt_manual_strength_workout",
+        id: "evt_manual_strength",
         kind: "activity_session",
         occurredAt: "2026-07-02T20:00:00.000Z",
         dayKey: "2026-07-02",
@@ -1473,12 +1518,6 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
         source: "manual",
         activityType: "strength-training",
         durationMinutes: 45,
-        workout: {
-          startedAt: "2026-07-02T20:00:00.000Z",
-          endedAt: "2026-07-02T20:45:00.000Z",
-          exercises: [],
-          metrics: {},
-        },
       },
       {
         schemaVersion: "murph.event.v1",
@@ -1495,78 +1534,75 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
         },
         activityType: "running",
         durationMinutes: 40,
-        workout: {
-          sourceApp: "strava",
-          sourceWorkoutId: "strava-activity-1",
-          startedAt: "2026-07-01T19:00:00.000Z",
-          endedAt: "2026-07-01T19:40:00.000Z",
-          exercises: [],
-          metrics: {},
-        },
       },
       {
         schemaVersion: "murph.event.v1",
-        id: "evt_legacy_provider_activity_session",
+        id: "evt_whoop_workout",
         kind: "activity_session",
         occurredAt: "2026-06-30T17:00:00.000Z",
         dayKey: "2026-06-30",
         recordedAt: "2026-06-30T17:32:00.000Z",
         source: "device",
         externalRef: {
-          system: "junction",
-          resourceType: "whoop_v2/activity_session",
-          resourceId: "legacy-provider-activity-session-1",
+          system: "whoop",
+          resourceType: "workout",
+          resourceId: "whoop-workout-1",
         },
         activityType: "cycling",
         durationMinutes: 32,
-        workout: {
-          sourceApp: "whoop",
-          sourceWorkoutId: "legacy-provider-activity-session-1",
-          startedAt: "2026-06-30T17:00:00.000Z",
-          endedAt: "2026-06-30T17:32:00.000Z",
-          exercises: [],
-          metrics: {},
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_junction_workout",
+        kind: "activity_session",
+        occurredAt: "2026-06-30T20:00:00.000Z",
+        dayKey: "2026-06-30",
+        recordedAt: "2026-06-30T20:25:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-workouts",
+          resourceId: "junction-workout-1",
         },
+        activityType: "walking",
+        durationMinutes: 25,
       },
     ]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
-      const selected = await readProjectableWorkoutLatestStartDays(vaultRoot);
-      expect(selected.map((record) => record.data)).toEqual([
-        {
-          date: "2026-07-03",
-          latestStartLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
-          timeSemantics:
-            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-        },
-        {
-          date: "2026-07-02",
-          latestStartLocalMs: 20 * 60 * 60 * 1_000,
-          timeSemantics:
-            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-        },
-        {
-          date: "2026-07-01",
-          latestStartLocalMs: 19 * 60 * 60 * 1_000,
-          timeSemantics:
-            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-        },
-        {
-          date: "2026-06-30",
-          latestStartLocalMs: 17 * 60 * 60 * 1_000,
-          timeSemantics:
-            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
-        },
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      expect(findWorkoutsRecord(
+        selected,
+        "2026-07-03",
+      )?.data.workouts).toEqual([{
+        kind: "running",
+        minutes: 45,
+        startLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
+      }]);
+      expect(JSON.stringify(selected)).not.toMatch(/meditation|oura-session/u);
+      expect(findWorkoutsRecord(
+        selected,
+        "2026-07-02",
+      )?.data.workouts).toMatchObject([{ kind: "strength-training" }]);
+      expect(findWorkoutsRecord(
+        selected,
+        "2026-07-01",
+      )?.data.workouts).toMatchObject([{ kind: "running" }]);
+      expect(findWorkoutsRecord(
+        selected,
+        "2026-06-30",
+      )?.data.workouts).toMatchObject([
+        { kind: "cycling" },
+        { kind: "walking" },
       ]);
-      expect(selected).toHaveLength(4);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 
-  it("widens the UTC source read before applying the event-zone date cutoff", async () => {
+  it("widens the UTC source read for the Asia/Tokyo earliest local window day", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_rederived_date_cutoff",
@@ -1579,28 +1615,32 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
       durationMinutes: 30,
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
-      Date.parse("2026-07-10T00:00:00.000Z"),
+      Date.parse("2026-07-09T00:00:00.000Z"),
     );
 
     try {
-      await expect(readProjectableWorkoutLatestStartDays(vaultRoot)).resolves.toMatchObject([{
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      expect(findWorkoutsRecord(selected, "2026-07-03")).toMatchObject({
         data: {
-          date: "2026-07-03",
-          latestStartLocalMs: 30_600_000,
+          workouts: [{
+            kind: "running",
+            minutes: 30,
+            startLocalMs: 30_600_000,
+          }],
         },
         recordKey: "2026-07-03",
-      }]);
+      });
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 
-  it("reads only canonical activity sessions and uses the validated vault timezone fallback", async () => {
+  it("reads canonical activity sessions with vault-zone fallback and never interventions", async () => {
     const vaultRoot = await createActivitySessionVault([
       {
         schemaVersion: "murph.event.v1",
-        id: "evt_activity_for_latest_start",
+        id: "evt_activity_for_workouts",
         kind: "activity_session",
         occurredAt: "2026-07-03T22:00:00.000Z",
         dayKey: ACTIVITY_DAY.date,
@@ -1615,23 +1655,28 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
         occurredAt: "2026-07-03T23:30:00.000Z",
         sessionLocalDate: ACTIVITY_DAY.date,
         interventionType: "sauna",
+        durationMinutes: 30,
       },
     ], "America/New_York");
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
-      const selected = await readProjectableWorkoutLatestStartDays(vaultRoot);
-      expect(selected[0]?.data).toMatchObject({
-        date: ACTIVITY_DAY.date,
-        latestStartLocalMs: 18 * 60 * 60 * 1_000,
-      });
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      expect(findWorkoutsRecord(
+        selected,
+        ACTIVITY_DAY.date,
+      )?.data.workouts).toEqual([{
+        kind: "running",
+        minutes: 45,
+        startLocalMs: 18 * 60 * 60 * 1_000,
+      }]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 
-  it("omits workouts when neither an event nor vault timezone is available", async () => {
+  it("omits workouts when neither an event nor vault timezone validates", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_activity_without_timezone",
@@ -1646,14 +1691,13 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
     try {
-      await expect(readProjectableWorkoutLatestStartDays(vaultRoot)).resolves.toEqual([]);
+      await expect(readProjectableWorkoutsDays(vaultRoot)).resolves.toEqual([]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
     }
   });
 });
-
 describe("selectProjectableActivityMinutesDays", () => {
   const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
   const runningSpec = requireActivityMinutesSpec(RUNNING_SCOPE);
@@ -1906,6 +1950,9 @@ describe("selectProjectableActivityMinutesDays", () => {
     expect(activitySessionReader).toContain('from: cutoffDate');
     expect(activitySessionReader).toContain("ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT");
     expect(activitySessionReader).toContain("entities.length > ACTIVITY_SESSION_SOURCE_ROW_LIMIT");
+    expect(activitySessionReader).toContain(
+      "return { complete: false, rows: [] }",
+    );
     expect(activitySessionReader).toContain('"activity_session"');
     expect(activitySessionReader).toContain('"intervention_session"');
     expect(activitySessionReader).not.toContain("limit: null");
@@ -1945,7 +1992,7 @@ describe("selectProjectableActivityMinutesDays", () => {
         vaultRoot,
         requireActivitySessionCountSpec(RUNNING_SESSION_COUNT_SCOPE),
       )).resolves.toEqual([]);
-      await expect(readProjectableWorkoutLatestStartDays(vaultRoot)).resolves.toEqual([]);
+      await expect(readProjectableWorkoutsDays(vaultRoot)).resolves.toEqual([]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -1974,7 +2021,7 @@ describe("selectProjectableActivityMinutesDays", () => {
       status: "delivered" as const,
     }));
     const activeScopes = [
-      WORKOUT_LATEST_START_SCOPE,
+      WORKOUTS_SCOPE,
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
@@ -2000,7 +2047,7 @@ describe("selectProjectableActivityMinutesDays", () => {
         RUNNING_DISTANCE_SCOPE,
         RUNNING_SCOPE,
         RUNNING_SESSION_COUNT_SCOPE,
-        WORKOUT_LATEST_START_SCOPE,
+        WORKOUTS_SCOPE,
       ]);
       expect(deliver.mock.calls[0]?.[0].records).toEqual([{
         data: {
@@ -2031,12 +2078,19 @@ describe("selectProjectableActivityMinutesDays", () => {
         recordKey: ACTIVITY_DAY.date,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
-      expect(deliver.mock.calls[3]?.[0].records).toMatchObject([{
+      expect(findWorkoutsRecord(
+        deliver.mock.calls[3]?.[0].records ?? [],
+        ACTIVITY_DAY.date,
+      )).toMatchObject({
         data: {
           date: ACTIVITY_DAY.date,
-          latestStartLocalMs: 7 * 60 * 60 * 1_000,
+          workouts: [{
+            kind: "running",
+            minutes: 40,
+            startLocalMs: 7 * 60 * 60 * 1_000,
+          }],
         },
-      }]);
+      });
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });

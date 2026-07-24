@@ -13,26 +13,29 @@ async function readSkill(slug: string): Promise<string> {
 }
 
 describe('assistant group challenge diagnostics guidance', () => {
-  it('enumerates sleep-stage and latest-workout-start scoring semantics', async () => {
+  it('enumerates sleep-stage and workout-array scoring semantics', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain('Deep sleep minutes: `deep-sleep-days.v0`')
     expect(challenge).toContain('REM sleep minutes: `rem-sleep-days.v0`')
     expect(challenge).toContain(
-      'Latest local workout start by day: `workout-latest-start-days.v0`',
+      "Every workout's local start time, duration, and type by day: `workouts.v0`",
     )
     expect(challenge).toContain(
       'normalize the configured threshold once at kickoff to an integer number of milliseconds after local midnight',
     )
     expect(challenge).toContain('6:00 PM is `64,800,000`')
     expect(challenge).toContain(
-      '`latestStartLocalMs > thresholdLocalMs`',
+      '`workouts.some(w => w.startLocalMs > thresholdLocalMs)`',
     )
     expect(challenge).toContain(
       'a workout starting exactly at the threshold does not count as after it',
     )
     expect(challenge).toContain(
-      'A missing date record is not `false`, zero, or evidence that no workout happened',
+      'A settled date record with `workouts: []` is a real observed zero and is scoreable as no qualifying workout',
+    )
+    expect(challenge).toContain(
+      'A missing date record is unobserved: it is not `false`, zero, or evidence that no workout happened',
     )
     expect(challenge).toContain(
       '`canonical-event-zone-or-vault-zone.v0`',
@@ -49,7 +52,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
+      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
     )
     expect(challenge).toContain(
       'Other scopes keep their existing date behavior; current-date Steps remains scoreable.',
@@ -91,7 +94,7 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('scores prior-date records for the new completed-date scopes normally', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const completedDateRule =
-      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
+      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
 
     expect(challenge).toContain(completedDateRule)
     expect(challenge).toContain(

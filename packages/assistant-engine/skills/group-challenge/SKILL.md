@@ -29,7 +29,7 @@ stay off weight, appearance, and health conditions.
 ## Challenge share scopes
 
 Choose the narrowest Vault Share projection scope that matches the agreed
-score. Use daily aggregate records only; never ask for routes, raw workouts,
+score. Use fixed day-keyed projection records only; never ask for routes,
 provider traces, or private 1:1 data for a group challenge.
 
 At kickoff, identify the exact scoring scope and include it with
@@ -99,11 +99,11 @@ request, not as something you cannot preselect and not as automatic sharing.
 - Deep sleep minutes: `deep-sleep-days.v0`
 - REM sleep minutes: `rem-sleep-days.v0`
 - Sleep timing: `sleep-times.v0`
-- Latest local workout start by day: `workout-latest-start-days.v0`
+- Every workout's local start time, duration, and type by day: `workouts.v0`
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 
-For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer
+For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer
 marks the open member-local date `data.provisional: true`; absence means settled. Rank only settled
 records and keep provisional values pending or clearly labeled provisional/live until
 that member's own local day closes. Never use a group, schedule, or UTC clock,
@@ -115,19 +115,21 @@ configured threshold once at kickoff to an integer number of milliseconds
 after local midnight and persist both the original wording and
 `thresholdLocalMs` in **Rules & metric**. For example, 6:00 PM is
 `64,800,000`. Match records to the exact challenge date and score a date as
-qualifying only when `latestStartLocalMs > thresholdLocalMs`; this comparison
-is deliberately strict, so a workout starting exactly at the threshold does
-not count as after it. The per-date maximum is sufficient for any "did any
-workout start after T?" predicate.
+qualifying only when
+`workouts.some(w => w.startLocalMs > thresholdLocalMs)`;
+this comparison is deliberately strict, so a workout starting exactly at the
+threshold does not count as after it.
 
-`workout-latest-start-days.v0` is a bounded daily aggregate, not raw workout
-history. Its required `timeSemantics` value is
+`workouts.v0` is a bounded day-keyed list. Each array element discloses only
+`startLocalMs`, `minutes`, and `kind`. Its required `timeSemantics` value is
 `canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
 event timezone when available and otherwise the member vault timezone; it does
-not prove physical workout location. A missing date record
-is not `false`, zero, or evidence that no workout happened: leave the
-participant unscored and report missing data. That same undisclosed zone dates
-the record and determines provisional state.
+not prove physical workout location. A settled date record with
+`workouts: []` is a real observed zero and is scoreable as no qualifying
+workout. A missing date record is unobserved: it is not `false`, zero, or
+evidence that no workout happened, so leave the participant unscored and
+report missing data. That same undisclosed zone dates the record and
+determines provisional state.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;

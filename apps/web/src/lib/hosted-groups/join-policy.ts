@@ -127,9 +127,9 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Workout summaries",
     description: "Shares your last 7 days of workout counts and minutes.",
   },
-  "workout-latest-start-days.v0": {
-    label: "Latest daily workout start",
-    description: "Shares your latest local workout start time for each workout day in the last 7 days, not raw workout history or location.",
+  "workouts.v0": {
+    label: "Workout details",
+    description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
   },
   "workout-strain-days.v0": {
     label: "Workout strain",

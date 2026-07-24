@@ -216,8 +216,8 @@ const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
 const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
 const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
-const WORKOUT_LATEST_START_SCOPE = {
-  projectionKind: "workout-latest-start-days.v0",
+const WORKOUTS_SCOPE = {
+  projectionKind: "workouts.v0",
 } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
@@ -1338,7 +1338,7 @@ describe("hosted group join policy", () => {
       DEEP_SLEEP_SCOPE,
       REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
-      WORKOUT_LATEST_START_SCOPE,
+      WORKOUTS_SCOPE,
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
@@ -1388,11 +1388,11 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description: "Shares your latest local workout start time for each workout day in the last 7 days, not raw workout history or location.",
-        label: "Latest daily workout start",
-        projectionKind: "workout-latest-start-days.v0",
-        projectionScope: WORKOUT_LATEST_START_SCOPE,
-        projectionScopeKey: "workout-latest-start-days.v0",
+        description: "Shares each workout from the last 7 days, including its local start time, duration, and type. Does not share absolute timestamps, routes, location, heart rate, or provider identity.",
+        label: "Workout details",
+        projectionKind: "workouts.v0",
+        projectionScope: WORKOUTS_SCOPE,
+        projectionScopeKey: "workouts.v0",
       },
       {
         description: "Shares your last 7 days of heart-rate zone minutes.",
