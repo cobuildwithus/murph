@@ -131,6 +131,61 @@ function createHostedExaResearchScoutRequestBody(
   };
 }
 
+// Wire-compatibility fixture: the EXACT JSON body the interceptor POSTs to
+// /api/internal/hosted-execution/usage/record after a successful xAI x_search
+// response. apps/web/test/hosted-execution-usage-allowance.test.ts carries a
+// byte-for-byte copy (HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE) and drives it
+// through the real route parse + allowance accounting, so a wire-format
+// mismatch between what the Worker posts and what the web route books fails
+// one of the two suites. Keep both copies identical. The turn id, usage id,
+// session id, and occurredAt placeholders stand in for per-call dynamic
+// values; the assertion below substitutes the actually generated values after
+// proving their formats.
+const HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE = {
+  usage: {
+    apiKeyEnv: "XAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.x.ai",
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: "x-search",
+    gatewayTags: [],
+    inputTokens: null,
+    memberId: "member_123",
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: null,
+    provider: "xai",
+    providerName: "xAI",
+    providerRequestId: "resp_xai_123",
+    rawUsageJson: {
+      cost_in_usd_ticks: 987_654_321,
+      input_tokens: 900,
+      input_tokens_details: { cached_tokens: 100 },
+      output_tokens: 120,
+      output_tokens_details: { reasoning_tokens: 40 },
+    },
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "grok-4.5",
+    routeId: null,
+    schema: "murph.assistant-usage.v1",
+    servedModel: null,
+    sessionId: "turn_xai_search_00000000000000000000000000000000",
+    stripeMeterSource: "murph",
+    surface: "hosted-runner",
+    tokenPricingBasis: "standard",
+    totalTokens: null,
+    triggerKind: "x-search",
+    turnId: "turn_xai_search_00000000000000000000000000000000",
+    turnProfileJson: null,
+    usageId: "turn_xai_search_00000000000000000000000000000000.attempt-1",
+    usageExtractionSourcePath: "xai.responses",
+    usageExtractionVersion: "xai-x-search-v1",
+  },
+} as const;
+
 function createHostedXaiResponsesRequestBody(
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -1702,30 +1757,25 @@ describe("hostedRunnerIntercept", () => {
     const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
       usage: Record<string, unknown>;
     };
-    expect(usageBody.usage).toMatchObject({
-      apiKeyEnv: "XAI_API_KEY",
-      baseUrl: "https://api.x.ai",
-      credentialSource: "platform",
-      featureKey: "x-search",
-      memberId: "member_123",
-      provider: "xai",
-      providerName: "xAI",
-      providerRequestId: "resp_xai_123",
-      rawUsageJson: {
-        cost_in_usd_ticks: 987_654_321,
-        input_tokens: 900,
-        input_tokens_details: { cached_tokens: 100 },
-        output_tokens: 120,
-        output_tokens_details: { reasoning_tokens: 40 },
+    // Prove the per-call dynamic fields' formats, then assert the FULL posted
+    // wire body equals the shared fixture exactly (no extra or missing keys,
+    // exact cost_in_usd_ticks passthrough) with only those dynamic fields
+    // substituted. The web-side mirror of this fixture books this exact
+    // payload, so this equality is the wire-compatibility proof.
+    const postedTurnId = usageBody.usage.turnId;
+    expect(postedTurnId).toMatch(/^turn_xai_search_[0-9a-f]{32}$/u);
+    expect(usageBody.usage.occurredAt).toMatch(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+    );
+    expect(usageBody).toEqual({
+      usage: {
+        ...HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE.usage,
+        occurredAt: usageBody.usage.occurredAt,
+        sessionId: postedTurnId,
+        turnId: postedTurnId,
+        usageId: `${String(postedTurnId)}.attempt-1`,
       },
-      requestedModel: "grok-4.5",
-      surface: "hosted-runner",
-      triggerKind: "x-search",
-      usageExtractionSourcePath: "xai.responses",
-      usageExtractionVersion: "xai-x-search-v1",
     });
-    expect(usageBody.usage.turnId).toMatch(/^turn_xai_search_[0-9a-f]{32}$/u);
-    expect(usageBody.usage.usageId).toBe(`${String(usageBody.usage.turnId)}.attempt-1`);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({

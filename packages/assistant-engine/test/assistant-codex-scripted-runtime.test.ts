@@ -22,6 +22,9 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  createXSearchToolRuntimeFromEnv,
+} from '../src/assistant-codex/x-search-tool.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -698,6 +701,84 @@ describe('real codex app-server with scripted provider', () => {
       messageRef,
     }])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('enforces the murph.x_search per-turn provider-call ceiling through the real tool loop', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let xaiProviderCalls = 0
+    const xaiFetch: typeof fetch = async () => {
+      xaiProviderCalls += 1
+      return new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: JSON.stringify({
+                    posts: [
+                      {
+                        authorHandle: 'runner_dave',
+                        createdAt: '2026-07-21T09:30:00Z',
+                        excerpt: 'Creatine timing does not matter much.',
+                        url: 'https://x.com/runner_dave/status/1947000000000000001',
+                      },
+                    ],
+                  }),
+                },
+              ],
+            },
+          ],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      )
+    }
+    const xSearchCall = {
+      functionCall: {
+        arguments: { action: 'search_posts', query: 'creatine' },
+        name: 'x_search',
+        namespace: 'murph',
+      },
+    } as const
+    scenario.stub.queue(
+      xSearchCall,
+      xSearchCall,
+      xSearchCall,
+      xSearchCall,
+      { text: 'X_SEARCH_CEILING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: false,
+        xSearchAvailable: true,
+      }),
+      prompt: 'Search X four times, then reply exactly X_SEARCH_CEILING_OK.',
+      xSearchRuntime: createXSearchToolRuntimeFromEnv({
+        env: { XAI_API_KEY: 'xai-sentinel-key' },
+        fetchImpl: xaiFetch,
+      }),
+    })
+
+    expect(result.finalMessage).toBe('X_SEARCH_CEILING_OK')
+    // Four tool calls flowed through the real turn executor, but the shared
+    // turn-scoped counter allowed exactly three provider requests.
+    expect(xaiProviderCalls).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+    const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(functionCallOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('untrusted content from X'),
+      expect.stringContaining(
+        'X search limit of 3 searches reached for this turn; no search ran',
+      ),
+    ]))
   })
 
   it('steers a live turn while the real app-server is mid-request', {

@@ -212,7 +212,7 @@ export async function executeXSearchTool(input: {
     return {
       rpcSuccess: false,
       rpcText:
-        `no X posts found for the last ${args.lookbackDays} day${args.lookbackDays === 1 ? '' : 's'}`,
+        `the X search completed but found no posts from the last ${args.lookbackDays} day${args.lookbackDays === 1 ? '' : 's'}`,
     }
   }
 

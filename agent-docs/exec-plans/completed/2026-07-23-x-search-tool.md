@@ -103,3 +103,6 @@ usage record shape → pricing branch), plus explicit blocked/failure-path tests
 Web (pricing branch + record acceptance) deploys before Cloudflare (egress + tool).
 Requires `XAI_API_KEY` in the hosted runner/Worker environment before the tool
 becomes available; absent key keeps the tool unregistered (safe skew).
+Status: completed
+Updated: 2026-07-23
+Completed: 2026-07-23

@@ -10,6 +10,9 @@ import {
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  parseHostedRuntimeUsageRecordRequest,
+} from "@murphai/hosted-execution/parsers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const usageCreditMocks = vi.hoisted(() => ({
@@ -82,6 +85,68 @@ const BASE_USAGE_RECORD = {
   usageExtractionSourcePath: null,
   usageExtractionVersion: "codex-usage-v1",
 } as const satisfies AssistantUsageRecord;
+
+// Wire-compatibility fixture: the EXACT JSON body the Cloudflare interceptor
+// POSTs to /api/internal/hosted-execution/usage/record after a successful xAI
+// x_search response. apps/cloudflare/test/runner-egress-intercept.test.ts
+// carries a byte-for-byte copy (HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE) and
+// asserts the interceptor's posted body equals it exactly, so a wire-format
+// mismatch between what the Worker posts and what this route-parse +
+// allowance-accounting path books fails one of the two suites. Keep both
+// copies identical. The turn id, usage id, session id, and occurredAt are
+// deterministic placeholders for the per-call dynamic values.
+const HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE = {
+  usage: {
+    apiKeyEnv: "XAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.x.ai",
+    cacheWriteTokens: null,
+    cachedInputTokens: null,
+    credentialSource: "platform",
+    featureKey: "x-search",
+    gatewayTags: [],
+    inputTokens: null,
+    memberId: "member_123",
+    occurredAt: "2026-03-29T12:00:00.000Z",
+    outputTokens: null,
+    provider: "xai",
+    providerName: "xAI",
+    providerRequestId: "resp_xai_123",
+    rawUsageJson: {
+      cost_in_usd_ticks: 987_654_321,
+      input_tokens: 900,
+      input_tokens_details: { cached_tokens: 100 },
+      output_tokens: 120,
+      output_tokens_details: { reasoning_tokens: 40 },
+    },
+    rawUsageJsonHash: null,
+    reasoningTokens: null,
+    reportingUserId: null,
+    requestedModel: "grok-4.5",
+    routeId: null,
+    schema: "murph.assistant-usage.v1",
+    servedModel: null,
+    sessionId: "turn_xai_search_00000000000000000000000000000000",
+    stripeMeterSource: "murph",
+    surface: "hosted-runner",
+    tokenPricingBasis: "standard",
+    totalTokens: null,
+    triggerKind: "x-search",
+    turnId: "turn_xai_search_00000000000000000000000000000000",
+    turnProfileJson: null,
+    usageId: "turn_xai_search_00000000000000000000000000000000.attempt-1",
+    usageExtractionSourcePath: "xai.responses",
+    usageExtractionVersion: "xai-x-search-v1",
+  },
+} as const;
+
+function cloneHostedXaiSearchUsageWireBody(): {
+  usage: Record<string, unknown> & { rawUsageJson: Record<string, unknown> };
+} {
+  return JSON.parse(JSON.stringify(HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE)) as {
+    usage: Record<string, unknown> & { rawUsageJson: Record<string, unknown> };
+  };
+}
 
 type AllowanceExecuteRaw = (sql: TemplateStringsArray, ...params: unknown[]) => Promise<number>;
 type AllowanceExecuteRawMock = ReturnType<typeof vi.fn<AllowanceExecuteRaw>>;
@@ -1274,6 +1339,85 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
       sourceUsageId: "turn_phone_call_hpc_credit_boundary.attempt-1",
       tx,
     });
+  });
+
+  it("books the Worker-posted xAI x_search wire payload through route parsing at the exact tick cost", async () => {
+    // Same parse path as the usage record route
+    // (apps/web/app/api/internal/hosted-execution/usage/record/route.ts).
+    const body = parseHostedRuntimeUsageRecordRequest(
+      cloneHostedXaiSearchUsageWireBody(),
+    );
+
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: body.usage,
+      tx: tx as never,
+    })).resolves.toBeNull();
+
+    // 987,654,321 ticks / 10,000 ticks-per-micro = 98,765.4321 → ceil 98,766.
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        allowanceCostUsdMicros: 98_766n,
+        allowanceCounted: true,
+        allowancePricingVersion: "xai-x-search-pricing-2026-07-23",
+      }),
+      where: {
+        allowanceAccountedAt: null,
+        id: "turn_xai_search_00000000000000000000000000000000.attempt-1",
+      },
+    }));
+    // The period spend increment fires exactly once, carrying the exact
+    // ceiled cost.
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
+    const [spendSql, ...spendParams] = executeRaw.mock.calls[0] ?? [];
+    const spendSqlText = Array.isArray(spendSql) ? spendSql.join("") : String(spendSql);
+    expect(spendSqlText).toContain('UPDATE "hosted_ai_usage_period"');
+    expect(spendSqlText).toContain('"spent_usd_micros" = "spent_usd_micros" +');
+    expect(spendParams[0]).toBe(98_766n);
+  });
+
+  it("rejects the xAI wire payload instead of booking free usage when cost ticks are missing or invalid", async () => {
+    // Missing cost ticks: the record parses at the route boundary, but
+    // pricing throws before any usage-row claim or period spend, so the
+    // transaction rolls back rather than accruing the call for free.
+    const missingTicks = cloneHostedXaiSearchUsageWireBody();
+    delete missingTicks.usage.rawUsageJson.cost_in_usd_ticks;
+    const body = parseHostedRuntimeUsageRecordRequest(missingTicks);
+
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const executeRaw = vi.fn<AllowanceExecuteRaw>(async () => 1);
+    const tx = createAllowanceTx({
+      executeRaw,
+      hostedAiUsageUpdateMany: updateMany,
+    });
+
+    await expect(accountHostedAiUsageForAllowanceTx({
+      memberId: "member_123",
+      now: new Date("2026-03-29T12:00:05.000Z"),
+      record: body.usage,
+      tx: tx as never,
+    })).rejects.toThrow("pricing is missing");
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(countPeriodMetadataUpdateCalls(tx)).toBe(0);
+    expect(usageCreditMocks.settleHostedUsageCreditForUsageTx).not.toHaveBeenCalled();
+
+    // Non-integer cost ticks never reach accounting at all: the route-level
+    // record parse rejects the row.
+    const fractionalTicks = cloneHostedXaiSearchUsageWireBody();
+    fractionalTicks.usage.rawUsageJson.cost_in_usd_ticks = 3_775.6;
+    expect(() => parseHostedRuntimeUsageRecordRequest(fractionalTicks)).toThrow(
+      "rawUsageJson.cost_in_usd_ticks must be a non-negative integer",
+    );
   });
 
   it("throws after a credit debit when the locked period spend row is lost", async () => {

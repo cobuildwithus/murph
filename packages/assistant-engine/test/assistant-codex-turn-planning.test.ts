@@ -1454,6 +1454,46 @@ describe('assistant Codex turn planning', () => {
     expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
+  it('plans murph.x_search only when the turn env carries an xAI API key', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const planToolNamesFor = async (env: NodeJS.ProcessEnv) => {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-23',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    expect(await planToolNamesFor({})).not.toContain('x_search')
+    expect(await planToolNamesFor({ XAI_API_KEY: '   ' })).not.toContain('x_search')
+    expect(await planToolNamesFor({ XAI_API_KEY: 'xai-sentinel-key' }))
+      .toContain('x_search')
+  })
+
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
