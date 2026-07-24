@@ -690,6 +690,17 @@ synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
 same fixed $5, $10, and $25 packs. The browser never submits payer or
 beneficiary identity.
 
+A group chat that has only ever talked to Murph has no `HostedGroup` row or
+join code. Its funding URL uses a signed funding-only locator instead:
+`gf1.<runtimeMemberId>.<hmac>` derived from the app-session HMAC key with a
+dedicated domain separator. The locator is accepted only by the funding page
+and checkout target resolution, resolves to the exact runtime member after
+re-verifying the container and active access, and is rejected by every join
+surface because it is not a join code. It writes nothing: no `HostedGroup`
+row, membership, join code, vault-share projection, or profile-name/email
+grant is created. Owner-created join codes keep funding exactly as before,
+and enrollment stays behind the owner-minted join link.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.
@@ -829,8 +840,9 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- coarse group usage reads, trusted low-capacity next-turn context, and the
-  route-authorized exhausted-notice funding link; and
+- group usage reads with a remaining percentage but no currency accounting,
+  trusted low-capacity next-turn context, and the route-authorized
+  exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

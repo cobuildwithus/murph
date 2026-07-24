@@ -5,7 +5,9 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  isHostedMemberMessagingSetupRequired,
   resolveHostedMemberAssistantNotificationRoute,
+  resolveHostedMemberChannels,
   resolveHostedMemberMessagingState,
 } from "@/src/lib/hosted-onboarding/messaging-state";
 
@@ -136,30 +138,60 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("prefers an inbound Telegram thread and otherwise uses the verified user id", () => {
-    const resolveRoute = (telegramThreadId: string | null) => {
-      const messaging = resolveHostedMemberMessagingState({
-        identity: null,
-        routing: {
-          telegramThreadId,
-          telegramUserId: "456",
-        },
-      });
-
-      return resolveHostedMemberAssistantNotificationRoute({
-        linqChatId: null,
-        memberId: "member_telegram",
-        messaging,
-      });
+  it("treats a linked Telegram identity as setup-complete while delivery still waits for an inbound thread", () => {
+    const input = {
+      identity: null,
+      routing: {
+        telegramThreadId: null,
+        telegramUserId: "456",
+      },
     };
+    const messaging = resolveHostedMemberMessagingState(input);
 
-    expect(resolveRoute("456:business:connection:dm-topic:9")?.delivery).toEqual({
+    expect(messaging).toMatchObject({
+      hasDirectMessagingChannel: false,
+      hasTelegram: false,
+      telegramTarget: null,
+    });
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
+    expect(resolveHostedMemberChannels({
+      ...input,
+      emailLinked: false,
+    })).toEqual({
+      email: false,
+      linq: false,
+      telegram: false,
+    });
+    expect(resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: null,
+      memberId: "member_telegram",
+      messaging,
+    })).toBeNull();
+  });
+
+  it("uses the exact inbound-observed Telegram thread for delivery", () => {
+    const input = {
+      identity: null,
+      routing: {
+        telegramThreadId: "456:business:connection:dm-topic:9",
+        telegramUserId: "456",
+      },
+    };
+    const messaging = resolveHostedMemberMessagingState(input);
+
+    expect(messaging).toMatchObject({
+      hasDirectMessagingChannel: true,
+      hasTelegram: true,
+      telegramTarget: "456:business:connection:dm-topic:9",
+    });
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
+    expect(resolveHostedMemberAssistantNotificationRoute({
+      linqChatId: null,
+      memberId: "member_telegram",
+      messaging,
+    })?.delivery).toEqual({
       kind: "thread",
       target: "456:business:connection:dm-topic:9",
-    });
-    expect(resolveRoute(null)?.delivery).toEqual({
-      kind: "thread",
-      target: "456",
     });
   });
 });

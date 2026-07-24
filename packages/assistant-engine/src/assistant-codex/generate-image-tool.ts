@@ -20,6 +20,7 @@ import type {
   AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
+import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
 import type {
   AssistantProviderUsageDraft,
@@ -56,6 +57,9 @@ export interface GenerateImageToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
+  // A specific runtime issue for the assistant runtime's existing issue owner to
+  // record off-path (e.g. an upload failure); populated only on failure.
+  runtimeIssue?: AssistantRuntimeIssueInput
   savedCaptureId?: string | null
   savedImageRef?: string | null
   usageDraft?: AssistantProviderUsageDraft | null
@@ -363,15 +367,49 @@ export async function executeGenerateImageTool(input: {
       savedImageRef: savedCapture?.imageRef ?? null,
       usageDraft,
     }
-  } catch {
+  } catch (error) {
+    if (!input.hostedGeneratedImageUploader) {
+      return {
+        rpcSuccess: false,
+        rpcText: 'image generated but local save failed',
+        usageDraft,
+      }
+    }
     return {
       rpcSuccess: false,
-      rpcText: input.hostedGeneratedImageUploader
-        ? 'image generated but upload failed'
-        : 'image generated but local save failed',
+      rpcText: 'image generated but upload failed',
+      runtimeIssue: buildGeneratedImageUploadIssue(error),
       usageDraft,
     }
   }
+}
+
+function buildGeneratedImageUploadIssue(error: unknown): AssistantRuntimeIssueInput {
+  const status = readGeneratedImageUploadErrorStatus(error)
+  return {
+    component: 'assistant.generated-image',
+    details: {
+      failureKind: status === null ? 'thrown' : 'http_status',
+      provider: 'cloudflare_images',
+      ...(status === null ? {} : { status }),
+    },
+    errorCode: 'GENERATED_IMAGE_UPLOAD_FAILED',
+    issueKind: 'tool_error',
+    operation: 'generated_image_upload',
+    phase: 'tool_call',
+    severity: 'warning',
+    summary: 'Generated image upload to Cloudflare Images failed.',
+  }
+}
+
+function readGeneratedImageUploadErrorStatus(error: unknown): number | null {
+  if (error && typeof error === 'object' && 'status' in error) {
+    const status = (error as { status?: unknown }).status
+    if (typeof status === 'number' && Number.isInteger(status)) {
+      return status
+    }
+  }
+  return null
 }
 
 function hasVaultReferenceImageRef(refs: readonly string[]): boolean {

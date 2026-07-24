@@ -1,4 +1,8 @@
-export type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+import type {
+  HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
+
+export type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export type DurableObjectSqlValue = ArrayBuffer | string | number | null;
 

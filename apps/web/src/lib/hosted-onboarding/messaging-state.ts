@@ -59,9 +59,7 @@ export function resolveHostedMemberMessagingState(input: {
   const linqContactLookupKey =
     phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
-  const telegramTarget =
-    normalizeMessagingIdentity(input.routing?.telegramThreadId)
-    ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
+  const telegramTarget = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
   const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
   const hasTelegram = telegramTarget !== null;
@@ -82,7 +80,15 @@ export function isHostedMemberMessagingSetupRequired(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
   routing: HostedMemberMessagingRoutingSlice | null;
 }): boolean {
-  return !resolveHostedMemberMessagingState(input).hasDirectMessagingChannel;
+  if (resolveHostedMemberMessagingState(input).hasDirectMessagingChannel) {
+    return false;
+  }
+
+  // A linked Telegram account completes messaging setup even before the member
+  // messages the bot. Telegram bots cannot send the first message, so the
+  // direct thread target only exists after the member opens the chat; that is
+  // a delivery concern, not a reason to hold signup on the contact step.
+  return normalizeMessagingIdentity(input.routing?.telegramUserId) === null;
 }
 
 export function resolveHostedMemberChannels(input: {

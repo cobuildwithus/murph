@@ -1202,7 +1202,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
   });
 
-  it("creates a hosted member and a web invite for a messaging-ready Telegram-only signup", async () => {
+  it("treats a Telegram-only signup as messaging-ready before any inbound thread exists", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update,
@@ -1286,7 +1286,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("allows invite-bound Telegram-only verification with messaging ready", async () => {
+  it("treats invite-bound Telegram-only verification as messaging-ready before inbound", async () => {
     const inviteMember = makeMember({
       maskedPhoneNumberHint: null,
       phoneLookupKey: null,

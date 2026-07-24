@@ -22,6 +22,7 @@ const MESSAGES_TOKEN = `hbds_imessage_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
   assertActiveHostedMemberAccessAllowed: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   authenticateAgentSessionByTokenHash: vi.fn(),
   readJsonObject: vi.fn(async (request: Request) => await request.json()),
@@ -61,6 +62,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
 }));
 vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 vi.mock("@/src/lib/device-sync/prisma-store/agent-sessions", () => ({
@@ -316,10 +318,11 @@ describe("iMessage mini-app routes", () => {
       memberId: "member-1",
       prisma,
     });
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
       memberId: "member-1",
       prisma,
     });
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       schemaVersion: 1,
       authenticated: true,
@@ -351,14 +354,14 @@ describe("iMessage mini-app routes", () => {
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "HOSTED_ACCESS_REQUIRED" },
     });
-    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
   });
 
-  it("fails closed when launch consent is no longer current", async () => {
-    mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
+  it("fails closed when launch consent was never granted", async () => {
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_CONSENT_REQUIRED",
       httpStatus: 403,
-      message: "Accept the current Murph legal consent before continuing.",
+      message: "Accept the Murph legal consent before continuing.",
     }));
 
     const response = await proofActionRoute.POST(jsonRequest(

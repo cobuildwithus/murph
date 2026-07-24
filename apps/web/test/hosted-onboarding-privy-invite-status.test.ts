@@ -388,6 +388,57 @@ describe("getHostedInviteStatus", () => {
     });
   });
 
+  it("unlocks checkout after setup polling observes a persisted Telegram thread", async () => {
+    const prisma = {
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingStatus: HostedBillingStatus.not_started,
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedInvite: {
+        findUnique: vi.fn().mockResolvedValue(createInvite({
+          member: createMember({
+            identity: await createIdentity({
+              ...(await buildHostedMemberIdentityPrivateColumns({
+                memberId: "member_123",
+                phoneNumber: null,
+                privyUserId: "did:privy:user_123",
+                signupPhoneCodeSendAttemptId: null,
+                signupPhoneCodeSendAttemptStartedAt: null,
+                signupPhoneCodeSentAt: null,
+                signupPhoneNumber: null,
+              })),
+              maskedPhoneNumberHint: null,
+              phoneLookupKey: null,
+              phoneNumberVerifiedAt: null,
+              privyUserId: "did:privy:user_123",
+            }),
+            routing: await createRouting({
+              telegramThreadId: "456:business:setup",
+              telegramUserId: "456",
+              telegramUserLookupKey: "hbidx:telegram:v1:member_123",
+            }),
+          }),
+        })),
+      },
+    } as never;
+
+    await expect(
+      getHostedInviteStatus({
+        authenticatedMember: createAuthenticatedMember(),
+        inviteCode: "invite-code",
+        now: NOW,
+        prisma,
+      }),
+    ).resolves.toMatchObject({
+      messagingSetupRequired: false,
+      stage: "checkout",
+    });
+  });
+
   it("does not expose the stored phone after the invite is already active", async () => {
     const prisma = {
       hostedMember: {
@@ -705,6 +756,8 @@ async function createRouting(input?: {
   pendingLinqParticipantContactKind?: string | null;
   pendingLinqParticipantContactLookupKey?: string | null;
   pendingLinqRecipientPhone?: string | null;
+  telegramThreadId?: string | null;
+  telegramUserId?: string | null;
   telegramUserLookupKey?: string | null;
 }) {
   return {
@@ -724,8 +777,8 @@ async function createRouting(input?: {
       pendingLinqChatId: input?.pendingLinqChatId ?? null,
       pendingLinqParticipantContact: input?.pendingLinqParticipantContact ?? null,
       pendingLinqRecipientPhone: input?.pendingLinqRecipientPhone ?? null,
-      telegramThreadId: null,
-      telegramUserId: null,
+      telegramThreadId: input?.telegramThreadId ?? null,
+      telegramUserId: input?.telegramUserId ?? null,
     })),
   };
 }

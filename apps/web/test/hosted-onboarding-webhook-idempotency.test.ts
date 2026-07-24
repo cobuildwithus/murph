@@ -583,7 +583,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       isGroup: false,
       messageId: "evt_reaction_reply_123",
       service: "iMessage",
-      text: "Yes.",
+      text: "Reacted with a like reaction.",
     }));
     messageEvent.data.reply_to = { message_id: "msg_murph_123" };
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);
@@ -664,7 +664,7 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
       isGroup: false,
       messageId: "evt_reaction_reply_retry_123",
       service: "iMessage",
-      text: "Yes.",
+      text: "Reacted with a like reaction.",
     }));
     messageEvent.data.reply_to = { message_id: "msg_murph_retry_123" };
     mocks.buildHostedLinqAffirmativeReactionMessageEvent.mockResolvedValue(messageEvent);

@@ -18,7 +18,7 @@ import {
   lockHostedMemberRow,
   lockHostedMemberSponsoredAccessRows,
 } from "../hosted-onboarding/shared";
-import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
+import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 
 export const MEAL_PHOTO_CAPTURE_SCHEMA_VERSION_HEADER = "x-murph-meal-capture-schema";
 export const MEAL_PHOTO_CAPTURE_CAPTURED_AT_HEADER = "x-murph-captured-at";
@@ -286,7 +286,10 @@ export async function requireActiveMealPhotoCaptureEnrollment(input: {
     memberId: enrollment.memberId,
     prisma: input.prisma,
   });
-  await assertHostedLaunchRequiredConsentGranted({
+  // Uploads happen from the phone with no consent UI, so stale launch-document
+  // acceptance must not interrupt an active enrollment; members with no grant at
+  // all still fail closed. New enrollments keep requiring the current versions.
+  await assertHostedHistoricalLaunchConsentGranted({
     memberId: enrollment.memberId,
     prisma: input.prisma,
   });

@@ -11,6 +11,7 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { GroupJoinStudy } from "./group-join-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
@@ -80,7 +81,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group usage funding">
+      <StudySection title="Group join actions">
+        <GroupJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group usage funding and top-up follow-up">
         <GroupUsageFundingStudy />
       </StudySection>
 

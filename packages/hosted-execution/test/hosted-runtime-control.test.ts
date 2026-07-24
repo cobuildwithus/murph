@@ -571,6 +571,13 @@ describe("hosted runtime control contracts", () => {
       ...workspaceInvocationRequest,
       processingMode: "inbox_media_retention",
     });
+    expect(parseHostedWorkspaceInvocationRequest({
+      ...workspaceInvocationRequest,
+      processingMode: "system_mailbox",
+    })).toEqual({
+      ...workspaceInvocationRequest,
+      processingMode: "system_mailbox",
+    });
     expect(() => parseHostedWorkspaceInvocationRequest({
       ...workspaceInvocationRequest,
       processingMode: "assistant",

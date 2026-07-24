@@ -212,6 +212,29 @@ describe("HostedUserRunner execution coordination", () => {
     expect(alarms).toEqual([]);
   });
 
+  it("forwards system-mailbox mode through the existing runtime invocation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-system-mailbox-import",
+      processingMode: "system_mailbox",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
+      "system_mailbox",
+    );
+  });
+
   it("clears the fence without owner release for a future mailbox continuation", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -2029,7 +2052,12 @@ describe("HostedUserRunner execution coordination", () => {
     });
   });
 
-  it("preempts active retention-only work before starting default processing", async () => {
+  it.each([
+    ["default", undefined],
+    ["system-mailbox", "system_mailbox"],
+  ] as const)(
+    "preempts active retention-only work before starting %s processing",
+    async (_label, processingMode) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const abortWorkspaceInvocation = vi.fn<
@@ -2070,6 +2098,7 @@ describe("HostedUserRunner execution coordination", () => {
 
     await expect(runner.ensureRuntimeProcessingForUser({
       orchestrationAttemptId: "test-orchestration-attempt-default-behind-retention",
+      processingMode,
       userId: TEST_USER_ID,
     })).resolves.toMatchObject({
       action: "replaced",
@@ -2086,6 +2115,9 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(ensureProcessing).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(invoke.mock.calls[0]?.[0].job.request.processingMode).toBe(
+      processingMode,
+    );
     expect(readRunnerMeta(sql)).toMatchObject({
       active_attempt_id: expect.not.stringMatching(token.attemptId),
       active_expires_at: null,
@@ -2102,7 +2134,8 @@ describe("HostedUserRunner execution coordination", () => {
         last_invocation_at: expect.any(String),
       })
     );
-  });
+    },
+  );
 
   it("preserves the active retention fence when the settled abort is stale", async () => {
     vi.useFakeTimers();
@@ -5491,7 +5524,7 @@ function writeRuntimeFenceForTest(
   input: {
     attemptId?: string;
     generation?: number;
-    processingMode?: "default" | "inbox_media_retention";
+    processingMode?: "default" | "inbox_media_retention" | "system_mailbox";
     runnerContainerName?: string | null;
     startedAt?: string;
     workspaceVersion?: string;

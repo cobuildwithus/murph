@@ -108,6 +108,34 @@ export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID =
   'automation_01K4Y0Q5C8M9N2P3R4S5T6V7WX'
 export const MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_PRIVATE_SUMMARY =
   'Overnight memory consolidation maintenance wake completed.'
+export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID =
+  'automation_01KZZM3A9C7P4R6T8V2W5X0YQZ'
+
+export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
+  automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  slug: 'automatic-meal-daily-closeout',
+  title: 'Daily captured-meal closeout',
+  summary: 'A 9pm closeout for automatically captured meals.',
+  schedule: {
+    kind: 'dailyLocal',
+    localTime: '21:00',
+  },
+  continuityPolicy: 'fresh',
+  excludeFromGroupChatRoutes: true,
+  tags: [
+    'murph-managed:automatic-meal-daily-closeout',
+    'automatic-meal-capture',
+  ],
+  instructions: [
+    'At 9:00pm in the member\'s vault timezone, close out automatically captured meals and remove their retained photos after using them.',
+    '',
+    'Read the automatic-meal-capture and food-journal skills before working. The automatic-meal-capture skill\'s "Run the automatic 9pm closeout" section is the single owner of the closeout workflow; follow it exactly.',
+    '',
+    'Use the engine-supplied `Occurrence local date` from the Scheduled occurrence context as the action and search-date anchor, even when the wall-clock `Today\'s date` differs. Use the occurrence instant for bounded same-occurrence retry evidence.',
+    '',
+    'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A removal failure or any selected photo remaining fails the run. After successful cleanup, return one ordinary user-facing closeout using the skill\'s content rules; do not expose images, internal paths, or automation details.',
+  ].join('\n'),
+} satisfies MurphManagedAutomationSeed
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -843,22 +871,24 @@ export async function applyMurphManagedAutomations(
     result.updated += 1
   }
 
-  if (input.shouldYield?.() === true) {
-    return { ...result, yielded: true }
-  }
-  reportMurphManagedAutomationDiagnosticStage(input, {
-    stage: 'onboarding_followup',
-  })
-  const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
-    now,
-    shouldYield: input.shouldYield ?? null,
-    vaultRoot: input.vaultRoot,
-  })
-  if (onboardingReconciliation.yielded) {
-    return { ...result, yielded: true }
-  }
-  if (onboardingReconciliation.updated) {
-    result.updated += 1
+  if (input.seeds === undefined) {
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
+    reportMurphManagedAutomationDiagnosticStage(input, {
+      stage: 'onboarding_followup',
+    })
+    const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
+      now,
+      shouldYield: input.shouldYield ?? null,
+      vaultRoot: input.vaultRoot,
+    })
+    if (onboardingReconciliation.yielded) {
+      return { ...result, yielded: true }
+    }
+    if (onboardingReconciliation.updated) {
+      result.updated += 1
+    }
   }
 
   if (desiredExperimentSupportSeries !== null) {
@@ -882,6 +912,25 @@ export async function applyMurphManagedAutomations(
   }
 
   return result
+}
+
+export async function ensureAutomaticMealCloseoutAutomation(
+  input: Omit<ApplyMurphManagedAutomationsInput, 'seeds'>,
+): Promise<AutomationRecord> {
+  await applyMurphManagedAutomations({
+    ...input,
+    seeds: [MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION],
+  })
+
+  const automation = await showAutomation({
+    automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+    vaultRoot: input.vaultRoot,
+  })
+  if (!automation) {
+    throw new Error('Automatic meal closeout automation could not be persisted.')
+  }
+
+  return automation
 }
 
 function reportMurphManagedAutomationDiagnosticStage(

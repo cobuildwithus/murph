@@ -1,6 +1,6 @@
 # Murph Contact Card Picker
 
-Last verified: 2026-07-22
+Last verified: 2026-07-23
 Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, and initial-visit handoff); persisted avatar choice not started
 
 ## Why
@@ -29,12 +29,13 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 ## Production wiring
 
 - Implemented: "Add Murph to Contacts" is a download link to `GET /api/murph-contact-card?avatar=<id>` (`apps/web/app/api/murph-contact-card/route.ts`), which returns `Murph.vcf` built with the existing `buildMurphHostedLinqContactCardVcf` (`apps/web/src/lib/hosted-onboarding/linq-contact-card.ts`): the member's own line as the `mobile` number, a second healthy pool line under the `backup` label, and the chosen avatar embedded as `PHOTO` (fetched from the deployment's own public assets). The optional backup comes from the existing `HostedLinqLine` projection maintained by scheduled provider reconciliation, so a download never performs live provider inventory or reconciliation work; a missing or unreadable projection omits only the backup. `avatar=none` omits `PHOTO`; unknown ids fall back to the default headshot. The route requires an active hosted member session and resolves the member's line server-side from hosted member routing.
-- Saving the vCard sets the contact photo in the member's own address book, which overrides what the Linq-side card would show. That is the entire per-user effect.
+- Saving the vCard sets the contact photo in the member's own address book. That is the entire per-user effect.
+- Invite-signup replies do not invoke Linq's native `share_contact_card` endpoint. The first-party vCard picker is the sole automatic onboarding contact-card flow, so a provider-side image cannot overwrite the member's avatar choice.
 - Members without a phone line get a 409 (`MURPH_TEXT_LINE_NOT_READY`); signup surfaces should skip the picker for them and keep the current CTA-only welcome shape.
 
 ## Invariants and non-goals
 
-- Do not write member avatar choices to Linq per-line contact cards. Lines are pooled across members and the contact-card cron (`reconcileHostedLinqContactCards`) keeps the provider card shared and name/phone-only; a per-member choice written there would fight the reconciler and leak one member's pick to others on the same line.
+- Do not write member avatar choices to Linq per-line contact cards. Lines are pooled across members, and the contact-card cron (`reconcileHostedLinqContactCards`) only creates missing cards or corrects the shared Murph name. Linq's documented API does not support clearing an existing image, so reconciliation leaves any legacy provider image untouched and never shares that provider card with members.
 - Contact-card choices do not change assistant behavior. Tone and voice preferences are owned separately by `agent-docs/product-specs/murph-tone-and-voice.md`.
 - v1 keeps no server state for the choice. Optional follow-up: persist the chosen avatar id on the hosted member so the group contact-card share tool and future re-sends use it.
 

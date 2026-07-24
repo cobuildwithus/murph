@@ -33,11 +33,21 @@ const mocks = vi.hoisted(() => ({
       null,
       `Hosted account settings ${String(props.murphPhoneNumber ?? "")}`,
     )),
-  resolveMurphContactOptions: vi.fn(() => [{
-    href: "sms:+15550100001?body=voice%20test",
-    kind: "text",
-    label: "Messages",
-  }]),
+  resolveMurphContactOptions: vi.fn(
+    (input?: { message?: { body?: string | null } | null }) => [
+      input?.message?.body === "Hey Murph, I just added more usage."
+        ? {
+            href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+            kind: "text",
+            label: "Messages",
+          }
+        : {
+            href: "sms:+15550100001?body=voice%20test",
+            kind: "text",
+            label: "Messages",
+          },
+    ],
+  ),
   HostedAssistantModelSettings: vi.fn((props: {
     canUpgradeToEdge: boolean;
     configurationAvailable: boolean;
@@ -685,7 +695,7 @@ test("SettingsPage reads the app session and persisted account settings into the
         label: "Messages",
       },
     }), undefined);
-    expect(mocks.resolveMurphContactOptions).toHaveBeenCalledWith({
+    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(1, {
       contactChannels: {
         email: false,
         telegram: true,
@@ -699,6 +709,29 @@ test("SettingsPage reads the app session and persisted account settings into the
       preferredKind: "text",
       userEmailAddress: "verified@example.com",
     });
+    expect(mocks.resolveMurphContactOptions).toHaveBeenNthCalledWith(2, {
+      contactChannels: {
+        email: false,
+        telegram: true,
+        text: true,
+      },
+      message: {
+        body: "Hey Murph, I just added more usage.",
+      },
+      murphEmailAddress: null,
+      murphPhoneNumber: "+15550100001",
+      userEmailAddress: "verified@example.com",
+    });
+    expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageTopUpContactOptions: [{
+          href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+          kind: "text",
+          label: "Messages",
+        }],
+      }),
+      undefined,
+    );
     expect(mocks.HostedPasskeySettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
       secureApprovalStatus: { status: "configured" },
@@ -944,6 +977,11 @@ test("SettingsPage keeps a former Family purchase status-only despite duplicate 
     ownerSnapshot: familyOwner,
     usageTopUpActiveMemberId: "member_family",
     usageTopUpActivePurchase: activePurchase,
+    usageTopUpContactOptions: [{
+      href: "sms:+15550100001?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+      kind: "text",
+      label: "Messages",
+    }],
     usageTopUpOffers: [],
     usageTopUpPurchaseReturn: {
       kind: "success",

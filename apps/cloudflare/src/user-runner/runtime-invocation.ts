@@ -19,6 +19,7 @@ import {
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLogRequest,
   type HostedRuntimeWebStatusResponse,
+  type HostedWorkspaceInvocationProcessingMode,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceReadResponse,
   type HostedWorkspaceState,
@@ -132,7 +133,7 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 export type RuntimeInvocationInput = {
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
-  processingMode?: "default" | "inbox_media_retention" | null;
+  processingMode?: HostedWorkspaceInvocationProcessingMode | null;
   userId: string;
 };
 
@@ -651,7 +652,7 @@ export class RuntimeInvocationService {
     hostedAssistantModelOverride: HostedAssistantModelOverride | null;
     hostedAssistantReasoningEffortOverride:
       HostedAssistantReasoningEffortOverride | null;
-    processingMode?: "default" | "inbox_media_retention" | null;
+    processingMode?: HostedWorkspaceInvocationProcessingMode | null;
     token: RunnerWriteFenceToken;
     userId: string;
     workspace: HostedWorkspaceState | null;

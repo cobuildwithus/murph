@@ -1690,7 +1690,7 @@ describe("hosted mailbox conversation import adapter", () => {
           parts: [
             {
               type: "text",
-              value: "Yes.",
+              value: "Reacted with a like reaction.",
             },
           ],
           reactionEligible: false,

@@ -139,6 +139,12 @@ describe("settings telegram sync route", () => {
       prisma: mocks.prismaClient,
       sourceType: "settings.telegram.sync",
     });
+    expect(
+      mocks.upsertHostedMemberTelegramRoutingBindingTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
+    );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_item_channels_telegram_123",

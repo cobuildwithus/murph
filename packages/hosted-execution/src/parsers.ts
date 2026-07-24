@@ -45,7 +45,7 @@ import type {
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionDeviceSyncWakeEvent,
-  HostedExecutionGroupNewsletterEmailNeededDirectRoute,
+  HostedExecutionDirectRoute,
   HostedExecutionGroupNewsletterEmailNeededEvent,
   HostedExecutionWake,
   HostedExecutionWakeKind,
@@ -371,7 +371,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           : {
               directRoute: record.directRoute === null
                 ? null
-                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                : parseHostedExecutionDirectRoute(
                     record.directRoute,
                     "Hosted execution wake group-newsletter.email-needed directRoute",
                   ),
@@ -416,6 +416,10 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         byteLength: mealPhoto.byteLength,
         captureId: mealPhoto.captureId,
         capturedAt: mealPhoto.capturedAt,
+        directRoute: parseHostedExecutionDirectRoute(
+          record.directRoute,
+          "Hosted execution wake meal-photo.captured directRoute",
+        ),
         eventId,
         mealPhotoKey: mealPhoto.mealPhotoKey,
         memberId: wireUserId,
@@ -1202,7 +1206,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           : {
               directRoute: record.directRoute === null
                 ? null
-                : parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+                : parseHostedExecutionDirectRoute(
                     record.directRoute,
                     "Hosted execution group-newsletter.email-needed directRoute",
                   ),
@@ -1399,20 +1403,31 @@ function parseHostedExecutionAssistantNotificationRoute(
   };
 }
 
-function parseHostedExecutionGroupNewsletterEmailNeededDirectRoute(
+export function parseHostedExecutionDirectRoute(
   value: unknown,
-  label: string,
-): HostedExecutionGroupNewsletterEmailNeededDirectRoute {
+  label = "Hosted execution direct route",
+): HostedExecutionDirectRoute {
   const record = requireObject(value, label);
   const channel = requireString(record.channel, `${label}.channel`);
-  if (channel !== "linq" && channel !== "telegram") {
-    throw new TypeError(`${label}.channel is invalid.`);
+  if (channel === "email") {
+    assertExactHostedExecutionKeys(record, ["channel", "deliveryTarget"], label);
+    return {
+      channel,
+      deliveryTarget: requireString(
+        record.deliveryTarget,
+        `${label}.deliveryTarget`,
+      ),
+    };
+  }
+  if (channel === "linq" || channel === "telegram") {
+    assertExactHostedExecutionKeys(record, ["channel", "threadId"], label);
+    return {
+      channel,
+      threadId: requireString(record.threadId, `${label}.threadId`),
+    };
   }
 
-  return {
-    channel,
-    threadId: requireString(record.threadId, `${label}.threadId`),
-  };
+  throw new TypeError(`${label}.channel is invalid.`);
 }
 
 function parseHostedExecutionAssistantNotificationDelivery(
