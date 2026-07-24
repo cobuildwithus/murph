@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
+  hasHostedMemberActivationProof: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -50,6 +51,10 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
+  hasHostedMemberActivationProof: mocks.hasHostedMemberActivationProof,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -101,6 +106,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       undefined,
     );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
@@ -242,6 +248,32 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
     })).resolves.toEqual({ status: "ignored", reason: "not_a_member" });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("accepts a lapsed member's Like, matching the link adapter's admission policy", async () => {
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toMatchObject({ status: "accepted" });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("still denies a Like from someone who never activated their own Murph", async () => {
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });

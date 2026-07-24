@@ -9,7 +9,7 @@ import {
   isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
-import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
@@ -96,9 +96,13 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "not_a_member",
     });
   }
+  // The link adapter admits any authenticated, non-suspended member, so the
+  // reaction adapter must not additionally require current billing: a lapsed
+  // member who likes the offer would otherwise be denied the action the offer
+  // itself advertises.
   if (
     member.suspendedAt
-    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
+    || !(await hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma }))
   ) {
     return skipHostedGroupJoinOfferReaction({
       reason: "member_inactive",
