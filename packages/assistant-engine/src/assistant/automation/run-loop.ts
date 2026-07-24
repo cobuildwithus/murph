@@ -957,6 +957,10 @@ export async function runAssistantAutomationPass(
   passTiming.scanElapsedMs = Date.now() - scanStartedAt
   if (
     scanResult.replies.considered === 0
+    // A zero-work scan that armed a reply wake (group burst hold) owes a
+    // prompt return so the wake can be staged; maintenance waits for a pass
+    // with no pending reply wake.
+    && scanResult.replies.nextWakeAt === null
     && input.signal?.aborted !== true
     && input.shouldYieldBackgroundMaintenance?.() !== true
   ) {
@@ -993,16 +997,9 @@ export async function runAssistantAutomationPass(
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
     scanResult.replies.replied > 0
-  // A held-only reply scan replied to nothing and only armed a group
-  // burst-hold wake; the caller's selected-input deferral would otherwise
-  // starve due cron work for the length of the hold.
-  const heldOnlyReplyScan =
-    scanResult.replies.considered === 0 &&
-    scanResult.replies.nextWakeAt !== null
   const shouldDeferCronByCaller =
     executionContext?.hosted != null &&
     input.deliveryDispatchMode === 'queue-only' &&
-    !heldOnlyReplyScan &&
     input.shouldDeferCron?.() === true
   const shouldDeferCron =
     shouldDeferCronAfterHostedReply || shouldDeferCronByCaller

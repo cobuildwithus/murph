@@ -7159,7 +7159,7 @@ describe('assistant auto-reply runtime', () => {
     }
   })
 
-  it('runs due cron during a held-only pass despite the caller deferral', async () => {
+  it('returns a held-only pass promptly without inline runtime maintenance', async () => {
     runLoopMocks.scanAssistantAutomationOnce.mockResolvedValueOnce({
       currentTurnDeliveryIntentIds: [],
       routing: {
@@ -7178,27 +7178,18 @@ describe('assistant auto-reply runtime', () => {
         skipped: 0,
       },
     })
-    const shouldDeferCron = vi.fn().mockReturnValue(true)
     const runLoop = await vi.importActual<
       typeof import('../src/assistant/automation/run-loop.ts')
     >('../src/assistant/automation/run-loop.ts')
 
     const result = await runLoop.runAssistantAutomationPass({
-      deliveryDispatchMode: 'queue-only',
-      executionContext: {
-        hosted: {
-          memberId: 'member-test',
-          userEnvKeys: [],
-        },
-      },
-      requestId: 'request-hosted-queue-only-held-only',
-      shouldDeferCron,
+      requestId: 'request-held-only-pass',
       vault: '/tmp/assistant-automation-vault',
     })
 
-    // The held group replied to nothing; cron must not starve for the length
-    // of the burst hold, and the hold wake still reaches the pass result.
-    expect(runLoopMocks.processDueAssistantCronJobs).toHaveBeenCalledOnce()
+    // The zero-work scan armed a burst-hold wake; the pass must return
+    // promptly so the wake is staged instead of waiting on maintenance.
+    expect(runLoopMocks.maybeRunAssistantRuntimeMaintenance).not.toHaveBeenCalled()
     expect(result.nextWakeAt).toBe('2026-05-08T16:00:05.000Z')
   })
 
