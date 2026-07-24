@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import {
   buildJoinInviteStatusRefreshSnapshot,
   hasResolvedHostedInviteVerification,
+  resolveJoinInviteSubtitle,
   shouldRefreshJoinInviteStatusFromPayload,
 } from "@/src/components/hosted-onboarding/join-invite-state";
 import {
@@ -82,6 +83,41 @@ test("verify-stage session resolution only waits for authenticated unresolved ve
   }))).toBe(true);
 });
 
+test("an activated Telegram member is told to message Murph instead of being called done", () => {
+  assert.equal(
+    resolveJoinInviteSubtitle(createStatus({
+      stage: "active",
+      telegramStartRequired: true,
+    })),
+    "Message Murph on Telegram to start.",
+  );
+
+  assert.equal(
+    resolveJoinInviteSubtitle(createStatus({ stage: "active" })),
+    "You’re all set.",
+  );
+});
+
+test("status refresh notices when the Telegram start requirement clears", () => {
+  const current = buildJoinInviteStatusRefreshSnapshot(createStatus({
+    session: { authenticated: true, expiresAt: null, matchesInvite: true },
+    stage: "active",
+    telegramStartRequired: true,
+  }));
+
+  assert.equal(
+    shouldRefreshJoinInviteStatusFromPayload({
+      current,
+      nextStatus: createStatus({
+        session: { authenticated: true, expiresAt: null, matchesInvite: true },
+        stage: "active",
+        telegramStartRequired: false,
+      }),
+    }),
+    true,
+  );
+});
+
 function createStatus(
   overrides: Omit<Partial<HostedInviteStatusPayload>, "capabilities"> & {
     capabilities?: Partial<HostedInviteStatusPayload["capabilities"]>;
@@ -116,6 +152,7 @@ function createStatus(
       matchesInvite: false,
     },
     stage: "verify",
+    telegramStartRequired: false,
     ...statusOverrides,
   };
 }
