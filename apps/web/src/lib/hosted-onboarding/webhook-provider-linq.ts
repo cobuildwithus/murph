@@ -579,7 +579,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
       now: new Date(occurredAt),
       prisma: input.prisma,
     });
-    if (!accessDecision.allowed) {
+    if (accessDecision.allowed) {
+      // The two access reads disagreed. Trust the runtime decision and let the
+      // normal active-member path own this inbound: falling through to the
+      // first-contact tail would attempt the pending bind and 503 forever.
+      existingMemberEffectiveActive = true;
+    } else {
       const userNotice = accessDecision.userNotice;
       if (userNotice) {
         return logHostedLinqWebhookPlannerDecisionAndReturn(
