@@ -5641,6 +5641,92 @@ test("Junction client rejects provider deregistration without a Junction user id
   );
 });
 
+test("Junction client triggers a historical pull for one source", async () => {
+  const requests: { body: unknown; method: string; url: string }[] = [];
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: String(init?.method ?? "GET"),
+        url: readUrl(input),
+      });
+      return createJsonResponse({ success: true }, 202);
+    },
+  });
+
+  const result = await client.bulkTriggerHistoricalPull({
+    sourceProviderSlug: "Garmin",
+    userIds: ["junction-user-1", "junction-user-1", "  "],
+  });
+
+  assert.deepEqual(result, { accepted: true, endpointUnavailable: false });
+  assert.deepEqual(requests, [
+    {
+      body: { provider: "garmin", user_ids: ["junction-user-1"] },
+      method: "POST",
+      url: "https://api.sandbox.us.junction.com/v2/link/bulk_trigger_historical_pull",
+    },
+  ]);
+});
+
+test("Junction client reports a gated historical pull trigger as unavailable rather than failing", async () => {
+  for (const status of [403, 404]) {
+    const client = new JunctionClient({
+      apiKey: "sk_us_test_123",
+      environment: "sandbox",
+      region: "us",
+      fetchImpl: async () => createJsonResponse({ detail: "not enabled" }, status),
+    });
+
+    // Link Migration endpoints are disabled per team by default. That is a
+    // "ask support to enable it" answer, not a transport failure to retry.
+    assert.deepEqual(
+      await client.bulkTriggerHistoricalPull({
+        sourceProviderSlug: "garmin",
+        userIds: ["junction-user-1"],
+      }),
+      { accepted: false, endpointUnavailable: true },
+    );
+  }
+});
+
+test("Junction client surfaces real historical pull trigger failures", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => createJsonResponse({ detail: "boom" }, 500),
+  });
+
+  await assert.rejects(() => client.bulkTriggerHistoricalPull({
+    sourceProviderSlug: "garmin",
+    userIds: ["junction-user-1"],
+  }));
+});
+
+test("Junction client rejects historical pull triggers without a source or user", async () => {
+  const client = new JunctionClient({
+    apiKey: "sk_us_test_123",
+    environment: "sandbox",
+    region: "us",
+    fetchImpl: async () => {
+      throw new Error("bulkTriggerHistoricalPull should not send an invalid request");
+    },
+  });
+
+  await assert.rejects(
+    () => client.bulkTriggerHistoricalPull({ sourceProviderSlug: " ", userIds: ["u"] }),
+    /require a provider slug/u,
+  );
+  await assert.rejects(
+    () => client.bulkTriggerHistoricalPull({ sourceProviderSlug: "garmin", userIds: ["  "] }),
+    /require at least one user id/u,
+  );
+});
+
 test("Junction client derives the API host from environment and region", async () => {
   const requests: string[] = [];
   const client = new JunctionClient({

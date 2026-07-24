@@ -76,6 +76,7 @@ import {
   JunctionClient,
   type JunctionClientConfig,
   type JunctionDateQueryFormat,
+  type JunctionBulkTriggerHistoricalPullResult,
   type JunctionHistoricalPullSnapshot,
   type JunctionProviderConnection,
 } from "./junction-client.ts";
@@ -1088,6 +1089,39 @@ export function createJunctionDeviceSyncProvider(
             timeoutSeconds,
           },
           response: describeJunctionRefreshUserData(payloadResult),
+        },
+      };
+    }
+
+    if (endpoint === "trigger_historical_pull") {
+      const sourceProviderSlug = normalizeProviderSlug(context.sourceProviderSlug);
+      if (!sourceProviderSlug) {
+        throw deviceSyncError({
+          code: "JUNCTION_TRIGGER_HISTORICAL_PULL_SOURCE_REQUIRED",
+          message: "Junction historical pull triggers require a source provider slug.",
+          retryable: false,
+          httpStatus: 400,
+        });
+      }
+
+      const payloadResult = await runJunctionDiagnosticPayloadCall(() =>
+        client.bulkTriggerHistoricalPull({
+          sourceProviderSlug,
+          userIds: [context.account.externalAccountId],
+        })
+      );
+
+      return {
+        generatedAt: context.now,
+        provider: "junction",
+        result: {
+          request: {
+            endpoint: "trigger_historical_pull",
+            endpointKind: "junction_bulk_trigger_historical_pull",
+            method: "POST",
+            sourceProviderSlug,
+          },
+          response: describeJunctionBulkTriggerHistoricalPull(payloadResult),
         },
       };
     }
@@ -3103,6 +3137,25 @@ function describeJunctionIntrospectionHistoricalPull(
     notPulledCount: notPulled.length,
     pulled,
     notPulled,
+  };
+}
+
+function describeJunctionBulkTriggerHistoricalPull(
+  result: JunctionDiagnosticPayloadResult<JunctionBulkTriggerHistoricalPullResult>,
+): Record<string, unknown> {
+  if (!result.ok || !result.payload) {
+    return describeJunctionDiagnosticPayloadFailure(
+      result,
+      "JUNCTION_TRIGGER_HISTORICAL_PULL_FAILED",
+    );
+  }
+
+  return {
+    ok: true,
+    accepted: result.payload.accepted,
+    // Link Migration endpoints are disabled per team by default, so this is the
+    // expected answer until Junction support enables them.
+    endpointUnavailable: result.payload.endpointUnavailable,
   };
 }
 

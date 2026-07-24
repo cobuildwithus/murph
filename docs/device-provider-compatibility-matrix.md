@@ -94,6 +94,18 @@ recovery, and a failure to evaluate or report must not fail the sync pass. A
 source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
 
+Recovering a dead push carrier cannot be done by pulling, because there is
+nothing to pull and a data refresh cannot make the provider push again. The only
+lever short of member re-authorization is asking the aggregator to re-run its
+historical pull for that one source (`bulkTriggerHistoricalPull`). Junction ships
+that behind Link Migration, which is disabled per team by default, so a gated
+403/404 is reported as `endpointUnavailable` — an "ask support to enable it"
+answer, not a transport failure to retry. Recovery is operator-triggered through
+the hosted ops Junction recovery route rather than automatic: until the trigger
+has been observed restarting a real stalled carrier, there is nothing proven
+enough to put on a timer, and a retry ladder against an unproven lever would
+just be silent churn.
+
 Junction historical progress is evaluated per advertised high-signal daily
 source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
 family (for example activity) is not evidence that Garmin sleep or
