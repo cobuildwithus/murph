@@ -12372,6 +12372,106 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it.each([
+    {
+      currentTarget: "previous@example.test",
+      label: "keeps an unchanged address",
+    },
+    {
+      currentTarget: "current@example.test",
+      label: "replaces a changed address",
+    },
+  ])("$label at direct email provider entry", async ({ currentTarget }) => {
+    const effect = createEffect({
+      bindingDeliveryKind: null,
+      bindingDeliveryTarget: null,
+      channel: "email",
+      explicitTarget: "previous@example.test",
+      threadId: null,
+      threadIsDirect: true,
+    });
+    const resolveCurrentVerifiedEmailRecipient = vi.fn(async () => currentTarget);
+    const sendEmail = vi.fn(async (request: HostedEmailSendRequest) =>
+      createDelivery({
+        channel: "email",
+        ...request,
+      })
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const delivery = await dependencies.sendEmail({
+        message: "Private meal closeout",
+        target: "previous@example.test",
+        targetKind: "explicit",
+      });
+      return createDispatchResult({
+        delivery,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        resolveCurrentVerifiedEmailRecipient,
+        sendEmail,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(resolveCurrentVerifiedEmailRecipient).toHaveBeenCalledWith({
+      signal: null,
+    });
+    expect(sendEmail).toHaveBeenCalledOnce();
+    expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Private meal closeout",
+      target: currentTarget,
+      targetKind: "explicit",
+    }));
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryChannel: "email",
+        deliveryStatus: "sent",
+        target: currentTarget,
+      }),
+    ]);
+  });
+
+  it("fails closed before direct email provider entry when verified email is cleared", async () => {
+    const effect = createEffect({
+      bindingDeliveryKind: null,
+      bindingDeliveryTarget: null,
+      channel: "email",
+      explicitTarget: "previous@example.test",
+      threadId: null,
+      threadIsDirect: true,
+    });
+    const sendEmail = vi.fn();
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      await dependencies.sendEmail({
+        message: "Private meal closeout",
+        target: "previous@example.test",
+        targetKind: "explicit",
+      });
+      throw new Error("unreachable without current email authority");
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        resolveCurrentVerifiedEmailRecipient: vi.fn(async () => null),
+        sendEmail,
+      }),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EMAIL_AUDIENCE_AUTHORITY_UNAVAILABLE",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
   it("persists one privacy-blind outbox child per planned group email recipient", async () => {
     const automationAuthority = {
       automationId: "automation_123",

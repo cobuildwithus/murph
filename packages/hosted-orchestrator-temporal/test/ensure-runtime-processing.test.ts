@@ -171,6 +171,33 @@ describe("ensureRuntimeProcessing", () => {
     });
   });
 
+  it("passes through system-mailbox Cloudflare processing mode", async () => {
+    await stubCloudflareEnvironment();
+
+    const response: HostedRuntimeEnsureProcessingResponse = {
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-05-20T12:02:30.000Z",
+      runtimeAttemptId: "runtime_attempt_test",
+    };
+    const observedRequests: ObservedRequest[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      observedRequests.push({ init, url: String(url) });
+      return jsonResponse(response);
+    }));
+
+    await expect(ensureRuntimeProcessing({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+      userId: "member_test",
+    })).resolves.toEqual(response);
+
+    expect(JSON.parse(String(observedRequests[0]?.init?.body))).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+    });
+  });
+
   it("does not call the web usage-decision endpoint", async () => {
     await stubCloudflareEnvironment();
 

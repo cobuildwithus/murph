@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  ensureAutomaticMealCloseoutAutomation,
+} from "@murphai/assistant-engine";
+import {
   ID_PREFIXES,
   addMeal,
   deterministicContractId,
@@ -68,6 +71,12 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
     if (existing.externalRef?.version !== input.wake.mealPhoto.sha256) {
       return blockedMealPhotoImport("meal_photo.capture_conflict", false);
     }
+    if (!(await automaticMealCloseoutIsReady({
+      directRoute: input.wake.directRoute,
+      vaultRoot: input.vaultRoot,
+    }))) {
+      return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
+    }
     return importedMealPhotoOutcome(input.effectsPort, input.wake.mealPhoto.mealPhotoKey);
   }
 
@@ -125,7 +134,44 @@ export async function importHostedMealPhotoCapturedMailboxItem(input: {
     await rm(temporaryDirectory, { force: true, recursive: true }).catch(() => undefined);
   }
 
+  if (!(await automaticMealCloseoutIsReady({
+    directRoute: input.wake.directRoute,
+    vaultRoot: input.vaultRoot,
+  }))) {
+    return blockedMealPhotoImport("meal_photo.closeout_automation_failed", true);
+  }
+
   return importedMealPhotoOutcome(input.effectsPort, input.wake.mealPhoto.mealPhotoKey);
+}
+
+async function automaticMealCloseoutIsReady(input: {
+  directRoute: HostedExecutionMealPhotoCapturedWake["directRoute"];
+  vaultRoot: string;
+}): Promise<boolean> {
+  try {
+    const emailDeliveryTarget = input.directRoute.channel === "email"
+      ? input.directRoute.deliveryTarget
+      : null;
+    const directThreadId = input.directRoute.channel === "email"
+      ? null
+      : input.directRoute.threadId;
+    await ensureAutomaticMealCloseoutAutomation({
+      defaultRoute: {
+        channel: input.directRoute.channel,
+        deliverySource: null,
+        deliveryTarget: emailDeliveryTarget,
+        identityId: null,
+        participantId: null,
+        threadId: directThreadId,
+        threadIsDirect: true,
+      },
+      routeValidationProfile: "hosted",
+      vaultRoot: input.vaultRoot,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateMealPhotoBytes(input: {

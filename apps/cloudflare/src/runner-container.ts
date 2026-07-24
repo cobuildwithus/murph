@@ -8,6 +8,9 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -337,7 +340,7 @@ interface RunnerActiveOperationRecord {
   userId: string;
 }
 
-type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
@@ -2943,7 +2946,9 @@ function assertRunnerContainerEnsureProcessingUserIds(
 function normalizeRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return value === "inbox_media_retention" || value === "system_mailbox"
+    ? value
+    : "default";
 }
 
 function parseRunnerContainerEnsureReadyForProcessingInput(

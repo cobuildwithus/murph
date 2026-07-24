@@ -16,6 +16,7 @@ import {
 } from "./hosted-auth-shared";
 import { HostedInlineAuthButton } from "./hosted-inline-auth-button";
 import { HostedVerificationCodeStep } from "./hosted-verification-code-step";
+import { JoinInviteChangeEmailDialog } from "./join-invite-change-email-dialog";
 import type { HostedPrivyAuthenticatedInput } from "./use-hosted-auth-completion";
 
 export function HostedEmailAuthButton({
@@ -23,6 +24,7 @@ export function HostedEmailAuthButton({
   disableSignup = false,
   inline = false,
   initialEmailAddress = null,
+  lockedEmailAddress = null,
   onActivate = () => undefined,
   onAuthenticated,
 }: {
@@ -30,11 +32,14 @@ export function HostedEmailAuthButton({
   disableSignup?: boolean;
   inline?: boolean;
   initialEmailAddress?: string | null;
+  lockedEmailAddress?: string | null;
   onActivate?: () => void;
   onAuthenticated: (input: HostedPrivyAuthenticatedInput) => Promise<void> | void;
 }) {
   const { loginWithCode, sendCode, state } = useLoginWithEmail();
   const { ready } = usePrivy();
+  const lockedEmail = normalizeEmailAddress(lockedEmailAddress);
+  const [changeEmailDialogOpen, setChangeEmailDialogOpen] = useState(false);
   const [code, setCode] = useState("");
   const [emailAddress, setEmailAddress] = useState(
     () => normalizeEmailAddress(initialEmailAddress) ?? "",
@@ -67,9 +72,9 @@ export function HostedEmailAuthButton({
     event.preventDefault();
     setErrorMessage(null);
 
-    const nextEmailAddress = normalizeEmailAddress(
-      emailInputRef.current?.value ?? emailAddress,
-    );
+    const nextEmailAddress =
+      lockedEmail
+      ?? normalizeEmailAddress(emailInputRef.current?.value ?? emailAddress);
 
     if (nextEmailAddress && nextEmailAddress !== emailAddress) {
       setEmailAddress(nextEmailAddress);
@@ -172,6 +177,62 @@ export function HostedEmailAuthButton({
     setPendingEmailAddress(null);
   }
 
+  const changeEmailDialog = lockedEmail ? (
+    <JoinInviteChangeEmailDialog
+      emailAddress={lockedEmail}
+      open={changeEmailDialogOpen}
+      onOpenChange={setChangeEmailDialogOpen}
+    />
+  ) : null;
+
+  const codeStepSecondaryAction = lockedEmail ? (
+    <Button
+      type="button"
+      variant="ghost"
+      size="lg"
+      disabled={disabled}
+      onClick={() => setChangeEmailDialogOpen(true)}
+      className="w-full text-muted-foreground hover:text-foreground"
+    >
+      Change email
+    </Button>
+  ) : (
+    <Button
+      type="button"
+      variant="ghost"
+      size="lg"
+      disabled={disabled}
+      onClick={handleUseAnotherEmail}
+      className="w-full text-muted-foreground hover:text-foreground"
+    >
+      Use another email
+    </Button>
+  );
+
+  const lockedEmailField = lockedEmail ? (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
+        <Label>Your email</Label>
+        <Button
+          type="button"
+          onClick={() => setChangeEmailDialogOpen(true)}
+          disabled={disabled}
+          variant="link"
+          size="xs"
+          className="relative h-auto p-0 text-sm text-muted-foreground before:absolute before:-inset-x-3 before:-inset-y-2.5 before:content-['']"
+        >
+          Change email
+        </Button>
+      </div>
+      <p
+        data-hosted-locked-email="true"
+        className="flex h-14 w-full items-center truncate rounded-2xl border border-stone-200 bg-white px-5 text-base"
+      >
+        {lockedEmail}
+      </p>
+    </div>
+  ) : null;
+
   if (inline) {
     return (
       <div className="space-y-3">
@@ -188,40 +249,31 @@ export function HostedEmailAuthButton({
             pendingAction={loading ? "verify-code" : null}
             primaryActionLabel="Verify email"
             primaryActionPendingLabel="Verifying..."
-            secondaryAction={
-              <Button
-                type="button"
-                variant="ghost"
-                size="lg"
-                disabled={disabled}
-                onClick={handleUseAnotherEmail}
-                className="w-full text-muted-foreground hover:text-foreground"
-              >
-                Use another email
-              </Button>
-            }
+            secondaryAction={codeStepSecondaryAction}
             onCodeChange={setCode}
             onResendCode={handleResendCode}
             onSubmit={handleVerifyCode}
           />
         ) : (
           <form className="space-y-3" onSubmit={handleSendCode}>
-            <div className="space-y-3">
-              <Label htmlFor="homepage-email-address">Your email</Label>
-              <Input
-                id="homepage-email-address"
-                autoComplete="off"
-                autoFocus
-                data-bwignore="true"
-                inputMode="email"
-                placeholder="you@example.com"
-                ref={emailInputRef}
-                value={emailAddress}
-                onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                inputSize="xl"
-                className="w-full border-stone-200 bg-white"
-              />
-            </div>
+            {lockedEmailField ?? (
+              <div className="space-y-3">
+                <Label htmlFor="homepage-email-address">Your email</Label>
+                <Input
+                  id="homepage-email-address"
+                  autoComplete="off"
+                  autoFocus
+                  data-bwignore="true"
+                  inputMode="email"
+                  placeholder="you@example.com"
+                  ref={emailInputRef}
+                  value={emailAddress}
+                  onChange={(event) => setEmailAddress(event.currentTarget.value)}
+                  inputSize="xl"
+                  className="w-full border-stone-200 bg-white"
+                />
+              </div>
+            )}
             <Button
               type="submit"
               size="xl"
@@ -241,6 +293,7 @@ export function HostedEmailAuthButton({
             <AlertDescription>{errorMessage}</AlertDescription>
           </Alert>
         ) : null}
+        {changeEmailDialog}
       </div>
     );
   }
@@ -272,37 +325,28 @@ export function HostedEmailAuthButton({
               pendingAction={loading ? "verify-code" : null}
               primaryActionLabel="Verify email"
               primaryActionPendingLabel="Verifying..."
-              secondaryAction={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="lg"
-                  disabled={disabled}
-                  onClick={handleUseAnotherEmail}
-                  className="w-full text-muted-foreground hover:text-foreground"
-                >
-                  Use another email
-                </Button>
-              }
+              secondaryAction={codeStepSecondaryAction}
               onCodeChange={setCode}
               onResendCode={handleResendCode}
               onSubmit={handleVerifyCode}
             />
           ) : (
             <form className="space-y-3" onSubmit={handleSendCode}>
-              <Input
-                id="homepage-email-address"
-                autoComplete="off"
-                autoFocus
-                data-bwignore="true"
-                inputMode="email"
-                placeholder="you@example.com"
-                ref={emailInputRef}
-                value={emailAddress}
-                onChange={(event) => setEmailAddress(event.currentTarget.value)}
-                inputSize="xl"
-                className="w-full border-stone-200 bg-white"
-              />
+              {lockedEmailField ?? (
+                <Input
+                  id="homepage-email-address"
+                  autoComplete="off"
+                  autoFocus
+                  data-bwignore="true"
+                  inputMode="email"
+                  placeholder="you@example.com"
+                  ref={emailInputRef}
+                  value={emailAddress}
+                  onChange={(event) => setEmailAddress(event.currentTarget.value)}
+                  inputSize="xl"
+                  className="w-full border-stone-200 bg-white"
+                />
+              )}
               <Button
                 type="submit"
                 size="xl"
@@ -322,6 +366,7 @@ export function HostedEmailAuthButton({
               <AlertDescription>{errorMessage}</AlertDescription>
             </Alert>
           ) : null}
+          {changeEmailDialog}
         </div>
       ) : null}
     </>

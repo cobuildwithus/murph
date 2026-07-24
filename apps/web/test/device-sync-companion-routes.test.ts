@@ -16,7 +16,7 @@ const HRV_ROUTE_NOW = "2026-07-10T13:46:00.000Z";
 
 const mocks = vi.hoisted(() => ({
   acceptCompanionHrvRmssdObservation: vi.fn(),
-  assertHostedLaunchRequiredConsentGranted: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   createSdkSignInSession: vi.fn(),
@@ -56,7 +56,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
-  assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+  assertHostedHistoricalLaunchConsentGranted:
+    mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
 
 vi.mock("@/src/lib/device-sync/control-plane", () => ({
@@ -112,6 +113,16 @@ function mockVerifiedPrivyUser(): void {
     suspendedAt: ACTIVE_MEMBER.suspendedAt,
     threadContainer: null,
   });
+}
+
+function rejectHistoricalLaunchConsent(): void {
+  mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValue(
+    hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the Murph legal consent before continuing.",
+    }),
+  );
 }
 
 function signInTokenRequest(body?: unknown, bearerToken: string | null = "privy-identity-token") {
@@ -214,7 +225,7 @@ describe("device sync companion routes", () => {
     vi.setSystemTime(new Date("2026-07-09T12:00:00.000Z"));
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
-    mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.createSdkSignInSession.mockResolvedValue({
       account: {
         externalAccountId: "junction-user-1",
@@ -689,18 +700,30 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
-    it("rejects members without launch consent", async () => {
+    it("issues a device sign-in token when launch-document acceptance is stale", async () => {
       mockVerifiedPrivyUser();
-      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-        code: "HOSTED_CONSENT_REQUIRED",
-        httpStatus: 403,
-        message: "Accept the current Murph legal consent before continuing.",
-      }));
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({}));
+
+      expect(response.status).toBe(200);
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+        memberId: "member_1",
+        prisma: mocks.prismaClient,
+      });
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects a device sign-in token without both historical launch grants", async () => {
+      mockVerifiedPrivyUser();
+      rejectHistoricalLaunchConsent();
 
       const response = await signInTokenRoute.POST(signInTokenRequest({}));
 
       expect(response.status).toBe(403);
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_CONSENT_REQUIRED" },
+      });
     });
 
     it("rejects malformed installation metadata without reaching Junction", async () => {
@@ -760,7 +783,7 @@ describe("device sync companion routes", () => {
         "junction",
         "connect",
       );
-      expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledWith({
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
         prisma: mocks.prismaClient,
       });
@@ -879,18 +902,30 @@ describe("device sync companion routes", () => {
       expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
     });
 
-    it("requires launch health-data consent before accepting an observation", async () => {
+    it("accepts current device observations when launch-document acceptance is stale", async () => {
       mockVerifiedPrivyUser();
-      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-        code: "HOSTED_CONSENT_REQUIRED",
-        httpStatus: 403,
-        message: "Accept the current Murph legal consent before continuing.",
-      }));
+
+      const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
+
+      expect(response.status).toBe(202);
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+        memberId: "member_1",
+        prisma: mocks.prismaClient,
+      });
+      expect(mocks.acceptCompanionHrvRmssdObservation).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects current device observations without both historical launch grants", async () => {
+      mockVerifiedPrivyUser();
+      rejectHistoricalLaunchConsent();
 
       const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
 
       expect(response.status).toBe(403);
       expect(mocks.acceptCompanionHrvRmssdObservation).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_CONSENT_REQUIRED" },
+      });
     });
 
     it("accepts exactly one compact derived observation without echoing the value", async () => {
@@ -1047,18 +1082,30 @@ describe("device sync companion routes", () => {
       });
     });
 
-    it("rejects members without launch consent before reading store state", async () => {
+    it("reads current device sync status when launch-document acceptance is stale", async () => {
       mockVerifiedPrivyUser();
-      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-        code: "HOSTED_CONSENT_REQUIRED",
-        httpStatus: 403,
-        message: "Accept the current Murph legal consent before continuing.",
-      }));
+
+      const response = await statusRoute.GET(statusRequest());
+
+      expect(response.status).toBe(200);
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+        memberId: "member_1",
+        prisma: mocks.prismaClient,
+      });
+      expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_1");
+    });
+
+    it("rejects current device sync status without both historical launch grants", async () => {
+      mockVerifiedPrivyUser();
+      rejectHistoricalLaunchConsent();
 
       const response = await statusRoute.GET(statusRequest());
 
       expect(response.status).toBe(403);
       expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_CONSENT_REQUIRED" },
+      });
     });
 
     it("returns empty evidence when the member has no junction connection", async () => {
@@ -1181,13 +1228,30 @@ describe("device sync companion routes", () => {
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
     });
 
-    it("requires current launch consent before parsing or staging health data", async () => {
+    it("stages current device metadata when launch-document acceptance is stale", async () => {
       mockVerifiedPrivyUser();
-      mocks.assertHostedLaunchRequiredConsentGranted.mockRejectedValue(hostedOnboardingError({
-        code: "HOSTED_CONSENT_REQUIRED",
-        httpStatus: 403,
-        message: "Accept the current Murph legal consent before continuing.",
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+
+      const response = await healthMetadataRoute.POST(healthMetadataRequest({
+        records: [healthMetadataRecord()],
+        schemaVersion: 1,
       }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+        memberId: "member_1",
+        prisma: mocks.prismaClient,
+      });
+      expect(mocks.persistHostedDeviceSyncCompanionMetadata).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects current device metadata without both historical launch grants", async () => {
+      mockVerifiedPrivyUser();
+      rejectHistoricalLaunchConsent();
 
       const response = await healthMetadataRoute.POST(healthMetadataRequest({
         records: [healthMetadataRecord()],
@@ -1196,6 +1260,9 @@ describe("device sync companion routes", () => {
 
       expect(response.status).toBe(403);
       expect(mocks.persistHostedDeviceSyncCompanionMetadata).not.toHaveBeenCalled();
+      await expect(response.json()).resolves.toMatchObject({
+        error: { code: "HOSTED_CONSENT_REQUIRED" },
+      });
     });
 
     it("stages on the sole active Junction connection before source projection", async () => {

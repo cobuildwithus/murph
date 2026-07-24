@@ -409,6 +409,48 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
+  test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const fulfilledPurchase = {
+      offerCode: "usage_10_usd",
+      purchaseId: "hucp_fulfilled_added",
+      retryAllowed: false,
+      status: "fulfilled" as const,
+    };
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus(),
+      usageTopUpActivePurchase: fulfilledPurchase,
+      usageTopUpContactOptions: [{
+        href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+        kind: "text" as const,
+        label: "Messages",
+      }],
+      usageTopUpInitialOpen: true,
+    }));
+
+    assert.match(markup, /Usage added/);
+    assert.match(markup, /Text Murph/);
+    assert.match(
+      markup,
+      /sms:\+15555550100\?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage\./,
+    );
+    assert.match(markup, /aria-label="Text Murph in Messages"/);
+
+    const withoutContactMarkup = renderToStaticMarkup(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        usageStatus: buildUsageStatus(),
+        usageTopUpActivePurchase: fulfilledPurchase,
+        usageTopUpInitialOpen: true,
+      }),
+    );
+
+    assert.match(withoutContactMarkup, /Usage added/);
+    assert.doesNotMatch(withoutContactMarkup, /Text Murph/);
+  });
+
   test("offers the same top-up primitive to a direct paid Edge member", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 

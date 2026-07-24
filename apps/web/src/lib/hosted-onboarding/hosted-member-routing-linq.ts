@@ -20,7 +20,9 @@ import {
 import { buildHostedMemberRoutingPrivateColumns } from "./member-private-codecs";
 import { hostedOnboardingError } from "./errors";
 import { normalizePhoneNumber } from "./phone";
-import { type HostedOnboardingReadClient } from "./shared";
+import {
+  type HostedOnboardingReadClient,
+} from "./shared";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
@@ -228,6 +230,10 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
     telegramUserId: null,
   });
 
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
     namespace: "participant-contact",
@@ -296,6 +302,10 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
     telegramUserId: null,
   });
 
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   await acquireHostedLinqRoutingWriteLockTx({
     lockValue: buildHostedLinqParticipantContactLockValue(input.contact),
     namespace: "participant-contact",
@@ -443,37 +453,20 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   });
 }
 
-export async function acquireHostedMemberHomeLinqRecipientAssignmentLockTx(input: {
-  prisma: Prisma.TransactionClient;
-}): Promise<void> {
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: "home-line-pool",
-    namespace: "recipient-assignment",
-    tx: input.prisma,
-  });
-}
-
-export async function tryAcquireHostedMemberHomeLinqRecipientAssignmentLockTx(input: {
-  prisma: Prisma.TransactionClient;
-}): Promise<boolean> {
-  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_xact_lock(
-      hashtext(${"hosted-linq-routing:recipient-assignment"}),
-      hashtext(${"home-line-pool"})
-    ) AS locked
-  `;
-  return rows[0]?.locked === true;
-}
-
 export async function acquireHostedMemberHomeLinqRouteLockTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
-  await acquireHostedLinqRoutingWriteLockTx({
-    lockValue: input.memberId,
-    namespace: "home-member",
-    tx: input.prisma,
-  });
+  // The durable member row is the sole per-member route owner. NO KEY UPDATE
+  // still serializes route owners with each other and with activation's UPDATE
+  // lock, while remaining compatible with mailbox foreign-key KEY SHARE locks
+  // from Telegram and other channels.
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member"
+    WHERE "id" = ${input.memberId}
+    FOR NO KEY UPDATE
+  `;
 }
 
 export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
@@ -584,59 +577,6 @@ export async function countHostedMemberHomeLinqBindingsByRecipientPhone(input: {
   return counts;
 }
 
-export async function countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince(input: {
-  prisma: HostedOnboardingReadClient;
-  recipientPhones: readonly string[];
-  since: Date;
-}): Promise<Map<string, number>> {
-  const recipientPhoneEntries = buildHostedRecipientPhoneLookupEntries(
-    input.recipientPhones,
-  );
-
-  if (recipientPhoneEntries.length === 0) {
-    return new Map();
-  }
-
-  const counts = new Map<string, number>(
-    recipientPhoneEntries.map(({ recipientPhone }) => [recipientPhone, 0]),
-  );
-  const recipientPhoneByLookupKey = new Map(
-    recipientPhoneEntries.map(({ lookupKey, recipientPhone }) => [
-      lookupKey,
-      recipientPhone,
-    ] as const),
-  );
-
-  const groupedCounts = await input.prisma.hostedMemberRouting.groupBy({
-    by: ["linqRecipientPhoneLookupKey"],
-    where: {
-      linqHomeLineAssignedAt: {
-        gte: input.since,
-      },
-      linqRecipientPhoneLookupKey: {
-        in: recipientPhoneEntries.map(({ lookupKey }) => lookupKey),
-      },
-    },
-    _count: {
-      _all: true,
-    },
-  });
-
-  for (const groupedCount of groupedCounts) {
-    const recipientPhone = groupedCount.linqRecipientPhoneLookupKey
-      ? recipientPhoneByLookupKey.get(groupedCount.linqRecipientPhoneLookupKey)
-      : null;
-
-    if (!recipientPhone) {
-      continue;
-    }
-
-    counts.set(recipientPhone, (counts.get(recipientPhone) ?? 0) + groupedCount._count._all);
-  }
-
-  return counts;
-}
-
 async function writeHostedMemberLinqBindingTx(input: {
   clearPending: boolean;
   homeLineAssignedAt: Date | null;
@@ -672,12 +612,10 @@ async function writeHostedMemberLinqBindingTx(input: {
     telegramUserId: null,
   });
 
-  if (reservesHomeRecipient) {
-    await acquireHostedMemberHomeLinqRouteLockTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    });
-  }
+  await acquireHostedMemberHomeLinqRouteLockTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
 
   const lockedHomeRoute = reservesHomeRecipient
     ? await readHostedMemberHomeLinqRouteTx({
@@ -1068,13 +1006,13 @@ async function tryAcquireHostedMemberHomeLinqRouteLockTx(input: {
     throw new TypeError("Hosted Linq member routing lock requires a non-empty member id.");
   }
 
-  const rows = await input.prisma.$queryRaw<Array<{ locked: boolean }>>`
-    SELECT pg_try_advisory_xact_lock(
-      hashtext(${"hosted-linq-routing:home-member"}),
-      hashtext(${memberId})
-    ) AS locked
+  const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT "id"
+    FROM "hosted_member"
+    WHERE "id" = ${memberId}
+    FOR NO KEY UPDATE SKIP LOCKED
   `;
-  return rows[0]?.locked === true;
+  return rows[0]?.id === memberId;
 }
 
 function buildHostedRecipientPhoneLookupEntries(
@@ -1116,7 +1054,7 @@ function buildHostedRecipientPhoneLookupEntries(
 
 async function acquireHostedLinqRoutingWriteLockTx(input: {
   lockValue: string | null;
-  namespace: "chat" | "home-member" | "participant-contact" | "recipient-assignment";
+  namespace: "chat" | "participant-contact";
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";

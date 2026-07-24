@@ -318,13 +318,31 @@ function renderBlock(block: MarkdownBlock, index: number) {
   }
 
   if (block.type === "table") {
+    const hasColumnHeaders = block.header.length > 0;
+    const isWideTable = block.header.length >= 6;
+    const regionClassName = isWideTable
+      ? "relative left-1/2 w-[min(1120px,calc(100vw-3rem))] -translate-x-1/2"
+      : "";
+    const tableClassName = isWideTable
+      ? "min-w-[1120px]"
+      : "min-w-full";
+    const columnNames = block.header.join(", ");
+
     return (
       <div
         key={`${block.type}-${index}`}
-        className="overflow-x-auto rounded-md border border-border"
+        aria-label="Scrollable legal document table"
+        className={`${regionClassName} overflow-x-auto rounded-md border border-border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background`}
+        role="region"
+        tabIndex={0}
       >
-        <table className="min-w-full border-collapse text-left text-[13px]">
-          {block.header.length > 0 ? (
+        <table className={`${tableClassName} border-collapse text-left text-[13px]`}>
+          <caption className="sr-only">
+            {columnNames
+              ? `Legal document table. Columns: ${columnNames}.`
+              : "Legal document table."}
+          </caption>
+          {hasColumnHeaders ? (
             <thead className="bg-muted text-foreground">
               <tr>
                 {block.header.map((cell, cellIndex) => (
@@ -342,14 +360,29 @@ function renderBlock(block: MarkdownBlock, index: number) {
           <tbody className="divide-y divide-border">
             {block.rows.map((row, rowIndex) => (
               <tr key={`${index}-row-${rowIndex}`} className="align-top">
-                {row.map((cell, cellIndex) => (
-                  <td
-                    key={`${index}-row-${rowIndex}-${cellIndex}`}
-                    className="px-3 py-2 leading-relaxed text-muted-foreground"
-                  >
-                    {renderInline(cell)}
-                  </td>
-                ))}
+                {row.map((cell, cellIndex) => {
+                  const cellKey = `${index}-row-${rowIndex}-${cellIndex}`;
+                  if (hasColumnHeaders && cellIndex === 0) {
+                    return (
+                      <th
+                        key={cellKey}
+                        className="px-3 py-2 text-left font-semibold leading-relaxed text-foreground"
+                        scope="row"
+                      >
+                        {renderInline(cell)}
+                      </th>
+                    );
+                  }
+
+                  return (
+                    <td
+                      key={cellKey}
+                      className="px-3 py-2 leading-relaxed text-muted-foreground"
+                    >
+                      {renderInline(cell)}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

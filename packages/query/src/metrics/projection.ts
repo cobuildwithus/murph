@@ -151,7 +151,7 @@ const RECOVERY_METRIC_EVIDENCE = [
 
 const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "steps", summaryField: "steps", sourceKind: "activity-summary" },
-  { metricKey: "activity-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
+  { metricKey: "workout-minutes", summaryField: "sessionMinutes", sourceKind: "activity-summary" },
   { metricKey: "workout-count", summaryField: "sessionCount", sourceKind: "activity-summary" },
   { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
   { metricKey: "activity-score", summaryField: "activityScore", sourceKind: "activity-summary" },

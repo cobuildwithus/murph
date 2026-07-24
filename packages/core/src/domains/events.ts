@@ -54,6 +54,9 @@ export {
   findEventByExternalRef,
   upsertEvent,
 } from "./events/ledger.ts";
+export {
+  removeAutomaticMealPhoto,
+} from "./events/automatic-meal-photo-retention.ts";
 export type {
   DeleteEventInput,
   DeleteEventResult,
@@ -63,6 +66,10 @@ export type {
   UpsertEventPayloadInput,
   UpsertEventResult,
 } from "./events/ledger.ts";
+export type {
+  RemoveAutomaticMealPhotoInput,
+  RemoveAutomaticMealPhotoResult,
+} from "./events/automatic-meal-photo-retention.ts";
 
 export function buildExperimentEventRecord(input: {
   occurredAt: string;

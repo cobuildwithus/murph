@@ -152,8 +152,9 @@ not permission to choose an amount, start Checkout, or claim usage was added.
   The Family plan owner may add one-time usage for this active member after the
   shared Family management gate above. Otherwise offer to use less included
   usage or wait for the reset.
-- **Group:** After an explicit request, call `read_usage`. Share only its
-  returned coarse state, period end when relevant, and first-party funding URL.
+- **Group:** After an explicit request, call `read_usage`. Share its returned
+  state, the remaining percentage when the result includes remainingPercent,
+  the period end when relevant, and the first-party funding URL.
   Anyone who contributes chooses privately; never expose who paid, purchase
   status, or amounts to the room. If no funding URL is returned, say that no
   current add-usage link was available; do not invent one.

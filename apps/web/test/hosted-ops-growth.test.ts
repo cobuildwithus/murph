@@ -11,8 +11,10 @@ import {
   captureHostedGrowthDailySnapshot,
   findComparableSnapshot,
   readHostedGrowthDashboard,
+  readHostedMessageVolumeTotal,
   startOfUtcDay,
 } from "../src/lib/hosted-ops/growth-metrics";
+import { HOSTED_MESSAGE_VOLUME_BASE } from "../src/lib/message-volume";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     findMany: vi.fn(),
   },
   hostedGrowthDailySnapshot: {
+    aggregate: vi.fn(),
     findMany: vi.fn(),
     upsert: vi.fn(),
   },
@@ -376,6 +379,95 @@ describe("hosted ops growth metrics", () => {
       conversionPercent: 100,
       started: 2,
       stillTrialing: 0,
+    });
+  });
+
+  it("adds snapshot sums and live counts since the last snapshot to the base", async () => {
+    const lastSnapshotDate = new Date("2026-07-23T00:00:00.000Z");
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: {
+        snapshotDate: lastSnapshotDate,
+      },
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(120);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(80);
+
+    await expect(
+      readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")),
+    ).resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE + 7_300 + 200);
+    expect(mocks.hostedMailboxItem.count).toHaveBeenCalledWith({
+      where: {
+        kind: "conversation.message",
+        occurredAt: {
+          gte: lastSnapshotDate,
+        },
+      },
+    });
+    expect(mocks.hostedLinqDelivery.count).toHaveBeenCalledWith({
+      where: {
+        attemptedAt: {
+          gte: lastSnapshotDate,
+        },
+        status: {
+          in: ["accepted", "delivered", "sent_no_receipt_expected"],
+        },
+      },
+    });
+  });
+
+  it("counts live messages from the start of today when no snapshot exists", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: {
+        snapshotDate: null,
+      },
+      _sum: {
+        inboundMessagesPriorDay: 400,
+        outboundMessagesPriorDay: null,
+      },
+    });
+    await expect(
+      readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")),
+    ).resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE + 400);
+    expect(mocks.hostedMailboxItem.count).toHaveBeenCalledWith({
+      where: {
+        kind: "conversation.message",
+        occurredAt: {
+          gte: new Date("2026-07-23T00:00:00.000Z"),
+        },
+      },
+    });
+
+    mocks.hostedGrowthDailySnapshot.aggregate.mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    await expect(
+      readHostedMessageVolumeTotal(new Date("2026-07-23T18:00:00.000Z")),
+    ).resolves.toBe(HOSTED_MESSAGE_VOLUME_BASE);
+  });
+
+  it("serves the message volume total with a cacheable response", async () => {
+    mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValueOnce({
+      _max: {
+        snapshotDate: new Date("2026-07-23T00:00:00.000Z"),
+      },
+      _sum: {
+        inboundMessagesPriorDay: 4_100,
+        outboundMessagesPriorDay: 3_200,
+      },
+    });
+    const route = await import("../app/api/message-volume/route");
+
+    const response = await route.GET();
+
+    expect(response.headers.get("Cache-Control")).toBe(
+      "public, s-maxage=300, stale-while-revalidate=3600",
+    );
+    await expect(response.json()).resolves.toEqual({
+      total: HOSTED_MESSAGE_VOLUME_BASE + 7_300,
     });
   });
 

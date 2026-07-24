@@ -801,6 +801,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
   byteLength: number;
   captureId: string;
   capturedAt: string;
+  directRoute: HostedExecutionMealPhotoCapturedWake["directRoute"];
   eventId: string;
   mealPhotoKey: string;
   memberId: string;
@@ -814,6 +815,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
   }
 
   return {
+    directRoute: input.directRoute,
     eventId: input.eventId,
     kind: "meal-photo.captured",
     mealPhoto: {

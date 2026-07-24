@@ -217,7 +217,7 @@ The affirmative-reaction adapter transfers target authorship from a live Linq
 message read to an optional wake marker plus exact same-route sent-outbox
 attestation in the runner. Old Web with a marker-aware runner is safe; new Web
 with an old runner is unsafe because the old tolerant parser drops the marker
-and imports the synthetic `Yes.` as an ordinary message.
+and imports the synthetic reaction description as an ordinary message.
 
 Roll out the first marker-aware release in this order:
 
@@ -673,6 +673,19 @@ preferred. After convergence, smoke one personal scheduled reminder and one
 group automation, and confirm there are no new
 `ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE` or
 `ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE` failures.
+
+The activity/workout semantic-marker rollout is producer-first and has no
+feature flag. Deploy its compatibility release to Web before Cloudflare so Web
+preserves the optional markers in encrypted share snapshots. Then deploy
+Cloudflare with `container_rollout=immediate`, prove the new runner fingerprint,
+and confirm a canary projection contains `broad-movement` activity and
+`canonical-workout-day` workout records. Use `/ops/runtime-maintenance` in its
+existing bounded batches to wake every current checkpointed grantor, retry
+failures, and verify with aggregate evidence that all current activity/workout
+snapshots were replaced after cutover. Readers remain legacy-compatible during
+this drain. Deploy exact-marker rejection only as a separate consumer release
+after the legacy count is zero. Do not replace this sequence with a rollout
+flag, read-triggered member fanout, polling, or another backfill owner.
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 

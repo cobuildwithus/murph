@@ -545,12 +545,8 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "HOSTED_LINQ_HOME_LINE_POOL_BUSY",
-    "HOSTED_LINQ_HOME_ROUTE_CHANGED",
-  ])("does not repeat finalization after downstream Linq contention: %s", async (
-    code,
-  ) => {
+  it("does not repeat finalization after downstream Linq contention", async () => {
+    const code = "HOSTED_LINQ_HOME_ROUTE_CHANGED";
     const prisma = makePrisma();
     mocks.activateHostedMemberForPositiveSourceTx.mockRejectedValueOnce(
       hostedOnboardingError({

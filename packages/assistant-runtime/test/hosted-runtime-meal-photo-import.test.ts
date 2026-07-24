@@ -1,17 +1,25 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { VAULT_LAYOUT } from "@murphai/contracts";
 import {
   ID_PREFIXES,
   deterministicContractId,
   findEventByExternalRef,
   initializeVault,
+  showAutomation,
 } from "@murphai/core";
-import { buildHostedExecutionMealPhotoCapturedWake } from "@murphai/hosted-execution";
+import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+} from "@murphai/assistant-engine";
+import {
+  buildHostedExecutionMealPhotoCapturedWake,
+  type HostedExecutionDirectRoute,
+} from "@murphai/hosted-execution";
 import type { HostedRuntimeEffectsPort } from "../src/hosted-runtime/platform.ts";
 import type { HostedMailboxResolvedImportItem } from "../src/hosted-runtime/mailbox-import.ts";
 import { importHostedMealPhotoCapturedMailboxItem } from "../src/hosted-runtime/meal-photo-import.ts";
@@ -35,7 +43,10 @@ describe("hosted meal photo mailbox import", () => {
     const vaultRoot = await createTestVault();
     const readMealPhoto = vi.fn(async () => JPEG_BYTES);
     const deleteMealPhoto = vi.fn(async () => undefined);
-    const effectsPort = createEffectsPort({ deleteMealPhoto, readMealPhoto });
+    const effectsPort = createEffectsPort({
+      deleteMealPhoto,
+      readMealPhoto,
+    });
     const item = createMealPhotoMailboxItem();
     const wake = createMealPhotoWake();
 
@@ -64,10 +75,28 @@ describe("hosted meal photo mailbox import", () => {
       effectsPort,
       item,
       vaultRoot,
-      wake,
+      wake: createMealPhotoWake({
+        channel: "telegram",
+        threadId: "telegram_home_thread",
+      }),
     });
     expect(replay.status).toBe("imported");
     expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: "linq",
+        threadId: "linq_home_thread",
+        threadIsDirect: true,
+      },
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "21:00",
+      },
+      status: "active",
+    });
 
     if (first.status !== "imported" || !first.afterCheckpoint) {
       throw new Error("Expected an after-checkpoint meal photo cleanup effect.");
@@ -111,6 +140,33 @@ describe("hosted meal photo mailbox import", () => {
     })).resolves.toBeNull();
   });
 
+  it("binds an email-only member's verified recipient as the closeout route", async () => {
+    const vaultRoot = await createTestVault();
+    const outcome = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort: createEffectsPort({
+        readMealPhoto: vi.fn(async () => JPEG_BYTES),
+      }),
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake({
+        channel: "email",
+        deliveryTarget: "member@example.test",
+      }),
+    });
+
+    expect(outcome.status).toBe("imported");
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      route: {
+        channel: "email",
+        deliveryTarget: "member@example.test",
+        threadIsDirect: true,
+      },
+    });
+  });
+
   it("retries when the platform has not configured staged-photo reads", async () => {
     const vaultRoot = await createTestVault();
     const outcome = await importHostedMealPhotoCapturedMailboxItem({
@@ -126,6 +182,62 @@ describe("hosted meal photo mailbox import", () => {
       status: "blocked",
     });
   });
+
+  it("keeps the mailbox item retryable until the closeout automation is durable", async () => {
+    const vaultRoot = await createTestVault();
+    const readMealPhoto = vi.fn(async () => JPEG_BYTES);
+    const deleteMealPhoto = vi.fn(async () => undefined);
+    const effectsPort = createEffectsPort({
+      deleteMealPhoto,
+      readMealPhoto,
+    });
+    const automationPath = path.join(
+      vaultRoot,
+      VAULT_LAYOUT.automationsDirectory,
+      "automatic-meal-daily-closeout.md",
+    );
+    await mkdir(automationPath);
+
+    const first = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort,
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    });
+
+    expect(first).toEqual({
+      reasonCode: "meal_photo.closeout_automation_failed",
+      retryable: true,
+      status: "blocked",
+    });
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    expect(deleteMealPhoto).not.toHaveBeenCalled();
+    await expect(findEventByExternalRef({
+      resourceId: CAPTURE_ID,
+      resourceType: "photo",
+      system: "meal-photo-capture",
+      vaultRoot,
+    })).resolves.not.toBeNull();
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull();
+
+    await rm(automationPath, { force: true, recursive: true });
+    const retry = await importHostedMealPhotoCapturedMailboxItem({
+      effectsPort,
+      item: createMealPhotoMailboxItem(),
+      vaultRoot,
+      wake: createMealPhotoWake(),
+    });
+
+    expect(retry.status).toBe("imported");
+    expect(readMealPhoto).toHaveBeenCalledTimes(1);
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.not.toBeNull();
+  });
 });
 
 async function createTestVault(): Promise<string> {
@@ -139,11 +251,17 @@ async function createTestVault(): Promise<string> {
   return vaultRoot;
 }
 
-function createMealPhotoWake() {
+function createMealPhotoWake(
+  directRoute: HostedExecutionDirectRoute = {
+    channel: "linq",
+    threadId: "linq_home_thread",
+  },
+) {
   return buildHostedExecutionMealPhotoCapturedWake({
     byteLength: JPEG_BYTES.byteLength,
     captureId: CAPTURE_ID,
     capturedAt: CAPTURED_AT,
+    directRoute,
     eventId: "meal-photo:enrollment:capture",
     mealPhotoKey: "meal_photo_opaque_key",
     memberId: "member_synthetic_001",
@@ -192,7 +310,10 @@ function createMealPhotoMailboxItem(): HostedMailboxResolvedImportItem {
 }
 
 function createEffectsPort(
-  overrides: Pick<HostedRuntimeEffectsPort, "deleteMealPhoto" | "readMealPhoto"> = {},
+  overrides: Pick<
+    HostedRuntimeEffectsPort,
+    "deleteMealPhoto" | "readMealPhoto"
+  > = {},
 ): HostedRuntimeEffectsPort {
   return {
     readRawEmailMessage: async () => null,
