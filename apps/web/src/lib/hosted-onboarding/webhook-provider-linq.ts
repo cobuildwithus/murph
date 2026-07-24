@@ -44,6 +44,7 @@ import {
 } from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
+  HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
@@ -620,6 +621,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       event: input.event,
       logDetails: {
         existingMemberActive: true,
@@ -1270,9 +1272,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   // Subscription/AI usage and its limit notice are gated after mailbox append,
   // so pending user input survives upgrades and allowance resets.
+  // Group threads share one daily bucket across every participant, so they get
+  // a higher cap than a 1:1 direct chat.
   const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
     context: input.context,
     dailyState,
+    dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
     event: input.event,
     logDetails: {
       existingMemberActive: true,
@@ -1525,6 +1530,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dailyState: HostedLinqDailyState | null;
+  dailyTextLimit: number;
   event: HostedLinqWebhookEvent;
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
@@ -1539,7 +1545,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return null;
   }
 
-  if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+  if (dailyState.inboundCount > input.dailyTextLimit) {
     if (dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("daily-quota-reached"),
@@ -1555,6 +1561,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildQuotaReplyResponse({
         chatId: input.context.summary.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,

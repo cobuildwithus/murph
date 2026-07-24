@@ -136,6 +136,9 @@ describe("hosted group funding page", () => {
       }),
       undefined,
     );
+    expect(mocks.HostedUsageTopUpDialog.mock.calls[0]?.[0]).not.toHaveProperty(
+      "contactOptions",
+    );
     expect(mocks.readHostedActiveUsageCreditPurchaseForPayer).toHaveBeenCalledWith({
       serverApprovedPayableTargets: [{
         beneficiaryMemberId: "member_group_runtime",

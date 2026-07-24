@@ -196,18 +196,46 @@ context-dependent measures mainly for group-level patterns unless the group
 explicitly chose that challenge metric.
 
 Express durations in human units. Use "about 30 minutes of movement a day"
-instead of raw minute totals. The weekly summary's `activity-minutes` stream is
-broad movement per observed day. The separate `workout-minutes` stream is
-exercise averaged over recorded workout days. Neither payload has a coverage
-count or weekly total, so never multiply an average into a weekly sum. The
-current `workout-count` average omits zero-workout days, so it
+instead of raw minute totals when the returned fact's semantic owner identifies
+the value as broad movement. New `activity-days.v0` producers mark that value
+as `"broad-movement"`, while new `workout-days.v0` producers mark their
+canonical combined rollup as `"canonical-workout-day"`. Distinct same-day
+workouts add in that rollup, while mirrored copies count once; consumers never
+repair a value by replacing one workout with another or summing raw records
+independently.
+
+The marker rollout is producer-first. During its bounded compatibility phase,
+the weekly reader still accepts unmarked legacy rows so existing groups do not
+lose data before their snapshots are refreshed. Deploy the marker-preserving
+Web parser before the marker-producing runner, refresh every current grantor
+through the existing maintenance wake, and prove the legacy population has
+drained. Exact-marker rejection belongs to the subsequent consumer release,
+not this compatibility phase.
+
+Newsletter `prepare` excludes the open local calendar day from every weekly
+average. Each returned stat reports `observedDayCount`, sorted `observedDates`,
+and `throughDate`; scope the claim to those observed completed days, and do not
+infer that unobserved days were zero or that the full week is represented.
+A settled cross-person leader, winner, or crown for a metric requires identical
+`observedDates` across every compared member. When coverage differs, scope each
+average to its own dates and avoid a crown. For current-chat raw records, derive
+the equivalent sorted usable date set from the current local Monday through
+yesterday after semantic validation. Exclude both the current local day and
+older records from the rolling read window. Apply the same identical-date rule.
+A current-day value may appear only as a separate, explicit "today so far"
+aside, never as input to a weekly leader, crown, or challenge. This group-level
+qualifier is not a member-specific missing-data callout.
+
+Neither weekly payload supports an inferred weekly total, so never multiply an
+average into a weekly sum. The current `workout-count` average omits
+zero-workout days, so it
 cannot support weekly workout totals or workout-count rankings. The payload
 also cannot support prior-week change, monthly highs, or four-week highs. Call
 genuinely broad activity "movement" and reserve "exercise" for
 workout/exercise sources. A normal rich edition may use roughly 6–12 useful
 stats, but every number should establish a leader, race, surprise, or current-
 week group pattern instead of merely proving the field was
-available. Omit missing-data callouts. Build the featured set only from
+available. Omit member-specific missing-data callouts. Build the featured set only from
 participants with a verified email and at least one current-week stat; do not
 use any other participant's health data in the subject or body.
 

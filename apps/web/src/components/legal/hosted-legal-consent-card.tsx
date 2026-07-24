@@ -339,11 +339,9 @@ function LaunchConsentCheckboxes({
 }) {
   return (
     <div className="space-y-6">
-      <p className="rounded-xl bg-muted/50 p-4 text-[13px] leading-relaxed text-muted-foreground">
-        Hosted Murph processes readable health data through contracted AI and other service
-        providers to provide features you request. Murph does not sell health data or use it for
-        advertising or general-purpose AI model training. Connected-source rules may further limit
-        AI use, sharing, storage, retention, or available features.
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
+        Murph never sells health data or uses it for advertising or general-purpose AI model
+        training.
       </p>
 
       {legalScope && !legalScope.granted ? (
@@ -389,8 +387,7 @@ function LaunchConsentCheckboxes({
               </a>
               .
               <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                You can stop future collection from a connected source by disconnecting it or
-                revoking its permissions. You can request deletion in Settings.
+                Disconnect a source anytime to stop collection. Request deletion in Settings.
               </span>
             </span>
           }

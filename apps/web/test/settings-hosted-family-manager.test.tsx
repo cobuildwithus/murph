@@ -40,6 +40,7 @@ vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
   HostedUsageTopUpDialog: (props: {
     activePurchase?: unknown;
     checkoutUrl?: string;
+    contactOptions?: readonly unknown[];
     deferTerminalRefreshUntilClose?: boolean;
     offers: readonly unknown[];
     purchaseReturn?: unknown;
@@ -945,7 +946,7 @@ test("HostedFamilyManager hides the no-contact hint when the active contact has 
   }
 });
 
-test("HostedFamilyManager leaves payment actions only on the frozen Family member", async () => {
+test("HostedFamilyManager surfaces the top-up dialog inside each member's manage modal", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
@@ -957,7 +958,7 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
     status: "checkout_open" as const,
     url: "https://checkout.stripe.test/session",
   };
-  const { cleanup, container } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedFamilyManager, {
       ...props,
       members: [
@@ -973,6 +974,7 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
       ],
       usageTopUpActiveMemberId: "member_family",
       usageTopUpActivePurchase: activePurchase,
+      usageTopUpContactOptions: [payerTopUpContactOption()],
       usageTopUpOffers: [
         { amountLabel: "$5", offerCode: "usage_5_usd" },
         { amountLabel: "$10", offerCode: "usage_10_usd" },
@@ -983,27 +985,46 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
   );
 
   try {
+    // The top-up entry only lives inside a member's manage modal now, so
+    // nothing renders it inline in the roster.
+    assert.equal(buttonByTextOrNull(container, "Add usage"), null);
+
+    // The frozen member's manage modal surfaces the payment-recovery action.
+    await clickLastButton(container, window, "Manage");
     expect([...container.querySelectorAll("button")].filter(
       (button) => button.textContent === "Add usage",
     )).toHaveLength(1);
     expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
       expect.objectContaining({
-        activePurchase: null,
-        checkoutUrl:
-          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
-        offers: [],
-        scope: "family",
-        targetLabel: "you",
-      }),
-    );
-    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
-      expect.objectContaining({
         activePurchase,
         checkoutUrl:
           "/api/settings/billing/family/members/member_family/usage-credit/checkout",
+        contactOptions: [payerTopUpContactOption()],
         offers: [],
         scope: "family",
         targetLabel: "Family member",
+      }),
+    );
+
+    // The owner's manage modal gates offers away and shows no payment action.
+    const dismiss = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Dismiss dialog"]',
+    );
+    assert.ok(dismiss);
+    await act(async () => {
+      dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    await clickButton(container, window, "Manage");
+    assert.equal(buttonByTextOrNull(container, "Add usage"), null);
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: null,
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+        contactOptions: [payerTopUpContactOption()],
+        offers: [],
+        scope: "family",
+        targetLabel: "you",
       }),
     );
   } finally {
@@ -1026,6 +1047,7 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
       ...baseFamilyManagerProps(),
       usageTopUpActiveMemberId: "member_former",
       usageTopUpActivePurchase: activePurchase,
+      usageTopUpContactOptions: [payerTopUpContactOption()],
     }),
     { requireButton: false },
   );
@@ -1046,10 +1068,23 @@ test("HostedFamilyManager renders a server-withheld former-member checkout as st
         targetLabel: "a former family member",
       }),
     );
+    const formerMountProps = mocks.usageTopUpDialogProps.mock.calls
+      .map(([callProps]) => callProps)
+      .find((callProps) => callProps.targetLabel === "a former family member");
+    assert.ok(formerMountProps);
+    assert.equal("contactOptions" in formerMountProps, false);
   } finally {
     await cleanup();
   }
 });
+
+function payerTopUpContactOption() {
+  return {
+    href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+    kind: "text" as const,
+    label: "Messages",
+  };
+}
 
 function baseFamilyManagerProps() {
   return {

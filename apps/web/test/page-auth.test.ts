@@ -89,6 +89,19 @@ describe("hosted page auth", () => {
     });
   });
 
+  it("returns an anonymous snapshot when the database pool checkout times out", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(
+      new Error("timeout exceeded when trying to connect"),
+    );
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+  });
+
   it("rethrows unexpected app-session failures", async () => {
     const error = new Error("session store unavailable");
     mocks.getHostedAppSession.mockRejectedValue(error);

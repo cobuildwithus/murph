@@ -159,6 +159,20 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("percentage of the current period's usage remaining");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("floored and clamped to 0-100");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("means under 1 percent remains");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("share the returned remainingPercent and periodEnd");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("when remainingPercent is absent, share the state and periodEnd instead");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("Never infer or disclose internal currency accounting");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("contributor identity, purchase history, or payment status");
     expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell waits and exact replay");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("poll every accepted ask_member call until it returns completed or unavailable");
@@ -2661,6 +2675,7 @@ describe("murph.newsletter dynamic tool", () => {
         hostedToolContext: createNewsletterHostedToolContext({
           groupSharedReader,
           newsletterRequest,
+          occurrenceAt: "2026-07-07T03:30:00.000Z",
         }),
         nextUsageOrdinal: () => 1,
         progressDelivery: null,
@@ -2677,7 +2692,10 @@ describe("murph.newsletter dynamic tool", () => {
             memberId: "member_a",
             weeklyStats: [{
               currentWeekAvg: 7_000,
+              observedDayCount: 1,
+              observedDates: ["2026-07-06"],
               stream: "steps",
+              throughDate: "2026-07-06",
               unit: "count",
             }],
           }],
@@ -2689,7 +2707,7 @@ describe("murph.newsletter dynamic tool", () => {
             { hasEmail: false, memberId: "member_opted_out" },
             { hasEmail: true, memberId: "member_stale_grant" },
           ],
-          referenceAt: "2026-07-06T03:30:00.000Z",
+          referenceAt: "2026-07-07T03:30:00.000Z",
           status: "ok",
         },
       });
@@ -3073,6 +3091,7 @@ function createNewsletterHostedToolContext(input: {
   closeNewsletterCapability?: () => void;
   groupSharedReader?: AssistantHostedGroupSharedReader;
   newsletterRequest?: NewsletterToolRequest;
+  occurrenceAt?: string;
   recordNewsletterSendResult?: (result: unknown) => void;
 } = {}): AssistantHostedToolContext {
   const context = {
@@ -3086,7 +3105,7 @@ function createNewsletterHostedToolContext(input: {
     currentUserActionScope: () => null,
     currentScheduledAutomationAuthority: () => ({
       automationId: "automation_newsletter",
-      occurrenceAt: "2026-07-06T03:30:00.000Z",
+      occurrenceAt: input.occurrenceAt ?? "2026-07-06T03:30:00.000Z",
     }),
     familyPlanTool: null,
     groupSharedReader: input.groupSharedReader ?? null,

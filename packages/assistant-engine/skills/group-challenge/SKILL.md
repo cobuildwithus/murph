@@ -69,7 +69,7 @@ grant Apple Health access.
 - Floors climbed: `floors-climbed-days.v0`
 - Active calories: `active-calories-days.v0`
 - Broad workout count/minutes: `workout-days.v0`
-- Broad active minutes: `activity-days.v0`
+- Broad movement minutes: `activity-days.v0`
 - Broad workout heart-rate zones: `heart-rate-zones-days.v0`
 - Workout strain: `workout-strain-days.v0`
 - Day strain: `day-strain-days.v0`
@@ -171,6 +171,14 @@ loses a reminder; it must never lose the challenge.
 When kickoff needs another decision, ask that next question directly in the
 group response. Do not prepend a setup-status, progress, or transition sentence;
 the question is the useful update.
+
+Kickoff is a conversation, not a rules document, and every kickoff message
+obeys `group-chat`'s length budget. Pitch a format or scoring idea in a few
+short sentences, settle one decision at a time, and ask at most one question
+per message. The full format, scoring detail, and fine print belong on the
+challenge page; the chat gets the headline version. Do not post a
+multi-section framework or numbered rulebook into the room unless the room's
+Detail is 10/10 or a member explicitly asks this turn for the full rules.
 
 1. **Negotiate the metric.** Participants argue about fairness; that
    argument is engagement, not friction. Take a real position, adjudicate
@@ -325,49 +333,49 @@ automation action rules with a `dailyLocal` schedule and
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
    returned records. `available` does not make an old record current for this
-   reporting cutoff. Never infer a grant from a record or a record from a grant.
-   Never reuse remembered numbers — wrong scores turn jokes into noise. A
-   recorded zero is a real score; missing data is never a zero.
+   reporting cutoff. Apply `group-chat`'s **Shared fact limits** before scoring.
+   Never infer a grant from a record or a record from a grant. Never reuse
+   remembered numbers — wrong scores turn jokes into noise. A recorded zero is
+   a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
    - The scoring projection is `granted` and `available`, with current
-     challenge-metric data through the reporting cutoff: rank the participant.
-     Do not override current metric evidence with a device status.
+     challenge-metric data through the reporting cutoff: rank the participant
+     from that metric evidence.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact
      scope, include the scope in the one proactive permission offer described
      below.
    - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
-     the metric share exists, but Murph cannot verify the source problem because
-     connection status was not shared. Unless their sharing choices record an
-     explicit decline or prior handled offer action for that exact scope,
-     include the diagnostic scope in the one proactive permission offer
-     described below.
+     reporting cutoff, while `device-sync-status.v0` is `not_granted`: unless
+     their sharing choices record an explicit decline or prior handled offer
+     action for that exact scope, include the diagnostic scope in the one
+     proactive permission offer described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
-     `device-sync-status.v0` record is `available`: use its literal source label,
-     coarse status, and, only when useful, the accurately named connection-wide
-     sync-job completion time described below. Treat a projection whose `observedAt` is more
-     than two local calendar days old as stale and unverified. Only
-     `needs-reconnect` and `disconnected` support a direct reconnect action.
-     `needs-attention` is generic and must not be translated into a denied
-     Apple Health permission. `setting-up` means setup is not complete.
-     `connected` means only that the source is connected; it does not prove
-     that the challenge metric arrived. If Apple Health has the literal
-     `connected` status and Steps are absent, say this group does not currently
-     have recent Steps for the participant and Apple Health is visible as
-     connected. Suggest opening Murph; if Steps still do not arrive, suggest
-     checking Apple Health Steps access. For any other Apple Health status,
-     follow the status-specific rules above. If the recent projection has an empty `sources`
-     list, say that no connected health source is visible in the shared
-     snapshot. That is not proof that no compatible source exists; suggest a
-     private source check or connection step.
+     `device-sync-status.v0` record is `available`: you may state its literal
+     source label, coarse status, and, only when useful, the accurately named
+     connection-wide sync-job completion time described below. Treat a
+     projection whose `observedAt` is more than two local calendar days old as
+     stale and unverified. Only
+     `needs-reconnect` and `disconnected` support a direct reconnect action,
+     based on the literal status alone; do not claim reconnecting will restore
+     the metric. `needs-attention` is generic and must not be translated into a
+     denied Apple Health permission. `setting-up` means setup is not complete.
+     `connected` means only that the source is connected. If Apple Health has
+     the literal `connected` status and Steps are absent, state these as two
+     independent facts: this group currently lacks recent Steps for the
+     participant, and Apple Health is visible as connected. You may suggest
+     opening Murph and, if needed, checking Apple Health Steps access as private
+     troubleshooting options, never as the established cause. For any other
+     Apple Health status, follow the status-specific rules above. If the recent
+     projection has an empty `sources` list, say only that this diagnostic
+     result contains no visible sources and suggest a private source check.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, and diagnostic data is also `granted` but `missing` or
-     stale: say that the reason is unverified. Do not guess about permissions,
-     a disconnected device, source freshness, or whether the participant opened
+     stale: report that diagnostic state without guessing about permissions, a
+     disconnected device, source freshness, or whether the participant opened
      the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
@@ -381,8 +389,8 @@ automation action rules with a `dailyLocal` schedule and
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
    message. Name every `in` participant who is missing current data, state the
-   current evidence-backed reason, and give the smallest useful action. Never
-   present a partial table as the full standings.
+   evidence-backed status, and give the smallest useful action. Never present a
+   partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
    in ordinary language in this same standings response and address the
@@ -424,9 +432,14 @@ automation action rules with a `dailyLocal` schedule and
    or stale data.
    Never offer the scoring scope merely because its grant exists but current
    data is missing. Apart from the exact diagnostic `not_granted` case above,
-   disconnected, `needs-reconnect`, and other sync/device cases get
-   ordinary-language sync or reconnect guidance and no permission card.
+   literal disconnected, `needs-reconnect`, and other device statuses may get
+   status-appropriate guidance and no permission card.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
+   The scheduled dispatch is the one group message where the required
+   completeness statement and per-person missing-data lines always count as
+   substance: never trim them for length, keep them to about one line per
+   person, keep the whole dispatch compact, and put ranking mechanics or
+   anything longer on the challenge page.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with

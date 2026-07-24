@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import {
   buildHostedExecutionAssistantAskRequestedWake,
+  type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
@@ -21,6 +22,7 @@ import {
   fetchHostedMailboxPayload,
   fetchHostedMailboxItemsAfterLaneCursors,
   fetchHostedRuntimeMailboxProjection,
+  hasHostedMailboxMealPhotoCaptureSince,
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -31,7 +33,6 @@ import {
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxItemCheckpointById,
   readHostedMailboxMaxSeqByLane,
-  readHostedMailboxPendingSystemItemsNeedAiUsageGate,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
@@ -100,6 +101,35 @@ describe("readHostedMailboxLiveItemById", () => {
           { expiresAt: null },
           { expiresAt: { gt: FIXED_NOW } },
         ],
+      },
+    });
+  });
+});
+
+describe("hasHostedMailboxMealPhotoCaptureSince", () => {
+  it("derives recent capture engagement from the accepted mailbox row", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ id: "mailbox-meal-photo" });
+    const since = new Date("2026-03-29T00:00:00.000Z");
+
+    await expect(hasHostedMailboxMealPhotoCaptureSince({
+      prisma: {
+        hostedMailboxItem: { findFirst },
+      } as never,
+      since,
+      userId: "member-meal-photo",
+    })).resolves.toBe(true);
+
+    expect(findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+      },
+      where: {
+        createdAt: {
+          gte: since,
+        },
+        kind: "meal-photo.captured",
+        lane: "system",
+        userId: "member-meal-photo",
       },
     });
   });
@@ -1595,6 +1625,7 @@ describe("appendHostedMailboxEnvelopeTx", () => {
         rows.push(row);
         return row;
       }),
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => rows[0] ?? null),
       findUnique,
     });
     const tx = createHostedMailboxTx({
@@ -1607,7 +1638,10 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       tx,
     });
     const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-b"),
+      envelope: buildHostedMealPhotoEnvelope(
+        "meal-photo-attempt-b",
+        { channel: "telegram", threadId: "telegram_home_thread" },
+      ),
       tx,
     });
 
@@ -1625,6 +1659,16 @@ describe("appendHostedMailboxEnvelopeTx", () => {
       item: { id: first.item.id },
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
+    await expect(readHostedMailboxWakeByItemId({
+      availableAt: FIXED_NOW,
+      mailboxItemId: first.item.id,
+      prisma: tx,
+    })).resolves.toMatchObject({
+      directRoute: {
+        channel: "linq",
+        threadId: "linq_home_thread",
+      },
+    });
     expect(vi.mocked(tx.$executeRaw).mock.invocationCallOrder[0]).toBeLessThan(
       findUnique.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     );
@@ -2192,44 +2236,6 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         kind: "member.activated",
         userId: "member_mailbox_1",
       },
-    });
-  });
-
-  it("checks pending system mailbox rows for any manual item after the imported watermark", async () => {
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
-        id: "mailbox_manual_2",
-        kind: "runtime.manual-requested",
-        lane: "system",
-        laneSeq: 2n,
-      })),
-    });
-    const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
-    const prisma = createHostedMailboxClient({
-      hostedMailboxItem,
-      hostedMailboxPayload,
-    });
-
-    await expect(readHostedMailboxPendingSystemItemsNeedAiUsageGate({
-      afterSeq: "0",
-      prisma,
-      userId: "member_mailbox_1",
-    })).resolves.toBe(true);
-
-    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
-      select: {
-        id: true,
-      },
-      where: expectLiveHostedMailboxWhere({
-        kind: {
-          in: ["runtime.manual-requested"],
-        },
-        lane: "system",
-        laneSeq: {
-          gt: 0n,
-        },
-        userId: "member_mailbox_1",
-      }),
     });
   });
 
@@ -3085,8 +3091,15 @@ function buildHostedGroupEmailEnvelope(userId: string) {
   };
 }
 
-function buildHostedMealPhotoEnvelope(mealPhotoKey: string) {
+function buildHostedMealPhotoEnvelope(
+  mealPhotoKey: string,
+  directRoute: HostedExecutionDirectRoute = {
+    channel: "linq",
+    threadId: "linq_home_thread",
+  },
+) {
   return {
+    directRoute,
     eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
     kind: "meal-photo.captured" as const,
     mealPhoto: {

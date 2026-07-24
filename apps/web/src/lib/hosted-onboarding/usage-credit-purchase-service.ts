@@ -62,8 +62,10 @@ import {
 } from "./usage-credit-purchase-stripe";
 import {
   buildHostedGroupUsageFundingPath,
+  normalizeHostedGroupUsageFundingLocator,
   normalizeHostedGroupUsageJoinCode,
-  readHostedGroupUsageFundingTargetByJoinCode,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId,
+  readHostedGroupUsageFundingTargetByLocator,
 } from "../hosted-groups/group-usage-funding";
 import { hasHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { generateHostedRandomPrefixedId } from "../primitives";
@@ -202,9 +204,9 @@ export async function createHostedGroupUsageCreditCheckout(input: {
   prisma?: PrismaClient;
 }): Promise<HostedUsageCreditCheckoutResult> {
   const prisma = input.prisma ?? getPrisma();
-  const joinCode = normalizeHostedGroupUsageJoinCode(input.joinCode);
-  const fundingTarget = joinCode
-    ? await readHostedGroupUsageFundingTargetByJoinCode({ joinCode, prisma })
+  const locator = normalizeHostedGroupUsageFundingLocator(input.joinCode);
+  const fundingTarget = locator
+    ? await readHostedGroupUsageFundingTargetByLocator({ locator, prisma })
     : null;
   if (!fundingTarget) {
     throw buildHostedUsageCreditNotEligibleError("group");
@@ -385,15 +387,28 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       }
       stripeCustomerId = billingRef.stripeCustomerId;
     } else if (target.kind === "group") {
-      const fundingTargets = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "group"."id"
-        FROM "hosted_group" AS "group"
-        INNER JOIN "hosted_thread_container" AS "container"
-          ON "container"."member_id" = "group"."runtime_member_id"
-        WHERE "group"."join_code" = ${target.joinCode}
-          AND "group"."runtime_member_id" = ${target.beneficiaryMemberId}
-        FOR SHARE OF "group", "container"
-      `;
+      // The locator is either the owner-created join code or the signed
+      // funding-only locator bound to the exact runtime member.
+      const locatorRuntimeMemberId =
+        readHostedGroupUsageFundingLocatorRuntimeMemberId(target.joinCode);
+      const fundingTargets = locatorRuntimeMemberId === null
+        ? await tx.$queryRaw<Array<{ id: string }>>`
+            SELECT "group"."id"
+            FROM "hosted_group" AS "group"
+            INNER JOIN "hosted_thread_container" AS "container"
+              ON "container"."member_id" = "group"."runtime_member_id"
+            WHERE "group"."join_code" = ${target.joinCode}
+              AND "group"."runtime_member_id" = ${target.beneficiaryMemberId}
+            FOR SHARE OF "group", "container"
+          `
+        : locatorRuntimeMemberId === target.beneficiaryMemberId
+          ? await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT "container"."member_id" AS "id"
+              FROM "hosted_thread_container" AS "container"
+              WHERE "container"."member_id" = ${target.beneficiaryMemberId}
+              FOR SHARE OF "container"
+            `
+          : [];
       if (
         fundingTargets.length !== 1
         || !(await hasHostedRuntimeActiveAccessForUpdateTx(

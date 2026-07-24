@@ -56,6 +56,51 @@ describe('executeGenerateImageTool reference images', () => {
     })
   })
 
+  it('attaches a runtime issue for the existing issue owner when the hosted upload fails', async () => {
+    await withTempDir(async (codexHome) => {
+      const uploadError = Object.assign(new Error('upload failed'), { status: 502 })
+      const result = await executeGenerateImageTool({
+        args: {
+          alt: null,
+          outputFormat: 'png',
+          prompt: 'Draw a dot.',
+          quality: 'low',
+          referenceImageRefs: [],
+          size: '1024x1024',
+        },
+        codexHome,
+        env: { OPENAI_API_KEY: 'test-key' },
+        fetchImpl: async () => openAiPngResponse(),
+        hostedGeneratedImageUploader: {
+          uploadGeneratedImage: async () => {
+            throw uploadError
+          },
+        },
+        providerRequestOrdinal: 1,
+      })
+
+      expect(result.rpcSuccess).toBe(false)
+      expect(result.rpcText).toBe('image generated but upload failed')
+      expect(result.runtimeIssue).toEqual(
+        expect.objectContaining({
+          component: 'assistant.generated-image',
+          errorCode: 'GENERATED_IMAGE_UPLOAD_FAILED',
+          issueKind: 'tool_error',
+          operation: 'generated_image_upload',
+          phase: 'tool_call',
+          severity: 'warning',
+        }),
+      )
+      expect(result.runtimeIssue?.details).toEqual(
+        expect.objectContaining({
+          failureKind: 'http_status',
+          provider: 'cloudflare_images',
+          status: 502,
+        }),
+      )
+    })
+  })
+
   it('returns a clean tool failure when references are requested without vault authority', async () => {
     const result = await executeGenerateImageTool({
       args: {

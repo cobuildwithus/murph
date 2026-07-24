@@ -605,8 +605,8 @@ test("JoinInvitePhoneVerificationIsland uses email auth for invite email verific
   expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
   expect(mocks.hostedEmailAuthProps).toMatchObject({
     active: true,
-    initialEmailAddress: "buddy@example.com",
     inline: true,
+    lockedEmailAddress: "buddy@example.com",
     onAuthenticated: expect.any(Function),
   });
   expect(mocks.hostedPhoneAuthProps).toBeNull();

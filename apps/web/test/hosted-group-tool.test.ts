@@ -296,6 +296,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       capacityState: "low",
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
+      remainingPercent: 20,
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -374,7 +375,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("returns only coarse usage state and the first-party group funding link", async () => {
+  it("returns currency-free quantified usage and the first-party group funding link", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
@@ -387,6 +388,7 @@ describe("handleHostedRuntimeGroupTool", () => {
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
           periodEnd: "2026-08-01T00:00:00.000Z",
+          remainingPercent: 20,
         },
       },
     });
@@ -2592,9 +2594,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         contentType: "text/vcard",
         fileName: "Murph.vcf",
-        idempotencyKey: expect.stringMatching(
-          /^group-contact-card:chat_group_1:\d{4}-\d{2}-\d{2}$/u,
-        ),
+        // Keyed to the reservation instant so retries of one reservation
+        // dedupe while a later requested re-share is a distinct send.
+        idempotencyKey: `group-contact-card:chat_group_1:${new Date("2026-07-02T12:00:00Z").getTime()}`,
       }),
     );
     expect(mocks.reserveHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(

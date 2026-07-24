@@ -80,7 +80,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group usage funding">
+      <StudySection title="Group usage funding and top-up follow-up">
         <GroupUsageFundingStudy />
       </StudySection>
 

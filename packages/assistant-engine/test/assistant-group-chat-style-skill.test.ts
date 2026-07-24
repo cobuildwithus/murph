@@ -37,6 +37,44 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('caps group message length behind the room Detail ceiling', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      "the room's Detail setting is a ceiling on unrequested length, never a target",
+    )
+    expect(normalized).toContain(
+      'Never skimp on asked-for substance: when someone directly asks a question whose complete answer genuinely needs a few paragraphs, give that answer, as tight as accuracy allows.',
+    )
+    expect(normalized).toContain(
+      'What the ceiling kills is volunteered length — frameworks, multi-topic essays, background beyond the question, detail nobody asked for — and it covers the whole turn, including every `---` bubble.',
+    )
+    expect(normalized).toContain(
+      'For open-ended setup, planning, or brainstorm asks, depth arrives incrementally: headline first, one decision per message, more on request',
+    )
+    expect(normalized).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
+  })
+
+  it('keeps challenge kickoff conversational instead of a rulebook dump', async () => {
+    const groupChallenge = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'group-challenge', 'SKILL.md'),
+      'utf8',
+    )
+    const normalized = groupChallenge.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      "Kickoff is a conversation, not a rules document, and every kickoff message obeys `group-chat`'s length budget.",
+    )
+    expect(normalized).toContain(
+      'Pitch a format or scoring idea in a few short sentences, settle one decision at a time, and ask at most one question per message.',
+    )
+    expect(normalized).toContain(
+      "Do not post a multi-section framework or numbered rulebook into the room unless the room's Detail is 10/10 or a member explicitly asks this turn for the full rules.",
+    )
+  })
+
   it('keeps emoji use occasional instead of habitual', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 

@@ -59,6 +59,12 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'Never present a partial table as the full standings.',
     )
+    expect(challenge).toContain(
+      'The scheduled dispatch is the one group message where the required completeness statement and per-person missing-data lines always count as substance',
+    )
+    expect(challenge).toContain(
+      'never trim them for length, keep them to about one line per person, keep the whole dispatch compact, and put ranking mechanics or anything longer on the challenge page',
+    )
     expect(groupChat).toContain(
       'It is the only hosted model-facing path to the current Web-owned shared snapshot',
     )
@@ -127,6 +133,9 @@ describe('assistant group challenge diagnostics guidance', () => {
       )
     }
 
+    expect(challenge).toContain(
+      'Apply `group-chat`\'s **Shared fact limits** before scoring.',
+    )
     expect(challenge).toContain('more than two local calendar days old')
     expect(challenge).toContain('`needs-reconnect` and `disconnected`')
     expect(challenge).toContain(
@@ -134,10 +143,13 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(challenge).toContain('`setting-up` means setup is not complete.')
     expect(challenge).toContain(
-      '`connected` means only that the source is connected; it does not prove that the challenge metric arrived.',
+      '`connected` means only that the source is connected.',
     )
     expect(challenge).toContain(
-      'this group does not currently have recent Steps for the participant',
+      'based on the literal status alone; do not claim reconnecting will restore the metric.',
+    )
+    expect(challenge).toContain(
+      'this group currently lacks recent Steps for the participant',
     )
     expect(challenge).not.toContain(
       'Murph has not received recent Steps from Apple Health',
@@ -146,13 +158,13 @@ describe('assistant group challenge diagnostics guidance', () => {
       'If the recent projection has an empty `sources` list',
     )
     expect(challenge).toContain(
-      'That is not proof that no compatible source exists',
+      'this diagnostic result contains no visible sources',
     )
     expect(challenge).toContain(
       'Apple does not expose HealthKit read authorization',
     )
     expect(challenge).toContain(
-      'Do not guess about permissions, a disconnected device, source freshness, or whether the participant opened the app.',
+      'without guessing about permissions, a disconnected device, source freshness, or whether the participant opened the app.',
     )
     expect(challenge).toContain(
       '`connectionSyncJobCompletedAt` field is completion time for a connection-wide sync job',
@@ -239,13 +251,13 @@ describe('assistant group challenge diagnostics guidance', () => {
       'Never offer the scoring scope merely because its grant exists but current data is missing.',
     )
     expect(challenge).toContain(
-      'Apart from the exact diagnostic `not_granted` case above, disconnected, `needs-reconnect`, and other sync/device cases get ordinary-language sync or reconnect guidance and no permission card.',
+      'literal disconnected, `needs-reconnect`, and other device statuses may get status-appropriate guidance and no permission card.',
     )
     expect(challenge).not.toContain('Gap disclosure log')
     expect(challenge).not.toContain('gapState')
     expect(challenge).not.toContain('episodePublicGapDate')
     expect(challenge).toContain(
-      'state the current evidence-backed reason, and give the smallest useful action.',
+      'state the evidence-backed status, and give the smallest useful action.',
     )
     expect(challenge).not.toContain('belong in the affected participant\'s private thread')
     expect(groupChat).toContain(

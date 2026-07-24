@@ -1,6 +1,3 @@
-import type {
-  HostedRuntimeEnsureProcessingResponse,
-} from "../index.js";
 import {
   parseHostedRuntimeEnsureProcessingRequest,
   parseHostedRuntimeEnsureProcessingResponse,
@@ -10,6 +7,10 @@ import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_REQUEST_STARTED_AT_MS_HEADER,
   HOSTED_RUNTIME_ENSURE_PROCESSING_TIMEOUT_MS_HEADER,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedRuntimeEnsureProcessingResponse,
+  HostedRuntimeProcessingMode,
+} from "../index.js";
 
 import {
   observeHostedTemporalActivity,
@@ -19,7 +20,7 @@ import {
 
 export interface EnsureRuntimeProcessingInput {
   orchestrationAttemptId: string;
-  processingMode?: "default" | "inbox_media_retention" | null;
+  processingMode?: HostedRuntimeProcessingMode | null;
   userId: string;
 }
 
@@ -105,11 +106,15 @@ function parseEnsureRuntimeProcessingInput(
 function parseNullableProcessingMode(
   value: unknown,
   label: string,
-): "default" | "inbox_media_retention" | null {
+): HostedRuntimeProcessingMode | null {
   if (value === null) {
     return null;
   }
-  if (value === "default" || value === "inbox_media_retention") {
+  if (
+    value === "default"
+    || value === "inbox_media_retention"
+    || value === "system_mailbox"
+  ) {
     return value;
   }
   throw new TypeError(`${label} is not supported.`);

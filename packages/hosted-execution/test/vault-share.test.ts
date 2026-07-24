@@ -11,6 +11,7 @@ import {
   HOSTED_VAULT_SHARE_ACTIVITY_SELECTOR_ACTIVITY_KINDS,
   HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
   getHostedVaultShareDailyMetricProjectionSpec,
+  HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
@@ -600,6 +601,25 @@ describe("vault-share contracts", () => {
 
 
 describe("activity-days.v0 scalar delivery records", () => {
+  it("preserves the optional broad-movement semantic marker while accepting legacy records", () => {
+    const markedRecord = {
+      ...VALID_ACTIVITY_RECORD,
+      data: {
+        ...VALID_ACTIVITY_RECORD.data,
+        metricSemantics: "broad-movement",
+      },
+    } as const;
+
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "activity-days.v0",
+      records: [markedRecord],
+    }).records).toEqual([markedRecord]);
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "activity-days.v0",
+      records: [VALID_ACTIVITY_RECORD],
+    }).records).toEqual([VALID_ACTIVITY_RECORD]);
+  });
+
   it("parses activity minutes through the daily scalar metric parser", () => {
     expect(parseHostedVaultShareDeliverRequest({
       projectionKind: "activity-days.v0",
@@ -664,6 +684,19 @@ describe("activity-days.v0 scalar delivery records", () => {
         })
       ).toThrow(/value must be between|finite number/u);
     }
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "activity-days.v0",
+        records: [{
+          ...VALID_ACTIVITY_RECORD,
+          data: {
+            ...VALID_ACTIVITY_RECORD.data,
+            metricSemantics: "workout-duration",
+          },
+        }],
+      })
+    ).toThrow(/metricSemantics is invalid/u);
   });
 });
 
@@ -712,6 +745,26 @@ describe("daily metric vault-share delivery records", () => {
 });
 
 describe("workout-days.v0 delivery records", () => {
+  it("preserves the canonical marker while accepting unmarked legacy records", () => {
+    const canonicalRecord = {
+      ...VALID_WORKOUT_RECORD,
+      data: {
+        ...VALID_WORKOUT_RECORD.data,
+        metricSemantics:
+          HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
+      },
+    };
+
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workout-days.v0",
+      records: [canonicalRecord],
+    }).records).toEqual([canonicalRecord]);
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workout-days.v0",
+      records: [VALID_WORKOUT_RECORD],
+    }).records).toEqual([VALID_WORKOUT_RECORD]);
+  });
+
   it("parses a valid daily workout summary record", () => {
     expect(parseHostedVaultShareDeliverRequest({
       projectionKind: "workout-days.v0",
@@ -733,6 +786,19 @@ describe("workout-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/workoutCount/u);
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "workout-days.v0",
+        records: [{
+          ...VALID_WORKOUT_RECORD,
+          data: {
+            ...VALID_WORKOUT_RECORD.data,
+            metricSemantics: "selected-source-workout-day",
+          },
+        }],
+      })
+    ).toThrow(/metricSemantics is invalid/u);
   });
 });
 

@@ -87,7 +87,7 @@ describe('shouldGroupAdjacentConversationInput', () => {
       inputId: 'ain_reaction',
       occurredAt: '2026-04-22T10:01:00.000Z',
       replyToMessageId: 'linq-msg-shared',
-      text: 'Yes.',
+      text: 'Reacted with a like reaction.',
     })
 
     expect(shouldGroupAdjacentConversationInput(ordinary, reaction)).toBe(false)

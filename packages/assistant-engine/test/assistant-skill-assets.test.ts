@@ -226,6 +226,26 @@ describe('assistant skill assets', () => {
     )
   })
 
+  it('keeps private and shared activity interpretation in their owners', async () => {
+    const load = async (slug: string) => {
+      const skill = ASSISTANT_SKILLS.find((candidate) => candidate.slug === slug)
+      if (!skill) throw new Error(`Missing registered skill: ${slug}`)
+      return (await readSkillFile(skill)).replace(/\s+/gu, ' ')
+    }
+    const [daily, shared] = await Promise.all([
+      load('daily-activity'),
+      load('group-chat'),
+    ])
+
+    expect(daily).toMatch(
+      /wearables day <date>.+wearables activity list.+canonical workout-day rollup/u,
+    )
+    expect(daily).toContain('current-local-day totals as provisional and say "so far."')
+    expect(daily).toContain('not proof of failed provider sync or import')
+    expect(shared).toContain('its cause is unverified')
+    expect(shared).toContain('current-local-day value as provisional: say "so far"')
+  })
+
   it('routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading', () => {
     const sleepSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'sleep-improvement',
@@ -821,6 +841,11 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Use your own words,\n  not a fixed script')
     expect(raw).toContain('Do not repeat the invitation unprompted')
     expect(raw).toContain('when someone new joins later')
+    expect(raw).toMatch(/if\s+someone asks you to resend or re-share the card, share it again/u)
+    expect(raw).not.toContain('Never try to re-send it')
+    expect(raw).toContain('`already_shared`')
+    expect(raw).toContain('that proves the attempt, not delivery')
+    expect(raw).toContain('Never claim the chat blocks duplicates')
     expect(raw).toContain('If\n  someone asks why they have not been added')
     expect(raw).not.toContain('their own Murph')
     expect(raw).not.toContain('the shape of "')
@@ -865,7 +890,14 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Use only `members`')
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
-    expect(raw).toContain('never as a daily or weekly exercise total')
+    expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
+    expect(raw).toContain('current local Monday through yesterday')
+    expect(raw).toMatch(/Exclude earlier\s+rolling-window dates and today/u)
+    expect(raw).toMatch(/only when every compared date\s+set is identical/u)
+    expect(raw).toMatch(
+      /When coverage differs, report scoped values or an unranked\s+pattern\./u,
+    )
+    expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
     expect(raw).toContain('Keep them separate')
     expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')
@@ -949,7 +981,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('If the returned group proves')
     expect(raw).not.toContain("Web's card is\n   the visible confirmation.")
     expect(raw).toMatch(/Never offer the scoring scope merely because its grant exists but current\s+data is missing/u)
-    expect(raw).toMatch(/Apart from the exact diagnostic `not_granted` case above,\s+disconnected, `needs-reconnect`, and other sync\/device cases get\s+ordinary-language sync or reconnect guidance and no permission card\./u)
+    expect(raw).toMatch(/literal disconnected, `needs-reconnect`, and other device statuses may get\s+status-appropriate guidance and no permission card\./u)
     expect(raw).not.toContain('belong in the affected participant\'s private thread')
     expect(raw).toContain(
       'The runtime does not preload a roster, grant snapshot, or shared\n   records into the prompt.',

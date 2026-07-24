@@ -581,7 +581,7 @@ describe("hosted onboarding member activation", () => {
     });
   });
 
-  it("emits Telegram first-contact from the verified user id before the first inbound message", async () => {
+  it("does not enqueue a Telegram welcome before an inbound thread exists", async () => {
     const member = makeMemberSnapshot({
       identity: {
         phoneLookupKey: null,
@@ -623,47 +623,19 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
-        signupWelcome: expect.objectContaining({
-          route: {
-            actorId: null,
-            channel: "telegram",
-            delivery: {
-              kind: "thread",
-              target: "456",
-            },
-            identityId: null,
-            threadId: expectedTelegramAssistantThreadId({
-              memberId: "member_123",
-              threadId: "456",
-            }),
-            threadIsDirect: true,
-          },
-        }),
+        memberChannels: {
+          email: false,
+          linq: false,
+          telegram: false,
+        },
+        signupWelcome: null,
       }),
       tx: expect.anything(),
     });
-    expectLegacySignupWelcomeCompatibilityWake({
-      callIndex: 2,
-      sourceEventId: "evt_telegram",
-      route: {
-        actorId: null,
-        channel: "telegram",
-        delivery: {
-          kind: "thread",
-          target: "456",
-        },
-        identityId: null,
-        threadId: expectedTelegramAssistantThreadId({
-          memberId: "member_123",
-          threadId: "456",
-        }),
-        threadIsDirect: true,
-      },
-    });
-    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(2);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
   });
 
-  it("prefers Telegram first-contact for email-linked phone-less members without a reusable Linq thread", async () => {
+  it("uses an inbound Telegram thread for email-linked phone-less members", async () => {
     const member = makeMemberSnapshot({
       emailAuthorization: {
         directPublicSender: null,

@@ -317,6 +317,9 @@ describe('assistant execution prompt contract', () => {
     expect(layers.threadContextPrompt).toContain(
       'Assistant personality preferences for this private conversation:',
     )
+    expect(layers.threadContextPrompt).not.toContain(
+      'In this group room, Detail caps unrequested length',
+    )
     expect(layers.threadContextPrompt).toContain(
       'Humor 9/10: initiate when there is an opening and commit to the bit',
     )
@@ -1266,10 +1269,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
     )
     expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
+      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
       'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
@@ -2019,25 +2022,6 @@ describe('assistant experiment onboarding guidance', () => {
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
 
-  it('routes running and cardio through the compact movement overlap rules', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
-    )
-    expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
-    )
-    expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
-    )
-    expect(prompt).toContain(
-      'behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.',
-    )
-    expect(prompt).not.toContain('- running-cardio: Use for running')
-    expect(prompt).not.toContain('File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.')
-  })
-
   it('routes acute stress support through the Murph stress skill', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -2245,6 +2229,15 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
     expect(prompt).toContain('synthetic room container, not the human speaker')
+    expect(prompt).toContain(
+      'Group messages stay phone-screen short by default, and the ceiling covers the whole reply.',
+    )
+    expect(prompt).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
+    expect(prompt).toContain(
+      'Answer a direct question completely — asked-for substance is never skimped, even when its honest answer needs a few tight paragraphs — but never volunteer length',
+    )
     expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
@@ -2277,7 +2270,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
-      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` after the group asks',
+      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` on a trusted low-usage turn or after the group asks',
     )
     expect(prompt).toContain(
       'Never describe the group funding link as a personal billing or account-management page.',
@@ -2319,6 +2312,12 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Humor 9/10')
     expect(prompt).toContain('Push 8/10')
     expect(prompt).toContain('Detail 7/10')
+    expect(prompt).toContain(
+      'In this group room, Detail caps unrequested length, never asked-for substance: below 10/10, default each reply to a few short sentences and never front-load detail nobody asked for, but answer a direct question completely even when its honest answer needs a few tight paragraphs.',
+    )
+    expect(prompt).toContain(
+      'Detail 10/10 or an explicit member request this turn for a full write-up lifts the default entirely.',
+    )
     expect(prompt).toContain(
       'Casual is a persistent user-facing writing invariant',
     )

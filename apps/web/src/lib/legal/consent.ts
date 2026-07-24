@@ -478,7 +478,7 @@ export async function assertHostedHistoricalLaunchConsentGranted(input: {
       code: "HOSTED_CONSENT_REQUIRED",
       details: { missingScopes },
       httpStatus: 403,
-      message: "Accept the Murph legal consent before connecting or syncing a device.",
+      message: "Accept the Murph legal consent before continuing.",
     });
   }
 }
