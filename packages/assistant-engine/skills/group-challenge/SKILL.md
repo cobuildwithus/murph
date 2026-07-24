@@ -79,6 +79,11 @@ grant Apple Health access.
 - Sleep timing: `sleep-times.v0`
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
+- Daily protein logged from meals: `protein-days.v0`. Values are protein the
+  member logged with Murph, not verified consumption, and a day only appears
+  once every meal that day carries protein data — a member with no record for
+  a day has no data, which never ranks as zero. Frame standings as "protein
+  logged".
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;

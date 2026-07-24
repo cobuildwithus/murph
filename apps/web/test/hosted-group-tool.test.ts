@@ -214,6 +214,7 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
+const PROTEIN_SCOPE = { projectionKind: "protein-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -1335,6 +1336,7 @@ describe("hosted group join policy", () => {
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
+      PROTEIN_SCOPE,
     ])).toEqual([
       {
         description:
@@ -1373,6 +1375,15 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
+        description:
+          "Shares your last 7 days of total protein from meals you logged with Murph. Does not share meal text, photos, foods, ingredients, meal times, meal counts, calories, or other nutrients.",
+        label: "Daily protein",
+        offerDisclosure: "daily protein totals from meals you logged with Murph",
+        projectionKind: "protein-days.v0",
+        projectionScope: PROTEIN_SCOPE,
+        projectionScopeKey: "protein-days.v0",
+      },
+      {
         description: "Shares your last 7 days of running minutes.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
@@ -1397,6 +1408,8 @@ describe("hosted group join policy", () => {
       },
     ]);
 
+    expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES)
+      .toContainEqual(PROTEIN_SCOPE);
     expect(projectHostedVaultShareProjectionDisplays(
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     ).map((entry) => entry.projectionScopeKey)).toEqual([

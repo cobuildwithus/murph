@@ -47,6 +47,7 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "vo2-max-days.v0",
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
+  "protein-days.v0",
 ] as const;
 
 const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
@@ -56,28 +57,53 @@ const HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS = 100;
 export type HostedVaultShareDailyMetricProjectionKind =
   (typeof HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS)[number];
 
+export type HostedVaultShareMealNutritionTotalKey =
+  | "calories"
+  | "carbsGrams"
+  | "fatGrams"
+  | "fiberGrams"
+  | "proteinGrams";
+
+/**
+ * Declarative source for a daily-metric projection: the grantor runtime dispatches on
+ * this instead of special-casing projection kinds. `metric-series` reads the member's
+ * metric-point series; `meal-nutrition-total` reads complete-day nutrition totals
+ * aggregated from canonical meal events.
+ */
+export type HostedVaultShareDailyMetricProjectionSource =
+  | { kind: "meal-nutrition-total"; totalKey: HostedVaultShareMealNutritionTotalKey }
+  | { kind: "metric-series" };
+
 export interface HostedVaultShareDailyMetricProjectionSpec {
+  /** When set, delivered records must carry exactly this unit. */
+  expectedUnit?: string;
   maxValue: number;
   metricKey: string;
   minValue: number;
   projectionKind: HostedVaultShareDailyMetricProjectionKind;
+  source: HostedVaultShareDailyMetricProjectionSource;
 }
 
+const METRIC_SERIES_SOURCE = { kind: "metric-series" } as const;
+
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
-  { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440 },
-  { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440 },
-  { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000 },
-  { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260 },
-  { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000 },
-  { projectionKind: "active-calories-days.v0", metricKey: "active-calories", minValue: 0, maxValue: 20_000 },
-  { projectionKind: "elevation-gain-days.v0", metricKey: "elevation-gain-meters", minValue: 0, maxValue: 100_000 },
-  { projectionKind: "floors-climbed-days.v0", metricKey: "floors-climbed", minValue: 0, maxValue: 10_000 },
-  { projectionKind: "day-strain-days.v0", metricKey: "day-strain", minValue: 0, maxValue: 30 },
-  { projectionKind: "workout-strain-days.v0", metricKey: "workout-strain", minValue: 0, maxValue: 30 },
-  { projectionKind: "activity-score-days.v0", metricKey: "activity-score", minValue: 0, maxValue: 100 },
-  { projectionKind: "vo2-max-days.v0", metricKey: "estimated-vo2-max", minValue: 0, maxValue: 100 },
-  { projectionKind: "resting-heart-rate-days.v0", metricKey: "resting-heart-rate", minValue: 20, maxValue: 250 },
-  { projectionKind: "hrv-days.v0", metricKey: "hrv-rmssd", minValue: 0, maxValue: 500 },
+  { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "active-calories-days.v0", metricKey: "active-calories", minValue: 0, maxValue: 20_000, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "elevation-gain-days.v0", metricKey: "elevation-gain-meters", minValue: 0, maxValue: 100_000, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "floors-climbed-days.v0", metricKey: "floors-climbed", minValue: 0, maxValue: 10_000, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "day-strain-days.v0", metricKey: "day-strain", minValue: 0, maxValue: 30, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "workout-strain-days.v0", metricKey: "workout-strain", minValue: 0, maxValue: 30, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "activity-score-days.v0", metricKey: "activity-score", minValue: 0, maxValue: 100, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "vo2-max-days.v0", metricKey: "estimated-vo2-max", minValue: 0, maxValue: 100, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "resting-heart-rate-days.v0", metricKey: "resting-heart-rate", minValue: 20, maxValue: 250, source: METRIC_SERIES_SOURCE },
+  { projectionKind: "hrv-days.v0", metricKey: "hrv-rmssd", minValue: 0, maxValue: 500, source: METRIC_SERIES_SOURCE },
+  // 2,000 g/day is a corruption guard against unit or duplication errors, not a
+  // health target; complete-day totals far above it are skipped, never clamped.
+  { projectionKind: "protein-days.v0", metricKey: "protein-grams", expectedUnit: "g", minValue: 0, maxValue: 2_000, source: { kind: "meal-nutrition-total", totalKey: "proteinGrams" } },
 ] as const satisfies readonly HostedVaultShareDailyMetricProjectionSpec[];
 
 export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND =
@@ -229,6 +255,7 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "vo2-max-days.v0",
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
+  "protein-days.v0",
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
@@ -1152,6 +1179,11 @@ function parseHostedVaultShareDailyMetricData(
   if (unit !== null && (unit.length > 40 || /[\u0000-\u001f\u007f]/u.test(unit))) {
     throw new TypeError(
       `Vault share ${spec.projectionKind} unit must be at most 40 characters with no control characters.`,
+    );
+  }
+  if (spec.expectedUnit !== undefined && unit !== spec.expectedUnit) {
+    throw new TypeError(
+      `Vault share ${spec.projectionKind} unit must be ${spec.expectedUnit}.`,
     );
   }
 

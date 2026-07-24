@@ -99,6 +99,13 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Daily max heart rate",
     description: "Shares your last 7 days of max heart rate.",
   },
+  "protein-days.v0": {
+    label: "Daily protein",
+    description:
+      "Shares your last 7 days of total protein from meals you logged with Murph. Does not share meal text, photos, foods, ingredients, meal times, meal counts, calories, or other nutrients.",
+    offerDisclosure:
+      "daily protein totals from meals you logged with Murph",
+  },
   "resting-heart-rate-days.v0": {
     label: "Resting heart rate",
     description: "Shares your last 7 days of resting heart rate.",
