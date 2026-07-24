@@ -740,10 +740,9 @@ describe('real codex app-server with scripted provider', () => {
                   text: JSON.stringify({
                     posts: [
                       {
-                        authorHandle: 'runner_dave',
                         createdAt: '2026-07-21T09:30:00Z',
                         excerpt: 'Creatine timing does not matter much.',
-                        url: 'https://x.com/runner_dave/status/1947000000000000001',
+                        url: 'https://x.com/i/status/1947000000000000001',
                       },
                     ],
                   }),

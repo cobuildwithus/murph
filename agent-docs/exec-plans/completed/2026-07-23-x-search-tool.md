@@ -33,7 +33,7 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    (int 1–30, default 7), `maxResults` (int 1–8, default 5). No pagination/cursors.
 2. **Provider request is fixed-shape, not model-forwarded.** The executor builds a fixed
    developer prompt from validated input asking for strict JSON
-   (`{"posts":[{"url","authorHandle","createdAt","excerpt"}]}`), pinned model, only the
+   (`{"posts":[{"url","createdAt","excerpt"}]}`), pinned model, only the
    `x_search` tool (with `allowed_x_handles=[username]` for `profile_posts`,
    `from_date`/`to_date` from `lookbackDays`), bounded `max_output_tokens`, `store: false`.
    Parse fail-closed: a completed `output[].type="custom_tool_call"` item with an
@@ -43,14 +43,13 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    and every relayed post's globally unique numeric status id must match a
    `url_citation.url` in that response. xAI citations use
    `https://x.com/i/status/<id>` while the model-authored JSON carries the display
-   handle; `profile_posts` requires that authored handle to match the requested
    handle. **Attribution scope:** the citation proves post identity only — xAI
    supplies no attribution metadata (the annotation `title` is the URL repeated),
-   so the displayed `authorHandle` is model-derived. That is acceptable because X
-   resolves `x.com/<anything>/status/<id>` to the correct post (a wrong handle is
-   cosmetic, never misdirecting) and `profile_posts` is additionally constrained by
-   the provider's own `allowed_x_handles` enforcement. The product promises
-   post-level citation, not independently verified account attribution.
+   so no model-authored handle is trusted or relayed. Accepted results are
+   normalized to the provider-evidenced handle-less `https://x.com/i/status/<id>`
+   form and carry no author field; `profile_posts` scope is owned solely by the
+   request's `allowed_x_handles`, which the provider enforces. The product
+   promises post-level citation, not account attribution.
    Invalid JSON fails; a post without a canonical
    `https://x.com/<handle>/status/<id>` URL keeps the existing drop behavior; zero valid
    posts with completed x_search evidence returns an explicit no-results failure.

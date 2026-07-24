@@ -128,7 +128,7 @@ export async function executeXSearchTool(input: {
         role: 'developer',
         content:
           'Use the x_search tool, then respond with strict JSON only, no prose and no markdown: ' +
-          '{"posts":[{"url":"https://x.com/<handle>/status/<id>","authorHandle":"<handle>","createdAt":"<ISO 8601 timestamp>","excerpt":"<short verbatim quote>"}]}. ' +
+          '{"posts":[{"url":"https://x.com/i/status/<id>","createdAt":"<ISO 8601 timestamp>","excerpt":"<short verbatim quote>"}]}. ' +
           `Include at most ${maxResults} posts, only real posts the x_search tool returned, and an empty posts array when nothing matches.`,
       },
       {
@@ -198,7 +198,7 @@ export async function executeXSearchTool(input: {
     timeout.cleanup()
   }
 
-  const posts = readValidatedXSearchPosts(responsePayload, profileHandle)
+  const posts = readValidatedXSearchPosts(responsePayload)
   if (posts === null) {
     return {
       rpcSuccess: false,
@@ -225,28 +225,25 @@ export async function executeXSearchTool(input: {
 }
 
 interface XSearchPost {
-  authorHandle: string
   createdAt: string | null
   excerpt: string
   url: string
 }
 
 interface CanonicalXPostUrl {
-  handle: string
   statusId: string
   url: string
 }
 
 /**
  * Fail-closed parse of the provider response: returns null when the model
- * output is not the requested strict-JSON shape, when a canonical post is not
- * backed by a same-response xAI URL citation, or when profile results escape
- * the requested handle. Non-canonical URLs keep the existing drop behavior.
+ * output is not the requested strict-JSON shape or when a canonical post is
+ * not backed by a same-response xAI URL citation. Non-canonical URLs keep the
+ * existing drop behavior. Profile scope is owned by the request's
+ * `allowed_x_handles`, which the provider enforces, so no model-authored
+ * handle is trusted or relayed.
  */
-function readValidatedXSearchPosts(
-  payload: unknown,
-  profileHandle: string | null,
-): XSearchPost[] | null {
+function readValidatedXSearchPosts(payload: unknown): XSearchPost[] | null {
   const citedPostStatusIds = readXSearchCitationStatusIds(payload)
   if (citedPostStatusIds === null) {
     return null
@@ -280,13 +277,7 @@ function readValidatedXSearchPosts(
     if (!canonicalUrl) {
       continue
     }
-    if (
-      profileHandle !== null &&
-      canonicalUrl.handle.toLowerCase() !== profileHandle.toLowerCase()
-    ) {
-      return null
-    }
-    const { handle, url } = canonicalUrl
+    const { url } = canonicalUrl
     if (seenUrls.has(url)) {
       continue
     }
@@ -304,7 +295,6 @@ function readValidatedXSearchPosts(
       : ''
     seenUrls.add(url)
     posts.push({
-      authorHandle: handle,
       createdAt: CREATED_AT_PATTERN.test(createdAt) ? createdAt : null,
       excerpt,
       url,
@@ -373,12 +363,12 @@ function readCanonicalXPostUrl(value: string): CanonicalXPostUrl | null {
   if (!urlMatch) {
     return null
   }
-  const handle = urlMatch[1]
   const statusId = urlMatch[2]
   return {
-    handle,
     statusId,
-    url: `https://x.com/${handle}/status/${statusId}`,
+    // Normalize to the provider-evidenced handle-less form. The citation
+    // proves only the status id, so no model-authored handle is relayed.
+    url: `https://x.com/i/status/${statusId}`,
   }
 }
 

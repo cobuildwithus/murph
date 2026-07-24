@@ -124,13 +124,11 @@ function readPostCitationUrls(value: unknown): string[] {
 }
 
 function post(overrides?: Partial<{
-  authorHandle: string
   createdAt: string
   excerpt: string
   url: string
 }>) {
   return {
-    authorHandle: 'runner_dave',
     createdAt: '2026-07-21T09:30:00Z',
     excerpt: 'Creatine timing does not matter much.',
     url: 'https://x.com/runner_dave/status/1947000000000000001',
@@ -143,7 +141,6 @@ function parseResultText(rpcText: string): {
   fromDate: string
   partial?: boolean
   posts: Array<{
-    authorHandle: string
     createdAt: string | null
     excerpt: string
     url: string
@@ -282,7 +279,9 @@ describe('murph.x_search availability', () => {
     expect(MURPH_X_SEARCH_TOOL.description).toContain('relay its message faithfully')
     expect(MURPH_X_SEARCH_TOOL.description)
       .toContain('say no search ran only when the message says so')
-    expect(MURPH_X_SEARCH_TOOL.description).toContain('Never invent posts or links')
+    expect(MURPH_X_SEARCH_TOOL.description).toContain('Never invent posts, links, or authors')
+    expect(MURPH_X_SEARCH_TOOL.description)
+      .toContain('supplies no verified account name')
   })
 })
 
@@ -368,6 +367,56 @@ describe('executeXSearchTool request shape', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
     expect(result.rpcSuccess).toBe(true)
   })
+
+  // Regression: xAI cites posts handle-lessly, so the model can legitimately
+  // echo that exact form. An earlier build compared the authored handle
+  // against the requested one and rejected the whole evidence-backed
+  // response, charging the member for nothing.
+  it('accepts profile_posts results that echo the provider handle-less citation URL', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiPayload({
+        posts: [post({ url: 'https://x.com/i/status/19470002' })],
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: {
+        action: 'profile_posts',
+        lookbackDays: 7,
+        maxResults: 3,
+        username: '@Some_User',
+      },
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    const payload = parseResultText(result.rpcText)
+    expect(payload.posts).toHaveLength(1)
+    expect(payload.posts[0]?.url).toBe('https://x.com/i/status/19470002')
+    expect(result.rpcText).not.toContain('authorHandle')
+  })
+
+  // A model-authored handle is never evidence, so it must not survive into the
+  // relayed result even when the post itself is properly cited.
+  it('never exposes a model-authored account name in an accepted result', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiPayload({
+        posts: [post({ url: 'https://x.com/wrong_account/status/19470003' })],
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: searchArgs(),
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    const payload = parseResultText(result.rpcText)
+    expect(payload.posts[0]?.url).toBe('https://x.com/i/status/19470003')
+    expect(result.rpcText).not.toContain('wrong_account')
+  })
 })
 
 describe('executeXSearchTool response handling', () => {
@@ -377,7 +426,6 @@ describe('executeXSearchTool response handling', () => {
         posts: [
           post(),
           post({
-            authorHandle: 'someone_else_entirely',
             url: 'https://twitter.com/coach_amy/status/1947000000000000002',
             excerpt: 'Zone 2 volume\u0007 beats\u202e intensity for base building.',
           }),
@@ -396,20 +444,18 @@ describe('executeXSearchTool response handling', () => {
     expect(payload.disclaimer).toContain('untrusted content from X')
     expect(payload.fromDate).toBe('2026-07-16')
     expect(payload.toDate).toBe('2026-07-23')
+    // Accepted posts are normalized to the provider-evidenced handle-less
+    // form and carry no model-authored account name.
     expect(payload.posts).toEqual([
       {
-        authorHandle: 'runner_dave',
         createdAt: '2026-07-21T09:30:00Z',
         excerpt: 'Creatine timing does not matter much.',
-        url: 'https://x.com/runner_dave/status/1947000000000000001',
+        url: 'https://x.com/i/status/1947000000000000001',
       },
       {
-        // twitter.com is normalized to x.com and the handle is re-derived
-        // from the validated URL, not trusted from the provider payload.
-        authorHandle: 'coach_amy',
         createdAt: '2026-07-21T09:30:00Z',
         excerpt: 'Zone 2 volume beats intensity for base building.',
-        url: 'https://x.com/coach_amy/status/1947000000000000002',
+        url: 'https://x.com/i/status/1947000000000000002',
       },
     ])
   })
@@ -457,7 +503,7 @@ describe('executeXSearchTool response handling', () => {
     const payload = parseResultText(result.rpcText)
     expect(payload.posts).toHaveLength(1)
     expect(payload.posts[0].url)
-      .toBe('https://x.com/runner_dave/status/1947000000000000001')
+      .toBe('https://x.com/i/status/1947000000000000001')
   })
 
   it('caps relayed posts at maxResults', async () => {
@@ -485,7 +531,7 @@ describe('executeXSearchTool response handling', () => {
         posts: Array.from({ length: 8 }, (_, index) =>
           post({
             excerpt: 'あ'.repeat(700),
-            url: `https://x.com/runner_dave/status/19470${index}`,
+            url: `https://x.com/i/status/19470${index}`,
           }),
         ),
       }),
@@ -600,12 +646,17 @@ describe('executeXSearchTool response handling', () => {
     })
   })
 
-  it('rejects evidence-backed profile posts from a different handle', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () =>
-      responsesApiPayload({
+  it('scopes profile posts through the provider request rather than model output', async () => {
+    // The requested handle is sent as allowed_x_handles and enforced by the
+    // provider. A model-authored handle is not evidence, so it neither admits
+    // nor rejects a cited post; the accepted link is normalized handle-less.
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.tools[0].allowed_x_handles).toEqual(['runner_dave'])
+      return responsesApiPayload({
         posts: [post({ url: 'https://x.com/other_author/status/1947000000000000002' })],
-      }),
-    )
+      })
+    })
 
     const result = await executeXSearchTool({
       args: {
@@ -618,10 +669,9 @@ describe('executeXSearchTool response handling', () => {
       runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
     })
 
-    expect(result).toEqual({
-      rpcSuccess: false,
-      rpcText: 'X search returned an unusable response; no results can be shown',
-    })
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('https://x.com/i/status/1947000000000000002')
+    expect(result.rpcText).not.toContain('other_author')
   })
 
   it('reports an explicit no-results failure for an empty completed response', async () => {
@@ -786,7 +836,7 @@ describe('murph.x_search dynamic tool execution', () => {
     const payload = parseResultText(result.rpcResult.contentItems[0]!.text)
     expect(payload.posts).toHaveLength(1)
     expect(payload.posts[0].url)
-      .toBe('https://x.com/runner_dave/status/1947000000000000001')
+      .toBe('https://x.com/i/status/1947000000000000001')
   })
 
   it('reports an exhausted turn ceiling without any provider call', async () => {
