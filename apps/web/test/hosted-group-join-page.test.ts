@@ -189,6 +189,8 @@ test("renders the join form for authenticated viewers with current launch consen
 
   expect(markup).toContain("Accept group invite");
   expect(markup).not.toContain('data-legal-consent-gate="true"');
+  expect(markup).toContain('href="/home"');
+  expect(markup).toContain("Not now");
 });
 
 test.each([
@@ -240,6 +242,8 @@ test("does not send an existing group member through the new-member handoff", as
   expect(markup).toContain('data-membership-id="membership_existing"');
   expect(markup).toContain('data-join-code="JOIN123"');
   expect(markup).toContain("Leave group");
+  expect(markup).toContain('href="/home"');
+  expect(markup).toContain("Back to Murph");
 });
 
 test("keeps self-service leave available when an existing member lacks launch consent", async () => {
@@ -269,6 +273,7 @@ test("keeps self-service leave available when an existing member lacks launch co
   expect(markup).toContain('data-legal-consent-gate="true"');
   expect(markup).toContain("Leave group");
   expect(markup).not.toContain("Accept group invite");
+  expect(markup).not.toContain("Back to Murph");
 });
 
 test("does not offer self-service leave to the group owner", async () => {

@@ -71,11 +71,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
 
   const purchase = screen.kind === "purchase" ? screen : null;
   const selection = screen.kind === "selection" ? screen : null;
+  const returnedFromSuccessfulCheckout =
+    purchase !== null &&
+    props.purchaseReturn?.kind === "success" &&
+    props.purchaseReturn.purchaseId === purchase.purchaseId;
   const canResume =
+    !returnedFromSuccessfulCheckout &&
     purchase?.targetConflict !== true &&
     purchase?.status === "checkout_open" &&
     purchase.checkoutUrl !== null;
-  const canCancel = purchase?.status === "checkout_open";
+  const canCancel =
+    !returnedFromSuccessfulCheckout && purchase?.status === "checkout_open";
   const canRetry =
     purchase !== null &&
     !purchase.targetConflict &&
@@ -94,7 +100,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const purchaseTriggerLabel = purchase
     ? canResume || canRetry
       ? "Continue checkout"
-      : purchase.status === "checkout_open"
+      : purchase.status === "checkout_open" && !returnedFromSuccessfulCheckout
         ? "Review checkout"
         : purchase.status === null || shouldPollPurchaseStatus(purchase.status)
           ? "Check payment"
@@ -110,9 +116,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
         pollKind: purchase.poll.kind,
-        returnedFromSuccessfulCheckout:
-          props.purchaseReturn?.kind === "success" &&
-          props.purchaseReturn.purchaseId === purchase.purchaseId,
+        returnedFromSuccessfulCheckout,
         scope: props.scope,
         status: purchase.status,
         targetLabel: familyTarget ?? undefined,
@@ -120,10 +124,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       })
     : null;
   const contactOptions = props.contactOptions ?? [];
-  const showContactAction =
+  const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
-    !purchase.targetConflict &&
+    !purchase.targetConflict;
+  const showGroupMessagesAction =
+    fulfilledConfirmation && props.scope === "group";
+  const showContactAction =
+    fulfilledConfirmation &&
+    props.scope !== "group" &&
     contactOptions.length > 0;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -140,9 +149,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           render={
             <Button
               type="button"
-              size={props.scope === "group" ? "xl" : "lg"}
-              variant={props.scope === "group" ? "default" : "outline"}
-              className={props.scope === "group" ? "w-full" : undefined}
+              size={props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")}
+              variant={
+                props.triggerVariant ??
+                (props.scope === "group" ? "default" : "outline")
+              }
+              className={cn(
+                props.scope === "group" ? "w-full" : undefined,
+                props.triggerClassName,
+              )}
               aria-label={
                 familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
               }
@@ -263,6 +278,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   Check again
                 </Button>
+              ) : null}
+              {showGroupMessagesAction ? (
+                // Messages has no deep link into an existing group thread, so
+                // the group follow-up can only open the app itself.
+                <a
+                  href="sms:"
+                  className={cn(buttonVariants({ size: "lg" }), "w-full")}
+                >
+                  <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
+                  Open Messages
+                </a>
               ) : null}
               {showContactAction ? (
                 contactOptions.length === 1 ? (

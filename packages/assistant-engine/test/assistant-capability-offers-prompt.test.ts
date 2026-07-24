@@ -271,6 +271,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('Use your own words, not a fixed script')
     expect(section).toContain('Do not repeat the invitation unprompted')
     expect(section).toContain('when someone joins later')
+    expect(section).toContain('If someone asks you to resend the card, share it again')
     expect(section).toContain('If someone asks why they have not been added')
     expect(section).toContain('skip the card and invitation')
     expect(section).not.toContain('their own Murph')
