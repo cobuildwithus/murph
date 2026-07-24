@@ -28,6 +28,7 @@ import {
   type MurphContactAvatarOption,
 } from "@/src/lib/murph-contact-avatars";
 import { detectInAppBrowser } from "@/src/lib/in-app-browser";
+import { isRecord } from "@/src/lib/primitives";
 import { cn } from "@/src/lib/utils";
 
 export {
@@ -40,6 +41,10 @@ export {
 
 export function murphContactCardDownloadHref(avatarId: string): string {
   return `/api/murph-contact-card?avatar=${encodeURIComponent(avatarId)}`;
+}
+
+function murphContactCardHandoffHref(claim: string): string {
+  return `/api/murph-contact-card?handoff=${encodeURIComponent(claim)}`;
 }
 
 function subscribeToBrowserSnapshot() {
@@ -200,6 +205,8 @@ const PICKER_DESCRIPTION =
 export const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
 export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
+const IN_APP_BROWSER_HANDOFF_ERROR =
+  "Couldn't open Safari. Check your connection and try again.";
 const DEFAULT_PICKER_COPY = {
   description: PICKER_DESCRIPTION,
   primaryAction: "Add Murph to Contacts",
@@ -231,6 +238,8 @@ export function MurphContactCardPicker({
     readBrowserServerSnapshot,
   );
   const [selectedId, setSelectedId] = useState(initialAvatarId);
+  const [handoffPending, setHandoffPending] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
   const selected = findMurphContactAvatarOption(selectedId);
   const browser = detectInAppBrowser(userAgent);
   const opensInSafari = browser.inAppBrowser && browser.isIos;
@@ -241,30 +250,63 @@ export function MurphContactCardPicker({
 
   const actions = (
     <div className="flex flex-col gap-2">
-      {/* No `download` attribute: the route serves the vCard inline so iOS
-          Safari opens its native contact preview; a download hint would
-          route it into Files instead. */}
-      <a
-        className={buttonVariants({ className: "w-full", size: "xl" })}
-        href={
-          opensInSafari
-            ? `x-safari-https://${window.location.host}${murphContactCardDownloadHref(selected.id)}`
-            : murphContactCardDownloadHref(selected.id)
-        }
-        onClick={() => onAddToContacts?.(selected)}
-      >
-        <ContactRoundIcon data-icon="inline-start" />
-        {opensInSafari
-          ? IN_APP_BROWSER_PRIMARY_ACTION
-          : pickerCopy.primaryAction}
-      </a>
       {opensInSafari ? (
-        <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
-          {IN_APP_BROWSER_DESCRIPTION}
-        </p>
-      ) : null}
+        <>
+          <Button
+            className="w-full"
+            disabled={handoffPending}
+            onClick={() => {
+              setHandoffError(null);
+              setHandoffPending(true);
+              void issueMurphContactCardHandoff(selected.id)
+                .then((claim) => {
+                  window.location.assign(
+                    `x-safari-https://${window.location.host}${murphContactCardHandoffHref(claim)}`,
+                  );
+                })
+                .catch(() => {
+                  setHandoffError(IN_APP_BROWSER_HANDOFF_ERROR);
+                })
+                .finally(() => {
+                  setHandoffPending(false);
+                });
+            }}
+            size="xl"
+            type="button"
+          >
+            <ContactRoundIcon data-icon="inline-start" />
+            {handoffPending ? "Opening Safari…" : IN_APP_BROWSER_PRIMARY_ACTION}
+          </Button>
+          <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
+            {IN_APP_BROWSER_DESCRIPTION}
+          </p>
+          {handoffError ? (
+            <p
+              className="px-2 text-center text-sm leading-5 text-destructive"
+              role="alert"
+            >
+              {handoffError}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {/* No `download` attribute: the route serves the vCard inline so iOS
+              Safari opens its native contact preview; a download hint would
+              route it into Files instead. */}
+          <a
+            className={buttonVariants({ className: "w-full", size: "xl" })}
+            href={murphContactCardDownloadHref(selected.id)}
+            onClick={() => onAddToContacts?.(selected)}
+          >
+            <ContactRoundIcon data-icon="inline-start" />
+            {pickerCopy.primaryAction}
+          </a>
+        </>
+      )}
       <Button
         className="w-full"
+        disabled={opensInSafari && handoffPending}
         onClick={() => {
           onSkip?.();
           onOpenChange(false);
@@ -332,4 +374,31 @@ export function MurphContactCardPicker({
       </DialogContent>
     </Dialog>
   );
+}
+
+async function issueMurphContactCardHandoff(avatarId: string): Promise<string> {
+  const response = await fetch("/api/murph-contact-card", {
+    body: JSON.stringify({ avatar: avatarId }),
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    throw new Error("Murph contact-card handoff issuance failed.");
+  }
+
+  const payload: unknown = await response.json();
+  if (
+    !isRecord(payload)
+    || typeof payload.claim !== "string"
+    || payload.claim.length === 0
+  ) {
+    throw new Error("Murph contact-card handoff response was invalid.");
+  }
+
+  return payload.claim;
 }
