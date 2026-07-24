@@ -2196,6 +2196,67 @@ test("withholds Text Murph until the returned payment is confirmed fulfilled", a
   }
 });
 
+test("keeps confirming on a success return that still reads checkout_open", async () => {
+  vi.useFakeTimers();
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_webhook_lag000",
+      status: "checkout_open",
+      url: "https://checkout.stripe.test/laggy-session",
+    })
+    .mockResolvedValueOnce({
+      purchaseId: "hucp_webhook_lag000",
+      status: "fulfilled",
+    });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      offers: [],
+      purchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_webhook_lag000",
+      },
+    }),
+    {
+      location: {
+        href: "https://example.test/settings?usagePurchase=hucp_webhook_lag000&usageCheckout=success",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.match(rendered.container.textContent ?? "", /Confirming payment/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Payment submitted\. We’re confirming it\./,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Checkout already open/,
+    );
+    assert.equal(hasButton(rendered.container, "Resume checkout"), false);
+    assert.equal(hasButton(rendered.container, "Cancel checkout"), false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_250);
+      await Promise.resolve();
+    });
+
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
+  } finally {
+    await rendered.cleanup();
+    vi.useRealTimers();
+  }
+});
+
 test("never offers Text Murph on a canceled checkout confirmation", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
     purchaseId: "hucp_contact_cancel",

@@ -71,11 +71,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
 
   const purchase = screen.kind === "purchase" ? screen : null;
   const selection = screen.kind === "selection" ? screen : null;
+  const returnedFromSuccessfulCheckout =
+    purchase !== null &&
+    props.purchaseReturn?.kind === "success" &&
+    props.purchaseReturn.purchaseId === purchase.purchaseId;
   const canResume =
+    !returnedFromSuccessfulCheckout &&
     purchase?.targetConflict !== true &&
     purchase?.status === "checkout_open" &&
     purchase.checkoutUrl !== null;
-  const canCancel = purchase?.status === "checkout_open";
+  const canCancel =
+    !returnedFromSuccessfulCheckout && purchase?.status === "checkout_open";
   const canRetry =
     purchase !== null &&
     !purchase.targetConflict &&
@@ -94,7 +100,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const purchaseTriggerLabel = purchase
     ? canResume || canRetry
       ? "Continue checkout"
-      : purchase.status === "checkout_open"
+      : purchase.status === "checkout_open" && !returnedFromSuccessfulCheckout
         ? "Review checkout"
         : purchase.status === null || shouldPollPurchaseStatus(purchase.status)
           ? "Check payment"
@@ -110,9 +116,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         canResumeCheckout: canResume,
         canRetryCheckout: canRetry,
         pollKind: purchase.poll.kind,
-        returnedFromSuccessfulCheckout:
-          props.purchaseReturn?.kind === "success" &&
-          props.purchaseReturn.purchaseId === purchase.purchaseId,
+        returnedFromSuccessfulCheckout,
         scope: props.scope,
         status: purchase.status,
         targetLabel: familyTarget ?? undefined,
