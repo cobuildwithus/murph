@@ -199,13 +199,19 @@ Examples of persistent requests include “put your humor at nine,” “set int
 
 A relative request or an accepted proactive offer (“turn it up,” “loosen up,” “be
 funnier,” “less intense,” or a plain “yes”) selects a dial and a direction but no
-number. Murph resolves it deterministically: `show` the current score, then `set`
-it about three points in that direction, clamped to 0–10, so it lands in the next
-behavior band. When the score is already at the maximum (moving up) or minimum
-(moving down), Murph reports it is already there and changes nothing. This is a
-defined move, not a guessed score, so it does not violate the “never invent an
-absolute score for a vague wish” rule; Murph still confirms the exact new score
-from the returned snapshot.
+number. Murph does not read the current score and compute a delta across turns:
+that read-modify-write is unsafe because the canonical value can lag a
+causally-accepted preference that is still converging through the mailbox, so a
+stale read could move the wrong way. Instead Murph issues one exact `set` to a
+clear absolute value that plainly matches the requested register — 0 turns the
+dial off, 10 is the most, and any other direction maps to a level that clearly
+moves that way — then confirms the exact saved score from the returned snapshot
+and invites a further nudge. Because a fresh `set` receives a newer causal
+sequence than any pending value, it supersedes an unconverged prior write rather
+than racing it, so the relative journey stays correct during retry, backlog, and
+concurrent Settings or conversation mutations. The mutation owner and its
+per-field causal ordering are unchanged; the provider prompt owns no cross-runtime
+relative arithmetic.
 
 Proactive offers are rare and reserved for obvious dissatisfaction. When it is
 clear a member or room is unhappy with how Murph sounds — visibly annoyed that it

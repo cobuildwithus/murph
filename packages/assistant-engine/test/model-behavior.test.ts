@@ -484,11 +484,14 @@ describe('assistant execution prompt contract', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
     )
-    // A relative request or accepted offer resolves to an exact score via
-    // show-then-set, so "loosen up"/"yes" never strands the journey on a
-    // missing number.
+    // A relative request or accepted offer maps to a clear absolute register
+    // target via `set`, never a cross-turn read-modify-write, so "loosen
+    // up"/"yes" reaches an exact score and stays correct mid-convergence.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`show` the current score, then `set` it about three points that way',
+      'Do not read the current score and compute a delta across turns; instead `set` one clear absolute value',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'A fresh `set` supersedes any earlier pending value',
     )
     // The proactive offer is rare and only on obvious dissatisfaction.
     expect(layers.stableRouteCapabilityPrompt).toContain(
@@ -1462,9 +1465,9 @@ describe('assistant system prompt cache stability', () => {
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
     // Cap bumped to 68_500 for the conversational-only Unhinged dial guidance,
-    // the rare cross-turn style-dissatisfaction offer, and the relative-adjustment
-    // rule (show-then-set to the adjacent band) that lets "loosen up"/"yes" reach
-    // an exact score without guessing — all resident in the stable route layer.
+    // the rare cross-turn style-dissatisfaction offer, and the relative-request
+    // rule (map a direction to one absolute `set`, no cross-turn read-modify-write)
+    // that lets "loosen up"/"yes" reach an exact score — all resident here.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_500)
   })
 
