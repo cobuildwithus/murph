@@ -11,6 +11,7 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
@@ -64,6 +65,12 @@ export function SectionsContent() {
 
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Family plan invite acceptance">
+        <FamilyInviteJoinStudy />
       </StudySection>
 
       <Separator />

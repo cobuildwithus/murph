@@ -26,7 +26,7 @@ vi.mock("@/src/components/family/family-invite-accept-client", () => ({
     return createElement(
       "button",
       { "data-family-sign-in": props.variant ?? "primary" },
-      props.variant === "link" ? "Sign in on the web instead" : "Sign in to join",
+      props.variant === "link" ? "Prefer not to text?" : "Sign in to join",
     );
   },
   FamilyInviteWebAcceptButton(props: { inviteCode: string }) {
@@ -101,7 +101,7 @@ test("renders the web sign-in path for unauthenticated email-bound invites", asy
   expect(mocks.signInButtonRendered).toBe(true);
   expect(mocks.signInButtonProps).toEqual({ bindingLabel: "email address" });
   expect(markup).toContain("Sign in to join");
-  expect(markup).toContain("Sign in with the email address this invite was sent to");
+  expect(markup).toContain("Use the email address this invite was sent to.");
   expect(markup).not.toContain("Continue in Telegram");
   expect(markup).not.toContain("Continue in Messages");
 });
@@ -144,7 +144,6 @@ test("leads phone-bound invites with the Messages accept path, not Telegram", as
   expect(markup).toContain(
     "sms:+15551230000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODEPHONE)",
   );
-  expect(markup).toContain("This opens a text to Murph");
   // The web sign-in is offered only as a compact secondary option.
   expect(mocks.signInButtonProps).toEqual({
     bindingLabel: "phone number",
@@ -216,7 +215,7 @@ test("shows Messages, web sign-in, and Telegram options for a label-only invite"
   expect(markup).toContain(
     "sms:+15559990000?body=Hi%20Murph%2C%20joining%20the%20family%20plan%20(code%20family_CODELABEL)",
   );
-  expect(markup).toContain("Sign in on the web instead");
+  expect(markup).toContain("Prefer not to text?");
   expect(markup).toContain("Continue in Telegram");
   expect(markup).toContain("https://t.me/withmurph_bot?start=family_CODELABEL");
   expect(mocks.signInButtonProps).toEqual({
