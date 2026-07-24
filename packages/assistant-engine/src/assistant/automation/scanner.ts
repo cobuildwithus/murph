@@ -26,9 +26,6 @@ import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
 } from './evidence.js'
 import {
-  decideAssistantGroupBurstHold,
-} from './group-burst-hold.js'
-import {
   applyAssistantAutoReplyProcessResult,
   createAssistantAutoReplyGroupContext,
   createAssistantAutoReplyHistoryReader,
@@ -38,7 +35,6 @@ import {
 import {
   createEmptyAutoReplyScanResult,
   createEmptyInboxScanResult,
-  earliestAssistantAutomationWakeAt,
   normalizeScanLimit,
   type AssistantAutomationScanResult,
   type AssistantAutomationScanStateProgress,
@@ -66,7 +62,6 @@ export async function scanAssistantAutomationOnce(input: {
   onStateProgress?: (
     state: AssistantAutomationScanStateProgress,
   ) => Promise<void> | void
-  now?: () => number
   providerHeartbeatMs?: number | null
   providerLongRunningCommandStallTimeoutMs?: number | null
   providerStallTimeoutMs?: number | null
@@ -132,14 +127,44 @@ export async function scanAssistantAutomationOnce(input: {
   const historyReader = createAssistantAutoReplyHistoryReader({
     vault: input.vault,
   })
-  const processGroupItems = async (
-    groupItems: Awaited<
-      ReturnType<typeof collectAssistantAutoReplyGroup>
-    >['items'],
-  ): Promise<boolean> => {
+  const inputSummaries = candidates.map((candidate) => candidate.summary)
+  const candidatesByInputId = new Map(
+    candidates.map((candidate) => [candidate.summary.inputId, candidate] as const),
+  )
+  const inputCandidatesByInputId = new Map(
+    candidates.map((candidate) => [
+      candidate.summary.inputId,
+      candidate.inputCandidate,
+    ] as const),
+  )
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (input.signal?.aborted) {
+      break
+    }
+
+    const candidate = candidates[index]
+    if (!candidate) {
+      continue
+    }
+
+    const group = await collectAssistantAutoReplyGroup({
+      inputSummaries,
+      inputCandidatesByInputId,
+      startIndex: index,
+      vault: input.vault,
+    })
+    index = group.endIndex
+    const groupItems = group.items.map((item) => ({
+      ...item,
+      inputCandidate:
+        candidatesByInputId.get(item.summary.inputId)?.inputCandidate ??
+        item.inputCandidate ??
+        null,
+    }))
+
     const context = createAssistantAutoReplyGroupContext(groupItems)
     if (!context) {
-      return false
+      continue
     }
 
     replies.considered += context.inputCount
@@ -208,65 +233,9 @@ export async function scanAssistantAutomationOnce(input: {
       stepElapsedMs: elapsedSince(scanStatePersistStartedAt),
     })
 
-    return stopReplyScan
-  }
-
-  let earliestGroupHoldResumeAt: number | null = null
-  let stopReplyScan = false
-  const candidateIndex = indexAssistantAutomationCandidates(candidates)
-  for (let index = 0; index < candidates.length; index += 1) {
-    if (input.signal?.aborted) {
-      break
-    }
-
-    const candidate = candidates[index]
-    if (!candidate) {
-      continue
-    }
-
-    const group = await collectAssistantAutoReplyGroup({
-      inputSummaries: candidateIndex.inputSummaries,
-      inputCandidatesByInputId: candidateIndex.inputCandidatesByInputId,
-      startIndex: index,
-      vault: input.vault,
-    })
-    const groupItems = hydrateAssistantAutoReplyGroupItems({
-      candidatesByInputId: candidateIndex.candidatesByInputId,
-      items: group.items,
-    })
-    const holdDecision = decideAssistantGroupBurstHoldForItems({
-      items: groupItems,
-      now: input.now?.() ?? Date.now(),
-    })
-    index = group.endIndex
-    // A held group defers to the runtime wake owner instead of waiting in
-    // process: input selection freezes at pass start, so only a later pass can
-    // admit a mid-hold arrival into the batch. Skipping without processing
-    // keeps the source cursor behind the held group; fail open when a later
-    // same-source candidate is already visible so the hold never delays it.
-    if (
-      !holdDecision.ready &&
-      !candidates
-        .slice(index + 1)
-        .some((later) => later.summary.source === candidate.summary.source)
-    ) {
-      earliestGroupHoldResumeAt =
-        earliestGroupHoldResumeAt === null
-          ? holdDecision.resumeAt
-          : Math.min(earliestGroupHoldResumeAt, holdDecision.resumeAt)
-      continue
-    }
-
-    stopReplyScan = await processGroupItems(groupItems)
     if (stopReplyScan) {
       break
     }
-  }
-  if (earliestGroupHoldResumeAt !== null) {
-    replies.nextWakeAt = earliestAssistantAutomationWakeAt(
-      replies.nextWakeAt,
-      new Date(earliestGroupHoldResumeAt).toISOString(),
-    )
   }
 
   return {
@@ -274,59 +243,6 @@ export async function scanAssistantAutomationOnce(input: {
     replies,
     routing,
   }
-}
-
-function decideAssistantGroupBurstHoldForItems(input: {
-  items: Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items']
-  now: number
-}): ReturnType<typeof decideAssistantGroupBurstHold> {
-  return decideAssistantGroupBurstHold({
-    items: input.items.map((item) => ({
-      ...(item.inputCandidate?.event.groupParticipantAdded === true
-        ? { groupParticipantAdded: true as const }
-        : {}),
-      sourceRef: item.inputCandidate?.event.sourceRef ?? null,
-      summary: item.summary,
-    })),
-    now: input.now,
-  })
-}
-
-function indexAssistantAutomationCandidates(
-  candidates: readonly AssistantAutomationCandidate[],
-): {
-  candidatesByInputId: ReadonlyMap<string, AssistantAutomationCandidate>
-  inputCandidatesByInputId: ReadonlyMap<string, AssistantInputCandidate>
-  inputSummaries: AssistantAutomationInputSummary[]
-} {
-  return {
-    candidatesByInputId: new Map(
-      candidates.map((candidate) => [
-        candidate.summary.inputId,
-        candidate,
-      ] as const),
-    ),
-    inputCandidatesByInputId: new Map(
-      candidates.map((candidate) => [
-        candidate.summary.inputId,
-        candidate.inputCandidate,
-      ] as const),
-    ),
-    inputSummaries: candidates.map((candidate) => candidate.summary),
-  }
-}
-
-function hydrateAssistantAutoReplyGroupItems(input: {
-  candidatesByInputId: ReadonlyMap<string, AssistantAutomationCandidate>
-  items: Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items']
-}): Awaited<ReturnType<typeof collectAssistantAutoReplyGroup>>['items'] {
-  return input.items.map((item) => ({
-    ...item,
-    inputCandidate:
-      input.candidatesByInputId.get(item.summary.inputId)?.inputCandidate ??
-      item.inputCandidate ??
-      null,
-  }))
 }
 
 export async function hasPendingAssistantAutoReplyInput(input: {

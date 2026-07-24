@@ -56,9 +56,11 @@ import {
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
 import {
+  createMurphWaitForRepliesTurnState,
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
+  MURPH_WAIT_FOR_REPLIES_TOOL,
   type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
@@ -2826,6 +2828,13 @@ async function runCodexAppServerTurnOnProcess(
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
   const dynamicToolAbortController = new AbortController()
+  const waitForRepliesTurnState = input.dynamicTools.some(
+    (tool) =>
+      tool.namespace === MURPH_WAIT_FOR_REPLIES_TOOL.namespace &&
+      tool.name === MURPH_WAIT_FOR_REPLIES_TOOL.name,
+  )
+    ? createMurphWaitForRepliesTurnState()
+    : null
   const turnCompleted = new Promise<void>((resolve, reject) => {
     completeTurn = resolve
     failTurn = reject
@@ -3899,6 +3908,7 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          waitForRepliesTurnState,
         })
         return result
       },
@@ -5001,6 +5011,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
       | 'invalid-reply-target-arguments'
+      | 'invalid-wait-for-replies-arguments'
       | 'invalid-product-feedback-arguments'
       | 'invalid-response-media-arguments'
   }
@@ -5016,6 +5027,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
     request.kind === 'invalid-reply-target-arguments' ||
+    request.kind === 'invalid-wait-for-replies-arguments' ||
     request.kind === 'invalid-product-feedback-arguments' ||
     request.kind === 'invalid-response-media-arguments'
   )
@@ -5038,6 +5050,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'submit-product-feedback' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
+    request.kind === 'wait-for-replies' ||
     isComputerDynamicToolRequest(request)
 }
 
@@ -5060,8 +5073,10 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'invalid-device-arguments' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
+    request.kind === 'wait-for-replies' ||
     request.kind === 'invalid-reaction-arguments' ||
-    request.kind === 'invalid-reply-target-arguments'
+    request.kind === 'invalid-reply-target-arguments' ||
+    request.kind === 'invalid-wait-for-replies-arguments'
 }
 
 function createDynamicToolRuntimeIssueInput(input: {

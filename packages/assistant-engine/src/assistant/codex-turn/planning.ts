@@ -691,6 +691,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
+        conversationScope,
         messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&

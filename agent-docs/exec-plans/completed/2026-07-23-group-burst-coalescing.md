@@ -17,26 +17,14 @@ In group chats, a burst of N inbound messages produces N serial Murph replies:
 
 ## Change (three levers, all group-scope only; DM behavior unchanged)
 
-### A. Pre-turn burst hold (5s, extending to a 15s cap)
+### A. Model-discretion waiting inside a live turn
 
-Before opening an auto-reply turn whose pending batch is group-thread inbound
-conversation messages (conversation directness = not direct), hold until the
-newest pending message is >= 5s old OR the oldest pending message is >= 15s
-old, whichever comes first. A held group defers to the existing runtime wake
-owner: the scanner skips it without advancing its source cursor and merges the
-hold's resume time into the scan result's reply wake (`replies.nextWakeAt`),
-which the run loop and hosted maintenance already project into the runtime's
-next wake. Selection is frozen per pass, so a mid-hold arrival lands in a later
-pass, re-lists old plus new messages, and recomputes the hold (extension). The
-hold fails open when a later same-source candidate is already visible. The
-hold is hosted-only by explicit scope decision: only hosted conversation-lane
-mailbox inputs are eligible, because only the hosted runtime provides a wake
-continuation owner; local continuous, `--once`, and assistantd one-shot runs
-keep pre-change immediate replies. A zero-work pass that armed a hold wake
-returns promptly instead of running inline runtime maintenance, and cron
-due/defer ownership is untouched. No in-process sleeping, no persisted state,
-no new wake owner. System/automation mailbox items and direct conversations
-are never held.
+The pre-turn hold was replaced by model-discretion waiting through
+`murph.wait_for_replies`, available only in group scope with a 3-10 second
+clamp and a two-call, 15-second cumulative turn budget. Because the turn is
+already live, messages arriving during the wait enter it through the existing
+active-turn steering path, so Murph can answer the whole burst once or reply
+immediately when the moment calls for it.
 
 ### B. Last-wins steered finals in groups
 
@@ -61,10 +49,10 @@ longer the latest inbound or when multiple conversations interleave.
 
 - DM (direct-scope) turn timing, steering, per-segment delivery, and
   transcript persistence are byte-for-byte unchanged.
-- Product-critical flow preservation: current-inbound replies must still be
-  answered; the hold only delays, never drops, and is hard-capped at 15s.
-- A held channel's cursor never advances past the held group; candidates on
-  other channels can still proceed during the first scan phase.
+- Waiting is optional model behavior inside an already-open group turn; it
+  never schedules a later message or delays an answer someone needs now.
+- Mid-wait arrivals use the existing active-turn steering path and therefore
+  remain visible before the model commits its final answer.
 - No new persisted state (placement gate: nothing to place).
 - Group-scope prompt additions are thread-stable static text (scope is stable
   per group thread); no per-turn fingerprint churn.
@@ -74,14 +62,17 @@ longer the latest inbound or when multiple conversations interleave.
 
 ## Files (expected)
 
-- `packages/assistant-engine/src/assistant/automation/` — hold decision +
-  scan-seam wait (new small module or `grouping.ts`), scanner integration.
+- `packages/assistant-engine/src/assistant-codex/dynamic-tools.ts` and
+  `packages/assistant-engine/src/assistant-codex.ts` — group-only wait tool and
+  turn-local call/time budget.
+- `packages/assistant-engine/src/assistant/automation/` — remove the scanner
+  hold and restore immediate pre-turn selection.
 - `packages/assistant-engine/src/assistant/local-service.ts` — group-scope
   gating of preceding-segment delivery + transcript persistence.
 - `packages/assistant-engine/src/assistant/system-prompt.ts` — group-scope
-  static line for last-wins steering.
-- `packages/assistant-engine/skills/group-chat/SKILL.md` — reply-target
-  guidance tweak.
+  static lines for waiting and last-wins steering.
+- `packages/assistant-engine/skills/group-chat/SKILL.md` — wait discretion and
+  reply-target guidance.
 - Matching tests under `packages/assistant-engine/test/`.
 
 ## Overlaps (non-exclusive, keep narrow)
@@ -92,13 +83,12 @@ longer the latest inbound or when multiple conversations interleave.
 
 ## Verification
 
-- New unit tests: hold boundary conditions (fresh burst held, 5s quiet
-  releases, 15s cap releases, direct scope never held, system items never
-  held, late arrival extends hold and joins batch, unrelated channels proceed
-  while the held channel cursor stays parked); group last-wins gating
-  (superseded segments dropped in group scope, last completed answer promoted
-  after no-reply, segments delivered in direct scope; transcript entries
-  follow).
+- Dynamic-tool tests: group-only availability and execution authority, strict
+  arguments, 3-10 second clamping, two-call/15-second turn budget, and
+  abort-aware early completion; prompt and skill assertions for discretionary
+  waiting; group last-wins gating (superseded segments dropped in group scope,
+  last completed answer promoted after no-reply, segments delivered in direct
+  scope; transcript entries follow).
 - `pnpm test:diff` over touched paths; assistant-engine owner suite; typecheck.
 Status: completed
 Updated: 2026-07-23

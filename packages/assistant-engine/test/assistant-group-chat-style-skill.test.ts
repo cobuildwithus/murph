@@ -94,6 +94,32 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).not.toContain('Exactly one message per turn.')
   })
 
+  it('waits selectively for a live volley and answers the burst once', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'When people are still typing or responding to each other and your reply can wait, call `murph.wait_for_replies` for a few seconds',
+    )
+    expect(normalized).toContain(
+      'Do not wait when someone needs an answer now.',
+    )
+    expect(normalized).toContain(
+      'a comedic interjection can be better because it lands immediately.',
+    )
+    expect(normalized).toContain(
+      'prefer one reply after the burst over serial replies.',
+    )
+    expect(normalized).toContain(
+      'never mention waiting, sleeping, or tools.',
+    )
+    expect(normalized).toContain(
+      'After waiting, answer the whole burst once; natural `---` bubbles are allowed.',
+    )
+    expect(normalized).toContain(
+      'If that answer targets an earlier message rather than the burst as a whole, use the stale-message reply-target rule below.',
+    )
+  })
+
   it('lets a server-owned permission card stand alone', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 

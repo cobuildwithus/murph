@@ -102,6 +102,9 @@ import type {
   AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
+  AssistantConversationScope,
+} from '../assistant/conversation-policy.js'
+import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
 import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
@@ -931,6 +934,25 @@ export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
   },
 } as const
 
+export const MURPH_WAIT_FOR_REPLIES_TOOL = {
+  namespace: 'murph',
+  name: 'wait_for_replies',
+  description:
+    'Wait briefly to see whether more group messages arrive before you commit to a reply. New messages arrive as normal messages after the wait. Use only when the room is actively mid-conversation and your reply genuinely benefits from waiting; never to delay an answer someone is waiting on.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      seconds: {
+        type: 'number',
+        description:
+          'How many seconds to wait. Values are clamped to the 3-to-10-second in-conversation range.',
+      },
+    },
+    required: ['seconds'],
+  },
+} as const
+
 const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
 const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
@@ -1140,6 +1162,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_WAIT_FOR_REPLIES_TOOL,
   MURPH_SELECT_REPLY_TARGET_TOOL,
   MURPH_REACT_TO_MESSAGE_TOOL,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
@@ -1173,6 +1196,7 @@ export interface MurphDynamicToolAvailability {
   allowFinishWithoutReply?: boolean | null
   automationAvailable?: boolean | null
   computerToolsAvailable?: boolean | null
+  conversationScope?: AssistantConversationScope | null
   progressUpdatesAvailable?: boolean | null
   connectedAppsAvailable?: boolean | null
   connectedAppsManageAvailable?: boolean | null
@@ -1218,6 +1242,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
+    [MURPH_WAIT_FOR_REPLIES_TOOL, (a) => a.conversationScope === 'group'],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
@@ -1548,6 +1573,11 @@ const sendVaultFileArgumentsSchema = z
   .strict()
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
+const waitForRepliesArgumentsSchema = z
+  .object({
+    seconds: z.number().finite(),
+  })
+  .strict()
 const planUsageArgumentsSchema = z.object({}).strict()
 
 const submitProductFeedbackArgumentsSchema = z
@@ -1956,6 +1986,10 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
+      kind: 'invalid-wait-for-replies-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
       kind: 'invalid-product-feedback-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
@@ -2031,6 +2065,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'select-reply-target'
       messageRef: string
+    }
+  | {
+      kind: 'wait-for-replies'
+      seconds: number
     }
   | {
       kind: 'finish-without-reply'
@@ -2321,6 +2359,20 @@ export function readMurphDynamicToolRequest(
         kind: 'finish-without-reply',
       }
     }
+    case MURPH_WAIT_FOR_REPLIES_TOOL.name: {
+      const parsed = parseWaitForRepliesArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-wait-for-replies-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'wait-for-replies',
+        seconds: parsed.seconds,
+      }
+    }
     case MURPH_REACT_TO_MESSAGE_TOOL.name: {
       const parsed = parseReactToMessageArguments(request.arguments)
       if (!parsed.ok) {
@@ -2490,6 +2542,99 @@ function readGeneratedImageToolCallId(
     : null
 }
 
+const MURPH_WAIT_FOR_REPLIES_MIN_SECONDS = 3
+const MURPH_WAIT_FOR_REPLIES_MAX_SECONDS = 10
+const MURPH_WAIT_FOR_REPLIES_MAX_CALLS = 2
+const MURPH_WAIT_FOR_REPLIES_TOTAL_SECONDS = 15
+
+export interface MurphWaitForRepliesTurnState {
+  wait(input: {
+    abortSignal: AbortSignal | null
+    seconds: number
+  }): Promise<{
+    budgetExhausted: boolean
+    waitedSeconds: number
+  }>
+}
+
+export function createMurphWaitForRepliesTurnState(): MurphWaitForRepliesTurnState {
+  let callCount = 0
+  let reservedSeconds = 0
+
+  return {
+    async wait(input) {
+      if (
+        callCount >= MURPH_WAIT_FOR_REPLIES_MAX_CALLS ||
+        reservedSeconds >= MURPH_WAIT_FOR_REPLIES_TOTAL_SECONDS
+      ) {
+        return {
+          budgetExhausted: true,
+          waitedSeconds: 0,
+        }
+      }
+
+      const clampedSeconds = Math.min(
+        MURPH_WAIT_FOR_REPLIES_MAX_SECONDS,
+        Math.max(MURPH_WAIT_FOR_REPLIES_MIN_SECONDS, input.seconds),
+      )
+      const waitSeconds = Math.min(
+        clampedSeconds,
+        MURPH_WAIT_FOR_REPLIES_TOTAL_SECONDS - reservedSeconds,
+      )
+      callCount += 1
+      reservedSeconds += waitSeconds
+
+      const startedAt = Date.now()
+      const aborted = await waitForRepliesDelay({
+        abortSignal: input.abortSignal,
+        milliseconds: waitSeconds * 1_000,
+      })
+      const waitedSeconds = aborted
+        ? Math.min(
+            waitSeconds,
+            Math.max(0, (Date.now() - startedAt) / 1_000),
+          )
+        : waitSeconds
+
+      return {
+        budgetExhausted: false,
+        waitedSeconds,
+      }
+    },
+  }
+}
+
+async function waitForRepliesDelay(input: {
+  abortSignal: AbortSignal | null
+  milliseconds: number
+}): Promise<boolean> {
+  if (input.abortSignal?.aborted === true) {
+    return true
+  }
+
+  return await new Promise<boolean>((resolve) => {
+    let settled = false
+    let timeout: ReturnType<typeof setTimeout> | null = null
+    const finish = (aborted: boolean) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeout !== null) {
+        clearTimeout(timeout)
+      }
+      input.abortSignal?.removeEventListener('abort', onAbort)
+      resolve(aborted)
+    }
+    const onAbort = () => finish(true)
+    timeout = setTimeout(() => finish(false), input.milliseconds)
+    input.abortSignal?.addEventListener('abort', onAbort, { once: true })
+    if (input.abortSignal?.aborted === true) {
+      onAbort()
+    }
+  })
+}
+
 export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
@@ -2511,6 +2656,7 @@ export async function executeMurphDynamicToolRequest(input: {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  waitForRepliesTurnState?: MurphWaitForRepliesTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -2547,6 +2693,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid reaction arguments')
     case 'invalid-reply-target-arguments':
       return toolTextResult(false, 'invalid reply target arguments')
+    case 'invalid-wait-for-replies-arguments':
+      return toolTextResult(false, 'invalid wait-for-replies arguments')
     case 'invalid-product-feedback-arguments':
       return toolTextResult(false, 'invalid product feedback arguments')
     case 'invalid-family-plan-arguments':
@@ -2866,6 +3014,31 @@ export async function executeMurphDynamicToolRequest(input: {
           kind: 'none',
         },
       }
+    case 'wait-for-replies': {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (
+        userActionScope !== null &&
+        userActionScope.conversationScope !== 'group'
+      ) {
+        return toolTextResult(
+          false,
+          'wait_for_replies is available only in a group conversation',
+        )
+      }
+      const turnState = input.waitForRepliesTurnState ?? null
+      if (turnState === null) {
+        return toolTextResult(
+          false,
+          'wait_for_replies is unavailable for this turn',
+        )
+      }
+      const result = await turnState.wait({
+        abortSignal: input.abortSignal ?? null,
+        seconds: input.request.seconds,
+      })
+      return toolTextResult(true, safeToolPayloadText(result))
+    }
     case 'react-to-message':
       {
         const target = await authorizeDynamicToolMessageTarget({
@@ -5157,6 +5330,31 @@ function parseFinishWithoutReplyArguments(
   }
 
   return { ok: true }
+}
+
+function parseWaitForRepliesArguments(
+  value: unknown,
+):
+  | { ok: true; seconds: number }
+  | { ok: false; validationDigest: SafeToolCallValidationDigest } {
+  const parsed = waitForRepliesArgumentsSchema.safeParse(value)
+  if (!parsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: parsed.error,
+        rawInput: value,
+        schemaName: 'murph.wait_for_replies.input',
+        schemaRootKeys: readZodObjectRootKeys(waitForRepliesArgumentsSchema),
+        toolName: 'murph.wait_for_replies',
+      }),
+    }
+  }
+
+  return {
+    ok: true,
+    seconds: parsed.data.seconds,
+  }
 }
 
 function parseReactToMessageArguments(

@@ -123,12 +123,22 @@ describe('assistant execution prompt contract', () => {
     expect(groupPrompt).toContain(
       'Make it stand alone and carry forward anything still worth saying.',
     )
+    expect(groupPrompt).toContain(
+      'When the room is actively mid-burst and your reply can wait, call `murph.wait_for_replies` for a few seconds',
+    )
+    expect(groupPrompt).toContain(
+      'Answer immediately when directly addressed with something time-sensitive or when immediacy is the moment.',
+    )
+    expect(groupPrompt).toContain(
+      'Messages that arrive during the wait appear as normal messages; rule 7 covers replacing an unsent answer.',
+    )
     expect(directPrompt).not.toContain(
       'that answer still sends',
     )
     expect(directPrompt).not.toContain(
       'that response replaces the earlier answer',
     )
+    expect(directPrompt).not.toContain('murph.wait_for_replies')
   })
 
   it('allows a loaded skill to split accepted durable input across bounded children', () => {

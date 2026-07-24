@@ -957,10 +957,6 @@ export async function runAssistantAutomationPass(
   passTiming.scanElapsedMs = Date.now() - scanStartedAt
   if (
     scanResult.replies.considered === 0
-    // A zero-work scan that armed a reply wake (group burst hold) owes a
-    // prompt return so the wake can be staged; maintenance waits for a pass
-    // with no pending reply wake.
-    && scanResult.replies.nextWakeAt === null
     && input.signal?.aborted !== true
     && input.shouldYieldBackgroundMaintenance?.() !== true
   ) {
