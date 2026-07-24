@@ -494,8 +494,15 @@ describe('assistant execution prompt contract', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`set` the endpoint for the direction — 10 for more/up/looser/funnier, 0 for off/less/calmer',
     )
+    // Accepting an offer that named a target uses that exact value, not an
+    // endpoint — the two paths are mutually exclusive.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use an in-between value only when the member states or agrees to that exact number',
+      'accepting an offer uses the exact value it named',
+    )
+    // A bare member directional request has no "yes"/"accepted offer" alias, so
+    // acceptance never falls through to the endpoint rule.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'A bare directional request the member makes with no number',
     )
     // The proactive offer is rare and only on obvious dissatisfaction.
     expect(layers.stableRouteCapabilityPrompt).toContain(

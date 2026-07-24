@@ -197,34 +197,37 @@ The assistant interprets these natural-language aliases:
 
 Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” “turn up your unhinged setting,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
 
-A relative request or an accepted proactive offer (“turn it up,” “loosen up,” “be
-funnier,” “less intense,” or a plain “yes”) selects a dial and a direction but no
-number. Murph does not read the current score and compute a delta across turns:
-that read-modify-write is unsafe because the canonical value can lag a
+A dial mutates only to a value the member stated or agreed to, or to a 0/10
+endpoint; these are the only two ways to reach an exact score safely without
+reading state. A bare directional request the member makes with no number (“turn
+it up,” “loosen up,” “be funnier,” “less intense,” “off”) selects a dial and a
+direction only. Murph does not read the current score and compute a delta across
+turns: that read-modify-write is unsafe because the canonical value can lag a
 causally-accepted preference that is still converging through the mailbox, so a
-stale read could move the wrong way. It also cannot pick a safe in-between target,
-because without reading state any intermediate value can move opposite the request
-when the accepted-or-pending value is already past it. The only state-independent
-targets that guarantee direction for every possible current or pending value are
-the endpoints, so a bare directional request maps to `set` 0 (off/less/calmer) or
-10 (more/up/looser/funnier). Murph uses an in-between value only when the member
-states or agrees to that exact number, which is then an ordinary explicit `set`.
-Murph confirms the exact saved score from the returned snapshot and invites a
-further nudge. Because a fresh `set` receives a newer causal sequence than any
-pending value, an endpoint target both moves the right way from any current value
-and supersedes an unconverged prior write rather than racing it, so the relative
-journey stays correct during retry, backlog, and concurrent Settings or
+stale read could move the wrong way, and without reading state any in-between
+target can move opposite the request when the accepted-or-pending value is already
+past it. The only state-independent targets that guarantee direction for every
+possible current or pending value are the endpoints, so a bare directional request
+maps to `set` 0 (off/less/calmer) or 10 (more/up/looser/funnier). A specific
+in-between value is reached only when the member states that exact number, which
+is an ordinary explicit `set`. Because a fresh `set` receives a newer causal
+sequence than any pending value, an endpoint target both moves the right way from
+any current value and supersedes an unconverged prior write rather than racing it,
+so the journey stays correct during retry, backlog, and concurrent Settings or
 conversation mutations. The mutation owner and its per-field causal ordering are
-unchanged; the provider prompt owns no cross-runtime relative arithmetic.
+unchanged; the provider prompt owns no cross-runtime relative arithmetic. Murph
+confirms the exact saved score from the returned snapshot.
 
 Proactive offers are rare and reserved for obvious dissatisfaction. When it is
 clear a member or room is unhappy with how Murph sounds — visibly annoyed that it
 is too tame, stiff, preachy, wordy, or unfunny, even across several turns — Murph
-may name the matching dial (Humor, Push, Detail, or Unhinged) and offer to change
-it (for example, “want me to turn up my unhinged setting?”). It does not fish for
-the offer, raise it when the conversation is fine, or repeat it after a decline. A
-clear yes is an ongoing-preference request applied through the relative-adjustment
-rule above; a one-reply aside is not.
+may name the matching dial (Humor, Push, Detail, or Unhinged) and, crucially, the
+exact level it would set (for example, “want me maxed out to 10?” or “want my
+humor up at a 7?”), so a plain “yes” is agreement to that exact value rather than
+an ambiguous jump. Accepting an offer therefore performs an explicit `set` to the
+named value, not an endpoint. Murph does not fish for the offer, raise it when the
+conversation is fine, or repeat it after a decline; a one-reply aside is not an
+ongoing change.
 
 The assistant must read canonical state for a setting query, report the scores
 and sources, and not treat the query's `updated: false` as a mutation outcome.
