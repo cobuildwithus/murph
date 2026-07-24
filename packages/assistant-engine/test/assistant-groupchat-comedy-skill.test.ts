@@ -72,6 +72,9 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalized).toContain(
       'for this one message the register overrides the usual brevity',
     )
+    expect(normalized).toContain(
+      "not the room's length ceiling: stay inside one compact message",
+    )
     expect(normalized).toContain('never the house voice or default register')
     expect(normalized).toContain('the parody collapses into the thing it mocks')
   })
