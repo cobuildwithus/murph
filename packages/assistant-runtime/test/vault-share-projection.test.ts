@@ -68,6 +68,7 @@ const RECORD = {
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const DEVICE_SYNC_STATUS_SCOPE = hostedVaultShareProjectionKindToScope(
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 );
@@ -739,7 +740,7 @@ describe("selectProjectableMealNutritionDays", () => {
     ], requireDailyMetricSpec("steps-days.v0"), nowMs)).toEqual([]);
   });
 
-  it("reads complete local-day protein totals without exposing meal metadata", async () => {
+  it("reads and offers complete local-day protein totals without exposing meal metadata", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-protein-days-"));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
       Date.parse("2026-07-05T00:00:00.000Z"),
@@ -877,6 +878,21 @@ describe("selectProjectableMealNutritionDays", () => {
       expect(selected[0]).not.toHaveProperty("sourceRevision");
       expect(JSON.stringify(selected)).not.toContain("externalRef");
       expect(JSON.stringify(selected)).not.toContain("mealId");
+
+      const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+      await expect(offerHostedVaultShareProjectionBestEffort({
+        vaultRoot,
+        vaultSharePort: {
+          deliver,
+          listActiveProjectionScopes: async () => [PROTEIN_SCOPE],
+        },
+      })).resolves.toEqual({ outcome: "delivered" });
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(deliver).toHaveBeenCalledWith({
+        projectionKind: "protein-days.v0",
+        projectionScope: PROTEIN_SCOPE,
+        records: selected,
+      });
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
