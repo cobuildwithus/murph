@@ -60,7 +60,6 @@ describe("hosted assistant capability env lists", () => {
     expect(HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES).toEqual([
       "MURPH_ELEVENLABS_MODEL_ID",
       "MURPH_ELEVENLABS_VOICE_ID",
-      "XAI_API_BASE_URL",
       "XAI_X_SEARCH_MODEL",
       "LINQ_ATTACHMENT_CDN_BASE_URL",
       "LINQ_API_BASE_URL",
@@ -71,7 +70,6 @@ describe("hosted assistant capability env lists", () => {
 
     expect(HOSTED_XAI_SEARCH_ENV_NAMES).toEqual([
       "XAI_API_KEY",
-      "XAI_API_BASE_URL",
       "XAI_X_SEARCH_MODEL",
     ]);
 
@@ -88,7 +86,6 @@ describe("hosted assistant capability env lists", () => {
     ]);
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("ELEVENLABS_API_KEY");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("XAI_API_KEY");
-    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("XAI_API_BASE_URL");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_MODEL_ID");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_VOICE_ID");
 
@@ -104,5 +101,8 @@ describe("hosted assistant capability env lists", () => {
       "TELEGRAM_FILE_BASE_URL",
     ]);
 
+    expect(HOSTED_ASSISTANT_FORWARDED_CONFIG_ENV_NAMES)
+      .not.toContain("XAI_API_BASE_URL");
+    expect(HOSTED_XAI_SEARCH_ENV_NAMES).not.toContain("XAI_API_BASE_URL");
   });
 });

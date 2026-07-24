@@ -105,7 +105,6 @@ describe("hosted assistant runner env policy", () => {
     expect(isHostedRunnerSecretKeyAllowed("TELEGRAM_BOT_TOKEN")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("ELEVENLABS_API_KEY")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("XAI_API_KEY")).toBe(false);
-    expect(isHostedRunnerSecretKeyAllowed("XAI_API_BASE_URL")).toBe(false);
     expect(isHostedRunnerSecretKeyAllowed("OPENAI_API_KEY")).toBe(false);
   });
 });

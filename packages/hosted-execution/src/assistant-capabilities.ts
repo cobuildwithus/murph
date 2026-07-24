@@ -16,7 +16,6 @@ const HOSTED_EXA_SEARCH_ENV = {
 
 const HOSTED_XAI_SEARCH_ENV = {
   forwardedConfig: [
-    "XAI_API_BASE_URL",
     "XAI_X_SEARCH_MODEL",
   ],
   workerSecrets: [

@@ -3,11 +3,13 @@
 ## Outcome
 
 Murph can search X for posts by query and fetch a profile's recent posts, through a
-new `murph.x_search` dynamic tool. Every upstream provider request books the
-provider's exact reported USD cost against the member's existing hosted AI usage
-allowance, so a member cannot make Murph burn provider spend beyond their metered
-allowance. No new billing primitives: the tool bills exactly like transcription and
-ElevenLabs do today.
+new `murph.x_search` dynamic tool. On the normal path, every completed provider call
+books the provider's exact reported USD cost against the member's existing hosted AI
+usage allowance. Recording is best-effort and post-hoc: a Murph-side accounting
+outage can leave a completed call unbilled, while failed provider calls are never
+billed. The trusted limit of three provider calls per assistant turn bounds exposure.
+No new billing primitives: the tool bills exactly like transcription and ElevenLabs
+do today.
 
 ## Provider
 
@@ -34,17 +36,26 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    (`{"posts":[{"url","authorHandle","createdAt","excerpt"}]}`), pinned model, only the
    `x_search` tool (with `allowed_x_handles=[username]` for `profile_posts`,
    `from_date`/`to_date` from `lookbackDays`), bounded `max_output_tokens`, `store: false`.
-   Parse fail-closed: invalid JSON or a post without a valid
-   `https://x.com/<handle>/status/<id>` URL is dropped; zero valid posts with a completed
-   response returns an explicit no-results failure (the cost is still booked — it was incurred).
+   Parse fail-closed: a completed `output[].type="x_search_call"` item or a canonical
+   `output[].type="message"` → `content[].type="output_text"` →
+   `annotations[].type="url_citation"` establishes same-response x_search evidence,
+   and every relayed post URL must match a `url_citation.url` from
+   that response. `profile_posts` also requires the cited URL's handle to match the
+   requested handle. Invalid JSON fails; a post without a canonical
+   `https://x.com/<handle>/status/<id>` URL keeps the existing drop behavior; zero valid
+   posts with completed x_search evidence returns an explicit no-results failure.
 3. **Billing follows the existing egress pattern exactly** (`runner-egress-intercept.ts`,
    like ElevenLabs/transcription): the interceptor injects the credential, buffers the
    completed response, builds a usage record via a new `buildHostedXaiSearchUsageRecord`
    in `packages/hosted-execution/src/assistant-usage.ts`
    (`provider: "xai"`, `featureKey: "x-search"`, `apiKeyEnv: "XAI_API_KEY"`), and posts it
-   through `recordHostedRuntimeUsageRecord`. `rawUsageJson` carries
-   `cost_in_usd_ticks` plus token counts. No usage row for non-completed responses
-   (429/5xx/transport failure) — never bill a failed upstream call.
+   through `recordHostedRuntimeUsageRecord` off the foreground reply path. When a
+   `waitUntil` owner exists the promise is registered there; production container
+   interception otherwise leaves the already-started, failure-isolated recorder
+   best-effort rather than awaiting it. `rawUsageJson` carries `cost_in_usd_ticks` plus
+   token counts. On the normal path the exact provider-reported cost is booked. A
+   Murph-side accounting outage can leave a completed call unbilled. No usage row for
+   non-completed responses (429/5xx/transport failure) — never bill a failed upstream call.
 4. **Pricing branch reads the provider-reported cost.** In
    `apps/web/src/lib/hosted-execution/usage-allowance.ts`, add an `x-search` branch
    *before* generic token pricing that converts `cost_in_usd_ticks` to USD micros
@@ -55,14 +66,15 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    accounting the call as free or estimating from tokens. No reservation tables, no
    reserve/settle endpoints, no remainder ledgers — post-hoc accrual into
    `HostedAiUsagePeriod` with existing `blockedAt` semantics, same as every other feature.
-5. **Abuse bound = per-turn ceiling in trusted executor state + real billing.**
+5. **Abuse bound = per-turn ceiling in trusted executor state + normal-path real billing.**
    Max 3 `murph.x_search` provider calls per assistant turn, counted in turn-scoped
    executor state (not prompt text). Exceeding returns an explicit
    `x_search_call_limit` failure. Over-allowance members are blocked at the next turn
    admission by the existing gate; worst-case in-turn overshoot (3 × ~$0.01–0.05) is far
-   below one existing music-generation call. Deliberately deferred, on record: per-day
-   DB-backed caps, thread-scoped result caching, single-flight dedupe, mid-turn
-   allowance checks.
+   below one existing music-generation call. An accounting outage can therefore leave
+   only the already-bounded calls from a turn unbilled; it cannot create unbounded
+   provider spend. Deliberately deferred, on record: per-day DB-backed caps,
+   thread-scoped result caching, single-flight dedupe, mid-turn allowance checks.
 6. **Tool availability** follows the existing capability pattern: available only when the
    xAI key/config is present (mirror how other provider-gated tools are declared in
    `assistant-capabilities.ts` / env policy). When unavailable or over-ceiling or the
@@ -74,12 +86,11 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    characters and bidi overrides; excerpts are framed in the result as untrusted quoted
    content, not instructions. Persist nothing beyond the normal thread transcript; no
    query text or post text in usage rows or structured logs.
-8. **Config/secrets:** `XAI_API_KEY` (+ optional `XAI_API_BASE_URL`, default
-   `https://api.x.ai`) via a new `packages/operator-config/src/xai-runtime.ts` resolver
-   mirroring `elevenlabs-runtime.ts`. Add the hostname to the provider egress allowlist
-   in `apps/cloudflare/src/runtime-platform/provider-fetch.ts` and restrict the
-   interceptor branch to `POST /v1/responses`. Update `.env.example` and hosted env
-   policy/worker contracts like existing provider keys.
+8. **Config/secrets:** `XAI_API_KEY` plus optional `XAI_X_SEARCH_MODEL` via
+   `packages/operator-config/src/xai-runtime.ts`. The Responses URL is pinned to
+   `https://api.x.ai/v1/responses`; there is no production base-URL override to forward,
+   allowlist, or deploy. Keep `api.x.ai` in the static provider egress host set and
+   restrict the interceptor branch to `POST /v1/responses`.
 
 ## Touch set (expected)
 
@@ -95,8 +106,10 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
 
 `pnpm test:diff` over touched owners; focused suites for dynamic tools, assistant-usage,
 usage-allowance, runner-egress-intercept, env policy. Direct scenario proof: scripted
-runtime test exercising a mocked `/v1/responses` completion end-to-end (tool call →
-usage record shape → pricing branch), plus explicit blocked/failure-path tests.
+runtime test exercising a mocked `/v1/responses` completion with x_search response-item
+and URL-citation evidence, plus focused proof that slow or failed accounting stays off
+the foreground delivery path, the usage record wire shape reaches pricing, and blocked
+or unusable-response paths fail explicitly.
 
 ## Deployment
 

@@ -715,10 +715,24 @@ describe('real codex app-server with scripted provider', () => {
           status: 'completed',
           output: [
             {
+              id: 'xsearch_1',
+              status: 'completed',
+              type: 'x_search_call',
+            },
+            {
               type: 'message',
               role: 'assistant',
               content: [
                 {
+                  annotations: [
+                    {
+                      end_index: 0,
+                      start_index: 0,
+                      title: 'X post',
+                      type: 'url_citation',
+                      url: 'https://x.com/runner_dave/status/1947000000000000001',
+                    },
+                  ],
                   type: 'output_text',
                   text: JSON.stringify({
                     posts: [

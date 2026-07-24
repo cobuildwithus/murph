@@ -48,23 +48,64 @@ function searchArgs(overrides?: Partial<{
 }
 
 function responsesApiPayload(outputJson: unknown): Response {
-  return responsesApiTextPayload(JSON.stringify(outputJson))
+  return responsesApiTextPayload(JSON.stringify(outputJson), {
+    evidenceUrls: readPostUrls(outputJson),
+  })
 }
 
-function responsesApiTextPayload(outputText: string): Response {
+function responsesApiTextPayload(
+  outputText: string,
+  options: {
+    evidenceUrls?: readonly string[]
+    includeXSearchCall?: boolean
+  } = {},
+): Response {
+  const evidenceUrls = options.evidenceUrls ?? []
   return new Response(
     JSON.stringify({
       status: 'completed',
       output: [
+        ...(options.includeXSearchCall === false
+          ? []
+          : [{ id: 'xsearch_1', status: 'completed', type: 'x_search_call' }]),
         {
           type: 'message',
           role: 'assistant',
-          content: [{ type: 'output_text', text: outputText }],
+          content: [
+            {
+              annotations: evidenceUrls.map((url) => ({
+                end_index: 0,
+                start_index: 0,
+                title: 'X post',
+                type: 'url_citation',
+                url,
+              })),
+              type: 'output_text',
+              text: outputText,
+            },
+          ],
         },
       ],
     }),
     { headers: { 'content-type': 'application/json' } },
   )
+}
+
+function readPostUrls(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return []
+  }
+  const posts = (value as Record<string, unknown>).posts
+  if (!Array.isArray(posts)) {
+    return []
+  }
+  return posts.flatMap((entry) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return []
+    }
+    const url = (entry as Record<string, unknown>).url
+    return typeof url === 'string' ? [url] : []
+  })
 }
 
 function post(overrides?: Partial<{
@@ -204,19 +245,17 @@ describe('murph.x_search availability', () => {
     expect(createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl))
       .toMatchObject({
         apiKey: 'xai-sentinel-key',
-        baseUrl: 'https://api.x.ai',
         model: 'grok-4.5',
       })
-    expect(
-      createRuntime({
-        XAI_API_BASE_URL: 'https://xai.example.test',
-        XAI_API_KEY: 'xai-sentinel-key',
-        XAI_X_SEARCH_MODEL: 'grok-5',
-      }, fetchImpl),
-    ).toMatchObject({
-      baseUrl: 'https://xai.example.test',
+    const configuredRuntime = createRuntime({
+      XAI_API_BASE_URL: 'https://xai.example.test',
+      XAI_API_KEY: 'xai-sentinel-key',
+      XAI_X_SEARCH_MODEL: 'grok-5',
+    }, fetchImpl)
+    expect(configuredRuntime).toMatchObject({
       model: 'grok-5',
     })
+    expect(configuredRuntime).not.toHaveProperty('baseUrl')
   })
 
   it('warns the model that results are untrusted and failures must be relayed', () => {
@@ -279,7 +318,7 @@ describe('executeXSearchTool request shape', () => {
 
   it('pins profile_posts to the requested handle without the leading @', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
-      expect(String(input)).toBe('https://xai.example.test/v1/responses')
+      expect(String(input)).toBe('https://api.x.ai/v1/responses')
       const body = JSON.parse(String(init?.body))
       expect(body.model).toBe('grok-5')
       expect(body.tools).toEqual([
@@ -317,7 +356,7 @@ describe('executeXSearchTool request shape', () => {
 })
 
 describe('executeXSearchTool response handling', () => {
-  it('relays validated posts as quoted untrusted content', async () => {
+  it('relays evidence-backed validated posts as quoted untrusted content', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiPayload({
         posts: [
@@ -364,6 +403,7 @@ describe('executeXSearchTool response handling', () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiTextPayload(
         '```json\n' + JSON.stringify({ posts: [post()] }) + '\n```',
+        { evidenceUrls: [post().url] },
       ),
     )
 
@@ -487,6 +527,86 @@ describe('executeXSearchTool response handling', () => {
         rpcText: 'X search returned an unusable response; no results can be shown',
       })
     }
+  })
+
+  it('accepts provider URL citations when the response omits a separate x_search_call item', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
+        evidenceUrls: [post().url],
+        includeXSearchCall: false,
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: searchArgs(),
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(parseResultText(result.rpcText).posts).toHaveLength(1)
+  })
+
+  it('rejects well-formed JSON when the response has no x_search evidence', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
+        includeXSearchCall: false,
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: searchArgs(),
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText: 'X search returned an unusable response; no results can be shown',
+    })
+  })
+
+  it('rejects a canonical post URL absent from the response citation evidence', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
+        evidenceUrls: ['https://x.com/other_author/status/1947000000000000002'],
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: searchArgs(),
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText: 'X search returned an unusable response; no results can be shown',
+    })
+  })
+
+  it('rejects evidence-backed profile posts from a different handle', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      responsesApiPayload({
+        posts: [post({ url: 'https://x.com/other_author/status/1947000000000000002' })],
+      }),
+    )
+
+    const result = await executeXSearchTool({
+      args: {
+        action: 'profile_posts',
+        lookbackDays: 7,
+        maxResults: 5,
+        username: '@runner_dave',
+      },
+      now: NOW,
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result).toEqual({
+      rpcSuccess: false,
+      rpcText: 'X search returned an unusable response; no results can be shown',
+    })
   })
 
   it('reports an explicit no-results failure for an empty completed response', async () => {

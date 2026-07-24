@@ -1787,6 +1787,132 @@ describe("hostedRunnerIntercept", () => {
     );
   });
 
+  it("returns the buffered xAI response without awaiting slow accounting when waitUntil is unavailable", async () => {
+    const upstreamPayload = {
+      id: "resp_xai_slow_accounting",
+      output: [],
+      usage: { cost_in_usd_ticks: 1 },
+    };
+    let markAccountingStarted: (() => void) | undefined;
+    const accountingStarted = new Promise<void>((resolve) => {
+      markAccountingStarted = resolve;
+    });
+    let finishAccounting: ((response: Response) => void) | undefined;
+    const pendingAccounting = new Promise<Response>((resolve) => {
+      finishAccounting = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markAccountingStarted?.();
+        return await pendingAccounting;
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request("https://api.x.ai/v1/responses", {
+            body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+            headers: {
+              ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+              "content-type": "application/json",
+            },
+            method: "POST",
+          }),
+          createInterceptEnv({
+            validateRuntimeWriteFence: async () => true,
+            XAI_API_KEY: "xai-worker-secret",
+          }),
+          { containerId: "member_123--v-version_1" },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("xAI delivery waited for the accounting callback"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(upstreamPayload);
+      await accountingStarted;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+    }
+  });
+
+  it("does not delay or fail xAI delivery when off-path accounting rejects", async () => {
+    const upstreamPayload = {
+      id: "resp_xai_failed_accounting",
+      output: [],
+      usage: { cost_in_usd_ticks: 2 },
+    };
+    let markAccountingStarted: (() => void) | undefined;
+    const accountingStarted = new Promise<void>((resolve) => {
+      markAccountingStarted = resolve;
+    });
+    let failAccounting: ((reason: Error) => void) | undefined;
+    const pendingAccounting = new Promise<Response>((_resolve, reject) => {
+      failAccounting = reject;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markAccountingStarted?.();
+        return await pendingAccounting;
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request("https://api.x.ai/v1/responses", {
+            body: JSON.stringify(createHostedXaiResponsesRequestBody()),
+            headers: {
+              ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
+              "content-type": "application/json",
+            },
+            method: "POST",
+          }),
+          createInterceptEnv({
+            validateRuntimeWriteFence: async () => true,
+            XAI_API_KEY: "xai-worker-secret",
+          }),
+          { containerId: "member_123--v-version_1" },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("xAI delivery waited for the failing accounting callback"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(upstreamPayload);
+      await accountingStarted;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      failAccounting?.(new Error("accounting transport failed"));
+    }
+
+    await vi.waitFor(() => {
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message: "Hosted xAI search usage recording failed; response delivery unaffected.",
+        }),
+      );
+    });
+  });
+
   it("does not record xAI usage when the provider call fails", async () => {
     for (const status of [429, 503]) {
       const fetchMock = vi.fn<typeof fetch>(async () =>
@@ -7246,7 +7372,6 @@ function createInterceptEnv(input: {
     runnerContainerName: string;
     userId: string;
   }) => Promise<WorkerProviderEgressCredentialValidationResult>;
-  XAI_API_BASE_URL?: string;
   XAI_API_KEY?: string;
 }): RunnerOutboundEnvironmentSource {
   return {
@@ -7304,7 +7429,6 @@ function createInterceptEnv(input: {
     TELEGRAM_API_BASE_URL: input.TELEGRAM_API_BASE_URL,
     TELEGRAM_BOT_TOKEN: input.TELEGRAM_BOT_TOKEN,
     TELEGRAM_FILE_BASE_URL: input.TELEGRAM_FILE_BASE_URL,
-    XAI_API_BASE_URL: input.XAI_API_BASE_URL,
     XAI_API_KEY: input.XAI_API_KEY,
     USER_RUNNER: {
       getByName: () => ({

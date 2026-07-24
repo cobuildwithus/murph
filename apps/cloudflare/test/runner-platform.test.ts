@@ -3528,11 +3528,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       TELEGRAM_API_BASE_URL: "http://telegram.example.com/bot",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example/",
+      // xAI is pinned to api.x.ai and must not join the configurable provider
+      // base-URL allowlist, even when a stale environment value is present.
       XAI_API_BASE_URL: "http://host.docker.internal:4014/",
     })).toEqual([
       "http://host.docker.internal:4011/",
       "https://files.telegram.example/",
-      "http://host.docker.internal:4014/",
     ]);
   });
 

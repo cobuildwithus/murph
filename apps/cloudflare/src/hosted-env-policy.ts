@@ -149,10 +149,6 @@ const DISALLOWED_RUNNER_SECRET_KEYS = new Set([
   "TELEGRAM_API_BASE_URL",
   "TELEGRAM_BOT_TOKEN",
   "TELEGRAM_FILE_BASE_URL",
-  // The xAI base URL is platform-owned; member runner secrets must not
-  // redirect the credential-injecting x_search egress to arbitrary endpoints.
-  // XAI_API_KEY is already covered by the intercept-injected worker secrets.
-  "XAI_API_BASE_URL",
   "VAULT",
 ]);
 

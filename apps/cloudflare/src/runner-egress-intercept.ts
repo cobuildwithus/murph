@@ -1486,7 +1486,7 @@ async function maybeHandleXaiRequest(input: {
   userId: string | null;
 }): Promise<Response | null> {
   const providerBase = readProviderBaseConfig(
-    input.env.XAI_API_BASE_URL,
+    undefined,
     DEFAULT_XAI_API_BASE_URL,
     input.env,
   );
@@ -1561,8 +1561,8 @@ async function maybeHandleXaiRequest(input: {
   }
 
   // The billing basis (usage.cost_in_usd_ticks) is in the response body, so
-  // buffer it, record usage, and hand the engine a new response carrying the
-  // same payload.
+  // buffer it, start failure-isolated usage recording off the reply path, and
+  // hand the engine a new response carrying the same payload.
   const responseBody = await readBoundedRequestBody(
     response,
     HOSTED_XAI_MAX_RESPONSE_BODY_BYTES,
@@ -1591,7 +1591,10 @@ async function maybeHandleXaiRequest(input: {
   if (typeof input.ctx?.waitUntil === "function") {
     input.ctx.waitUntil(usageRecording);
   } else {
-    await usageRecording;
+    // Production container interception has no waitUntil. The recorder owns
+    // its catch/log path, so deliberately let the already-started best-effort
+    // post continue without extending the member-visible provider budget.
+    void usageRecording;
   }
   // The buffered body may differ from the wire encoding (fetch decompresses),
   // so drop the stale entity headers before re-wrapping.
