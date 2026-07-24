@@ -41,7 +41,7 @@ export const MURPH_ASSISTANT_STYLE_TOOL = {
   namespace: 'murph',
   name: 'assistant_style',
   description:
-    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. Never guess or clamp a score.',
+    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. For a bare directional request ("more"/"less"/"off") set the 0 or 10 endpoint for that direction; otherwise set only the exact score the member stated or agreed to. Never silently clamp an out-of-range value.',
   inputSchema: z.toJSONSchema(assistantStyleArgumentsSchema, { io: 'input' }),
 } as const
 

@@ -484,14 +484,18 @@ describe('assistant execution prompt contract', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
     )
-    // A relative request or accepted offer maps to a clear absolute register
-    // target via `set`, never a cross-turn read-modify-write, so "loosen
-    // up"/"yes" reaches an exact score and stays correct mid-convergence.
+    // A relative request or accepted offer maps to a direction-guaranteed
+    // endpoint (10 more / 0 less) via `set`, never a cross-turn read-modify-write
+    // or an unsafe in-between target, so "loosen up"/"yes" reaches an exact score
+    // and always moves the requested way from any current or pending value.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Do not read the current score and compute a delta across turns; instead `set` one clear absolute value',
+      'Do not read the current score and compute a delta across turns',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'A fresh `set` supersedes any earlier pending value',
+      '`set` the endpoint for the direction — 10 for more/up/looser/funnier, 0 for off/less/calmer',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Use an in-between value only when the member states or agrees to that exact number',
     )
     // The proactive offer is rare and only on obvious dissatisfaction.
     expect(layers.stableRouteCapabilityPrompt).toContain(

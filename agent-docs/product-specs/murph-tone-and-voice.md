@@ -202,16 +202,20 @@ funnier,” “less intense,” or a plain “yes”) selects a dial and a direc
 number. Murph does not read the current score and compute a delta across turns:
 that read-modify-write is unsafe because the canonical value can lag a
 causally-accepted preference that is still converging through the mailbox, so a
-stale read could move the wrong way. Instead Murph issues one exact `set` to a
-clear absolute value that plainly matches the requested register — 0 turns the
-dial off, 10 is the most, and any other direction maps to a level that clearly
-moves that way — then confirms the exact saved score from the returned snapshot
-and invites a further nudge. Because a fresh `set` receives a newer causal
-sequence than any pending value, it supersedes an unconverged prior write rather
-than racing it, so the relative journey stays correct during retry, backlog, and
-concurrent Settings or conversation mutations. The mutation owner and its
-per-field causal ordering are unchanged; the provider prompt owns no cross-runtime
-relative arithmetic.
+stale read could move the wrong way. It also cannot pick a safe in-between target,
+because without reading state any intermediate value can move opposite the request
+when the accepted-or-pending value is already past it. The only state-independent
+targets that guarantee direction for every possible current or pending value are
+the endpoints, so a bare directional request maps to `set` 0 (off/less/calmer) or
+10 (more/up/looser/funnier). Murph uses an in-between value only when the member
+states or agrees to that exact number, which is then an ordinary explicit `set`.
+Murph confirms the exact saved score from the returned snapshot and invites a
+further nudge. Because a fresh `set` receives a newer causal sequence than any
+pending value, an endpoint target both moves the right way from any current value
+and supersedes an unconverged prior write rather than racing it, so the relative
+journey stays correct during retry, backlog, and concurrent Settings or
+conversation mutations. The mutation owner and its per-field causal ordering are
+unchanged; the provider prompt owns no cross-runtime relative arithmetic.
 
 Proactive offers are rare and reserved for obvious dissatisfaction. When it is
 clear a member or room is unhappy with how Murph sounds — visibly annoyed that it

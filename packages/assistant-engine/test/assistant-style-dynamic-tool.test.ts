@@ -99,6 +99,12 @@ describe('assistant style dynamic tool', () => {
     expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
       'never to a participant',
     )
+    // The tool contract must agree with the prompt's endpoint mapping for bare
+    // directional requests instead of a blanket "never guess a score".
+    expect(MURPH_ASSISTANT_STYLE_TOOL.description).toContain(
+      'set the 0 or 10 endpoint for that direction',
+    )
+    expect(MURPH_ASSISTANT_STYLE_TOOL.description).not.toContain('Never guess or clamp')
     expect(MURPH_ASSISTANT_STYLE_TOOL.inputSchema).not.toHaveProperty(
       'properties.memberId',
     )
