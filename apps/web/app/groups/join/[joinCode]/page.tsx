@@ -7,7 +7,9 @@ import {
   GroupJoinLegalConsentGate,
   GroupJoinSignInButton,
 } from "@/src/components/hosted-groups/group-join-client";
+import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { Button } from "@/src/components/ui/button";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import {
   readGroupJoinPostAuthHandoff,
   resolveGroupJoinPostJoinDestination,
@@ -83,6 +85,11 @@ export default async function GroupJoinPage({
         prisma,
       })
     : null;
+  // Most members live in a chat thread, not the dashboard, so the post-join
+  // hand-off returns them to the channel Murph already reaches them on.
+  const postJoinContactOption = auth.authenticatedMember
+    ? await resolveGroupJoinPostJoinContactOption()
+    : null;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
@@ -90,6 +97,7 @@ export default async function GroupJoinPage({
         authenticated: auth.authenticated,
         joinCode,
         launchConsentStatus,
+        postJoinContactOption,
         postJoinDestination,
         view,
       })}
@@ -97,10 +105,19 @@ export default async function GroupJoinPage({
   );
 }
 
+async function resolveGroupJoinPostJoinContactOption(): Promise<MurphContactOption | null> {
+  try {
+    return await resolveHostedMurphContactOption();
+  } catch {
+    return null;
+  }
+}
+
 function renderGroupJoin(input: {
   authenticated: boolean;
   joinCode: string;
   launchConsentStatus: HostedConsentStatus | null;
+  postJoinContactOption: MurphContactOption | null;
   postJoinDestination: GroupJoinPostJoinDestination;
   view: Awaited<ReturnType<typeof readHostedGroupJoinView>>;
 }) {
@@ -168,6 +185,7 @@ function renderGroupJoin(input: {
                 groupName={groupName}
                 joinCode={input.joinCode}
                 permissions={view.requestedVaultShareProjections}
+                postJoinContactOption={input.postJoinContactOption}
                 postJoinDestination={alreadyActiveMember ? "/home" : input.postJoinDestination}
               />
             )}
@@ -179,7 +197,7 @@ function renderGroupJoin(input: {
                 href="/home"
                 className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
               >
-                {alreadyActiveMember ? "Back to Murph" : "Not now"}
+                {alreadyActiveMember ? "Go home" : "Not now"}
               </Link>
             ) : null}
           </div>

@@ -1296,3 +1296,190 @@ export function PrivacyTimeline({
     </div>
   );
 }
+
+export type DialogChoice = {
+  label: string;
+  note?: string;
+};
+
+export function DialogMock({
+  body,
+  choices,
+  label = "Murph",
+  media,
+  primary,
+  secondary,
+  title,
+}: {
+  body?: string;
+  choices?: readonly DialogChoice[];
+  label?: string;
+  media?: ReactNode;
+  primary: string;
+  secondary?: string;
+  title: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
+          {title}
+        </p>
+        {body ? (
+          <p className="text-[12.5px] leading-[1.5] text-[#4d453b]">{body}</p>
+        ) : null}
+        {media ? <div className="py-0.5">{media}</div> : null}
+        {choices && choices.length > 0 ? (
+          <div className="flex flex-col divide-y divide-[#2d3436]/8 rounded-xl border border-[#2d3436]/8">
+            {choices.map((choice) => (
+              <div
+                key={choice.label}
+                className="flex items-baseline justify-between gap-3 px-3 py-2"
+              >
+                <span className="text-[12.5px] font-medium text-[#2d3436]">
+                  {choice.label}
+                </span>
+                {choice.note ? (
+                  <span className="font-mono text-[10px] tracking-[0.04em] text-[#736a58]">
+                    {choice.note}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-2 pt-0.5">
+          <span className="inline-flex items-center justify-center rounded-full bg-[#3a4a1e] px-3 py-2 text-[12.5px] font-medium text-[#f5f0e8]">
+            {primary}
+          </span>
+          {secondary ? (
+            <span className="inline-flex items-center justify-center rounded-full border border-[#c4a882]/45 px-3 py-2 text-[12.5px] font-medium text-[#736a58]">
+              {secondary}
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export type ContactField = {
+  label: string;
+  value: string;
+};
+
+export function ContactCardMock({
+  action,
+  fields,
+  label = "Contact card",
+  name = "Murph",
+  subtitle,
+}: {
+  action?: string;
+  fields: readonly ContactField[];
+  label?: string;
+  name?: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+        <span className={HEADER_META}>vCard</span>
+      </div>
+      <div className="flex flex-col gap-3 p-4">
+        <div className="flex items-center gap-3">
+          <span
+            aria-hidden="true"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-[#3a4a1e] font-serif text-[17px] font-semibold text-[#f5f0e8]"
+          >
+            {name.slice(0, 1)}
+          </span>
+          <div className="min-w-0">
+            <p className="font-serif text-[15px] font-semibold leading-tight text-[#2d3436]">
+              {name}
+            </p>
+            {subtitle ? (
+              <p className="mt-0.5 text-[11px] leading-[1.4] text-[#736a58]">
+                {subtitle}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-col divide-y divide-[#2d3436]/8 border-t border-[#2d3436]/8">
+          {fields.map((field) => (
+            <div
+              key={field.label}
+              className="flex items-baseline justify-between gap-3 py-2"
+            >
+              <span className="font-mono text-[10px] tracking-[0.12em] text-[#a39684] uppercase">
+                {field.label}
+              </span>
+              <span className="truncate text-[12.5px] text-[#2d3436] tabular-nums">
+                {field.value}
+              </span>
+            </div>
+          ))}
+        </div>
+        {action ? (
+          <span className="inline-flex items-center justify-center rounded-full bg-[#3a4a1e] px-3 py-1.5 text-[12px] font-medium text-[#f5f0e8]">
+            {action}
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export type PanelEntry = {
+  state: "ok" | "retry";
+  title: string;
+  value?: string;
+};
+
+export function PanelGrid({
+  label = "Home",
+  panels,
+}: {
+  label?: string;
+  panels: readonly PanelEntry[];
+}) {
+  return (
+    <div className={FRAME_BASE}>
+      <div className={FRAME_HEADER}>
+        <p className={HEADER_LABEL}>{label}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 p-3.5">
+        {panels.map((panel) => {
+          const isRetry = panel.state === "retry";
+          return (
+            <div
+              key={panel.title}
+              className={`flex min-h-[64px] flex-col justify-between gap-1.5 rounded-xl border p-2.5 ${
+                isRetry
+                  ? "border-dashed border-[#c4a882]/70 bg-[#c4a882]/8"
+                  : "border-[#2d3436]/8 bg-[#fafaf6]"
+              }`}
+            >
+              <p className="text-[11px] leading-tight font-medium text-[#2d3436]">
+                {panel.title}
+              </p>
+              {isRetry ? (
+                <span className="inline-flex w-fit items-center rounded-full border border-[#c4a882]/60 px-2 py-0.5 font-mono text-[9.5px] tracking-[0.06em] text-[#8b4f2c] uppercase">
+                  Try again
+                </span>
+              ) : (
+                <p className="font-serif text-[17px] leading-none font-semibold text-[#3a4a1e] tabular-nums">
+                  {panel.value}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

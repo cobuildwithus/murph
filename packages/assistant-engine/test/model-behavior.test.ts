@@ -699,6 +699,26 @@ describe('assistant execution prompt contract', () => {
     )
   })
 
+  it('tells the assistant it can read the canonical product update feeds', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Murph product updates:')
+    expect(prompt).toContain('https://www.withmurph.ai/api/changelog?days=14')
+    expect(prompt).toContain('https://www.withmurph.ai/api/feature-catalog')
+    expect(prompt).toContain(
+      'When the user asks what is new, what shipped recently, or whether Murph can already do something, read the canonical public JSON feeds over the network before answering',
+    )
+    expect(prompt).toContain(
+      "Never claim there is no way to check Murph's own updates.",
+    )
+    expect(prompt).toContain(
+      'Those feeds are the only source of shipped-product truth',
+    )
+    expect(prompt).toContain(
+      'If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.',
+    )
+  })
+
   it('guides explicit structured product feedback capture', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -1486,10 +1506,11 @@ describe('assistant system prompt cache stability', () => {
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
     // This layer is resident on every turn for every member, so it is a ratchet,
     // not a budget: raise it only for guidance that has to be thread-stable.
-    // 68_200 covers the conversational-only Unhinged dial, the rare
-    // style-dissatisfaction offer, and the bounded-step rule for a bare
-    // directional request — together ~1_040 characters over the pre-dial prompt.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_200)
+    // Main's own bound moved to 68_000 (baseline 67_801) while this branch was
+    // open. The conversational-only Unhinged dial, the rare style-dissatisfaction
+    // offer, and the bounded-step rule for a bare directional request add ~1_040
+    // characters on top of that baseline.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(69_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

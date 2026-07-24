@@ -75,12 +75,12 @@ export function FamilyInviteSignInButton(props: {
       {props.variant === "link" ? (
         <Button
           type="button"
-          variant="link"
+          variant="ghost"
           size="sm"
-          className="h-auto w-fit p-0 text-sm font-medium text-muted-foreground hover:text-foreground"
+          className="w-fit"
           onClick={() => setOpen(true)}
         >
-          Sign in on the web instead
+          Prefer not to text?
         </Button>
       ) : (
         <Button type="button" size="xl" onClick={() => setOpen(true)}>
