@@ -34,6 +34,15 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
       projectionKind: "active-calories-days.v0",
     }),
   },
+  {
+    description:
+      "Shares your last 7 days of daily protein totals from meals you logged with Murph.",
+    label: "Daily protein",
+    projectionScope: { projectionKind: "protein-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "protein-days.v0",
+    }),
+  },
 ];
 
 export function GroupJoinStudy() {

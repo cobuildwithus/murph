@@ -1376,9 +1376,8 @@ describe("hosted group join policy", () => {
       },
       {
         description:
-          "Shares your last 7 days of total protein from meals you logged with Murph. Does not share meal text, photos, foods, ingredients, meal times, meal counts, calories, or other nutrients.",
+          "Shares your last 7 days of daily protein totals from meals you logged with Murph.",
         label: "Daily protein",
-        offerDisclosure: "daily protein totals from meals you logged with Murph",
         projectionKind: "protein-days.v0",
         projectionScope: PROTEIN_SCOPE,
         projectionScopeKey: "protein-days.v0",
