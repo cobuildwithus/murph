@@ -1682,15 +1682,15 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
       chatId: authorized.chatId,
       contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + day: dedupes duplicate provider submissions of this share
-      // without suppressing an intentional re-share after the 48h throttle.
+      // Chat id + reservation instant: retries of this reservation dedupe at
+      // the provider while a later requested re-share stays a distinct send.
       // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `group-contact-card:${authorized.chatId}:${new Date().toISOString().slice(0, 10)}`,
+      idempotencyKey: `group-contact-card:${authorized.chatId}:${reservation.attemptedAt.getTime()}`,
     });
   } catch (error) {
     if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the 48h reservation so a later retry
-      // is not locked out. Ambiguous message-send failures keep it.
+      // Nothing reached the chat; free the throttle reservation so a later
+      // retry is not locked out. Ambiguous message-send failures keep it.
       try {
         await releaseHostedLinqContactCardShareAttempt({
           attemptedAt: reservation.attemptedAt,
