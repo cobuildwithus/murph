@@ -41,7 +41,7 @@ export const MURPH_ASSISTANT_STYLE_TOOL = {
   namespace: 'murph',
   name: 'assistant_style',
   description:
-    'Read or update the current conversation runtime\'s Humor, Push, and Detail settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. Never guess or clamp a score.',
+    'Read or update the current conversation runtime\'s Humor, Push, Detail, and Unhinged settings. In a private chat these belong to the member; in a group chat they belong to the synthetic room Murph and never to a participant. Use show to read scores and sources; set only for an explicit ongoing preference; reset one setting or all settings to product defaults. Never guess or clamp a score.',
   inputSchema: z.toJSONSchema(assistantStyleArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -148,7 +148,9 @@ export async function executeAssistantStyleDynamicTool(input: {
       const personality = args.action === 'set'
         ? { [args.setting]: args.value }
         : args.setting === 'all'
-          ? { detail: null, humor: null, push: null }
+          ? Object.fromEntries(
+              assistantPersonalitySettingIds.map((setting) => [setting, null]),
+            )
           : { [args.setting]: null }
       const response = await personalizationTool.request({
         action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
@@ -223,6 +225,7 @@ function mergePersonalitySettings(
     detail: overlay.detail ?? base.detail,
     humor: overlay.humor ?? base.humor,
     push: overlay.push ?? base.push,
+    unhinged: overlay.unhinged ?? base.unhinged,
   }
 }
 

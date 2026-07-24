@@ -1948,7 +1948,7 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Tone, Voice, Humor, Push, and Detail belong to this room',
+      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
@@ -2271,7 +2271,7 @@ describe('assistant Codex turn planning', () => {
       "change this room's Murph style",
     )
     expect(plan.developerInstructions).not.toContain(
-      'Tone, Voice, Humor, Push, and Detail belong to this room',
+      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
     expect(plan.developerInstructions).not.toContain('PERSONAL_CLI_CONTRACT')
     expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')

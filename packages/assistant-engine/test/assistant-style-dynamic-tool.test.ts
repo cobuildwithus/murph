@@ -120,6 +120,7 @@ describe('assistant style dynamic tool', () => {
             detail: 'unchanged',
             humor: 'saved',
             push: 'unchanged',
+            unhinged: 'unchanged',
           },
           settings: personalitySettings(),
         },
@@ -149,7 +150,7 @@ describe('assistant style dynamic tool', () => {
     })
     expect(hostedMocks.requestPersonalization).toHaveBeenNthCalledWith(2, {
       action: 'update_personality',
-      personality: { detail: null, humor: null, push: null },
+      personality: { detail: null, humor: null, push: null, unhinged: null },
     }, {
       assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
     })
@@ -194,6 +195,46 @@ describe('assistant style dynamic tool', () => {
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
       outcomes: { push: 'saved' },
       updated: false,
+    })
+  })
+
+  it('sets the conversational-only Unhinged dial through the Web owner', async () => {
+    hostedMocks.requestPersonalization.mockResolvedValue({
+      action: 'update_personality',
+      result: {
+        outcomes: { unhinged: 'saved' },
+        settings: personalitySettings({ unhinged: { source: 'custom', value: 8 } }),
+      },
+    })
+
+    const set = await executeStyleRequest(
+      { action: 'set', setting: 'unhinged', value: 8 },
+      true,
+      { hosted: true },
+    )
+
+    expect(set.rpcResult.success).toBe(true)
+    expect(hostedMocks.requestPersonalization).toHaveBeenCalledWith({
+      action: 'update_personality',
+      personality: { unhinged: 8 },
+    }, {
+      assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+    })
+    expect(JSON.parse(set.rpcResult.contentItems[0]!.text)).toMatchObject({
+      outcomes: { unhinged: 'saved' },
+      settings: { unhinged: { source: 'custom', value: 8 } },
+      updated: true,
+    })
+  })
+
+  it('parses the Unhinged setting in the closed set/reset contract', () => {
+    expect(readStyleRequest({ action: 'set', setting: 'unhinged', value: 9 })).toEqual({
+      args: { action: 'set', setting: 'unhinged', value: 9 },
+      kind: 'assistant-style',
+    })
+    expect(readStyleRequest({ action: 'reset', setting: 'unhinged' })).toEqual({
+      args: { action: 'reset', setting: 'unhinged' },
+      kind: 'assistant-style',
     })
   })
 
@@ -455,11 +496,13 @@ function personalitySettings(overrides: Partial<{
   detail: { source: 'custom' | 'default'; value: number }
   humor: { source: 'custom' | 'default'; value: number }
   push: { source: 'custom' | 'default'; value: number }
+  unhinged: { source: 'custom' | 'default'; value: number }
 }> = {}) {
   return {
     detail: { source: 'default' as const, value: 5 },
     humor: { source: 'default' as const, value: 3 },
     push: { source: 'default' as const, value: 3 },
+    unhinged: { source: 'default' as const, value: 0 },
     ...overrides,
   }
 }

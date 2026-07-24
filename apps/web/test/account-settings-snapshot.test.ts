@@ -615,6 +615,7 @@ function makeSettingsMemberRecord(
     assistantHumor: null,
     assistantModelPreference: null,
     assistantPush: null,
+    assistantUnhinged: null,
     assistantReasoningEffortPreference: null,
     assistantTone: null,
     assistantVoice: null,

@@ -451,6 +451,9 @@ describe('assistant execution prompt contract', () => {
       '`jokes`/`funny` = Humor',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
       '`show`: scores/sources only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
@@ -1417,7 +1420,9 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_000)
+    // Cap bumped to 68_000 for the conversational-only Unhinged dial guidance
+    // and the style-dissatisfaction offer bullet in the stable route layer.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2247,7 +2252,7 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain(
-      "Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime",
+      "Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",

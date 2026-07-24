@@ -480,6 +480,7 @@ describe("hosted member assistant preferences", () => {
         assistantDetail: true,
         assistantHumor: true,
         assistantPush: true,
+        assistantUnhinged: true,
         assistantTone: true,
         assistantVoice: true,
       },
@@ -622,6 +623,7 @@ describe("hosted member assistant preferences", () => {
         assistantDetail: true,
         assistantHumor: true,
         assistantPush: true,
+        assistantUnhinged: true,
         assistantTone: true,
         assistantVoice: true,
       },
@@ -1017,12 +1019,16 @@ function createPreferencesPrismaDouble(member: {
   assistantHumorCausalSeq: bigint | null;
   assistantPush: number | null;
   assistantPushCausalSeq: bigint | null;
+  assistantUnhinged?: number | null;
+  assistantUnhingedCausalSeq?: bigint | null;
   assistantTone: string | null;
   assistantToneCausalSeq?: bigint | null;
   assistantVoice: string | null;
   assistantVoiceCausalSeq?: bigint | null;
   id: string;
 }): Prisma.TransactionClient {
+  member.assistantUnhinged ??= null;
+  member.assistantUnhingedCausalSeq ??= null;
   return {
     hostedMember: {
       findUnique: vi.fn(async () => ({ ...member })),
@@ -1036,6 +1042,8 @@ function createPreferencesPrismaDouble(member: {
           assistantHumorCausalSeq?: bigint;
           assistantPush?: number | null;
           assistantPushCausalSeq?: bigint;
+          assistantUnhinged?: number | null;
+          assistantUnhingedCausalSeq?: bigint;
           assistantTone?: string;
           assistantToneCausalSeq?: bigint;
           assistantVoice?: string;
@@ -1067,6 +1075,12 @@ function createPreferencesPrismaDouble(member: {
         if (input.data.assistantPushCausalSeq !== undefined) {
           member.assistantPushCausalSeq = input.data.assistantPushCausalSeq;
         }
+        if (input.data.assistantUnhinged !== undefined) {
+          member.assistantUnhinged = input.data.assistantUnhinged;
+        }
+        if (input.data.assistantUnhingedCausalSeq !== undefined) {
+          member.assistantUnhingedCausalSeq = input.data.assistantUnhingedCausalSeq;
+        }
         if (input.data.assistantTone !== undefined) {
           member.assistantTone = input.data.assistantTone;
         }
@@ -1084,6 +1098,7 @@ function createPreferencesPrismaDouble(member: {
           assistantDetail: member.assistantDetail,
           assistantHumor: member.assistantHumor,
           assistantPush: member.assistantPush,
+          assistantUnhinged: member.assistantUnhinged,
           assistantTone: member.assistantTone,
           assistantVoice: member.assistantVoice,
         };

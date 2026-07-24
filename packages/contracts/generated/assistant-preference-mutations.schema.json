@@ -32,6 +32,10 @@
         "detail": {
           "type": "string",
           "pattern": "^(?:0|[1-9][0-9]{0,18})$"
+        },
+        "unhinged": {
+          "type": "string",
+          "pattern": "^(?:0|[1-9][0-9]{0,18})$"
         }
       },
       "additionalProperties": false

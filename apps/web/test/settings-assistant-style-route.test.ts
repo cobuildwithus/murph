@@ -347,6 +347,9 @@ describe("assistant style settings route", () => {
     { personality: { detail: 11 } },
     { personality: { humor: 2.5 } },
     { personality: { surprise: 4 } },
+    // The conversational-only Unhinged dial has no browser Settings surface.
+    { personality: { unhinged: 7 } },
+    { personality: { humor: 4, unhinged: 7 } },
   ])("rejects invalid personality updates before opening persistence: %j", async (body) => {
     const response = await route.POST(jsonRequest(body));
 

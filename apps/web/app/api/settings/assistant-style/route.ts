@@ -1,5 +1,5 @@
 import {
-  assistantPersonalityPreferencesSchema,
+  assistantWebPersonalityPreferencesSchema,
   isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
@@ -148,7 +148,10 @@ function parseAssistantPersona(value: unknown): AssistantPersonaId {
 }
 
 function parseAssistantPersonality(value: unknown): AssistantPersonalityPreferences {
-  const result = assistantPersonalityPreferencesSchema.safeParse(value);
+  // The browser Settings surface only exposes the web-visible dials. The
+  // conversational-only `unhinged` dial is rejected as an unknown key here and
+  // can be changed only through Murph in conversation.
+  const result = assistantWebPersonalityPreferencesSchema.safeParse(value);
   if (result.success && Object.keys(result.data).length > 0) return result.data;
   throw hostedOnboardingError({
     code: "ASSISTANT_STYLE_INVALID_PERSONALITY",
