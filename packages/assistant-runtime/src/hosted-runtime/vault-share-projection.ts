@@ -86,8 +86,8 @@ type MetricSourceRevisionPoint = MetricSourceOwnerPoint & Pick<
 
 type DailyMetricProjectionPoint = MetricSourceRevisionPoint & Pick<
   MetricSeriesPoint,
-  "date" | "grain" | "metricKey" | "statistic" | "unit" | "value"
->;
+  "context" | "date" | "grain" | "metricKey" | "statistic" | "unit" | "value"
+> & { provisional?: boolean };
 
 type WorkoutMetricProjectionRow = MetricSourceRevisionPoint & Pick<
   MetricSeriesPoint,
@@ -458,7 +458,17 @@ export async function readProjectableDailyMetricDays(
     points,
     statistic: "value",
   });
-  return selectProjectableDailyMetricDays(series.rows, spec, nowMs);
+  const completedDateScope = ["deep-sleep-days.v0", "rem-sleep-days.v0"].includes(spec.projectionKind);
+  if (!completedDateScope) return selectProjectableDailyMetricDays(series.rows, spec, nowMs);
+
+  const vaultTimeZone = await readProjectableVaultTimeZone(vaultRoot);
+  return selectProjectableDailyMetricDays(series.rows.flatMap((row) => {
+    const timeZone = normalizeIanaTimeZone(readContextString(row.context, "timeZone"))
+      ?? vaultTimeZone;
+    if (!timeZone) return [];
+    const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
+    return row.date > currentDate ? [] : [{ ...row, provisional: row.date === currentDate }];
+  }), spec, nowMs);
 }
 
 export async function readProjectableWorkoutDays(
@@ -694,6 +704,7 @@ export function selectProjectableDailyMetricDays(
                 HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS,
             }
           : {}),
+        ...(point.provisional ? { provisional: true } : {}),
         unit: sanitizeProjectionUnit(point.unit),
         value,
       },
@@ -817,6 +828,7 @@ export function selectProjectableWorkoutLatestStartDays(
     if (!localStart) {
       continue;
     }
+    if (localStart.date > formatTimeZoneDateTimeParts(input.nowMs, timeZone).dayKey) continue;
     const dayMs = Date.parse(`${localStart.date}T00:00:00.000Z`);
     if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
       continue;
@@ -860,6 +872,9 @@ export function selectProjectableWorkoutLatestStartDays(
       data: {
         date,
         latestStartLocalMs,
+        ...(candidates.some(({ timeZone }) =>
+          date === formatTimeZoneDateTimeParts(input.nowMs, timeZone).dayKey
+        ) ? { provisional: true } : {}),
         timeSemantics:
           HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
       },

@@ -1388,11 +1388,8 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "activity-days.v0",
       },
       {
-        description:
-          "Shares the latest observed local workout start time for each day in the last 7 days with an observed workout. Local time uses the workout event timezone when available, otherwise your vault timezone, and does not prove physical location. This is more detailed than daily workout counts or minutes. It does not share absolute timestamps, end times, sport, provider, routes, location, heart rate, or individual workout history.",
+        description: "Shares your latest local workout start time for each workout day in the last 7 days, not raw workout history or location.",
         label: "Latest daily workout start",
-        offerDisclosure:
-          "the latest observed local workout start time for each day in the last 7 days with a workout",
         projectionKind: "workout-latest-start-days.v0",
         projectionScope: WORKOUT_LATEST_START_SCOPE,
         projectionScopeKey: "workout-latest-start-days.v0",

@@ -411,6 +411,7 @@ export interface HostedVaultShareDailyMetricData {
   date: string;
   metricKey: string;
   metricSemantics?: typeof HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS;
+  provisional?: true;
   unit: string | null;
   value: number;
 }
@@ -425,6 +426,7 @@ export interface HostedVaultShareWorkoutDayData {
 export interface HostedVaultShareWorkoutLatestStartDayData {
   date: string;
   latestStartLocalMs: number;
+  provisional?: true;
   timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS;
 }
 
@@ -876,14 +878,22 @@ export function parseHostedVaultShareDeliveryRecord(
     record.occurredAt,
     "Vault share delivery record occurredAt",
   );
+  const provisional = requireObject(record.data, "Vault share delivery record data").provisional;
+  const completedDateScope = projectionScope.projectionKind === "deep-sleep-days.v0"
+    || projectionScope.projectionKind === "rem-sleep-days.v0"
+    || projectionScope.projectionKind === "workout-latest-start-days.v0";
+  if (provisional !== undefined && (provisional !== true || !completedDateScope)) {
+    throw new TypeError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
+  }
+  const data = parseHostedVaultShareDeliveryRecordData(record.data, {
+    occurredAt,
+    projectionKind: projectionScope.projectionKind,
+    projectionScope,
+    recordKey,
+  });
 
   return {
-    data: parseHostedVaultShareDeliveryRecordData(record.data, {
-      occurredAt,
-      projectionKind: projectionScope.projectionKind,
-      projectionScope,
-      recordKey,
-    }),
+    data: provisional === true ? { ...data, provisional } : data,
     occurredAt,
     recordKey,
     ...parseHostedVaultShareSourceRevision(record.sourceRevision),
@@ -1276,7 +1286,7 @@ function parseHostedVaultShareWorkoutLatestStartDayData(
   assertObjectKeys(
     data,
     "Vault share workout-latest-start-days data",
-    ["date", "latestStartLocalMs", "timeSemantics"],
+    ["date", "latestStartLocalMs", "provisional", "timeSemantics"],
   );
   const date = parseHostedVaultShareDailyDate(data.date, {
     dataLabel: "Vault share workout-latest-start-days data",

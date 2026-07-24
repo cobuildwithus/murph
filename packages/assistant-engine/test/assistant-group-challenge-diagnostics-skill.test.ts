@@ -32,7 +32,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'a workout starting exactly at the threshold does not count as after it',
     )
     expect(challenge).toContain(
-      'A missing date record is not `false`, not zero, and not evidence that no workout happened',
+      'A missing date record is not `false`, zero, or evidence that no workout happened',
     )
     expect(challenge).toContain(
       '`canonical-event-zone-or-vault-zone.v0`',
@@ -49,14 +49,17 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'Only `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0` use completed-date scoring.',
+      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
     )
     expect(challenge).toContain(
-      'Every other scope, including `steps-days.v0`, keeps its existing date behavior and does not gain these fields; an available current-date Steps record remains scoreable under that existing behavior.',
+      'Other scopes keep their existing date behavior; current-date Steps remains scoreable.',
     )
     expect(challenge).toContain(
-      'Any other scope, and any page without both explicit fields, keeps its existing date behavior; do not infer, append, or backfill the completed-date rule.',
+      'Never use a group, schedule, or UTC clock',
     )
+    expect(challenge).not.toContain('scoringTimeZone')
+    expect(challenge).not.toContain('scoringDateRule')
+    expect(challenge).not.toContain('prior-dispatch-local-date-only.v0')
     expect(challenge).not.toContain(
       'Use one deterministic date-completeness rule for every challenge',
     )
@@ -71,14 +74,15 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'when one or more otherwise usable records are available but all are excluded only because their dates are current or future in `scoringTimeZone`, classify the participant as `pending`, not missing.',
+      'If every record otherwise eligible for a completed-date ruling is provisional, keep the participant pending',
     )
     expect(challenge).toContain(
-      'Do not inspect device diagnostics, offer either permission, or suggest a device action for that pending state.',
+      'skip diagnostics and permission offers',
     )
     expect(challenge).toContain(
-      'Tell the group that the open day is not final and the next completed date will be scored on the next dispatch.',
+      'say the value settles once that member\'s own local day closes.',
     )
+    expect(challenge).not.toContain('next dispatch')
     expect(challenge).toContain(
       'A completed-date `pending` participant is never eligible for either offer.',
     )
@@ -87,11 +91,11 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('scores prior-date records for the new completed-date scopes normally', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const completedDateRule =
-      'When the scoring scope is `deep-sleep-days.v0`, `rem-sleep-days.v0`, or `workout-latest-start-days.v0` and the challenge page explicitly stores `scoringDateRule: prior-dispatch-local-date-only.v0` plus a `scoringTimeZone`, apply that completed-date rule before classifying or scoring'
+      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
 
     expect(challenge).toContain(completedDateRule)
     expect(challenge).toContain(
-      'A prior-date record for one of those scopes scores normally.',
+      'Rank only settled records',
     )
     expect(challenge).toContain(
       'with challenge-metric data eligible under the scope\'s applicable date behavior: rank the participant from that metric evidence.',
@@ -220,7 +224,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const evidence = [
       'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the scope\'s applicable date behavior',
-      'A completed-date scoring projection is `granted` and `available`, and has one or more otherwise usable metric records but all are excluded only by `prior-dispatch-local-date-only.v0`',
+      'A completed-date scoring projection is `granted` and `available`, but every record otherwise eligible for the ruling is provisional',
       'The scoring projection is `not_granted`',
       'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
       'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while a recent `device-sync-status.v0` record is `available`',

@@ -103,18 +103,12 @@ request, not as something you cannot preselect and not as automatic sharing.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 
-Only `deep-sleep-days.v0`, `rem-sleep-days.v0`, and
-`workout-latest-start-days.v0` use completed-date scoring. Their open local day
-can still change. At kickoff for one of those scopes, persist
-`scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch's
-IANA schedule timezone as `scoringTimeZone` in **Rules & metric**. On each
-daily run, compute the current calendar date in `scoringTimeZone` and score
-only records whose `date` is strictly earlier. Never score the current or a
-future dispatch-local date for those scopes. A prior-date record for one of
-those scopes scores normally. Every other scope, including
-`steps-days.v0`, keeps its existing date behavior and does not gain these
-fields; an available current-date Steps record remains scoreable under that
-existing behavior.
+For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0`, the producer
+marks the open member-local date `data.provisional: true`; absence means settled. Rank only settled
+records and keep provisional values pending or clearly labeled provisional/live until
+that member's own local day closes. Never use a group, schedule, or UTC clock,
+disclose the private event/vault timezone, or promise a dispatch. Other scopes keep their existing
+date behavior; current-date Steps remains scoreable.
 
 For a challenge such as "any workout starting after 6 PM," normalize the
 configured threshold once at kickoff to an integer number of milliseconds
@@ -131,10 +125,9 @@ history. Its required `timeSemantics` value is
 `canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
 event timezone when available and otherwise the member vault timezone; it does
 not prove physical workout location. A missing date record
-is not `false`, not zero, and not evidence that no workout happened: leave the
-participant unscored for that date and report the data as missing. The event or
-vault timezone still derives each workout record's date; it does not replace
-the completed-date scoring timezone.
+is not `false`, zero, or evidence that no workout happened: leave the
+participant unscored and report missing data. That same undisclosed zone dates
+the record and determines provisional state.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -175,13 +168,8 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
 The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
-  settled any dispute about it. For `deep-sleep-days.v0`,
-  `rem-sleep-days.v0`, or `workout-latest-start-days.v0`, also store
-  `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch's
-  IANA `scoringTimeZone`. A challenge page without both explicit fields keeps
-  its existing date behavior; do not infer or append them. For a workout
-  time-of-day rule, also store the original threshold wording and normalized
-  integer `thresholdLocalMs`.
+  settled any dispute about it. For a workout time-of-day rule, also store the
+  original threshold wording and normalized integer `thresholdLocalMs`.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
   `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
@@ -399,28 +387,14 @@ automation action rules with a `dailyLocal` schedule and
    Do not retry on every scheduled run; reconsider only after new attributable
    evidence makes that one association exact.
 
-   When the scoring scope is `deep-sleep-days.v0`, `rem-sleep-days.v0`, or
-   `workout-latest-start-days.v0` and the challenge page explicitly stores
-   `scoringDateRule: prior-dispatch-local-date-only.v0` plus a
-   `scoringTimeZone`, apply that completed-date rule before classifying or
-   scoring: compute the current calendar date in `scoringTimeZone`, then
-   exclude every record whose `date` is equal to or later than that date. Only
-   prior dispatch-local dates are eligible. Any other scope, and any page
-   without both explicit fields, keeps its existing date behavior; do not
-   infer, append, or backfill the completed-date rule.
-
    Classify every `in` participant in a successful result before composing:
    `grantStatus="not_granted"` means the group share is not granted;
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
-   returned records. For a completed-date scope, when one or more otherwise
-   usable records are available but all are excluded only because their dates
-   are current or future in `scoringTimeZone`, classify the participant as
-   `pending`, not missing. Do not inspect device diagnostics, offer either
-   permission, or suggest a device action for that pending state. Tell the
-   group that the open day is not final and the next completed date will be
-   scored on the next dispatch. Apply `group-chat`'s **Shared fact limits**
-   before scoring.
+   returned records. If every record otherwise eligible for a completed-date
+   ruling is provisional, keep the participant pending, skip diagnostics and
+   permission offers, and say the value settles once that member's own local day closes. Apply `group-chat`'s
+   **Shared fact limits** before scoring.
    A genuinely missing snapshot still follows the recovery evidence order
    below.
    Never infer a grant from a record or a record from a grant. Never reuse
@@ -431,12 +405,9 @@ automation action rules with a `dailyLocal` schedule and
    - The scoring projection is `granted` and `available`, with challenge-metric
      data eligible under the scope's applicable date behavior: rank the
      participant from that metric evidence.
-   - A completed-date scoring projection is `granted` and `available`, and has
-     one or more otherwise usable metric records but all are excluded only by
-     `prior-dispatch-local-date-only.v0`: keep the participant unranked as
-     `pending`, tell the group the next completed date will be scored, and stop.
-     This is not missing data and must not enter device diagnostics or either
-     permission offer.
+   - A completed-date scoring projection is `granted` and `available`, but every
+     record otherwise eligible for the ruling is provisional: keep the participant
+     pending and unranked; do not enter diagnostics or permission offers.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact

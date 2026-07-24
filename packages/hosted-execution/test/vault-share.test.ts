@@ -832,6 +832,55 @@ describe("daily metric vault-share delivery records", () => {
       }
     }
   });
+
+  it("preserves provisional state only for completed-date daily scopes", () => {
+    for (const [projectionScope, metricKey] of [
+      [DEEP_SLEEP_SCOPE, "deep-sleep-minutes"],
+      [REM_SLEEP_SCOPE, "rem-sleep-minutes"],
+    ] as const) {
+      const record = {
+        ...VALID_DAILY_METRIC_RECORD,
+        data: {
+          ...VALID_DAILY_METRIC_RECORD.data,
+          metricKey,
+          provisional: true,
+          unit: "minutes",
+          value: 480,
+        },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [record],
+      }).records).toEqual([record]);
+    }
+
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "steps-days.v0",
+        records: [{
+          ...VALID_DAILY_METRIC_RECORD,
+          data: { ...VALID_DAILY_METRIC_RECORD.data, provisional: true },
+        }],
+      })
+    ).toThrow(/provisional is invalid/u);
+    for (const provisional of [false, "yes"] as const) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "deep-sleep-days.v0",
+          records: [{
+            ...VALID_DAILY_METRIC_RECORD,
+            data: {
+              ...VALID_DAILY_METRIC_RECORD.data,
+              metricKey: "deep-sleep-minutes",
+              provisional,
+              unit: "minutes",
+              value: 480,
+            },
+          }],
+        })
+      ).toThrow(/provisional is invalid/u);
+    }
+  });
 });
 
 describe("workout-days.v0 delivery records", () => {
@@ -902,6 +951,31 @@ describe("workout-latest-start-days.v0 delivery records", () => {
       projectionScope: WORKOUT_LATEST_START_SCOPE,
       records: [VALID_WORKOUT_LATEST_START_RECORD],
     });
+  });
+
+  it("preserves the producer-owned provisional marker", () => {
+    const record = {
+      ...VALID_WORKOUT_LATEST_START_RECORD,
+      data: {
+        ...VALID_WORKOUT_LATEST_START_RECORD.data,
+        provisional: true,
+      },
+    };
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workout-latest-start-days.v0",
+      records: [record],
+    }).records).toEqual([record]);
+    for (const provisional of [false, "yes"] as const) {
+      expect(() =>
+        parseHostedVaultShareDeliverRequest({
+          projectionKind: "workout-latest-start-days.v0",
+          records: [{
+            ...record,
+            data: { ...record.data, provisional },
+          }],
+        })
+      ).toThrow(/provisional is invalid/u);
+    }
   });
 
   it("accepts only integer local clock values within one day", () => {
