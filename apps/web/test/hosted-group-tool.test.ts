@@ -2594,9 +2594,9 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         chatId: "chat_group_1",
         contentType: "text/vcard",
         fileName: "Murph.vcf",
-        idempotencyKey: expect.stringMatching(
-          /^group-contact-card:chat_group_1:\d{4}-\d{2}-\d{2}$/u,
-        ),
+        // Keyed to the reservation instant so retries of one reservation
+        // dedupe while a later requested re-share is a distinct send.
+        idempotencyKey: `group-contact-card:chat_group_1:${new Date("2026-07-02T12:00:00Z").getTime()}`,
       }),
     );
     expect(mocks.reserveHostedLinqContactCardShareAttempt).toHaveBeenCalledWith(
