@@ -1251,7 +1251,10 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
       if (!systemMailboxMaintenance.result) {
-        return { progressed: false };
+        return withHostedRuntimeWakeCandidate({
+          result: { progressed: false },
+          wake: createExistingHostedAssistantWorkspaceWakeCandidate(input),
+        });
       }
       return withHostedDeviceSyncMaintenanceRan(
         systemMailboxMaintenance.result,
@@ -4423,6 +4426,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     backgroundWake,
     createHostedRuntimeWakeCandidate(systemMailboxMetricsWakeAt, systemMailboxMetricsWakeReason),
     dirtyDeviceSyncWake,
+    phaseInput.foregroundCausalOnly === true
+      ? createExistingHostedAssistantWorkspaceWakeCandidate(phaseInput)
+      : null,
   ]);
   const nextWakeAt = nextWake.at;
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
@@ -4707,6 +4713,9 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         input.systemMailboxMetricsWakeAt,
         input.systemMailboxMetricsWakeReason,
       ),
+      foregroundCausalOnly
+        ? createExistingHostedAssistantWorkspaceWakeCandidate(input.input)
+        : null,
     ]);
     const statusNextWakeAt = statusNextWake.at;
     const statusNextWakeReason = statusNextWake.reason;
@@ -5480,11 +5489,17 @@ function resolveHostedPostDeliveryBaseNextWake(
     return baseNextWake;
   }
 
+  const futureWakeAt = normalizeHostedFutureWakeAt(
+    baseNextWake.at,
+    resolveHostedAssistantPhaseNowMs(input.input),
+  );
+  if (!futureWakeAt && !input.canConsumeWorkspaceAssistantWake) {
+    // A non-consuming drain must keep a due assistant wake armed; normalizing
+    // it away here would disarm cron with no later candidate to re-arm it.
+    return baseNextWake;
+  }
   return createHostedRuntimeWakeCandidate(
-    normalizeHostedFutureWakeAt(
-      baseNextWake.at,
-      resolveHostedAssistantPhaseNowMs(input.input),
-    ),
+    futureWakeAt,
     baseNextWake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
   );
 }
