@@ -507,11 +507,11 @@ export async function readProjectableWorkoutLatestStartDays(
   context?: HostedVaultShareProjectionReadContext,
 ): Promise<HostedVaultShareDeliveryRecord[]> {
   const nowMs = Date.now();
-  const cutoffDate = new Date(
-    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  const sourceReadFromDate = new Date(
+    nowMs - (HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS + 1) * DAY_MS,
   ).toISOString().slice(0, 10);
   const [rows, vaultTimeZone] = await Promise.all([
-    readProjectableActivitySessionRows(vaultRoot, cutoffDate, context),
+    readProjectableActivitySessionRows(vaultRoot, sourceReadFromDate, context),
     readProjectableVaultTimeZone(vaultRoot, context),
   ]);
   return selectProjectableWorkoutLatestStartDays({
@@ -1213,6 +1213,25 @@ async function readProjectableActivitySessionRows(
     if (cached) {
       return cached;
     }
+
+    const priorCutoffDate = new Date(
+      Date.parse(`${cutoffDate}T00:00:00.000Z`) - DAY_MS,
+    ).toISOString().slice(0, 10);
+    const priorCached = context.activityRowsByVaultAndCutoff.get(
+      `${vaultRoot}\u0000${priorCutoffDate}`,
+    );
+    if (priorCached) {
+      const rows = await priorCached;
+      // A populated broader read is safe because every selector applies its own
+      // cutoff. Do not reuse an empty result: it may represent the 500-row
+      // fail-closed path, and the narrower read must retain its own cap semantics.
+      if (rows.length > 0) {
+        const read = Promise.resolve(rows);
+        context.activityRowsByVaultAndCutoff.set(cacheKey, read);
+        return read;
+      }
+    }
+
     const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate);
     context.activityRowsByVaultAndCutoff.set(cacheKey, read);
     return read;

@@ -1150,14 +1150,14 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     }
   });
 
-  it("applies the seven-day cutoff after re-deriving the event-zone date", async () => {
+  it("widens the UTC source read before applying the event-zone date cutoff", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
       id: "evt_rederived_date_cutoff",
       kind: "activity_session",
-      occurredAt: "2026-07-03T23:30:00.000Z",
+      occurredAt: "2026-07-02T23:30:00.000Z",
       dayKey: "2026-07-02",
-      recordedAt: "2026-07-04T00:30:00.000Z",
+      recordedAt: "2026-07-03T00:30:00.000Z",
       timeZone: "Asia/Tokyo",
       activityType: "running",
       durationMinutes: 30,
@@ -1169,10 +1169,10 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     try {
       await expect(readProjectableWorkoutLatestStartDays(vaultRoot)).resolves.toMatchObject([{
         data: {
-          date: "2026-07-04",
-          latestStartLocalMs: 8 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
+          date: "2026-07-03",
+          latestStartLocalMs: 30_600_000,
         },
-        recordKey: "2026-07-04",
+        recordKey: "2026-07-03",
       }]);
     } finally {
       dateNow.mockRestore();

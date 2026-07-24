@@ -99,8 +99,15 @@ history. Its required `timeSemantics` value is
 event timezone when available and otherwise the member vault timezone; it does
 not prove physical workout location. A missing date record
 is not `false`, not zero, and not evidence that no workout happened: leave the
-participant unscored for that date and report the data as missing. Treat the
-current local date as provisional until its reporting cutoff has passed.
+participant unscored for that date and report the data as missing. Use one
+deterministic date-completeness rule for every challenge: at kickoff, persist
+the selected rule as `scoringDateRule: prior-dispatch-local-date-only.v0` and
+the daily dispatch's IANA schedule timezone as `scoringTimeZone` in **Rules &
+metric**, alongside any threshold fields. On every daily run, compute the
+current calendar date in `scoringTimeZone` and score only records whose `date`
+is strictly earlier. Never score the current or a future dispatch-local date.
+The event or vault timezone still derives each workout record's date; it does
+not replace the persisted challenge scoring timezone.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -141,7 +148,9 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
 The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
-  settled any dispute about it. For a workout time-of-day rule, also store the
+  settled any dispute about it. For every challenge, also store
+  `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch's
+  IANA `scoringTimeZone`. For a workout time-of-day rule, also store the
   original threshold wording and normalized integer `thresholdLocalMs`.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
@@ -343,32 +352,43 @@ automation action rules with a `dailyLocal` schedule and
    Do not retry on every scheduled run; reconsider only after new attributable
    evidence makes that one association exact.
 
+   Before classifying or scoring any returned metric records, apply the
+   persisted `scoringDateRule` and `scoringTimeZone`: compute the current
+   calendar date in `scoringTimeZone`, then exclude every record whose `date`
+   is equal to or later than that date. Under
+   `prior-dispatch-local-date-only.v0`, only prior dispatch-local dates are
+   eligible. For a legacy active page missing either field, append both from
+   the existing `dailyLocal` dispatch schedule before scoring; if that schedule
+   timezone cannot be verified, do not publish standings.
+
    Classify every `in` participant in a successful result before composing:
    `grantStatus="not_granted"` means the group share is not granted;
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
-   returned records. `available` does not make an old record current for this
-   reporting cutoff. Apply `group-chat`'s **Shared fact limits** before scoring.
+   returned records. `available` does not make an ineligible date scoreable
+   under the persisted scoring-date rule. Apply `group-chat`'s **Shared fact
+   limits** before scoring.
    Never infer a grant from a record or a record from a grant. Never reuse
    remembered numbers — wrong scores turn jokes into noise. A recorded zero is
    a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
-   - The scoring projection is `granted` and `available`, with current
-     challenge-metric data through the reporting cutoff: rank the participant
-     from that metric evidence.
+   - The scoring projection is `granted` and `available`, with challenge-metric
+     data eligible under the persisted scoring-date rule: rank
+     the participant from that metric evidence.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact
      scope, include the scope in the one proactive permission offer described
      below.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while `device-sync-status.v0` is `not_granted`: unless
+   - The scoring projection is `granted` but has no eligible challenge-metric data
+     under the persisted scoring-date rule, while `device-sync-status.v0` is
+     `not_granted`: unless
      their sharing choices record an explicit decline or prior handled offer
      action for that exact scope, include the diagnostic scope in the one
      proactive permission offer described below.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while a recent
+   - The scoring projection is `granted` but has no eligible challenge-metric data
+     under the persisted scoring-date rule, while a recent
      `device-sync-status.v0` record is `available`: you may state its literal
      source label, coarse status, and, only when useful, the accurately named
      connection-wide sync-job completion time described below. Treat a
@@ -387,8 +407,9 @@ automation action rules with a `dailyLocal` schedule and
      Apple Health status, follow the status-specific rules above. If the recent
      projection has an empty `sources` list, say only that this diagnostic
      result contains no visible sources and suggest a private source check.
-   - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, and diagnostic data is also `granted` but `missing` or
+   - The scoring projection is `granted` but has no eligible challenge-metric data
+     under the persisted scoring-date rule, and diagnostic data is also
+     `granted` but `missing` or
      stale: report that diagnostic state without guessing about permissions, a
      disconnected device, source freshness, or whether the participant opened
      the app.

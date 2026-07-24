@@ -35,9 +35,6 @@ describe('assistant group challenge diagnostics guidance', () => {
       'A missing date record is not `false`, not zero, and not evidence that no workout happened',
     )
     expect(challenge).toContain(
-      'Treat the current local date as provisional until its reporting cutoff has passed.',
-    )
-    expect(challenge).toContain(
       '`canonical-event-zone-or-vault-zone.v0`',
     )
     expect(challenge).toContain(
@@ -46,6 +43,30 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'original threshold wording and normalized integer `thresholdLocalMs`',
     )
+  })
+
+  it('persists and applies one deterministic completed-date scoring rule', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+    const kickoffRule =
+      'at kickoff, persist the selected rule as `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch\'s IANA schedule timezone as `scoringTimeZone` in **Rules & metric**, alongside any threshold fields'
+    const dailyRule =
+      'Before classifying or scoring any returned metric records, apply the persisted `scoringDateRule` and `scoringTimeZone`'
+
+    expect(challenge).toContain(kickoffRule)
+    expect(challenge).toContain(
+      'For every challenge, also store `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch\'s IANA `scoringTimeZone`.',
+    )
+    expect(challenge).toContain(
+      'compute the current calendar date in `scoringTimeZone`, then exclude every record whose `date` is equal to or later than that date',
+    )
+    expect(challenge).toContain(dailyRule)
+    const dailyRuleIndex = challenge.indexOf(dailyRule)
+    const scoringIndex = challenge.indexOf(
+      'Classify every `in` participant in a successful result before composing',
+    )
+    expect(dailyRuleIndex).toBeGreaterThanOrEqual(0)
+    expect(scoringIndex).toBeGreaterThan(dailyRuleIndex)
+    expect(challenge).not.toContain('reporting cutoff')
   })
 
   it('builds complete or partial standings from the opted-in challenge roster', async () => {
@@ -149,11 +170,11 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('uses the evidence hierarchy and keeps Apple Health uncertainty honest', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const evidence = [
-      'The scoring projection is `granted` and `available`, with current challenge-metric data through the reporting cutoff',
+      'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the persisted scoring-date rule',
       'The scoring projection is `not_granted`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, while `device-sync-status.v0` is `not_granted`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, while a recent `device-sync-status.v0` record is `available`',
-      'The scoring projection is `granted` but has no current metric through the reporting cutoff, and diagnostic data is also `granted` but `missing` or stale',
+      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, while `device-sync-status.v0` is `not_granted`',
+      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, while a recent `device-sync-status.v0` record is `available`',
+      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, and diagnostic data is also `granted` but `missing` or stale',
     ]
 
     for (let index = 1; index < evidence.length; index += 1) {

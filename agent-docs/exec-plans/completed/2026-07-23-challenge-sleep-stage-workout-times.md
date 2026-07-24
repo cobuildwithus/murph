@@ -1,6 +1,6 @@
 # Challenge scopes: deep/REM sleep days and latest workout start
 
-Status: Active
+Status: completed
 Created: 2026-07-23
 Worktree: `/private/tmp/murph-sleep-stage-workout-times` (`agent/challenge-sleep-stage-workout-times`)
 
@@ -81,3 +81,5 @@ safely), then Cloudflare runner with `container_rollout=immediate`; after
 convergence offer the new permissions and refresh consenting members'
 replacement snapshots via the existing bounded maintenance wake. No backfill
 queue or new state owner.
+Updated: 2026-07-24
+Completed: 2026-07-24
