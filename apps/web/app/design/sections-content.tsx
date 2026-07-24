@@ -11,15 +11,13 @@ import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
-import GroupJoinPermissionsStudy, {
-  type GroupJoinPermissionsStudyProps,
-} from "./group-join-permissions-study";
+import { GroupJoinStudy } from "./group-join-study";
+import { HomeLoadStateStudy } from "./home-load-state-study";
+import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
-import { HomeLoadStateStudy } from "./home-load-state-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 
 function StudySection({
   children,
@@ -38,11 +36,7 @@ function StudySection({
   );
 }
 
-export function SectionsContent({
-  groupJoinPermissionsStudy,
-}: {
-  groupJoinPermissionsStudy?: GroupJoinPermissionsStudyProps;
-}) {
+export function SectionsContent() {
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-16 px-5 py-12 sm:px-8 lg:px-12">
       <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">
@@ -85,15 +79,11 @@ export function SectionsContent({
         <HomeLoadStateStudy />
       </StudySection>
 
-      {groupJoinPermissionsStudy ? (
-        <>
-          <Separator />
+      <Separator />
 
-          <StudySection title="Group join sharing permissions">
-            <GroupJoinPermissionsStudy {...groupJoinPermissionsStudy} />
-          </StudySection>
-        </>
-      ) : null}
+      <StudySection title="Group join actions">
+        <GroupJoinStudy />
+      </StudySection>
 
       <Separator />
 

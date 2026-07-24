@@ -46,7 +46,13 @@ type HostedLinqContactCardShareFindManyInput = {
   };
 };
 
-const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 48 * 60 * 60 * 1000;
+// Sized to the runtime turn-retry horizon, not a user-visible cooldown. The
+// hosted turn retries up to 6 times and this send is not journaled, so a
+// duplicate `share_contact_card` firing (a retried/replayed turn, or a
+// coalesced wake burst) must collapse to one card. A genuine human re-request
+// arrives minutes later, after the card is already in the chat, so 90s is
+// imperceptible to it while still covering the retry backoff.
+const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 90 * 1000;
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -67,7 +73,9 @@ type HostedLinqContactCardShareReserveDecision =
 
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
- * checks; this only guards the attempt cadence (one per chat per 48h).
+ * checks; this only dedupes duplicate attempts within one turn/wake (one per
+ * chat per 90 seconds). Every share is an intentional assistant decision, so
+ * a requested re-share outside that window must go through.
  */
 export async function reserveHostedLinqContactCardShareAttempt(input: {
   chatId: string;
