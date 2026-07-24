@@ -120,10 +120,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
       })
     : null;
   const contactOptions = props.contactOptions ?? [];
-  const showContactAction =
+  const fulfilledConfirmation =
     purchase !== null &&
     purchase.status === "fulfilled" &&
-    !purchase.targetConflict &&
+    !purchase.targetConflict;
+  const showGroupMessagesAction =
+    fulfilledConfirmation && props.scope === "group";
+  const showContactAction =
+    fulfilledConfirmation &&
+    props.scope !== "group" &&
     contactOptions.length > 0;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
@@ -263,6 +268,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 >
                   Check again
                 </Button>
+              ) : null}
+              {showGroupMessagesAction ? (
+                // Messages has no deep link into an existing group thread, so
+                // the group follow-up can only open the app itself.
+                <a
+                  href="sms:"
+                  className={cn(buttonVariants({ size: "lg" }), "w-full")}
+                >
+                  <MessageCircle className="size-4 shrink-0" aria-hidden="true" />
+                  Open Messages
+                </a>
               ) : null}
               {showContactAction ? (
                 contactOptions.length === 1 ? (

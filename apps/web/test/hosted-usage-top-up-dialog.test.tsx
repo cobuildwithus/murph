@@ -2238,6 +2238,54 @@ test("never offers Text Murph on a canceled checkout confirmation", async () => 
   }
 });
 
+test("offers Open Messages on a fulfilled group top-up return", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+    purchaseId: "hucp_group_added000",
+    status: "fulfilled",
+  });
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      contactOptions: [textMurphContactOption()],
+      offers: [],
+      purchaseReturn: {
+        kind: "success",
+        purchaseId: "hucp_group_added000",
+      },
+      scope: "group",
+    }),
+    {
+      location: {
+        href: "https://example.test/groups/fund/group_join_code_1234?usagePurchase=hucp_group_added000&usageCheckout=success",
+      },
+      requireButton: false,
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.match(rendered.container.textContent ?? "", /Usage added/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /This group's available usage has been updated\./,
+    );
+    const contactLink = rendered.container.querySelector("a");
+    assert.ok(contactLink);
+    assert.equal(contactLink.textContent, "Open Messages");
+    assert.equal(contactLink.getAttribute("href"), "sms:");
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Text Murph/);
+    assert.equal(buttonByText(rendered.container, "Close").disabled, false);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("offers the payer Text Murph on a fulfilled Family top-up return", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValue({
     purchaseId: "hucp_contact_family",
