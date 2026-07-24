@@ -86,8 +86,6 @@ import type {
 } from './store/types.js'
 
 const ASSISTANT_STATE_SCHEMA = 'murph.assistant-conversation.v2'
-const ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT =
-  'ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT'
 
 export function isAssistantSessionNotFoundError(error: unknown): boolean {
   return Boolean(
@@ -95,20 +93,6 @@ export function isAssistantSessionNotFoundError(error: unknown): boolean {
       typeof error === 'object' &&
       'code' in error &&
       (error as { code?: unknown }).code === 'ASSISTANT_SESSION_NOT_FOUND',
-  )
-}
-
-export function isAssistantConversationContextUnavailableError(
-  error: unknown,
-): boolean {
-  if (isAssistantSessionNotFoundError(error)) {
-    return true
-  }
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      error.code === ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT,
   )
 }
 
@@ -455,30 +439,6 @@ export async function listAssistantSessionsLocal(
   })
 }
 
-export async function listValidAssistantSessionIds(
-  vault: string,
-): Promise<string[]> {
-  return withAssistantRuntimeWriteLock(vault, async (paths) => {
-    await ensureAssistantState(paths)
-    const validSessionIds: string[] = []
-    for (const sessionId of await listAssistantSessionFileIds(paths)) {
-      try {
-        const session = parseAssistantSessionRecord(
-          JSON.parse(
-            await readFile(resolveAssistantSessionPath(paths, sessionId), 'utf8'),
-          ),
-        )
-        if (session.sessionId === sessionId) {
-          validSessionIds.push(sessionId)
-        }
-      } catch {
-        continue
-      }
-    }
-    return validSessionIds
-  })
-}
-
 async function listAssistantSessionFileIds(
   paths: AssistantStatePaths,
 ): Promise<string[]> {
@@ -642,73 +602,6 @@ export async function appendAssistantTranscriptEntriesWithRefs(
         entryKind: entry.kind,
         sessionId,
       })),
-    }
-  })
-}
-
-export async function appendAssistantConversationContextEntry(input: {
-  createdAt: string
-  sessionId: string
-  text: string
-  vault: string
-}): Promise<{
-  appended: boolean
-  session: AssistantSession
-}> {
-  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
-    await ensureAssistantState(paths)
-    const session = await readAssistantSession({
-      paths,
-      sessionId: input.sessionId,
-    })
-    if (!session) {
-      throw await createAssistantSessionNotFoundError({
-        paths,
-        sessionId: input.sessionId,
-      })
-    }
-    if (session.binding.threadIsDirect !== true) {
-      throw new VaultCliError(
-        ASSISTANT_CONVERSATION_CONTEXT_SESSION_NOT_DIRECT,
-        'Assistant conversation context requires an existing direct session.',
-      )
-    }
-
-    const existingEntries = await readAssistantTranscriptEntries(
-      paths,
-      input.sessionId,
-    )
-    const appended = !existingEntries.some((entry) =>
-      entry.kind === 'status' && entry.text === input.text
-    )
-    if (appended) {
-      await appendTranscriptEntries(paths, input.sessionId, [
-        assistantTranscriptEntrySchema.parse({
-          schema: 'murph.assistant-transcript-entry.v1',
-          kind: 'status',
-          text: input.text,
-          createdAt: input.createdAt,
-        }),
-      ])
-    }
-
-    if (
-      !appended
-      && session.codexResume === null
-      && session.resumeState === null
-    ) {
-      return { appended, session }
-    }
-
-    const updatedSession = await saveAssistantSessionAtPaths(paths, {
-      ...session,
-      codexResume: null,
-      resumeState: null,
-      updatedAt: new Date().toISOString(),
-    })
-    return {
-      appended,
-      session: updatedSession,
     }
   })
 }

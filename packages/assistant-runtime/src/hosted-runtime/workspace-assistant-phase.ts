@@ -259,9 +259,6 @@ const HOSTED_MEMBER_CHANNEL_UPDATE_ROUTE_ACTIONS = ["apply-member-channels-updat
 const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS = [
   "apply-member-preferences",
 ] as const;
-const HOSTED_PHONE_CALL_RESULT_PRE_PLANNING_ROUTE_ACTIONS = [
-  "record-phone-call-result-context",
-] as const;
 const HOSTED_FOREGROUND_CAUSAL_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "continue-assistant-ask",
@@ -1546,29 +1543,6 @@ export async function runHostedWorkspaceAssistantPhase(
       continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
         continuingSystemMailboxResult,
         memberPreferencesPrePlanning.result,
-      );
-    }
-
-    const phoneCallResultPrePlanning =
-      hasFreshConversationInput && input.acceptedAssistantInputCausalSeq
-        ? await runPrePlanningSystemMailboxPhase({
-          allowedRouteActions: HOSTED_PHONE_CALL_RESULT_PRE_PLANNING_ROUTE_ACTIONS,
-          executionContext,
-          input,
-          maxCausalSeq: input.acceptedAssistantInputCausalSeq,
-        })
-        : {
-            continueAssistantLane: true,
-            result: null,
-          };
-    if (phoneCallResultPrePlanning.result) {
-      if (!phoneCallResultPrePlanning.continueAssistantLane) {
-        return mergeContinuingSystemMailboxResult(phoneCallResultPrePlanning.result);
-      }
-
-      continuingSystemMailboxResult = mergeHostedAssistantPhaseResults(
-        continuingSystemMailboxResult,
-        phoneCallResultPrePlanning.result,
       );
     }
 

@@ -230,7 +230,6 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   acceptedAssistantInputCausalSeq?: string | null;
   assistantAutomationScheduleChanged?: (() => boolean) | null;
   backgroundMaintenanceSignal?: AbortSignal | null;
-  beforeDirectAssistantSessionProviderTurn?: ((sessionId: string) => Promise<void>) | null;
   clearAssistantAutomationScheduleChanged?: (() => void) | null;
   deviceSyncWorkspaceWakeHandled?: HostedWorkspaceRunnerHandledDeviceSyncWake | null;
   initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
@@ -354,9 +353,6 @@ export type HostedWorkspaceRunnerMailboxImportItem = (
 ) => Promise<HostedMailboxItemImportOutcome>;
 
 export interface HostedWorkspaceRunnerInput {
-  checkpointDirectAssistantSession?: ((
-    sessionId: string,
-  ) => Promise<HostedWorkspaceState | null>) | null;
   checkpointRuntimeRedactedStatus?: ((
     input: HostedWorkspaceRunnerRuntimeStatusCheckpointInput,
   ) => Promise<HostedWorkspaceCheckpointResponse> | HostedWorkspaceCheckpointResponse) | null;
@@ -380,7 +376,6 @@ export interface HostedWorkspaceRunnerInput {
   requestId: string;
   runtimePassDiagnostics?: HostedWorkspaceRunnerRuntimePassDiagnostics | null;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
-  shouldCheckpointDirectAssistantSession?: ((sessionId: string) => boolean) | null;
   signal?: AbortSignal | null;
   runtimeLogContext?: HostedRuntimeLogContext | null;
   runAssistantPhase?: (
@@ -1033,31 +1028,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }),
     assistantAutomationScheduleChanged: () => assistantAutomationScheduleChanged,
     backgroundMaintenanceSignal: backgroundMaintenanceAbortController.signal,
-    beforeDirectAssistantSessionProviderTurn:
-      input.checkpointDirectAssistantSession
-        ? async (sessionId: string): Promise<void> => {
-            if (
-              input.shouldCheckpointDirectAssistantSession?.(sessionId) === false
-            ) {
-              return;
-            }
-            await stopForegroundMailboxImportLoop();
-            try {
-              const checkpointWorkspace =
-                await input.checkpointDirectAssistantSession?.(sessionId);
-              if (checkpointWorkspace) {
-                checkpointRequestSession.adoptCheckpointWorkspace(
-                  checkpointWorkspace,
-                );
-              }
-            } finally {
-              if (!foregroundConversationWorkObserved && !input.signal?.aborted) {
-                await startForegroundMailboxImportLoop();
-                await foregroundMailboxImportLoop?.drainPendingWake();
-              }
-            }
-          }
-        : null,
     clearAssistantAutomationScheduleChanged: () => {
       assistantAutomationScheduleChanged = false;
     },

@@ -206,9 +206,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
-    causalSeq: routeAction === "record-phone-call-result-context"
-      ? (input.item.item.causalSeq ?? null)
-      : null,
+    causalSeq: null,
     preferenceCausalSeq: routeAction === "apply-member-preferences"
       ? (
         input.wake.kind === "member.preferences.updated"
@@ -621,7 +619,6 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "apply-member-channels-update"
     || item.route.action === "apply-member-preferences"
     || item.route.action === "dispatch-assistant-notification"
-    || item.route.action === "record-phone-call-result-context"
     || item.route.action === "run-assistant-ask"
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"

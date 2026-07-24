@@ -7,8 +7,6 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationRequestedWake,
-  HostedExecutionPhoneCallResultedPayload,
-  HostedExecutionPhoneCallResultedWake,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionGroupNewsletterEmailNeededWake,
@@ -150,7 +148,6 @@ type HostedExecutionMemberOwnedWake =
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantNotificationRequestedWake
-  | HostedExecutionPhoneCallResultedWake
   | HostedExecutionMemberActivatedWake
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
@@ -514,26 +511,6 @@ export function buildHostedExecutionAssistantNotificationRequestedWake(input: {
       occurredAt: input.occurredAt,
     }),
     notification: cloneAssistantNotificationPayload(input.notification),
-  };
-}
-
-export function buildHostedExecutionPhoneCallResultedWake(input: {
-  eventId: string;
-  memberId: string;
-  occurredAt: string;
-  phoneCall: HostedExecutionPhoneCallResultedPayload;
-}): HostedExecutionPhoneCallResultedWake {
-  return {
-    ...buildHostedExecutionMemberOwnedWakeBase({
-      eventId: input.eventId,
-      kind: "phone-call.resulted",
-      memberId: input.memberId,
-      occurredAt: input.occurredAt,
-    }),
-    phoneCall: {
-      context: input.phoneCall.context,
-      originSessionId: input.phoneCall.originSessionId,
-    },
   };
 }
 

@@ -11,7 +11,6 @@ import {
 } from './local-service.js'
 import { sendAssistantNotificationLocal as sendAssistantNotificationTurnLocal } from './notification-turn.js'
 import { sendAssistantAskContinuationLocal as sendAssistantAskContinuationTurnLocal } from './ask-continuation.js'
-import { recordAssistantConversationContextLocal as recordAssistantConversationContextTurnLocal } from './conversation-context.js'
 
 export { buildResolveAssistantSessionInput } from './session-resolution.js'
 export {
@@ -20,11 +19,6 @@ export {
   updateAssistantSessionOptionsLocal,
 } from './local-service.js'
 export { sendAssistantNotificationLocal } from './notification-turn.js'
-export {
-  buildAssistantConversationContextTranscriptText,
-  readAssistantConversationContextTranscriptText,
-  recordAssistantConversationContextLocal,
-} from './conversation-context.js'
 export {
   ASSISTANT_ASK_CONTINUATION_TURN_PROFILE,
   buildAssistantAskContinuationMessageInput,
@@ -62,10 +56,6 @@ export type {
   AssistantAskContinuationInput,
   AssistantAskContinuationResult,
 } from './ask-continuation.js'
-export type {
-  AssistantConversationContextInput,
-  AssistantConversationContextResult,
-} from './conversation-context.js'
 
 export type AssistantSessionOptionsPatch = Pick<
   AssistantSession['providerOptions'],
@@ -95,12 +85,6 @@ export async function sendAssistantAskContinuation(
   input: import('./ask-continuation.js').AssistantAskContinuationInput,
 ) {
   return sendAssistantAskContinuationTurnLocal(input)
-}
-
-export async function recordAssistantConversationContext(
-  input: import('./conversation-context.js').AssistantConversationContextInput,
-) {
-  return recordAssistantConversationContextTurnLocal(input)
 }
 
 export async function updateAssistantSessionOptions(input: {

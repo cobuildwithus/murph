@@ -51,7 +51,6 @@ export type HostedSystemMailboxRouteAction =
   | "apply-member-channels-update"
   | "apply-member-preferences"
   | "dispatch-assistant-notification"
-  | "record-phone-call-result-context"
   | "run-assistant-ask"
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
@@ -504,7 +503,6 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "apply-member-channels-update"
     || value === "apply-member-preferences"
     || value === "dispatch-assistant-notification"
-    || value === "record-phone-call-result-context"
     || value === "run-assistant-ask"
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
@@ -688,9 +686,6 @@ function systemMailboxItemIsCausallyEligible(
   maxCausalSeq: string | null,
 ): boolean {
   if (!maxCausalSeq) {
-    return true;
-  }
-  if (item.routeAction !== "record-phone-call-result-context") {
     return true;
   }
   if (!item.causalSeq) {

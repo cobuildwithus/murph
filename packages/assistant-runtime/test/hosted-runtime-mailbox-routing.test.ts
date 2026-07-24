@@ -48,11 +48,6 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
-        action: "record-phone-call-result-context",
-        kind: "phone-call.resulted",
-        lane: "system",
-      },
-      {
         action: "run-assistant-ask",
         kind: "assistant.ask.requested",
         lane: "system",
@@ -140,7 +135,6 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.channels.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("member.preferences.updated"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.notification.requested"), "system");
-    assert.equal(resolveExpectedLaneForHostedMailboxKind("phone-call.resulted"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.requested"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("assistant.ask.completed"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("clinical-records.sync-requested"), "system");

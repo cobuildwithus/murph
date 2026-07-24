@@ -34,10 +34,10 @@ export const POST = withJsonError(async (request: Request) => {
         () => accountRetellPhoneCallUsage({ call: payload.call }),
         async () => {
           const result = await handleRetellCallAnalyzed({ call: payload.call });
-          if (result.contextMailboxItemId) {
+          if (result.notificationMailboxItemId) {
             await signalHostedMailboxAppendRuntime({
-              expectedUserId: result.contextUserId,
-              mailboxItemId: result.contextMailboxItemId,
+              expectedUserId: result.notificationUserId,
+              mailboxItemId: result.notificationMailboxItemId,
             });
           }
         },

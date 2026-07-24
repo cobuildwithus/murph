@@ -11,6 +11,9 @@ import {
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedAssistantNotificationDecisionResponse,
+} from "./helpers/hosted-local-e2e-support.js";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -32,7 +35,6 @@ const linqWebhookSecret = "linq-local-retell-result-secret";
 const assistantModel = "gpt-5.6-terra";
 const resultSummary = "The pharmacy confirmed the prescription will be ready this afternoon.";
 const resultReply = "The pharmacy confirmed your prescription will be ready this afternoon. No follow-up is needed.";
-const resultQuestion = "Did the pharmacy call return?";
 const setupQuestion = "Can you keep this conversation open while I wait for a pharmacy update?";
 const setupReply = "Yes, I’ll be here when you have an update.";
 
@@ -78,7 +80,7 @@ describe("hosted local Retell result roundtrip e2e", () => {
     });
   }, 300_000);
 
-  it("records one signed call result for the next attended turn without automatic delivery", async () => {
+  it("delivers one signed call result proactively without a follow-up user turn", async () => {
     const memberPhone = buildLinqRecipientPhoneNumber(userId);
     await requireScenario().seedActiveHostedLinqMember({
       homePhone: buildLinqHomePhoneNumber(userId),
@@ -150,30 +152,23 @@ describe("hosted local Retell result roundtrip e2e", () => {
       requestKey: `retell-result-e2e:${runId}`,
     });
 
+    // The completed call runs an allow-skip notification turn; queue the
+    // assistant's composed result message keyed on the untrusted summary.
+    requireScenario().queueAssistantResponses([
+      buildHostedAssistantNotificationDecisionResponse({
+        privateSummary: "deliver pharmacy call result",
+        text: resultReply,
+      }),
+    ], {
+      matchInputContains: resultSummary,
+    });
     const baselineSends = requireLinqStub().countObservedSends(replyPath);
     const baselineProviderRequests = countAssistantProviderRequests();
     const payload = buildRetellCallAnalyzedPayload();
     const response = await postSignedRetellWebhook(payload);
     expect(response.status).toBe(204);
 
-    await requireScenario().waitForLatestPendingWake(userId);
-    const contextStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(contextStatus.lastErrorCode ?? null).toBeNull();
-    expect(contextStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
-    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends);
-    expect(countAssistantProviderRequests()).toBe(baselineProviderRequests);
-
-    requireScenario().queueAssistantResponses([resultReply], {
-      matchInputContains: resultSummary,
-    });
-    const questionResponse = await postSignedLinqWebhook(
-      buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_retell_result_question_${runId}`,
-        messageId: `msg_retell_result_question_${runId}`,
-        text: resultQuestion,
-      }),
-    );
-    expect(questionResponse.status).toBe(202);
+    // Proactive delivery: one message is sent WITHOUT any follow-up user turn.
     await requireScenario().waitForLatestPendingWake(userId);
     const send = await requireLinqStub().waitForAdditionalSend({
       baselineCount: baselineSends,
@@ -183,14 +178,18 @@ describe("hosted local Retell result roundtrip e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(send)).toBe(resultReply);
 
-    const finalStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(finalStatus.lastErrorCode ?? null).toBeNull();
-    expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    const resultStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(resultStatus.lastErrorCode ?? null).toBeNull();
+    expect(resultStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
+    // Exactly one notification provider request ran, framed with the untrusted
+    // call result and carrying the result summary.
     expect(requireScenario().assistantProviderRequests.slice(baselineProviderRequests).some((request) =>
       request.url === "/v1/responses"
       && request.body.includes(resultSummary)
       && request.body.includes("untrusted provider/callee text")
     )).toBe(true);
+    expect(countAssistantProviderRequests()).toBe(baselineProviderRequests + 1);
+    expect(requireLinqStub().countObservedSends(replyPath)).toBe(baselineSends + 1);
 
     const storedCall = await readHostedPhoneCallForTest({
       environment: requireScenario().runtimeEnv,
@@ -207,6 +206,9 @@ describe("hosted local Retell result roundtrip e2e", () => {
     expect(storedCall?.resultEncrypted).not.toHaveLength(0);
     expect(storedCall?.resultJson).toBeNull();
 
+    // Idempotent replay: re-POSTing the same call_analyzed sends no second
+    // message and runs no second turn (deliveryIdempotencyKey dedupe on
+    // phone-call-result:${call.id}).
     const replay = await postSignedRetellWebhook(payload);
     expect(replay.status).toBe(204);
     await requireScenario().waitForHostedIdle(userId);

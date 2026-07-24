@@ -2774,10 +2774,8 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
     },
     beforeProviderAcceptedInputs: async ({
       acceptedInputs,
-      directUserActionSession,
     }) => {
       assert.deepEqual(acceptedInputs.map((item) => item.id), ['turn-default'])
-      assert.equal(directUserActionSession, undefined)
       callOrder.push('accepted-inputs')
     },
     prompt: 'Initial prompt',
@@ -2785,115 +2783,6 @@ test('sendAssistantMessageLocal binds accepted inputs before provider execution'
   })
 
   assert.deepEqual(callOrder, ['accepted-inputs', 'provider'])
-})
-
-test.each([
-  {
-    expectedSessionId: 'session-new-direct',
-    label: 'created by the current turn',
-    sessionCreated: true,
-    turnTrigger: 'manual-ask' as const,
-  },
-  {
-    expectedSessionId: 'session-new-direct',
-    label: 'created earlier by an output-only welcome',
-    sessionCreated: false,
-    turnTrigger: 'manual-ask' as const,
-  },
-  {
-    expectedSessionId: null,
-    label: 'used by an output-only notification',
-    sessionCreated: false,
-    turnTrigger: 'automation-cron' as const,
-  },
-])('sendAssistantMessageLocal emits the direct user-action session boundary for a session $label', async ({
-  expectedSessionId,
-  sessionCreated,
-  turnTrigger,
-}) => {
-  const callOrder: string[] = []
-  const session = createAssistantSession({
-    binding: {
-      actorId: 'actor-direct-session',
-      channel: 'linq',
-      conversationKey: null,
-      delivery: {
-        kind: 'thread',
-        target: 'thread-direct-session',
-      },
-      identityId: 'identity-direct-session',
-      threadId: 'thread-direct-session',
-      threadIsDirect: true,
-    },
-    sessionId: 'session-new-direct',
-  })
-  const directPlan = createSharedPlan()
-  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
-    plan: {
-      ...directPlan,
-      conversationPolicy: {
-        ...directPlan.conversationPolicy,
-        audience: {
-          ...directPlan.conversationPolicy.audience,
-          actorId: 'actor-direct-session',
-          channel: 'linq',
-          effectiveThreadIsDirect: true,
-          identityId: 'identity-direct-session',
-          threadId: 'thread-direct-session',
-          threadIsDirect: true,
-        },
-      },
-    },
-    session,
-    sessionCreated,
-  })
-  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(async (providerInput) => {
-    await providerInput.onProviderRequestPlanned?.({
-      providerAttemptId: null,
-      codexContinuation: {
-        kind: 'explicit-structured-history',
-      },
-    })
-    callOrder.push('provider')
-    return {
-      kind: 'succeeded',
-      providerTurn: {
-        onboardingGuidanceInjected: true,
-        codexContinuation: {
-          kind: 'explicit-structured-history',
-        },
-        codexThreadId: 'provider-thread-new-direct',
-        response: 'assistant response',
-        responseDeliveryContextOrdinal: 0,
-        transcriptResponse: 'assistant response',
-        route: {
-          routeId: 'route-new-direct',
-        },
-        session,
-      },
-    }
-  })
-
-  await sendAssistantMessageLocal({
-    acceptedTurnInput: {
-      initialInputs: [{
-        id: 'input-new-direct-user-action',
-        source: 'manual',
-      }],
-    },
-    beforeProviderAcceptedInputs: async ({ directUserActionSession }) => {
-      assert.deepEqual(
-        directUserActionSession,
-        expectedSessionId ? { sessionId: expectedSessionId } : undefined,
-      )
-      callOrder.push('new-direct-session')
-    },
-    prompt: 'Please place the call.',
-    turnTrigger,
-    vault: '/vaults/test',
-  })
-
-  assert.deepEqual(callOrder, ['new-direct-session', 'provider'])
 })
 
 test('sendAssistantMessageLocal updates provider request metadata when final continuation changes', async () => {

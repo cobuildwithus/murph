@@ -152,24 +152,22 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
-## Phone-Call Result Context Deployment
+## Phone-Call Result Deployment
 
-`phone-call.resulted` is a new system-mailbox kind and has no safe old-runner,
-new-web compatibility window. First apply the additive nullable
-`HostedPhoneCall.origin_session_id` migration and confirm that active calls from
-the prior producer have drained; legacy rows without an origin session persist
-their analysis result but skip the context append. Deploy Cloudflare and the
-runner consumer next
-with `container_rollout=immediate`, require managed-container smoke to report
-the expected runner-bundle fingerprint, and verify there are no hosted mailbox
-parse or quarantine failures. Only then deploy Web, which replaces the prior
-automatic result notification with the internal context event. The first
-compatible runner is the rollback floor while that Web producer is active or
-any result event can remain durable or imported. Phone-call starts fail closed
-during the runner-first window: the new runner sends `originSessionId`, which
-the old Web start endpoint rejects, so `create_phone_call` returns a start
-failure to the model until Web deploys. Keep that window short; old Web
-producers otherwise retain the prior automatic-message behavior.
+A completed phone call delivers its result as a proactive
+`assistant.notification.requested` message: Murph composes the result in its own
+voice and may skip a non-meaningful call. This reuses the existing notification
+wake path, so no new mailbox kind or runtime consumer is introduced and there is
+no result-path old-runner/new-web compatibility window.
+
+Apply the additive nullable `HostedPhoneCall.origin_session_id` migration; it is
+used only for phone-call request-key idempotency, not for delivery, so legacy
+rows without an origin session still deliver their result. The start schema
+still requires `originSessionId`, so `create_phone_call` fails closed during a
+runner-first window (a new runner sends the field to an old Web start endpoint
+that rejects it) — deploy Web and the runner together, or keep the window short.
+Delivery requires a resolvable member messaging route, exactly like every other
+proactive notification.
 
 ## Consented Group Disclosure Rollout
 

@@ -17,7 +17,6 @@ import {
   appendAssistantTranscriptEntriesWithRefs,
   listAssistantSessions,
   listAssistantSessionsLocal,
-  listValidAssistantSessionIds,
   updateAssistantAutomationState,
 } from '../src/assistant/store.ts'
 import {
@@ -763,37 +762,6 @@ describe('assistant store persistence seams', () => {
     expect(rebuilt.recentSessions?.['session-legacy-59']).toBe(
       '2026-04-08T00:59:00.000Z',
     )
-  })
-
-  it('lists valid session ids without mutating invalid restored session files', async () => {
-    const context = await createTempVaultContext(
-      'assistant-store-persistence-valid-session-ids-',
-    )
-    tempRoots.push(context.parentRoot)
-    const paths = resolveAssistantStatePaths(context.vaultRoot)
-    await ensureAssistantState(paths)
-    const validSession = createSession({
-      sessionId: 'session-valid-restored',
-    })
-    const invalidSessionId = 'session-invalid-restored'
-    const invalidSessionPath = resolveAssistantSessionPath(
-      paths,
-      invalidSessionId,
-    )
-    await writeAssistantSession(paths, validSession)
-    await writeFile(
-      invalidSessionPath,
-      '{"session":"legacy-invalid"}\n',
-      'utf8',
-    )
-
-    await expect(
-      listValidAssistantSessionIds(context.vaultRoot),
-    ).resolves.toEqual([validSession.sessionId])
-    await expect(readFile(invalidSessionPath, 'utf8')).resolves.toBe(
-      '{"session":"legacy-invalid"}\n',
-    )
-    await expect(listAssistantQuarantineEntriesAtPaths(paths)).resolves.toEqual([])
   })
 
   it('treats corrupted session files as missing and ignores corrupted legacy sidecars for Codex sessions', async () => {

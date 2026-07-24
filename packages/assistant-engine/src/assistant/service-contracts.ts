@@ -104,9 +104,6 @@ export type AssistantProviderAcceptedInputsRelease = () => Promise<void> | void
 
 export type AssistantBeforeProviderAcceptedInputsHook = (event: {
   acceptedInputs: readonly AssistantAcceptedTurnInputItemInput[]
-  directUserActionSession?: {
-    sessionId: string
-  } | null
 }) =>
   | AssistantProviderAcceptedInputsRelease
   | Promise<AssistantProviderAcceptedInputsRelease | void>

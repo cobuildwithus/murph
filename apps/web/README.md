@@ -253,13 +253,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
   secure-box ciphertext; new writes never populate the nullable legacy JSON
   columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph. The call row persists the exact initiating resident-session id. Final
-  analysis appends a `phone-call.resulted` system-mailbox event carrying that id
-  plus at most 4,000 UTF-8 bytes of context; it never re-resolves the member's
-  current messaging route. It is internal context for the next
-  attended user turn, not an automatic result notification; the runtime starts
-  no provider turn and performs no delivery for this event. The web owner bounds
-  the aggregate start path at 40 seconds. Because
+  Murph. The call row persists the exact initiating resident-session id for
+  request-key idempotency. Final analysis appends an
+  `assistant.notification.requested` system-mailbox event: Murph composes the
+  result in its own voice and proactively messages the member's resolved
+  messaging route, and may skip a non-meaningful result (allow-send-or-skip).
+  The result JSON is framed as untrusted provider/callee text. The web owner
+  bounds the aggregate start path at 40 seconds. Because
   Retell create-call has no documented idempotency contract, a connection or
   timeout ambiguity preserves the durable row as `starting`; the same request
   key never blindly creates another provider call. Exact replays resolve the

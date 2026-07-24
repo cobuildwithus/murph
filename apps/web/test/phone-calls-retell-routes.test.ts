@@ -61,8 +61,8 @@ describe("Retell ask_murph route", () => {
     });
     mocks.accountRetellPhoneCallUsage.mockResolvedValue("accounted");
     mocks.handleRetellCallAnalyzed.mockResolvedValue({
-      contextMailboxItemId: "mailbox_item_123",
-      contextUserId: "member_123",
+      notificationMailboxItemId: "mailbox_item_123",
+      notificationUserId: "member_123",
     });
     mocks.handleRetellCallEnded.mockResolvedValue(undefined);
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
@@ -307,12 +307,12 @@ describe("Retell ask_murph route", () => {
       .mockResolvedValueOnce("accounted");
     mocks.handleRetellCallAnalyzed
       .mockResolvedValueOnce({
-        contextMailboxItemId: "mailbox_item_123",
-        contextUserId: "member_123",
+        notificationMailboxItemId: "mailbox_item_123",
+        notificationUserId: "member_123",
       })
       .mockResolvedValueOnce({
-        contextMailboxItemId: null,
-        contextUserId: null,
+        notificationMailboxItemId: null,
+        notificationUserId: null,
       });
     const request = () => signedRetellRequest({
       payload: {
@@ -445,8 +445,8 @@ describe("Retell ask_murph route", () => {
 
   it("does not wake the runtime when call_analyzed did not append context", async () => {
     mocks.handleRetellCallAnalyzed.mockResolvedValueOnce({
-      contextMailboxItemId: null,
-      contextUserId: null,
+      notificationMailboxItemId: null,
+      notificationUserId: null,
     });
 
     const response = await retellWebhookRoute.POST(signedRetellRequest({

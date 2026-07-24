@@ -5,7 +5,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  findNextHostedSystemMailboxQueueItem,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxHandledThroughSeq,
@@ -296,85 +295,6 @@ describe("hosted runtime mailbox import state", () => {
 });
 
 describe("hosted runtime system mailbox state", () => {
-  it("admits phone-call context only through the accepted conversation causal frontier", () => {
-    const item: HostedSystemMailboxPendingItem = {
-      ...buildPendingSystemMailboxItem({
-        itemId: "phone-call-result",
-        mailboxLaneSeq: "19",
-      }),
-      causalSeq: "21",
-      routeAction: "record-phone-call-result-context",
-      wake: {
-        eventId: "phone-call.resulted:call-1",
-        kind: "phone-call.resulted",
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        phoneCall: {
-          context: "Internal call result context.",
-          originSessionId: "session_origin",
-        },
-        userId: "member_123",
-      },
-    };
-    const input = {
-      allowedRouteActions: ["record-phone-call-result-context"] as const,
-      now: "2026-04-27T00:00:00.000Z",
-      state: { pending: [item] },
-    };
-
-    expect(findNextHostedSystemMailboxQueueItem({
-      ...input,
-      maxCausalSeq: "20",
-    })).toBeNull();
-    expect(findNextHostedSystemMailboxQueueItem({
-      ...input,
-      maxCausalSeq: "21",
-    })).toEqual(item);
-  });
-
-  it("keeps preference progress independent from an ineligible phone-result head", () => {
-    const phoneResult = {
-      ...buildPendingSystemMailboxItem({
-        itemId: "phone-call-result",
-        mailboxLaneSeq: "21",
-      }),
-      causalSeq: "21",
-      preferenceCausalSeq: null,
-      routeAction: "record-phone-call-result-context" as const,
-      wake: {
-        eventId: "phone-call.resulted:call-1",
-        kind: "phone-call.resulted" as const,
-        occurredAt: "2026-04-27T00:00:00.000Z",
-        phoneCall: {
-          context: "Internal call result context.",
-          originSessionId: "session_origin",
-        },
-        userId: "member_123",
-      },
-    };
-    const preference = {
-      ...buildPendingSystemMailboxItem({
-        itemId: "member-preference",
-        mailboxLaneSeq: "12",
-      }),
-      causalSeq: null,
-      preferenceCausalSeq: "10",
-    };
-    const state = { pending: [phoneResult, preference] };
-
-    expect(findNextHostedSystemMailboxQueueItem({
-      allowedRouteActions: ["record-phone-call-result-context"],
-      maxCausalSeq: "20",
-      now: "2026-04-27T00:00:00.000Z",
-      state,
-    })).toBeNull();
-    expect(findNextHostedSystemMailboxQueueItem({
-      allowedRouteActions: ["apply-member-preferences"],
-      maxCausalSeq: "20",
-      now: "2026-04-27T00:00:00.000Z",
-      state,
-    })).toEqual(preference);
-  });
-
   it("acknowledges only the contiguous imported prefix before pending system work", () => {
     expect(resolveHostedSystemMailboxHandledThroughSeq({
       importedSeq: "9",

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS,
-  HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES,
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
@@ -523,59 +522,6 @@ describe("parseHostedExecutionEvent", () => {
       },
       userId: "user-1",
     });
-  });
-
-  it("parses bounded phone-call result context for an initiating session", () => {
-    const value = {
-      kind: "phone-call.resulted",
-      phoneCall: {
-        context: "Internal call result context.",
-        originSessionId: "session_origin",
-      },
-      userId: "user-1",
-    } as const;
-
-    expect(parseHostedExecutionWake({
-      ...value,
-      eventId: "phone-call.resulted:call-1",
-      occurredAt: "2026-07-22T16:24:46.000Z",
-    })).toEqual({
-      ...value,
-      eventId: "phone-call.resulted:call-1",
-      occurredAt: "2026-07-22T16:24:46.000Z",
-    });
-  });
-
-  it("rejects phone-call result context without a bounded origin session", () => {
-    const value = {
-      kind: "phone-call.resulted",
-      phoneCall: {
-        context: "Internal call result context.",
-        originSessionId: "session_origin",
-      },
-      userId: "user-1",
-    } as const;
-
-    expect(() => parseHostedExecutionWake({
-      ...value,
-      eventId: "phone-call.resulted:call-1",
-      occurredAt: "2026-07-22T16:24:46.000Z",
-      phoneCall: {
-        ...value.phoneCall,
-        originSessionId: "",
-      },
-    })).toThrow(/non-empty string/u);
-    expect(() => parseHostedExecutionWake({
-      ...value,
-      eventId: "phone-call.resulted:call-1",
-      occurredAt: "2026-07-22T16:24:46.000Z",
-      phoneCall: {
-        ...value.phoneCall,
-        context: "界".repeat(
-          Math.ceil(HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES / 3) + 1,
-        ),
-      },
-    })).toThrow(/UTF-8 bytes/u);
   });
 
   it("parses device-sync wake events with hint jobs and revoke warnings", () => {

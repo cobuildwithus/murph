@@ -45,7 +45,6 @@ import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
   getAssistantCronStatus,
-  listValidAssistantSessionIds,
 } from "@murphai/assistant-engine";
 import {
   createHostedAssistantTurnEnvironment,
@@ -1111,11 +1110,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       workspace: workspaceRead.workspace,
     });
     assertRuntimeNotAborted();
-    const durablyCheckpointedDirectAssistantSessionIds =
-      workspaceRead.workspace?.snapshotRef
-        ? new Set(await listValidAssistantSessionIds(restored.vaultRoot))
-        : new Set<string>();
-    assertRuntimeNotAborted();
     const workspaceRestoreDoneAt = new Date().toISOString();
     initialAssistantInputLatencyMilestones.workspaceRestoreDoneAt = workspaceRestoreDoneAt;
     // Attach the in-memory cold-start phase breakdown to the SAME staged-milestone
@@ -1805,8 +1799,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         let currentAssistantInputId: string | null = null;
         const passPromise = runHostedWorkspaceUntilIdleOrBudget({
           ...baseRunnerInput,
-          checkpointDirectAssistantSession,
-          shouldCheckpointDirectAssistantSession,
           initialAssistantInputBatch: passInput.initialAssistantInputBatch ?? null,
           initialMailboxImport: passInput.initialMailboxImport,
           initialMailboxImportContext: passInput.initialMailboxImportContext ?? null,
@@ -1855,20 +1847,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 },
                 beforeProviderAcceptedInputs: async ({
                   acceptedInputs,
-                  directUserActionSession,
                 }) => {
-                  if (directUserActionSession) {
-                    const checkpointDirectSession =
-                      phaseInput.beforeDirectAssistantSessionProviderTurn;
-                    if (!checkpointDirectSession) {
-                      throw new TypeError(
-                        "Hosted direct user-action sessions require pre-provider checkpoint support.",
-                      );
-                    }
-                    await checkpointDirectSession(
-                      directUserActionSession.sessionId,
-                    );
-                  }
                   const acceptedInputsOnlyAssistant = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
                   );
@@ -2208,45 +2187,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         mailboxBudgetExhausted: mailboxBudgetExhausted(),
         nextWakeAt: pendingWake.nextWakeAt,
       });
-    };
-    const shouldCheckpointDirectAssistantSession = (sessionId: string): boolean =>
-      !durablyCheckpointedDirectAssistantSessionIds.has(sessionId);
-    const checkpointDirectAssistantSession = async (sessionId: string) => {
-      if (!shouldCheckpointDirectAssistantSession(sessionId)) {
-        return null;
-      }
-      await pauseDetachedAssistantAskBeforeWorkspaceBoundary();
-      try {
-        await drainLocalWorkspaceMutationsBestEffort();
-        assertRuntimeNotAborted();
-        const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
-          assertRuntimeNotAborted,
-          checkpointRequestBuilder,
-          expectedUserId: input.request.userId,
-          inboxMediaRetentionWakeAt:
-            committedWorkspace?.inboxMediaRetentionWakeAt ?? null,
-          issueExportPort: runtime.platform.issueExportPort ?? null,
-          nextWakeAt: pendingWake.nextWakeAt,
-          nextWakeReason: pendingWake.nextWakeReason,
-          redactedStatus,
-          runtimeAbortSignal: runtimeAbortController.signal,
-          vaultRoot: restored.vaultRoot,
-          workspacePort: foregroundWorkspacePort,
-        });
-        // This checkpoint runs inside the active foreground pass. Advance the
-        // durable workspace reference without rebasing invocation-local wake
-        // projection or status state that the pass still owns.
-        committedWorkspace = checkpoint.workspace;
-        durablyCheckpointedDirectAssistantSessionIds.add(sessionId);
-        // Provider work continues after this boundary and mutates the same
-        // workspace. Keep the ordinary final checkpoint armed for those later
-        // writes instead of treating the pre-provider snapshot as clean.
-        runtimeStateDirty = true;
-        markIdleCheckpointTimerAfterDirtyWork();
-        return checkpoint.workspace;
-      } finally {
-        resumeDetachedAssistantAskAfterWorkspaceBoundary();
-      }
     };
     const stageDurableCheckpointFollowUp = (
       workspace: HostedWorkspaceState | null,

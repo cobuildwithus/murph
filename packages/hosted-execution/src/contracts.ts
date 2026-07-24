@@ -85,7 +85,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "member.channels.updated",
   "member.preferences.updated",
   "assistant.notification.requested",
-  "phone-call.resulted",
   "assistant.ask.requested",
   "assistant.ask.completed",
   "clinical-records.sync-requested",
@@ -236,14 +235,6 @@ export interface HostedExecutionAssistantNotificationRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: "assistant.notification.requested";
   notification: HostedExecutionAssistantNotificationRequestedPayload;
-}
-
-export const HOSTED_EXECUTION_PHONE_CALL_RESULT_CONTEXT_MAX_UTF8_BYTES = 4_000;
-export const HOSTED_EXECUTION_PHONE_CALL_ORIGIN_SESSION_ID_MAX_CODE_POINTS = 200;
-
-export interface HostedExecutionPhoneCallResultedPayload {
-  context: string;
-  originSessionId: string;
 }
 
 export const HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS = 1_200;
@@ -628,12 +619,6 @@ export interface HostedExecutionAssistantNotificationRequestedWake
   notification: HostedExecutionAssistantNotificationRequestedPayload;
 }
 
-export interface HostedExecutionPhoneCallResultedWake
-  extends HostedExecutionBaseWake {
-  kind: "phone-call.resulted";
-  phoneCall: HostedExecutionPhoneCallResultedPayload;
-}
-
 export interface HostedExecutionAssistantAskRequestedWake
   extends HostedExecutionBaseWake {
   ask: HostedExecutionAssistantAskRequestedPayload;
@@ -740,7 +725,6 @@ export type HostedExecutionWake =
   | HostedExecutionMemberChannelsUpdatedWake
   | HostedExecutionMemberPreferencesUpdatedWake
   | HostedExecutionAssistantNotificationRequestedWake
-  | HostedExecutionPhoneCallResultedWake
   | HostedExecutionAssistantAskRequestedWake
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake

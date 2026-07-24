@@ -44,7 +44,6 @@ import {
 import {
   readAssistantCodexResume,
 } from '../conversation-persistence.js'
-import { readAssistantConversationContextTranscriptText } from '../conversation-context.js'
 import {
   listAssistantTranscriptEntries,
 } from '../store.js'
@@ -905,18 +904,6 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   }
 
   const messages = entries.flatMap((entry): TranscriptHistoryCandidate[] => {
-    const conversationContext = entry.kind === 'status'
-      ? readAssistantConversationContextTranscriptText(entry.text)
-      : null
-    if (conversationContext) {
-      return [{
-        message: {
-          content: conversationContext,
-          role: 'assistant',
-        },
-        userPromptKey: null,
-      }]
-    }
     if (
       entry.kind === 'status' &&
       entry.text.startsWith(ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX)
