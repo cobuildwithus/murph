@@ -6,6 +6,7 @@ import {
   buildHostedVaultShareActivityDistanceProjectionScope,
   buildHostedVaultShareActivityMinutesProjectionScope,
   buildHostedVaultShareActivitySessionCountProjectionScope,
+  buildHostedVaultShareProjectionScopeKey,
   getHostedVaultShareActivityDistanceProjectionSpec,
   getHostedVaultShareActivityMinutesProjectionSpec,
   getHostedVaultShareActivitySessionCountProjectionSpec,
@@ -177,6 +178,7 @@ function activitySessionRow(input: {
   distanceMeters?: number | null;
   durationMinutes?: number | null;
   endedAt?: string | null;
+  isWorkout?: boolean;
   observedAt?: string;
   recordIds?: string[];
   sourceKind?: string;
@@ -190,6 +192,7 @@ function activitySessionRow(input: {
     ...(input.distanceMeters === undefined ? {} : { distanceMeters: input.distanceMeters }),
     ...(input.durationMinutes === undefined ? {} : { durationMinutes: input.durationMinutes }),
     endedAt: input.endedAt ?? null,
+    isWorkout: input.isWorkout ?? true,
     observedAt: input.observedAt ?? `${input.date}T12:00:00.000Z`,
     pointIds: [`point_${recordIds.join("_")}`],
     recordIds,
@@ -1150,6 +1153,159 @@ describe("selectProjectableWorkoutLatestStartDays", () => {
     }
   });
 
+  it("uses stored provider provenance to exclude Oura wellness sessions from workout starts", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_oura_workout_before_wellness",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T18:30:00.000Z",
+        dayKey: "2026-07-03",
+        recordedAt: "2026-07-03T19:15:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "oura",
+          resourceType: "workout",
+          resourceId: "oura-workout-1",
+        },
+        activityType: "running",
+        durationMinutes: 45,
+        workout: {
+          sourceApp: "oura",
+          sourceWorkoutId: "oura-workout-1",
+          startedAt: "2026-07-03T18:30:00.000Z",
+          endedAt: "2026-07-03T19:15:00.000Z",
+          exercises: [],
+          metrics: {},
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_oura_wellness_after_workout",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T21:30:00.000Z",
+        dayKey: "2026-07-03",
+        recordedAt: "2026-07-03T22:00:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "oura",
+          resourceType: "session",
+          resourceId: "oura-session-1",
+        },
+        activityType: "breathing",
+        durationMinutes: 30,
+        workout: {
+          sourceApp: "oura",
+          sourceWorkoutId: "oura-session-1",
+          startedAt: "2026-07-03T21:30:00.000Z",
+          endedAt: "2026-07-03T22:00:00.000Z",
+          exercises: [],
+          metrics: {},
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_manual_strength_workout",
+        kind: "activity_session",
+        occurredAt: "2026-07-02T20:00:00.000Z",
+        dayKey: "2026-07-02",
+        recordedAt: "2026-07-02T20:45:00.000Z",
+        source: "manual",
+        activityType: "strength-training",
+        durationMinutes: 45,
+        workout: {
+          startedAt: "2026-07-02T20:00:00.000Z",
+          endedAt: "2026-07-02T20:45:00.000Z",
+          exercises: [],
+          metrics: {},
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_strava_run",
+        kind: "activity_session",
+        occurredAt: "2026-07-01T19:00:00.000Z",
+        dayKey: "2026-07-01",
+        recordedAt: "2026-07-01T19:40:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "strava",
+          resourceType: "activity",
+          resourceId: "strava-activity-1",
+        },
+        activityType: "running",
+        durationMinutes: 40,
+        workout: {
+          sourceApp: "strava",
+          sourceWorkoutId: "strava-activity-1",
+          startedAt: "2026-07-01T19:00:00.000Z",
+          endedAt: "2026-07-01T19:40:00.000Z",
+          exercises: [],
+          metrics: {},
+        },
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_legacy_provider_activity_session",
+        kind: "activity_session",
+        occurredAt: "2026-06-30T17:00:00.000Z",
+        dayKey: "2026-06-30",
+        recordedAt: "2026-06-30T17:32:00.000Z",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "whoop_v2/activity_session",
+          resourceId: "legacy-provider-activity-session-1",
+        },
+        activityType: "cycling",
+        durationMinutes: 32,
+        workout: {
+          sourceApp: "whoop",
+          sourceWorkoutId: "legacy-provider-activity-session-1",
+          startedAt: "2026-06-30T17:00:00.000Z",
+          endedAt: "2026-06-30T17:32:00.000Z",
+          exercises: [],
+          metrics: {},
+        },
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableWorkoutLatestStartDays(vaultRoot);
+      expect(selected.map((record) => record.data)).toEqual([
+        {
+          date: "2026-07-03",
+          latestStartLocalMs: 18 * 60 * 60 * 1_000 + 30 * 60 * 1_000,
+          timeSemantics:
+            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        },
+        {
+          date: "2026-07-02",
+          latestStartLocalMs: 20 * 60 * 60 * 1_000,
+          timeSemantics:
+            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        },
+        {
+          date: "2026-07-01",
+          latestStartLocalMs: 19 * 60 * 60 * 1_000,
+          timeSemantics:
+            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        },
+        {
+          date: "2026-06-30",
+          latestStartLocalMs: 17 * 60 * 60 * 1_000,
+          timeSemantics:
+            HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+        },
+      ]);
+      expect(selected).toHaveLength(4);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("widens the UTC source read before applying the event-zone date cutoff", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
@@ -1536,10 +1692,10 @@ describe("selectProjectableActivityMinutesDays", () => {
     }
   });
 
-  it("shares one cached session read across activity selector scopes in an offer", async () => {
+  it("projects active scopes in the production active-kinds order", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",
-      id: "evt_run_cache_1",
+      id: "evt_run_active_kinds_order_1",
       kind: "activity_session",
       occurredAt: "2026-07-03T07:00:00.000Z",
       dayKey: ACTIVITY_DAY.date,
@@ -1554,24 +1710,26 @@ describe("selectProjectableActivityMinutesDays", () => {
       },
     }]);
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
-    const deliver = vi.fn(async (request: HostedVaultShareDeliverRequest) => {
-      if (request.projectionScope === WORKOUT_LATEST_START_SCOPE) {
-        await rm(vaultRoot, { recursive: true, force: true });
-      }
-      return { status: "delivered" as const };
-    });
+    const deliver = vi.fn(async (_request: HostedVaultShareDeliverRequest) => ({
+      status: "delivered" as const,
+    }));
+    const activeScopes = [
+      WORKOUT_LATEST_START_SCOPE,
+      RUNNING_SCOPE,
+      RUNNING_DISTANCE_SCOPE,
+      RUNNING_SESSION_COUNT_SCOPE,
+    ].sort((left, right) =>
+      buildHostedVaultShareProjectionScopeKey(left).localeCompare(
+        buildHostedVaultShareProjectionScopeKey(right),
+      )
+    );
 
     try {
       await expect(offerHostedVaultShareProjectionBestEffort({
         vaultRoot,
         vaultSharePort: {
           deliver,
-          listActiveProjectionScopes: async () => [
-            WORKOUT_LATEST_START_SCOPE,
-            RUNNING_SCOPE,
-            RUNNING_DISTANCE_SCOPE,
-            RUNNING_SESSION_COUNT_SCOPE,
-          ],
+          listActiveProjectionScopes: async () => activeScopes,
         },
       })).resolves.toEqual({ outcome: "delivered" });
       expect(deliver).toHaveBeenCalledTimes(4);
@@ -1579,16 +1737,21 @@ describe("selectProjectableActivityMinutesDays", () => {
         (call: readonly [HostedVaultShareDeliverRequest]) =>
           call[0].projectionScope,
       )).toEqual([
-        WORKOUT_LATEST_START_SCOPE,
-        RUNNING_SCOPE,
         RUNNING_DISTANCE_SCOPE,
+        RUNNING_SCOPE,
         RUNNING_SESSION_COUNT_SCOPE,
+        WORKOUT_LATEST_START_SCOPE,
       ]);
-      expect(deliver.mock.calls[0]?.[0].records).toMatchObject([{
+      expect(deliver.mock.calls[0]?.[0].records).toEqual([{
         data: {
+          activityKind: "running",
           date: ACTIVITY_DAY.date,
-          latestStartLocalMs: 7 * 60 * 60 * 1_000,
+          sessionCount: 1,
+          sessionDistanceMeters: 5_000,
         },
+        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
+        recordKey: ACTIVITY_DAY.date,
+        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
       expect(deliver.mock.calls[1]?.[0].records).toMatchObject([{
         data: {
@@ -1603,21 +1766,16 @@ describe("selectProjectableActivityMinutesDays", () => {
           activityKind: "running",
           date: ACTIVITY_DAY.date,
           sessionCount: 1,
-          sessionDistanceMeters: 5_000,
         },
         occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
         recordKey: ACTIVITY_DAY.date,
         sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
-      expect(deliver.mock.calls[3]?.[0].records).toEqual([{
+      expect(deliver.mock.calls[3]?.[0].records).toMatchObject([{
         data: {
-          activityKind: "running",
           date: ACTIVITY_DAY.date,
-          sessionCount: 1,
+          latestStartLocalMs: 7 * 60 * 60 * 1_000,
         },
-        occurredAt: `${ACTIVITY_DAY.date}T00:00:00.000Z`,
-        recordKey: ACTIVITY_DAY.date,
-        sourceRevision: expect.stringMatching(SOURCE_REVISION_PATTERN),
       }]);
     } finally {
       dateNow.mockRestore();

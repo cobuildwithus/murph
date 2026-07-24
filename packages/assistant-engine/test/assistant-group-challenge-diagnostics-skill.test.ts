@@ -45,28 +45,71 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
   })
 
-  it('persists and applies one deterministic completed-date scoring rule', async () => {
+  it('keeps established Steps challenges on their existing date behavior', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
-    const kickoffRule =
-      'at kickoff, persist the selected rule as `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch\'s IANA schedule timezone as `scoringTimeZone` in **Rules & metric**, alongside any threshold fields'
-    const dailyRule =
-      'Before classifying or scoring any returned metric records, apply the persisted `scoringDateRule` and `scoringTimeZone`'
 
-    expect(challenge).toContain(kickoffRule)
     expect(challenge).toContain(
-      'For every challenge, also store `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch\'s IANA `scoringTimeZone`.',
+      'Only `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workout-latest-start-days.v0` use completed-date scoring.',
     )
     expect(challenge).toContain(
-      'compute the current calendar date in `scoringTimeZone`, then exclude every record whose `date` is equal to or later than that date',
+      'Every other scope, including `steps-days.v0`, keeps its existing date behavior and does not gain these fields; an available current-date Steps record remains scoreable under that existing behavior.',
     )
-    expect(challenge).toContain(dailyRule)
-    const dailyRuleIndex = challenge.indexOf(dailyRule)
-    const scoringIndex = challenge.indexOf(
-      'Classify every `in` participant in a successful result before composing',
+    expect(challenge).toContain(
+      'Any other scope, and any page without both explicit fields, keeps its existing date behavior; do not infer, append, or backfill the completed-date rule.',
     )
-    expect(dailyRuleIndex).toBeGreaterThanOrEqual(0)
-    expect(scoringIndex).toBeGreaterThan(dailyRuleIndex)
+    expect(challenge).not.toContain(
+      'Use one deterministic date-completeness rule for every challenge',
+    )
+    expect(challenge).not.toContain('For every challenge, also store')
+    expect(challenge).not.toContain(
+      'For a legacy active page missing either field, append both',
+    )
     expect(challenge).not.toContain('reporting cutoff')
+  })
+
+  it('keeps current-date-only completed-scope evidence pending without diagnostics', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      'when one or more otherwise usable records are available but all are excluded only because their dates are current or future in `scoringTimeZone`, classify the participant as `pending`, not missing.',
+    )
+    expect(challenge).toContain(
+      'Do not inspect device diagnostics, offer either permission, or suggest a device action for that pending state.',
+    )
+    expect(challenge).toContain(
+      'Tell the group that the open day is not final and the next completed date will be scored on the next dispatch.',
+    )
+    expect(challenge).toContain(
+      'A completed-date `pending` participant is never eligible for either offer.',
+    )
+  })
+
+  it('scores prior-date records for the new completed-date scopes normally', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+    const completedDateRule =
+      'When the scoring scope is `deep-sleep-days.v0`, `rem-sleep-days.v0`, or `workout-latest-start-days.v0` and the challenge page explicitly stores `scoringDateRule: prior-dispatch-local-date-only.v0` plus a `scoringTimeZone`, apply that completed-date rule before classifying or scoring'
+
+    expect(challenge).toContain(completedDateRule)
+    expect(challenge).toContain(
+      'A prior-date record for one of those scopes scores normally.',
+    )
+    expect(challenge).toContain(
+      'with challenge-metric data eligible under the scope\'s applicable date behavior: rank the participant from that metric evidence.',
+    )
+  })
+
+  it('routes a genuinely missing snapshot into the existing recovery flow', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain(
+      '`grantStatus="granted"` plus `dataStatus="missing"` means it is granted but no usable record was returned',
+    )
+    expect(challenge).toContain(
+      'A genuinely missing snapshot still follows the recovery evidence order below.',
+    )
+    expect(challenge).toContain(
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
+    )
   })
 
   it('builds complete or partial standings from the opted-in challenge roster', async () => {
@@ -170,11 +213,12 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('uses the evidence hierarchy and keeps Apple Health uncertainty honest', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const evidence = [
-      'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the persisted scoring-date rule',
+      'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the scope\'s applicable date behavior',
+      'A completed-date scoring projection is `granted` and `available`, and has one or more otherwise usable metric records but all are excluded only by `prior-dispatch-local-date-only.v0`',
       'The scoring projection is `not_granted`',
-      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, while `device-sync-status.v0` is `not_granted`',
-      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, while a recent `device-sync-status.v0` record is `available`',
-      'The scoring projection is `granted` but has no eligible challenge-metric data under the persisted scoring-date rule, and diagnostic data is also `granted` but `missing` or stale',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while a recent `device-sync-status.v0` record is `available`',
+      'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, and diagnostic data is also `granted` but `missing` or stale',
     ]
 
     for (let index = 1; index < evidence.length; index += 1) {

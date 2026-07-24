@@ -83,6 +83,19 @@ grant Apple Health access.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 
+Only `deep-sleep-days.v0`, `rem-sleep-days.v0`, and
+`workout-latest-start-days.v0` use completed-date scoring. Their open local day
+can still change. At kickoff for one of those scopes, persist
+`scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch's
+IANA schedule timezone as `scoringTimeZone` in **Rules & metric**. On each
+daily run, compute the current calendar date in `scoringTimeZone` and score
+only records whose `date` is strictly earlier. Never score the current or a
+future dispatch-local date for those scopes. A prior-date record for one of
+those scopes scores normally. Every other scope, including
+`steps-days.v0`, keeps its existing date behavior and does not gain these
+fields; an available current-date Steps record remains scoreable under that
+existing behavior.
+
 For a challenge such as "any workout starting after 6 PM," normalize the
 configured threshold once at kickoff to an integer number of milliseconds
 after local midnight and persist both the original wording and
@@ -99,15 +112,9 @@ history. Its required `timeSemantics` value is
 event timezone when available and otherwise the member vault timezone; it does
 not prove physical workout location. A missing date record
 is not `false`, not zero, and not evidence that no workout happened: leave the
-participant unscored for that date and report the data as missing. Use one
-deterministic date-completeness rule for every challenge: at kickoff, persist
-the selected rule as `scoringDateRule: prior-dispatch-local-date-only.v0` and
-the daily dispatch's IANA schedule timezone as `scoringTimeZone` in **Rules &
-metric**, alongside any threshold fields. On every daily run, compute the
-current calendar date in `scoringTimeZone` and score only records whose `date`
-is strictly earlier. Never score the current or a future dispatch-local date.
-The event or vault timezone still derives each workout record's date; it does
-not replace the persisted challenge scoring timezone.
+participant unscored for that date and report the data as missing. The event or
+vault timezone still derives each workout record's date; it does not replace
+the completed-date scoring timezone.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -148,10 +155,13 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
 The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
-  settled any dispute about it. For every challenge, also store
+  settled any dispute about it. For `deep-sleep-days.v0`,
+  `rem-sleep-days.v0`, or `workout-latest-start-days.v0`, also store
   `scoringDateRule: prior-dispatch-local-date-only.v0` and the daily dispatch's
-  IANA `scoringTimeZone`. For a workout time-of-day rule, also store the
-  original threshold wording and normalized integer `thresholdLocalMs`.
+  IANA `scoringTimeZone`. A challenge page without both explicit fields keeps
+  its existing date behavior; do not infer or append them. For a workout
+  time-of-day rule, also store the original threshold wording and normalized
+  integer `thresholdLocalMs`.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
   `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
@@ -352,46 +362,61 @@ automation action rules with a `dailyLocal` schedule and
    Do not retry on every scheduled run; reconsider only after new attributable
    evidence makes that one association exact.
 
-   Before classifying or scoring any returned metric records, apply the
-   persisted `scoringDateRule` and `scoringTimeZone`: compute the current
-   calendar date in `scoringTimeZone`, then exclude every record whose `date`
-   is equal to or later than that date. Under
-   `prior-dispatch-local-date-only.v0`, only prior dispatch-local dates are
-   eligible. For a legacy active page missing either field, append both from
-   the existing `dailyLocal` dispatch schedule before scoring; if that schedule
-   timezone cannot be verified, do not publish standings.
+   When the scoring scope is `deep-sleep-days.v0`, `rem-sleep-days.v0`, or
+   `workout-latest-start-days.v0` and the challenge page explicitly stores
+   `scoringDateRule: prior-dispatch-local-date-only.v0` plus a
+   `scoringTimeZone`, apply that completed-date rule before classifying or
+   scoring: compute the current calendar date in `scoringTimeZone`, then
+   exclude every record whose `date` is equal to or later than that date. Only
+   prior dispatch-local dates are eligible. Any other scope, and any page
+   without both explicit fields, keeps its existing date behavior; do not
+   infer, append, or backfill the completed-date rule.
 
    Classify every `in` participant in a successful result before composing:
    `grantStatus="not_granted"` means the group share is not granted;
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
-   returned records. `available` does not make an ineligible date scoreable
-   under the persisted scoring-date rule. Apply `group-chat`'s **Shared fact
-   limits** before scoring.
+   returned records. For a completed-date scope, when one or more otherwise
+   usable records are available but all are excluded only because their dates
+   are current or future in `scoringTimeZone`, classify the participant as
+   `pending`, not missing. Do not inspect device diagnostics, offer either
+   permission, or suggest a device action for that pending state. Tell the
+   group that the open day is not final and the next completed date will be
+   scored on the next dispatch. Apply `group-chat`'s **Shared fact limits**
+   before scoring.
+   A genuinely missing snapshot still follows the recovery evidence order
+   below.
    Never infer a grant from a record or a record from a grant. Never reuse
    remembered numbers — wrong scores turn jokes into noise. A recorded zero is
    a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
    - The scoring projection is `granted` and `available`, with challenge-metric
-     data eligible under the persisted scoring-date rule: rank
-     the participant from that metric evidence.
+     data eligible under the scope's applicable date behavior: rank the
+     participant from that metric evidence.
+   - A completed-date scoring projection is `granted` and `available`, and has
+     one or more otherwise usable metric records but all are excluded only by
+     `prior-dispatch-local-date-only.v0`: keep the participant unranked as
+     `pending`, tell the group the next completed date will be scored, and stop.
+     This is not missing data and must not enter device diagnostics or either
+     permission offer.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact
      scope, include the scope in the one proactive permission offer described
      below.
-   - The scoring projection is `granted` but has no eligible challenge-metric data
-     under the persisted scoring-date rule, while `device-sync-status.v0` is
-     `not_granted`: unless
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     while `device-sync-status.v0` is `not_granted`: unless
      their sharing choices record an explicit decline or prior handled offer
      action for that exact scope, include the diagnostic scope in the one
      proactive permission offer described below.
-   - The scoring projection is `granted` but has no eligible challenge-metric data
-     under the persisted scoring-date rule, while a recent
-     `device-sync-status.v0` record is `available`: you may state its literal
-     source label, coarse status, and, only when useful, the accurately named
-     connection-wide sync-job completion time described below. Treat a
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     while a recent `device-sync-status.v0` record is `available`: you may
+     state its literal source label, coarse status, and, only when useful, the
+     accurately named connection-wide sync-job completion time described
+     below. Treat a
      projection whose `observedAt` is more than two local calendar days old as
      stale and unverified. Only
      `needs-reconnect` and `disconnected` support a direct reconnect action,
@@ -407,12 +432,11 @@ automation action rules with a `dailyLocal` schedule and
      Apple Health status, follow the status-specific rules above. If the recent
      projection has an empty `sources` list, say only that this diagnostic
      result contains no visible sources and suggest a private source check.
-   - The scoring projection is `granted` but has no eligible challenge-metric data
-     under the persisted scoring-date rule, and diagnostic data is also
-     `granted` but `missing` or
-     stale: report that diagnostic state without guessing about permissions, a
-     disconnected device, source freshness, or whether the participant opened
-     the app.
+   - The scoring projection is `granted` but is genuinely missing usable
+     challenge-metric data for reasons other than completed-date eligibility,
+     and diagnostic data is also `granted` but `missing` or stale: report that
+     diagnostic state without guessing about permissions, a disconnected
+     device, source freshness, or whether the participant opened the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
    participant denied, forgot, or has not approved Apple Health Steps. The
@@ -424,9 +448,9 @@ automation action rules with a `dailyLocal` schedule and
 4. Lead with completeness: say whether the standings are complete or partial
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
-   message. Name every `in` participant who is missing current data, state the
-   evidence-backed status, and give the smallest useful action. Never present a
-   partial table as the full standings.
+   message. Name every `in` participant who is missing current data or pending
+   a completed date, state the evidence-backed status, and give the smallest
+   useful action. Never present a partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
    in ordinary language in this same standings response and address the
@@ -435,12 +459,13 @@ automation action rules with a `dailyLocal` schedule and
 
    After `read_shared`, collect the exact scopes eligible for a proactive offer:
    use the scoring scope when that scope is `not_granted`; use
-   `device-sync-status.v0` only when the scoring scope is granted but has no
-   current metric and the diagnostic scope is `not_granted`. Exclude a scope
-   only when every affected participant has either explicitly declined that
-   exact scope or has a handled offer action recorded for that exact participant
-   and scope. A prior handled action for one participant does not cover a newly
-   affected participant. Deduplicate the list.
+   `device-sync-status.v0` only when the scoring scope is granted but genuinely
+   lacks usable metric data and the diagnostic scope is `not_granted`. A
+   completed-date `pending` participant is never eligible for either offer.
+   Exclude a scope only when every affected participant has either explicitly
+   declined that exact scope or has a handled offer action recorded for that
+   exact participant and scope. A prior handled action for one participant does
+   not cover a newly affected participant. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
    call `murph.group action="post_join_offer"` exactly once after the read with

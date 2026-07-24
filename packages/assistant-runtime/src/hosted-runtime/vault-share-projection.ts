@@ -9,6 +9,7 @@ import {
   isStrictIsoDate,
   isStrictIsoDateTime,
   memoryDisplayNameSchema,
+  normalizeActivityKindToken,
   normalizeIanaTimeZone,
   parseFrontmatterDocument,
   resolveMemoryDisplayName,
@@ -104,6 +105,7 @@ export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   distanceMeters?: number | null;
   durationMinutes?: number | null;
   endedAt?: string | null;
+  isWorkout: boolean;
   startedAt?: string | null;
   timeZone?: string | null;
 };
@@ -190,7 +192,6 @@ type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outco
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
-  vaultTimeZoneByVault?: Map<string, Promise<string | null>>;
 }
 
 type ProjectableRecordReader = (input: {
@@ -512,7 +513,7 @@ export async function readProjectableWorkoutLatestStartDays(
   ).toISOString().slice(0, 10);
   const [rows, vaultTimeZone] = await Promise.all([
     readProjectableActivitySessionRows(vaultRoot, sourceReadFromDate, context),
-    readProjectableVaultTimeZone(vaultRoot, context),
+    readProjectableVaultTimeZone(vaultRoot),
   ]);
   return selectProjectableWorkoutLatestStartDays({
     nowMs,
@@ -523,19 +524,7 @@ export async function readProjectableWorkoutLatestStartDays(
 
 async function readProjectableVaultTimeZone(
   vaultRoot: string,
-  context?: HostedVaultShareProjectionReadContext,
 ): Promise<string | null> {
-  if (context) {
-    context.vaultTimeZoneByVault ??= new Map();
-    const cached = context.vaultTimeZoneByVault.get(vaultRoot);
-    if (cached) {
-      return cached;
-    }
-    const read = readProjectableVaultTimeZone(vaultRoot);
-    context.vaultTimeZoneByVault.set(vaultRoot, read);
-    return read;
-  }
-
   try {
     const rawMetadata: unknown = JSON.parse(
       await readFile(path.join(vaultRoot, VAULT_LAYOUT.metadata), "utf8"),
@@ -812,7 +801,7 @@ export function selectProjectableWorkoutLatestStartDays(
   >();
 
   for (const row of input.rows) {
-    if (row.sourceKind !== "activity_session") {
+    if (row.sourceKind !== "activity_session" || !row.isWorkout) {
       continue;
     }
     const startedAt = row.startedAt;
@@ -1214,24 +1203,6 @@ async function readProjectableActivitySessionRows(
       return cached;
     }
 
-    const priorCutoffDate = new Date(
-      Date.parse(`${cutoffDate}T00:00:00.000Z`) - DAY_MS,
-    ).toISOString().slice(0, 10);
-    const priorCached = context.activityRowsByVaultAndCutoff.get(
-      `${vaultRoot}\u0000${priorCutoffDate}`,
-    );
-    if (priorCached) {
-      const rows = await priorCached;
-      // A populated broader read is safe because every selector applies its own
-      // cutoff. Do not reuse an empty result: it may represent the 500-row
-      // fail-closed path, and the narrower read must retain its own cap semantics.
-      if (rows.length > 0) {
-        const read = Promise.resolve(rows);
-        context.activityRowsByVaultAndCutoff.set(cacheKey, read);
-        return read;
-      }
-    }
-
     const read = readProjectableActivitySessionRows(vaultRoot, cutoffDate);
     context.activityRowsByVaultAndCutoff.set(cacheKey, read);
     return read;
@@ -1305,6 +1276,7 @@ function toActivitySessionProjectionRow(
     ...(distanceMeters === null ? {} : { distanceMeters }),
     ...(durationMinutes === null ? {} : { durationMinutes }),
     endedAt: timing.endedAt,
+    isWorkout: entity.kind === "activity_session" && hasPositiveWorkoutEvidence(entity),
     observedAt,
     pointIds: [`event:${entity.entityId}`],
     recordIds: [entity.entityId],
@@ -1313,6 +1285,27 @@ function toActivitySessionProjectionRow(
     startedAt: timing.startedAt,
     timeZone: readOptionalString(entity.attributes.timeZone),
   };
+}
+
+function hasPositiveWorkoutEvidence(entity: CanonicalEntity): boolean {
+  if (readOptionalString(entity.attributes.source)?.toLowerCase() !== "device") {
+    return true;
+  }
+
+  const externalRef = readRecord(entity.attributes.externalRef);
+  const system = readOptionalString(externalRef?.system);
+  const resourceType = normalizeActivityKindToken(
+    readOptionalString(externalRef?.resourceType),
+  );
+  if (!system || !resourceType) {
+    return false;
+  }
+
+  return resourceType === "activity"
+    || resourceType.endsWith("-activity")
+    || resourceType === "activity-session"
+    || resourceType.endsWith("-activity-session")
+    || resourceType.split("-").some((token) => token === "workout" || token === "workouts");
 }
 
 function readCanonicalWorkoutTiming(
