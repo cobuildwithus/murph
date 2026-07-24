@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-07-23
+Last verified: 2026-07-24
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
@@ -197,37 +197,36 @@ The assistant interprets these natural-language aliases:
 
 Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” “turn up your unhinged setting,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
 
-A dial mutates only to a value the member stated or agreed to, or to a 0/10
-endpoint; these are the only two ways to reach an exact score safely without
-reading state. A bare directional request the member makes with no number (“turn
-it up,” “loosen up,” “be funnier,” “less intense,” “off”) selects a dial and a
-direction only. Murph does not read the current score and compute a delta across
-turns: that read-modify-write is unsafe because the canonical value can lag a
-causally-accepted preference that is still converging through the mailbox, so a
-stale read could move the wrong way, and without reading state any in-between
-target can move opposite the request when the accepted-or-pending value is already
-past it. The only state-independent targets that guarantee direction for every
-possible current or pending value are the endpoints, so a bare directional request
-maps to `set` 0 (off/less/calmer) or 10 (more/up/looser/funnier). A specific
-in-between value is reached only when the member states that exact number, which
-is an ordinary explicit `set`. Because a fresh `set` receives a newer causal
-sequence than any pending value, an endpoint target both moves the right way from
-any current value and supersedes an unconverged prior write rather than racing it,
-so the journey stays correct during retry, backlog, and concurrent Settings or
-conversation mutations. The mutation owner and its per-field causal ordering are
-unchanged; the provider prompt owns no cross-runtime relative arithmetic. Murph
-confirms the exact saved score from the returned snapshot.
+A dial mutates only to a value the member stated or agreed to, or to a value Murph
+derives from a score it read in the same turn. A bare directional request the
+member makes with no number (“turn it up,” “loosen up,” “be funnier,” “less
+intense”) selects a dial and a direction, not a value. Murph resolves it by
+calling `show` in that same turn and moving a bounded step from the reported
+score — roughly two points, three for an emphatic request — clamped to 0 through
+10. It never jumps to an endpoint the member did not ask for: “be a bit funnier”
+is not a request for Humor 10. The explicit words “off” and “max” are themselves
+endpoint requests and are set as such.
+
+Reading before writing is safe within the turn because `show` merges the canonical
+document with this turn's own accepted-but-unconverged writes, so a second
+directional request in one turn steps from the value the first one set rather than
+from stale canonical state. Across turns the read can still lag a preference
+converging through the mailbox, which bounds the error at one step in a direction
+the member asked for — a smaller failure than silently maxing a dial. The mutation
+owner and its per-field causal ordering are unchanged; a fresh `set` still receives
+a newer causal sequence than any pending value and supersedes it rather than racing
+it. The provider prompt owns no cross-runtime relative arithmetic. Murph confirms
+the exact saved score from the returned snapshot.
 
 Proactive offers are rare and reserved for obvious dissatisfaction. When it is
 clear a member or room is unhappy with how Murph sounds — visibly annoyed that it
 is too tame, stiff, preachy, wordy, or unfunny, even across several turns — Murph
 may name the matching dial (Humor, Push, Detail, or Unhinged) and, crucially, the
-exact level it would set (for example, “want me maxed out to 10?” or “want my
-humor up at a 7?”), so a plain “yes” is agreement to that exact value rather than
-an ambiguous jump. Accepting an offer therefore performs an explicit `set` to the
-named value, not an endpoint. Murph does not fish for the offer, raise it when the
-conversation is fine, or repeat it after a decline; a one-reply aside is not an
-ongoing change.
+exact level it would set (for example, “want my humor up at a 7?”), so a plain
+“yes” is agreement to that exact value rather than an ambiguous jump. Accepting an
+offer therefore performs an explicit `set` to the named value. Murph does not fish
+for the offer, raise it when the conversation is fine, or repeat it after a
+decline; a one-reply aside is not an ongoing change.
 
 The assistant must read canonical state for a setting query, report the scores
 and sources, and not treat the query's `updated: false` as a mutation outcome.
@@ -346,6 +345,17 @@ participant who wants out, and the precedence order below still places safety,
 truth, privacy, consent, authorization, and clinical boundaries above it exactly
 like every other dial.
 
+In a group room the dial is room-owned and, like the other dials, carries no
+per-participant authorization: any member of the authenticated room can move it.
+Unhinged differs from Humor, Push, and Detail in what that costs, because the
+register it sets lands on everyone present. The group prompt therefore carries a
+shared-dial rule: Murph raises Unhinged above 0 only when the room's own register
+already supports it, never on one member's say-so while another is visibly
+uncomfortable, and drops it back when a participant wants out. This is a prompt
+rule, not a mechanical gate — the room's membership is not consulted at write
+time, so the hard floor above remains the only invariant that does not depend on
+Murph's reading of the room.
+
 ## Baseline And Sparse Prompting
 
 The stored document remains sparse, and the thread-context personality block appears only when at least one explicit override exists. This preserves the current prompt and thread contract for members who never use the dials.
@@ -402,14 +412,14 @@ The web surfaces use the same tone ids and shared voice roster defined above.
 
 `hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
 `assistant_humor`, `assistant_push`, `assistant_detail`, and `assistant_unhinged`
-columns capture the
-latest web projection for mailbox handoff. For person members, the three
-web-visible dial columns also drive personal Settings display; `assistant_unhinged`
-is projection state for mailbox handoff only and never reaches the browser
-Settings payload. For synthetic room members, all of these belong only to the
-room runtime and have no personal Settings surface. The numeric
-columns have database range constraints from 0 through 10. They are a
-projection, not canonical preference truth;
+columns capture the latest web projection for mailbox handoff. For person members,
+the three web-visible dial columns also drive personal Settings display;
+`assistant_unhinged` is projection state for mailbox handoff only and never
+reaches the browser Settings payload. For synthetic room members, all of these
+belong only to the room runtime and have no personal Settings surface. The 0
+through 10 range on the numeric columns is enforced at the application boundary by
+`assistantPersonalityScoreSchema`, not by a database constraint; the columns are
+plain nullable integers. They are a projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
 
 `POST /api/settings/assistant-style` validates the authenticated member's

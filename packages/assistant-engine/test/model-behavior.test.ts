@@ -487,29 +487,29 @@ describe('assistant execution prompt contract', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
     )
-    // A relative request or accepted offer maps to a direction-guaranteed
-    // endpoint (10 more / 0 less) via `set`, never a cross-turn read-modify-write
-    // or an unsafe in-between target, so "loosen up"/"yes" reaches an exact score
-    // and always moves the requested way from any current or pending value.
+    // A bare directional request resolves against the score `show` reports in
+    // the same turn (which merges this turn's own pending writes), then moves a
+    // bounded step. It must never jump to an endpoint the member did not ask
+    // for — "be a bit funnier" is not a request for Humor 10.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Do not read the current score and compute a delta across turns',
+      'A bare directional request',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      '`set` the endpoint for the direction — 10 for more/up/looser/funnier, 0 for off/less/calmer',
+      '`show` in the same turn, then `set` a bounded step from what it reports',
     )
-    // Accepting an offer that named a target uses that exact value, not an
-    // endpoint — the two paths are mutually exclusive.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'accepting an offer uses the exact value it named',
+      'Never jump to an endpoint the member did not ask for',
     )
-    // A bare member directional request has no "yes"/"accepted offer" alias, so
-    // acceptance never falls through to the endpoint rule.
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '`set` the endpoint for the direction',
+    )
+    // Accepting an offer that named a target uses that exact value.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'A bare directional request the member makes with no number',
+      'accepting an offer uses the level it named',
     )
     // The proactive offer is rare and only on obvious dissatisfaction.
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Offer a dial change rarely, and only when it is obvious',
+      'Offer a dial rarely, only on obvious dissatisfaction',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`show`: scores/sources only',
@@ -1484,11 +1484,12 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    // Cap is 68_500 for the conversational-only Unhinged dial guidance, the rare
-    // cross-turn style-dissatisfaction offer, and the endpoint/relative-request
-    // rule (map a direction to one absolute `set`, no cross-turn read-modify-write)
-    // that lets "loosen up"/"yes" reach an exact score — all resident here.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_500)
+    // This layer is resident on every turn for every member, so it is a ratchet,
+    // not a budget: raise it only for guidance that has to be thread-stable.
+    // 68_200 covers the conversational-only Unhinged dial, the rare
+    // style-dissatisfaction offer, and the bounded-step rule for a bare
+    // directional request — together ~1_040 characters over the pre-dial prompt.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_200)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2338,6 +2339,18 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",
+    )
+    // Unhinged is room-owned with no per-participant authorization, so the
+    // group prompt carries the shared-dial buy-in rule that the private
+    // conversation has no need for.
+    expect(prompt).toContain(
+      'Unhinged is one shared room dial',
+    )
+    expect(prompt).toContain(
+      "Raise it above 0 only when the room's own register already supports it",
+    )
+    expect(prompt).toContain(
+      'never on one member\'s say-so while another is visibly uncomfortable',
     )
     expect(prompt).toContain('`murph.personalization`')
     expect(prompt).toContain('`murph.assistant_style`')

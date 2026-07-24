@@ -61,8 +61,9 @@ Push, Detail (or now Unhinged) exist.
 4. `packages/hosted-execution/src/assistant-personalization.ts`: add the field
    to the personality update schema.
 5. `apps/web/prisma/schema.prisma` + additive migration: nullable
-   `assistant_unhinged` (0–10 check constraint) and
-   `assistant_unhinged_causal_seq` on `hosted_member`.
+   `assistant_unhinged` and `assistant_unhinged_causal_seq` on `hosted_member`,
+   matching the existing dial columns exactly — plain nullable integers with the
+   0–10 range enforced at the application boundary, not by a DB check constraint.
 6. `apps/web/src/lib/hosted-onboarding/member-preferences.ts`: extend the
    per-dial enumerations (read, applicability, column write, stored-score
    switch, normalize).
@@ -76,7 +77,14 @@ Push, Detail (or now Unhinged) exist.
    - `buildAssistantStyleSettingsGuidanceText` covers the fourth dial, its
      aliases, and the rule that a clear ongoing "change how you act" request is
      authorization to set the matching dial;
+   - a bare directional request with no number resolves through a same-turn
+     `show` plus a bounded step, never an endpoint the member did not ask for;
+   - a group-only shared-dial rule: Unhinged rises above 0 only when the room's
+     own register supports it, never on one member's say-so over another's
+     visible discomfort;
    - one style-dissatisfaction bullet in `buildAssistantCapabilityOffersText`.
+   This layer is resident on every turn, so the additions stay inside a ~1_000
+   character growth against the pre-dial prompt and the ratchet cap moves once.
 9. `murph.assistant_style` tool (`assistant-style.ts`): schema flows from the
    shared setting enum; extend the hardcoded reset-all map.
 10. Tests: contracts preferences/personas, assistant-style dynamic tool,
