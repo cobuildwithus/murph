@@ -22,7 +22,7 @@ const DESIGN_USAGE_OFFERS = [
 const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
   {
     href: buildMurphSmsHref({
-      body: "Hey Murph, I just added more usage for the group.",
+      body: "Hey Murph, I just added more usage.",
       murphPhoneNumber: "+15555550100",
     }),
     kind: "text",
@@ -34,7 +34,7 @@ const DESIGN_TOP_UP_MULTI_CONTACT_OPTIONS: MurphContactOption[] = [
   ...DESIGN_TOP_UP_CONTACT_OPTIONS,
   {
     href: buildMurphTelegramTextHref({
-      body: "Hey Murph, I just added more usage for the group.",
+      body: "Hey Murph, I just added more usage.",
       username: "withmurph_bot",
     }),
     kind: "telegram",
@@ -72,6 +72,7 @@ const DESIGN_CREDIT_BACKED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 };
 
 function GroupUsageFundingStudy() {
+  const [groupFulfilledPreviewKey, setGroupFulfilledPreviewKey] = useState(0);
   const [fulfilledPreviewKey, setFulfilledPreviewKey] = useState(0);
   const [multiChannelPreviewKey, setMultiChannelPreviewKey] = useState(0);
 
@@ -95,14 +96,22 @@ function GroupUsageFundingStudy() {
       </div>
       <div
         className="flex w-full max-w-xl flex-col items-start gap-3"
-        data-design-state="usage-added-text-murph"
+        data-design-state="usage-added-follow-up"
       >
         <p className="text-sm text-muted-foreground">
-          After payment completes, the confirmation offers a Text Murph action
-          when the payer has a Murph contact channel. One channel renders a
-          direct link; several channels render inline rows in the same dialog.
+          After a group payment completes, the confirmation offers Open
+          Messages — there is no deep link back into the group thread, so it
+          opens the Messages app. Personal and Family top-ups keep the Text
+          Murph action: one channel renders a direct link; several channels
+          render inline rows in the same dialog.
         </p>
         <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setGroupFulfilledPreviewKey((key) => key + 1)}
+          >
+            Preview group usage added
+          </Button>
           <Button
             variant="outline"
             onClick={() => setFulfilledPreviewKey((key) => key + 1)}
@@ -116,6 +125,21 @@ function GroupUsageFundingStudy() {
             Preview usage added with channel choices
           </Button>
         </div>
+        {groupFulfilledPreviewKey > 0 ? (
+          <HostedUsageTopUpDialog
+            key={groupFulfilledPreviewKey}
+            activePurchase={{
+              offerCode: "usage_5_usd",
+              purchaseId: "hucp_design_added_0",
+              retryAllowed: false,
+              status: "fulfilled",
+            }}
+            deferTerminalRefreshUntilClose
+            initialOpen
+            offers={[]}
+            scope="group"
+          />
+        ) : null}
         {fulfilledPreviewKey > 0 ? (
           <HostedUsageTopUpDialog
             key={fulfilledPreviewKey}
@@ -129,7 +153,6 @@ function GroupUsageFundingStudy() {
             deferTerminalRefreshUntilClose
             initialOpen
             offers={[]}
-            scope="group"
           />
         ) : null}
         {multiChannelPreviewKey > 0 ? (
@@ -145,7 +168,6 @@ function GroupUsageFundingStudy() {
             deferTerminalRefreshUntilClose
             initialOpen
             offers={[]}
-            scope="group"
           />
         ) : null}
       </div>
