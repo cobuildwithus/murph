@@ -392,6 +392,37 @@ describe('assistant execution prompt contract', () => {
       expect(prompt).toContain(expected)
     }
 
+    const unhingedCases = [
+      [0, 'keep the default register'],
+      [1, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [3, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [4, "match the room's edge"],
+      [6, "match the room's edge"],
+      [7, 'fully game'],
+      [9, 'fully game'],
+      [10, 'maximum latitude'],
+    ] as const
+    for (const [score, expected] of unhingedCases) {
+      const layers = buildAssistantSystemPromptLayers(
+        createCommonCodexPromptInput({
+          assistantPersonality: { unhinged: score },
+        }),
+      )
+      expect(layers.prompt).toContain(`Unhinged ${score}/10`)
+      expect(layers.prompt).toContain(expected)
+      // Band text is thread-context only; it must never enter the cacheable
+      // stable prefix that participates in the contract fingerprint.
+      expect(layers.staticCacheableCorePrompt).not.toContain(`Unhinged ${score}/10`)
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(`Unhinged ${score}/10`)
+      // Every nonzero score carries the fixed hard-floor sentence; zero does not.
+      const hardFloor = 'no minors, no non-consenting third parties'
+      if (score === 0) {
+        expect(layers.prompt).not.toContain(hardFloor)
+      } else {
+        expect(layers.prompt).toContain(hardFloor)
+      }
+    }
+
     const maximumPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         assistantPersonality: {

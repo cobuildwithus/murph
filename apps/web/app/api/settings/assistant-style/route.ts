@@ -1,5 +1,6 @@
 import {
   assistantWebPersonalityPreferencesSchema,
+  assistantWebPersonalitySettingIds,
   isAssistantPersonaId,
   isAssistantTonePreference,
   isAssistantVoiceOptionId,
@@ -7,6 +8,7 @@ import {
   type AssistantPersonalityPreferences,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
+  type AssistantWebPersonalitySettingId,
 } from "@murphai/contracts";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -71,7 +73,11 @@ export const POST = withJsonError(async (request: Request) => {
 
   return jsonOk({
     assistantPersona: result.assistantPersona,
-    assistantPersonality: result.assistantPersonality,
+    // Project to the web-visible dials so the conversational-only Unhinged score
+    // never crosses the server boundary into browser network or client state,
+    // even when the saved personality includes it. The client filters again as
+    // defense in depth.
+    assistantPersonality: projectWebVisiblePersonality(result.assistantPersonality),
     assistantTone: result.assistantTone,
     assistantVoice: result.assistantVoice,
     ok: true,
@@ -79,6 +85,16 @@ export const POST = withJsonError(async (request: Request) => {
     updated: result.updated,
   });
 });
+
+function projectWebVisiblePersonality(
+  personality: Record<string, number | null>,
+): Record<AssistantWebPersonalitySettingId, number | null> {
+  const projected = {} as Record<AssistantWebPersonalitySettingId, number | null>;
+  for (const id of assistantWebPersonalitySettingIds) {
+    projected[id] = personality[id] ?? null;
+  }
+  return projected;
+}
 
 function parseAssistantStyleRequestBody(
   body: Record<string, unknown>,

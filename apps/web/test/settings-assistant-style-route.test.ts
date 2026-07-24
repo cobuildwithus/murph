@@ -182,6 +182,32 @@ describe("assistant style settings route", () => {
     });
   });
 
+  it("never returns the conversational-only Unhinged dial in the response", async () => {
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValueOnce({
+      assistantPersona: null,
+      // The saved projection can carry a conversationally-set Unhinged score;
+      // the server boundary must strip it before the browser sees it.
+      assistantPersonality: { detail: 5, humor: 3, push: 3, unhinged: 9 },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_item_preferences" },
+      updated: true,
+    });
+
+    const response = await route.POST(jsonRequest({ personality: { humor: 3 } }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      assistantPersona: null,
+      assistantPersonality: { detail: 5, humor: 3, push: 3 },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      ok: true,
+      runTriggered: true,
+      updated: true,
+    });
+  });
+
   it("returns an idempotent no-op response without signaling the runtime", async () => {
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       assistantPersona: null,

@@ -412,6 +412,32 @@ describe("hosted account settings snapshot", () => {
     });
   });
 
+  it("never leaks the conversational-only Unhinged dial into the settings snapshot", async () => {
+    mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
+    // The underlying projection carries all four dials; the snapshot must
+    // expose only the three web-visible ones.
+    mocks.projectHostedMemberAssistantPreferences.mockReturnValue({
+      personality: {
+        detail: 8,
+        humor: 7,
+        push: 6,
+        unhinged: 9,
+      },
+      tone: "casual",
+      voice: "warm",
+    });
+
+    const snapshot = await readHostedAccountSettingsSnapshot({
+      memberId: "member_123",
+    });
+
+    expect(snapshot.assistant?.personality).toEqual({
+      detail: 8,
+      humor: 7,
+      push: 6,
+    });
+  });
+
   it("normalizes assistant preferences for settings display", async () => {
     mocks.findUniqueHostedMember.mockResolvedValue(makeSettingsMemberRecord());
     mocks.projectHostedMemberAssistantPreferences.mockReturnValue({

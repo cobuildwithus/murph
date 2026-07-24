@@ -576,6 +576,20 @@ describe("hosted member assistant preferences", () => {
       },
       personality: { detail: 9 },
     },
+    {
+      appliedField: "unhinged",
+      expectedData: {
+        assistantUnhinged: 8,
+        assistantUnhingedCausalSeq: 11n,
+      },
+      expectedPersonality: {
+        detail: 4,
+        humor: 3,
+        push: 5,
+        unhinged: 8,
+      },
+      personality: { unhinged: 8 },
+    },
   ])("projects a causally ordered $appliedField conversation update", async ({
     appliedField,
     expectedData,
