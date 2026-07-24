@@ -81,11 +81,13 @@ function StepFrame(props: {
       <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
         {props.label}
       </p>
+      {/* Matches the delete dialog's own max-w-md so the catalog shows the
+          component at the width it actually renders at. */}
       <div
-        className="rounded-2xl border border-border bg-background p-6"
+        className="w-full max-w-md rounded-2xl border border-border bg-background p-6"
         inert={props.inert}
       >
-        <div className="mx-auto w-full max-w-md">{props.children}</div>
+        {props.children}
       </div>
     </div>
   );

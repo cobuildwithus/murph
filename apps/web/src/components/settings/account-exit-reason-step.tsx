@@ -49,10 +49,12 @@ export function AccountExitReasonStep(props: {
           return (
             <Label
               key={option.code}
-              className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2.5 text-sm leading-6 font-normal text-foreground transition-colors hover:bg-primary/5 has-data-checked:bg-primary/10"
+              className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2.5 text-sm leading-6 font-normal text-foreground transition-colors hover:bg-primary/5 has-data-checked:bg-primary/10"
               htmlFor={inputId}
             >
-              <RadioGroupItem id={inputId} value={option.code} />
+              {/* items-start keeps the control on the first line when a label
+                  wraps at narrow widths; mt-1 optically centers it there. */}
+              <RadioGroupItem className="mt-1" id={inputId} value={option.code} />
               {option.label}
             </Label>
           );
