@@ -78,8 +78,12 @@ consent for common future newsletter and group-health uses:
 
 Pass the set as `requestedVaultShareProjectionScopes` on `create_join_link`, or
 as `projectionScopes` when creation uses `post_join_offer`. This is a permission
-request, not automatic sharing. On the join page, every item stays individually
-selectable. On a like-to-consent offer, liking grants exactly the disclosed
+request, not automatic sharing. The join page opens with every requested
+permission preselected, and every item stays individually
+selectable: a member can uncheck any of them before joining, and nothing is
+shared until they accept. Never claim you cannot preselect a permission; a
+request prefills the join page but grants nothing by itself. On a
+like-to-consent offer, liking grants exactly the disclosed
 snapshot, and Web's first-party customize link remains the secondary path to
 share more or less.
 

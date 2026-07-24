@@ -47,6 +47,26 @@ participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
 
+Whenever a challenge turn is authorized under `group-chat`'s rules to send a
+permission request — a `create_join_link` reply, an explicitly requested
+permission flow, or the one evidence-gated standings offer — the request must
+name everything the challenge needs to score, all in that single request:
+
+- `group-email.v0` and `device-sync-status.v0`, always.
+- The exact scoring scope (or scopes) for the agreed metric — a steps
+  challenge requests `steps-days.v0`, a sleep challenge requests
+  `sleep-duration-days.v0`, and so on from the list below. Never send a
+  challenge join link or offer that omits the scoring scope.
+- When the request also creates the hosted group, or the group has no agreed
+  single metric yet, additionally the reusable core set from `group-chat`'s
+  "Creating a hosted group" rules, so a general health group starts with the
+  common permissions requested by default.
+
+The join page opens with every requested permission preselected; each stays
+an individual choice the member can uncheck before joining. Requesting
+prefills that page — it never pre-grants, so describe it as a prefilled
+request, not as something you cannot preselect and not as automatic sharing.
+
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
   - Running minutes: `activityKind: "running"`
@@ -127,7 +147,8 @@ The page carries these sections, kept current:
 - **Sharing choices** — per participant and exact scope, explicit sharing
   declines and any permission-offer action already handled. Silence is not
   consent or refusal, but a handled offer action is not a reason to retry it.
-- **Baselines** — per-member starting values where shared data allows.
+- **Baselines** — per-member starting values where shared data allows, or
+  `pending` until usable records arrive.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
@@ -263,7 +284,15 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    paths expire, captures do not.
 
 6. **Set baselines.** Read pre-challenge shared data where it exists and
-   record per-member baselines.
+   record per-member baselines. A missing baseline never blocks kickoff:
+   when the shared snapshot has no usable records yet for a member — or for
+   everyone — continue the rest of setup and start the challenge on
+   schedule, record that baseline as `pending` on the page, and say plainly
+   that it locks in once their data arrives. On a later read (a follow-up
+   turn or the daily loop), backfill a pending baseline from the earliest
+   usable shared records, note on the page which dates it covers, and until
+   then present that member as waiting on data, never as a zero or a
+   forfeit.
 7. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
