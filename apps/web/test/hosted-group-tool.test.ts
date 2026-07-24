@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
+  hasHostedMemberActivationProof: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
   hostedThreadContainerParticipantUpdateMany: vi.fn(),
@@ -60,6 +61,10 @@ vi.mock("@/src/lib/hosted-onboarding/entitlement", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
+  hasHostedMemberActivationProof: mocks.hasHostedMemberActivationProof,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
@@ -264,6 +269,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       "group-disclosure:provider-request-1",
     );
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.leaveHostedGroupMemberTx.mockResolvedValue({ kind: "left" });
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(GROUP_SUMMARY);
@@ -1450,6 +1456,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       ownerMemberId: "member_owner",
     });
     mocks.isHostedMemberSuspended.mockReturnValue(false);
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_participant", suspendedAt: null },
     });
@@ -2327,7 +2334,32 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
   });
 
-  it("classifies chat participants by Murph membership and skips the line and departed handles", async () => {
+  it("reads the live roster when read_current reports no hosted group", async () => {
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readHostedGroupByRuntimeMemberId.mockResolvedValue(null);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_current" },
+    })).resolves.toEqual({
+      action: "read_current",
+      result: { group: null, status: "none" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toMatchObject({
+      action: "read_chat_participants",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.getHostedLinqChatHandles).toHaveBeenCalledWith({
+      chatId: "chat_group_1",
+    });
+  });
+
+  it("classifies chat participants by durable Murph activation and skips the line and departed handles", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
@@ -2349,6 +2381,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith(
       expect.objectContaining({ address: "person@example.com" }),
     );
+    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledWith({
+      memberId: "member_participant",
+      prisma: expect.anything(),
+    });
     expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
@@ -2417,9 +2453,10 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledTimes(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
-    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledTimes(
+    expect(mocks.hasHostedMemberActivationProof).toHaveBeenCalledTimes(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
     expect(mocks.hostedThreadContainerParticipantUpsert).toHaveBeenCalledTimes(
       HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX,
     );
@@ -2439,6 +2476,28 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     warn.mockRestore();
+  });
+
+  it("does not confuse durable Murph activation with current access", async () => {
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: { action: "read_chat_participants", linqThread: LINQ_THREAD },
+    })).resolves.toMatchObject({
+      action: "read_chat_participants",
+      result: {
+        participants: [
+          { handle: "+15550000001", hasOwnMurph: true },
+          { handle: "person@example.com", hasOwnMurph: false },
+        ],
+        status: "ok",
+      },
+    });
+
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
   });
 
   it("bounds at-creation reconcile lookups and upserts to the roster cap", async () => {

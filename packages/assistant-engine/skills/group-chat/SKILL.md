@@ -42,6 +42,15 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+In an interactive iMessage/Linq room, call
+`murph.group action="read_chat_participants"` immediately before
+`post_join_offer`, including when `read_current` returned `status="none"`. This
+is the separate lazy read of the current provider roster; do not substitute the
+hosted membership rows in `read_current`. Use `hasOwnMurph` only to tell whether
+that handle has durable Murph activation. It does not prove current billing or
+runtime access, and it does not prove membership in this hosted group. Never
+quote, list, or otherwise expose roster handles in the chat.
+
 ## Shared fact limits
 
 Say only what the current `read_shared` result proves. A granted projection

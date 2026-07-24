@@ -738,6 +738,12 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*those\s+actions create the hosted group record/u,
     )
+    expect(raw).toContain('`murph.group action="read_chat_participants"` immediately before')
+    expect(raw).toContain('including when `read_current` returned `status="none"`')
+    expect(raw).toContain('separate lazy read of the current provider roster')
+    expect(raw).toContain('does not prove current billing or')
+    expect(raw).toContain('does not prove membership in this hosted group')
+    expect(raw).toContain('Never\nquote, list, or otherwise expose roster handles')
     expect(raw).toContain('`murph.automation action="save_newsletter"`')
     expect(raw).toMatch(
       /`delivery` \(`current_chat` or `group_email`\)/u,

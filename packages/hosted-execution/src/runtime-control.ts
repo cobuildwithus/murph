@@ -1053,6 +1053,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
+  /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
 }
 

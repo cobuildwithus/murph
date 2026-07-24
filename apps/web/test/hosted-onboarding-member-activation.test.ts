@@ -101,6 +101,7 @@ import {
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationWelcomeRoute,
+  hasHostedMemberActivationProof,
 } from "@/src/lib/hosted-onboarding/member-activation";
 import { renderUserFacingMessage } from "@/src/lib/hosted-messages/user-facing-messages";
 
@@ -227,6 +228,28 @@ describe("hosted onboarding member activation", () => {
       suspendedAt: null,
       updatedAt: new Date("2026-04-12T00:00:00.000Z"),
     });
+  });
+
+  it("uses a durable activation marker or complete crypto roots as activation proof", async () => {
+    const prisma = makeTransactionHarness() as never;
+
+    await expect(hasHostedMemberActivationProof({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toBe(false);
+
+    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(true);
+    await expect(hasHostedMemberActivationProof({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toBe(true);
+
+    mocks.hasHostedMailboxItemByKind.mockResolvedValueOnce(false);
+    mocks.hasActiveHostedCryptoDomainRootsForUserTx.mockResolvedValueOnce(true);
+    await expect(hasHostedMemberActivationProof({
+      memberId: "member_123",
+      prisma,
+    })).resolves.toBe(true);
   });
 
   it("keeps the Linq routing lookup and activation dispatch ownership together for Stripe activations", async () => {
