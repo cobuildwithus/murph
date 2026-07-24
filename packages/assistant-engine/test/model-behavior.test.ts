@@ -104,6 +104,51 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupPrompt).toContain(
+      'It does not withdraw an answer already completed in that turn; that answer still sends.',
+    )
+    expect(groupPrompt).toContain(
+      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+    )
+    expect(groupPrompt).toContain(
+      'Make it stand alone and carry forward anything still worth saying.',
+    )
+    expect(groupPrompt).toContain(
+      'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
+    )
+    // Watching must not turn into a catch-all digest of the burst.
+    expect(groupPrompt).toContain(
+      'Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point.',
+    )
+    expect(groupPrompt).not.toContain('everything that arrived')
+    expect(groupPrompt).toContain(
+      'Answer immediately when someone needs you or the beat is yours.',
+    )
+    expect(groupPrompt).toContain(
+      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+    )
+    expect(directPrompt).not.toContain(
+      'that answer still sends',
+    )
+    expect(directPrompt).not.toContain(
+      'that response replaces the earlier answer',
+    )
+    expect(groupPrompt).toContain(
+      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley',
+    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
@@ -638,6 +683,26 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+    )
+  })
+
+  it('tells the assistant it can read the canonical product update feeds', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Murph product updates:')
+    expect(prompt).toContain('https://www.withmurph.ai/api/changelog?days=14')
+    expect(prompt).toContain('https://www.withmurph.ai/api/feature-catalog')
+    expect(prompt).toContain(
+      'When the user asks what is new, what shipped recently, or whether Murph can already do something, read the canonical public JSON feeds over the network before answering',
+    )
+    expect(prompt).toContain(
+      "Never claim there is no way to check Murph's own updates.",
+    )
+    expect(prompt).toContain(
+      'Those feeds are the only source of shipped-product truth',
+    )
+    expect(prompt).toContain(
+      'If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.',
     )
   })
 
@@ -1420,7 +1485,7 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_000)
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
