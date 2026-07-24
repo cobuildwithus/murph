@@ -1,6 +1,12 @@
+import assert from "node:assert/strict";
 import { existsSync, statSync } from "node:fs";
 
-import { createElement, type HTMLAttributes, type ReactNode } from "react";
+import {
+  act,
+  createElement,
+  type HTMLAttributes,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 
@@ -13,6 +19,8 @@ import {
   MurphContactCardPreview,
   MurphContactCardPicker,
 } from "@/src/components/murph/murph-contact-card-picker";
+
+import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/ui/drawer", () => ({
   Drawer: ({ children, open }: { children?: ReactNode; open?: boolean }) =>
@@ -139,4 +147,98 @@ test("contact card picker fills the mobile viewport and keeps safe-area actions"
   expect(markup).toContain("max-h-dvh");
   expect(markup).not.toContain("92dvh");
   expect(markup).toContain("safe-area-inset-bottom");
+});
+
+test("contact card picker opens iOS webviews in Safari", async () => {
+  const onAddToContacts = vi.fn();
+  const props = {
+    initialAvatarId: "gremlin",
+    onAddToContacts,
+    onOpenChange: () => {},
+    open: true,
+  };
+  const rendered = await renderClientComponent(
+    <MurphContactCardPicker {...props} />,
+    {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/onboarding",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    },
+  );
+
+  vi.stubGlobal("navigator", {
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+  });
+  await rendered.rerender(<MurphContactCardPicker {...props} />);
+
+  try {
+    const link = rendered.container.querySelector("a");
+    assert.ok(link);
+    expect(link.getAttribute("href")).toBe(
+      "x-safari-https://app.example.com/api/murph-contact-card?avatar=gremlin",
+    );
+    expect(link.textContent).toContain("Open in Safari to add Murph");
+    expect(rendered.container.textContent).toContain(
+      "You're in an in-app browser, which can't save contacts. This opens Safari instead.",
+    );
+    expect(rendered.container.textContent).toContain("Skip for now");
+
+    await act(async () => {
+      const clickEvent = new rendered.window.Event("click", {
+        bubbles: true,
+        cancelable: true,
+      });
+      clickEvent.preventDefault();
+      link.dispatchEvent(clickEvent);
+    });
+    expect(onAddToContacts).toHaveBeenCalledWith(
+      findMurphContactAvatarOption("gremlin"),
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("contact card picker keeps the normal download action in Android webviews", async () => {
+  const props = {
+    initialAvatarId: "gremlin",
+    onOpenChange: () => {},
+    open: true,
+  };
+  const rendered = await renderClientComponent(
+    <MurphContactCardPicker {...props} />,
+    {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/onboarding",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    },
+  );
+
+  vi.stubGlobal("navigator", {
+    userAgent:
+      "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro Build/AP1A.240505.005; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/125.0.0.0 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/466.0.0.55.109;]",
+  });
+  await rendered.rerender(<MurphContactCardPicker {...props} />);
+
+  try {
+    const link = rendered.container.querySelector("a");
+    assert.ok(link);
+    expect(link.getAttribute("href")).toBe(
+      "/api/murph-contact-card?avatar=gremlin",
+    );
+    expect(link.textContent).toContain("Add Murph to Contacts");
+    expect(rendered.container.textContent).not.toContain(
+      "You're in an in-app browser",
+    );
+    expect(rendered.container.textContent).toContain("Skip for now");
+  } finally {
+    await rendered.cleanup();
+  }
 });

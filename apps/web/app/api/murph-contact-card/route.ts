@@ -11,6 +11,11 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { readHostedMemberRoutingState } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
+  sanitizeHostedOnboardingStructuredLogDetails,
+  toHostedOnboardingLogIdSuffix,
+} from "@/src/lib/hosted-onboarding/logging";
+import { detectInAppBrowser } from "@/src/lib/in-app-browser";
+import {
   DEFAULT_MURPH_CONTACT_AVATAR_ID,
   findMurphContactAvatarOption,
 } from "@/src/lib/murph-contact-avatars";
@@ -28,6 +33,18 @@ export const GET = withJsonError(async (request: Request) => {
   // plus the active-access entitlement check, like the other member-bound
   // settings GET routes.
   const session = await requireActiveHostedAppSessionFromRequest(request);
+  const avatarId = new URL(request.url).searchParams.get("avatar")
+    ?? DEFAULT_MURPH_CONTACT_AVATAR_ID;
+  const avatar = findMurphContactAvatarOption(avatarId);
+  const browser = detectInAppBrowser(request.headers.get("user-agent") ?? "");
+  console.info("Hosted Murph contact-card request.", {
+    app: browser.app,
+    ...sanitizeHostedOnboardingStructuredLogDetails({
+      avatarId: avatar.id,
+      memberIdSuffix: toHostedOnboardingLogIdSuffix(session.member.id),
+      webview: browser.inAppBrowser,
+    }),
+  });
   const prisma = getPrisma();
 
   const routing = await readHostedMemberRoutingState({
@@ -47,10 +64,6 @@ export const GET = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
-
-  const avatarId = new URL(request.url).searchParams.get("avatar")
-    ?? DEFAULT_MURPH_CONTACT_AVATAR_ID;
-  const avatar = findMurphContactAvatarOption(avatarId);
 
   const [photo, backupPhoneNumber] = await Promise.all([
     avatar.src

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import { ContactRoundIcon } from "lucide-react";
 
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -27,6 +27,7 @@ import {
   type MurphContactAvatarKind,
   type MurphContactAvatarOption,
 } from "@/src/lib/murph-contact-avatars";
+import { detectInAppBrowser } from "@/src/lib/in-app-browser";
 import { cn } from "@/src/lib/utils";
 
 export {
@@ -39,6 +40,18 @@ export {
 
 export function murphContactCardDownloadHref(avatarId: string): string {
   return `/api/murph-contact-card?avatar=${encodeURIComponent(avatarId)}`;
+}
+
+function subscribeToBrowserSnapshot() {
+  return () => {};
+}
+
+function readBrowserServerSnapshot(): string {
+  return "";
+}
+
+function readBrowserUserAgentSnapshot(): string {
+  return navigator.userAgent;
 }
 
 export function MurphContactAvatarArt({
@@ -184,6 +197,9 @@ export function MurphAddToContactsButton({
 const PICKER_TITLE = "Add Murph to your contacts";
 const PICKER_DESCRIPTION =
   "Pick the photo Murph shows up with in your contacts. Same Murph either way.";
+const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
+const IN_APP_BROWSER_DESCRIPTION =
+  "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
 const DEFAULT_PICKER_COPY = {
   description: PICKER_DESCRIPTION,
   primaryAction: "Add Murph to Contacts",
@@ -209,8 +225,15 @@ export function MurphContactCardPicker({
   open: boolean;
 }) {
   const isMobile = useIsMobile();
+  const userAgent = useSyncExternalStore(
+    subscribeToBrowserSnapshot,
+    readBrowserUserAgentSnapshot,
+    readBrowserServerSnapshot,
+  );
   const [selectedId, setSelectedId] = useState(initialAvatarId);
   const selected = findMurphContactAvatarOption(selectedId);
+  const browser = detectInAppBrowser(userAgent);
+  const opensInSafari = browser.inAppBrowser && browser.isIos;
   const pickerCopy = {
     ...DEFAULT_PICKER_COPY,
     ...copy,
@@ -223,12 +246,23 @@ export function MurphContactCardPicker({
           route it into Files instead. */}
       <a
         className={buttonVariants({ className: "w-full", size: "xl" })}
-        href={murphContactCardDownloadHref(selected.id)}
+        href={
+          opensInSafari
+            ? `x-safari-https://${window.location.host}${murphContactCardDownloadHref(selected.id)}`
+            : murphContactCardDownloadHref(selected.id)
+        }
         onClick={() => onAddToContacts?.(selected)}
       >
         <ContactRoundIcon data-icon="inline-start" />
-        {pickerCopy.primaryAction}
+        {opensInSafari
+          ? IN_APP_BROWSER_PRIMARY_ACTION
+          : pickerCopy.primaryAction}
       </a>
+      {opensInSafari ? (
+        <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
+          {IN_APP_BROWSER_DESCRIPTION}
+        </p>
+      ) : null}
       <Button
         className="w-full"
         onClick={() => {

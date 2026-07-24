@@ -41,8 +41,11 @@ type MurphContactCardRouteModule =
 
 let route: MurphContactCardRouteModule;
 
-function buildRequest(query: string = ""): Request {
-  return new Request(`https://app.example.com/api/murph-contact-card${query}`);
+function buildRequest(query: string = "", userAgent?: string): Request {
+  return new Request(
+    `https://app.example.com/api/murph-contact-card${query}`,
+    userAgent ? { headers: { "user-agent": userAgent } } : undefined,
+  );
 }
 
 describe("murph contact card route", () => {
@@ -52,10 +55,11 @@ describe("murph contact card route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue({});
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
-      member: { id: "member_1" },
+      member: { id: "member_123456789" },
     });
     mocks.readHostedMemberRoutingState.mockResolvedValue({
       linqRecipientPhone: "+14045550100",
@@ -128,6 +132,44 @@ describe("murph contact card route", () => {
     expect(mocks.fetchMurphHostedLinqContactCardVcfPhoto).toHaveBeenCalledWith({
       imageUrl: "https://www.withmurph.ai/murph-headshots/murph-headshot-02-sm.png",
     });
+  });
+
+  it("logs an iOS webview contact-card request", async () => {
+    await route.GET(
+      buildRequest(
+        "?avatar=hooded",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+      ),
+    );
+
+    expect(console.info).toHaveBeenCalledWith(
+      "Hosted Murph contact-card request.",
+      {
+        app: null,
+        avatarId: "hooded",
+        memberIdSuffix: "456789",
+        webview: true,
+      },
+    );
+  });
+
+  it("logs a Safari contact-card request as outside a webview", async () => {
+    await route.GET(
+      buildRequest(
+        "?avatar=hooded",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+      ),
+    );
+
+    expect(console.info).toHaveBeenCalledWith(
+      "Hosted Murph contact-card request.",
+      {
+        app: null,
+        avatarId: "hooded",
+        memberIdSuffix: "456789",
+        webview: false,
+      },
+    );
   });
 
   it("uses the pending line while the member's line commit is in flight", async () => {
