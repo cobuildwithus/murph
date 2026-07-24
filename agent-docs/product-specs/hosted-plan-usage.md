@@ -322,11 +322,16 @@ inventing a billing menu:
   `owner: true` through the Family status read before offering that owner a
   private Settings handoff; a sponsored non-owner is told that the Family
   owner must make the change, while Family Edge has no higher current tier; and
-- a hosted group receives only a generic first heads-up. After the group asks,
-  `murph.group action="read_usage"` may return the coarse state, the integer
-  percent of the current period's usage remaining, the period end, and the
-  first-party funding URL without exposing a payer or contributor; the
-  heads-up does not promise that URL before the read returns it.
+- a hosted group gets a proactive first heads-up: on the first trusted
+  low-usage turn the assistant calls `murph.group action="read_usage"` once and
+  may include the returned state, the integer percent of the current period's
+  usage remaining, and the first-party funding URL in the heads-up segment,
+  matching the room's tone; a `healthy` read suppresses the heads-up entirely.
+  Playful payer nomination is allowed, but who actually paid, purchase status,
+  and amounts stay private, and the assistant never promises a URL the read
+  did not return. For a group without an owner-created join code, the funding
+  URL carries a signed funding-only locator that grants no enrollment or
+  sharing, so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
@@ -356,9 +361,10 @@ current request before mentioning the low capacity casually. A deterministic
 group exhaustion notice may use only the exact originating external-thread
 target after Web re-authorizes its persisted thread authority; no personal-home
 fallback is valid for an accepted group conversation. At delivery time Web
-rechecks the exhausted state and may append the group's
-`/groups/fund/[joinCode]` link. The notice does not name a payer, claim that
-payment occurred, or add a separate scheduler or money-prompt lifecycle.
+rechecks the exhausted state and may append the group's funding link, using
+the owner join code when one exists or the signed funding-only locator when
+none does. The notice does not name a payer, claim that payment occurred, or
+add a separate scheduler or money-prompt lifecycle.
 
 ## Non-Goals
 
