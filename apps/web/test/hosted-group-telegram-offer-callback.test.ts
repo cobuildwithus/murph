@@ -108,32 +108,39 @@ describe("hosted telegram group offer callback", () => {
     ]);
   });
 
-  it("scopes the affirmation id to one actor on one message", async () => {
+  it("gives a genuinely new tap a new affirmation id so a revoked grant can be restored", async () => {
     await handleHostedTelegramGroupOfferCallback({
-      callbackQuery: buildCallbackQuery(),
+      callbackQuery: buildCallbackQuery({ id: "cbq_first" }),
       prisma,
     });
     const first = mocks.acceptHostedGroupOfferAffirmation.mock.calls[0]?.[0]
       .affirmationEventId;
 
-    vi.clearAllMocks();
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: { core: { id: "usr_2", suspendedAt: null } },
-      status: "found",
+    await handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery({ id: "cbq_second" }),
+      prisma,
     });
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.acceptHostedGroupOfferAffirmation.mockResolvedValue({
-      kind: "join",
-      status: "accepted",
+    const second = mocks.acceptHostedGroupOfferAffirmation.mock.calls[1]?.[0]
+      .affirmationEventId;
+
+    expect(first).not.toBe(second);
+  });
+
+  it("keeps one redelivered callback idempotent", async () => {
+    await handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery({ id: "cbq_same" }),
+      prisma,
     });
     await handleHostedTelegramGroupOfferCallback({
-      callbackQuery: buildCallbackQuery({ from: { id: 5353, is_bot: false } }),
+      callbackQuery: buildCallbackQuery({ id: "cbq_same" }),
       prisma,
     });
 
     expect(
       mocks.acceptHostedGroupOfferAffirmation.mock.calls[0]?.[0].affirmationEventId,
-    ).not.toBe(first);
+    ).toBe(
+      mocks.acceptHostedGroupOfferAffirmation.mock.calls[1]?.[0].affirmationEventId,
+    );
   });
 
   it.each([

@@ -90,11 +90,7 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
   }
 
   const result = await acceptHostedGroupOfferAffirmation({
-    affirmationEventId: buildHostedTelegramGroupOfferAffirmationEventId({
-      chatId: String(message.chat.id),
-      messageId: String(message.message_id),
-      telegramUserId,
-    }),
+    affirmationEventId: buildHostedTelegramGroupOfferAffirmationEventId(callbackQuery.id),
     channel: "telegram",
     kinds,
     memberId: member.id,
@@ -144,15 +140,15 @@ function readHostedTelegramGroupOfferCallbackKinds(
 }
 
 /**
- * Scopes the affirmation to one actor on one exact message so a member's own
- * repeat taps stay idempotent for the disclosure grant.
+ * Uses Telegram's own callback identity, the same way the Linq adapter passes
+ * the provider event id. Redelivery of one update repeats its id and stays
+ * idempotent, while a genuinely new tap gets a new id. Deriving this from the
+ * chat, message, and actor instead would make every later tap look like a
+ * replay of the first, so a member who revoked a grant could never restore it
+ * by tapping again.
  */
-function buildHostedTelegramGroupOfferAffirmationEventId(input: {
-  chatId: string;
-  messageId: string;
-  telegramUserId: string;
-}): string {
-  return `telegram:callback:${input.chatId}:${input.messageId}:${input.telegramUserId}`;
+function buildHostedTelegramGroupOfferAffirmationEventId(callbackQueryId: string): string {
+  return `telegram:callback:${callbackQueryId}`;
 }
 
 const HOSTED_TELEGRAM_GROUP_OFFER_JOINED_TEXT = "You're in.";

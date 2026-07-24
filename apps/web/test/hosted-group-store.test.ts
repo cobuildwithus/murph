@@ -798,6 +798,103 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("keys a Telegram offer on chat and message so ids cannot collide across chats", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    const inChat = await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      message: { channel: "telegram" as const, chatId: "-100777", messageId: "55" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+    const otherChat = await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      message: { channel: "telegram" as const, chatId: "-100888", messageId: "55" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    expect(inChat.messageLookupKey).toMatch(/^hbidx:telegram-message:/u);
+    // Same Telegram message id, different chat: never the same offer.
+    expect(inChat.messageLookupKey).not.toBe(otherChat.messageLookupKey);
+    // And never collides with a Linq binding.
+    expect(inChat.messageLookupKey).not.toMatch(/^hbidx:linq-message:/u);
+  });
+
+  it("matches a Telegram acceptance only against a Telegram route", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerMessageLookupKey: "hbidx:telegram-message:v1:offer",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedThreadRoute.findFirst.mockResolvedValue({
+      containerMemberId: "member_group_runtime",
+    });
+
+    await acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:tg"],
+      tx,
+    });
+
+    expect(tx.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
+      select: { containerMemberId: true },
+      where: {
+        channel: "telegram",
+        containerMemberId: "member_group_runtime",
+        threadIdentityLookupKey: { in: ["hbidx:external-thread-identity:v1:tg"] },
+      },
+    });
+  });
+
+  it("refuses a Telegram acceptance when no route matches the offer thread", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerMessageLookupKey: "hbidx:telegram-message:v1:offer",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedThreadRoute.findFirst.mockResolvedValue(null);
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:wrong"],
+      tx,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an acceptance whose message binding matches no offer", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedGroupJoinOffer.findFirst.mockResolvedValue(null);
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:other-message"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:tg"],
+      tx,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
   it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
