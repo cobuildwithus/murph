@@ -640,8 +640,9 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
  * iMessage-only gate and the per-chat throttle reservation. Best effort:
  * a share failure never fails or delays the reply delivery, and the request
  * signal is deliberately not forwarded because the share may run after the
- * response completes. With or without a post-response scheduler, this returns
- * before the provider attachment work settles.
+ * response completes. With a post-response scheduler this returns after
+ * registering the task; otherwise the returned promise settles after the
+ * provider attachment attempt reaches its terminal best-effort outcome.
  */
 export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input: {
   chatId: string | null;
@@ -649,7 +650,7 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   service: string | null;
-}): void {
+}): Promise<void> | void {
   if (
     !input.chatId
     || !isHostedLinqContactCardAutoShareEligible({ service: input.service })
@@ -696,7 +697,7 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
     input.scheduleAfterResponse(task);
     return;
   }
-  void task();
+  return task();
 }
 
 function buildHostedLinqContactCardShareLogDetails(
@@ -894,7 +895,12 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       return milestone;
     });
     if (milestone.restoreOnboardingLink) {
-      void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      // A rare delivered-before-accepted race can let receipt ingestion and
+      // this milestone commit without cross-observing the other's uncommitted
+      // write, omitting this best-effort card. The signup reply still lands and
+      // Murph remains available in the web picker; that accepted limitation
+      // does not warrant an advisory lock or a new durable obligation.
+      await queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
         chatId: milestone.restoreOnboardingLink.linqChatId,
         memberId: milestone.restoreOnboardingLink.memberId,
         prisma: input.prisma,

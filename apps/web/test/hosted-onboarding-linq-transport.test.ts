@@ -274,7 +274,7 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
-  it("shares once when accepted-milestone replay finds an earlier delivered receipt", async () => {
+  it("awaits one share when accepted-milestone replay finds an earlier delivered receipt", async () => {
     vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
       reopenOnboardingLink: null,
       restoreOnboardingLink: {
@@ -284,6 +284,12 @@ describe("hosted Linq webhook transport", () => {
         service: "iMessage",
       },
     });
+    const shareControl: { resolve?: () => void } = {};
+    const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
+      shareControl.resolve = () => resolve({ status: "sent" });
+    });
+    transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat
+      .mockReturnValueOnce(pendingShare);
     const scheduledTasks: Array<() => Promise<void>> = [];
     const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
       scheduledTasks.push(task);
@@ -323,13 +329,24 @@ describe("hosted Linq webhook transport", () => {
     if (!scheduledTask) {
       throw new Error("Expected an accepted-milestone task.");
     }
-    await scheduledTask();
+    let milestoneSettled = false;
+    const milestoneTask = scheduledTask().finally(() => {
+      milestoneSettled = true;
+    });
 
     await vi.waitFor(() => {
       expect(
         transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
       ).toHaveBeenCalledTimes(1);
     });
+    expect(milestoneSettled).toBe(false);
+    const resolveShare = shareControl.resolve;
+    if (!resolveShare) {
+      throw new Error("Expected the contact-card share to start.");
+    }
+    resolveShare();
+    await expect(milestoneTask).resolves.toBeUndefined();
+    expect(milestoneSettled).toBe(true);
     expect(
       transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -975,68 +992,9 @@ describe("hosted Linq webhook transport", () => {
       prisma: expect.anything(),
     });
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
-  });
-
-  it("never awaits a delivered-signup card share on the inline AI usage milestone", async () => {
-    vi.mocked(markHostedLinqDeliveryAcceptedTx).mockResolvedValueOnce({
-      reopenOnboardingLink: null,
-      restoreOnboardingLink: {
-        linqChatId: "chat-1",
-        memberId: "member-1",
-        occurredAt: "2026-03-26T00:00:00.000Z",
-        service: "iMessage",
-      },
-    });
-    const shareControl: { resolve?: () => void } = {};
-    const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
-      shareControl.resolve = () => resolve({ status: "sent" });
-    });
-    transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat
-      .mockReturnValueOnce(pendingShare);
-    const effect = createHostedWebhookLinqMessageSideEffect({
-      chatId: "chat-1",
-      claimToken: {
-        periodStart: "2026-03-01T00:00:00.000Z",
-        sentAt: "2026-03-26T12:00:01.000Z",
-        usageCreditLedgerVersion: "0",
-      },
-      memberId: "member-1",
-      message: "usage-limit",
-      noticeCode: "pulse_upgrade_edge",
-      occurredAt: "2026-03-26T12:00:00.000Z",
-      replyToMessageId: "message-1",
-      sourceEventId: "event-ai-usage-card-share-detached",
-      template: "ai_usage_quota",
-    });
-
-    const drainTask = drainHostedLinqSideEffectsDirect({
-      prisma: usagePrisma as never,
-      sideEffects: [effect],
-    });
-    await vi.waitFor(() => {
-      expect(
-        transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
-      ).toHaveBeenCalledTimes(1);
-    });
-
-    const completionBeforeShareSettled = await Promise.race([
-      drainTask.then(() => "completed" as const),
-      new Promise<"blocked">((resolve) => {
-        setImmediate(() => resolve("blocked"));
-      }),
-    ]);
-    const resolveShare = shareControl.resolve;
-    if (!resolveShare) {
-      throw new Error("Expected the contact-card share to start.");
-    }
-    resolveShare();
-
-    await expect(drainTask).resolves.toEqual({ sentCount: 1, skipped: [] });
-    expect(completionBeforeShareSettled).toBe("completed");
     expect(
       transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
-    ).toHaveBeenCalledTimes(1);
-    expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    ).not.toHaveBeenCalled();
   });
 
   it("consumes legacy persisted AI usage claims without a ledger version as epoch zero", async () => {

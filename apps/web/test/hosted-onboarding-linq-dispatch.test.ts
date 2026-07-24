@@ -669,6 +669,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         sourceRef: effectId,
         template: "invite_signup",
       });
+      const shareControl: { resolve?: () => void } = {};
+      const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
+        shareControl.resolve = () => resolve({ status: "sent" });
+      });
+      mocks.shareMurphHostedLinqContactCardVcfToChat.mockReturnValueOnce(pendingShare);
       const scheduledTasks: Array<() => Promise<void>> = [];
       const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
         scheduledTasks.push(task);
@@ -710,7 +715,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       if (!scheduledTask) {
         throw new Error("Expected a delivered-signup contact-card task.");
       }
-      await scheduledTask();
+      let scheduledTaskSettled = false;
+      const scheduledTaskPromise = scheduledTask().finally(() => {
+        scheduledTaskSettled = true;
+      });
+
+      await vi.waitFor(() => {
+        expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+      });
+      expect(scheduledTaskSettled).toBe(false);
+      const resolveShare = shareControl.resolve;
+      if (!resolveShare) {
+        throw new Error("Expected the delivered-signup contact-card share to start.");
+      }
+      resolveShare();
+      await expect(scheduledTaskPromise).resolves.toBeUndefined();
+      expect(scheduledTaskSettled).toBe(true);
 
       expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
       expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith({
@@ -821,8 +841,17 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       providerEventCreateCounts: [1],
       receiptUpdateCounts: [0],
     },
+    {
+      eventId: "evt_delivered_non_invite",
+      eventType: "message.delivered" as const,
+      expectedScheduledTaskCount: 0,
+      label: "non-invite template",
+      providerEventCreateCounts: [1],
+      receiptUpdateCounts: [1],
+      template: "ai_usage_quota" as const,
+    },
   ])(
-    "does not share for a $label signup delivery event",
+    "does not share for a $label delivery event",
     async ({
       createdAt,
       eventId,
@@ -830,6 +859,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectedScheduledTaskCount,
       providerEventCreateCounts,
       receiptUpdateCounts,
+      template = "invite_signup",
     }: {
       createdAt?: string;
       eventId: string;
@@ -837,12 +867,13 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expectedScheduledTaskCount: number;
       providerEventCreateCounts: readonly number[];
       receiptUpdateCounts: readonly number[];
+      template?: "ai_usage_quota" | "invite_signup";
     }) => {
       const prisma = createHostedLinqDeliveryReceiptWebhookPrisma({
         providerEventCreateCounts,
         receiptUpdateCounts,
         sourceRef: "linq-invite-signup:member_123:2026-03-26T00:00:00.000Z",
-        template: "invite_signup",
+        template,
       });
       const scheduledTasks: Array<() => Promise<void>> = [];
       const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
@@ -867,6 +898,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       expect(scheduledTasks).toHaveLength(expectedScheduledTaskCount);
+      for (const scheduledTask of scheduledTasks) {
+        await scheduledTask();
+      }
       expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
     },
   );
@@ -9600,7 +9634,7 @@ function createHostedLinqDeliveryReceiptWebhookPrisma(input: {
   providerEventCreateCounts?: readonly number[];
   receiptUpdateCounts?: readonly number[];
   sourceRef: string;
-  template: "invite_signup" | "invite_signup_fallback";
+  template: "ai_usage_quota" | "invite_signup" | "invite_signup_fallback";
 }): HostedOnboardingLinqWebhookPrismaFixture {
   const providerEventCreateCounts = input.providerEventCreateCounts ?? [1];
   const hostedLinqProviderEventCreateMany = vi.fn().mockResolvedValue({
