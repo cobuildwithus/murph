@@ -30,15 +30,17 @@ import {
 export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile make import-graph growth fail the
-// assembly instead of silently regressing cold start. The baselines are the
-// clean packaged measurements after unused contracts and query exports became
-// tree-shakeable. Entry and static-closure caps retain their platform-jitter
-// tolerances. The highest observed local packaged bundle measures 9,488,490B;
-// the total cap leaves 32KB for small reviewed additions without restoring the
-// former 250KB operational growth allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_521_258;
+// assembly instead of silently regressing cold start. The static-closure
+// baseline and total budget are the packaged measurements after the x_search
+// tool landed on the updated main branch; the entry baseline remains the prior
+// clean packaged measurement. Entry and static-closure caps retain their
+// existing platform-jitter tolerances. The post-x_search bundle measured
+// 9,526,269B total and 7,767,224B in the static boot closure, so those reviewed
+// values become the new ratchet without restoring the former 250KB operational
+// growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_526_269;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_641_831;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_767_224;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
