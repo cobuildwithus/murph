@@ -348,6 +348,14 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       userId,
     });
     await barrier.released;
+    if (request.signal.aborted) {
+      throw request.signal.reason instanceof Error
+        ? request.signal.reason
+        : new DOMException(
+            "Hosted-local shutdown checkpoint publication was interrupted.",
+            "AbortError",
+          );
+    }
     return await handler(request, env, ctx);
   };
 }

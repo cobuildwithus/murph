@@ -1,19 +1,30 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 
 import {
   buildHostedExecutionMemberActivatedWake,
+  buildHostedExecutionPendingEffectsReconcileRequestedWake,
 } from "@murphai/hosted-execution";
+import {
+  buildHostedActionApprovalOutcomeEffectId,
+} from "@murphai/hosted-execution/action-approval";
 import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
+  denyHostedSensitiveActionChallengeForTest,
   listHostedAiUsageForTest,
+  readLatestHostedSensitiveActionChallengeForTest,
   type HostedAiUsageForTestRow,
+  type HostedSensitiveActionChallengeForTest,
 } from "#hosted-web-testing";
+import {
+  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+} from "@murphai/runtime-state/assistant-generated-deliveries";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildAssistantProviderMurphToolCall,
+  buildAssistantProviderShellCommandCall,
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -39,6 +50,17 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep mate, I am here.";
+const wakePreservationApprovalRequestText =
+  "Create a synthetic checkpoint report and prepare it for secure attachment.";
+const wakePreservationApprovalPendingReplyText =
+  "The checkpoint report is prepared and awaiting approval.";
+const wakePreservationWindowRequestText =
+  "Confirm the hosted-local wake-preservation checkpoint window.";
+const wakePreservationWindowReplyText =
+  "Wake-preservation checkpoint window confirmed.";
+const wakePreservationReportRef =
+  `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/wake-preservation-proof.pdf`;
+const approvalGenerationVersion = "murph-action-approval-generation-v1";
 const scheduledReminderTiming = resolveScheduledReminderTiming();
 const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
@@ -49,6 +71,7 @@ const scheduledReminderInstructions =
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
+const shutdownCheckpointBarrierWaitMs = 30_000;
 const productionLikeAssistantModel = "gpt-5.6-terra";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -61,6 +84,10 @@ let scenario: HostedLocalFullStackScenario | null = null;
 vi.mock("server-only", () => ({}));
 
 afterAll(async () => {
+  if (scenario) {
+    await scenario.harness.releaseShutdownCheckpointPublicationBarrierForTest(userId)
+      .catch(() => undefined);
+  }
   await scenario?.stop();
   scenario = null;
   await linqStub?.stop();
@@ -106,6 +133,50 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
+    const approvalReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderShellCommandCall(
+        `mkdir -p '${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}'`
+          + ` && printf '%s\\n' '%PDF-1.7 synthetic wake preservation proof'`
+          + ` > '${wakePreservationReportRef}'`,
+      ),
+      buildAssistantProviderMurphToolCall("send_vault_file", {
+        ref: wakePreservationReportRef,
+      }),
+      wakePreservationApprovalPendingReplyText,
+    ], {
+      matchInputContains: wakePreservationApprovalRequestText,
+    });
+    const approvalWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      scheduledChatId,
+      {
+        eventId: `evt_scheduled_reminder_approval_${userId}`,
+        messageId: `msg_scheduled_reminder_approval_${userId}`,
+        text: wakePreservationApprovalRequestText,
+      },
+    ));
+    expect(approvalWebhookResponse.status).toBe(202);
+    await requireScenario().waitForLatestPendingWake(userId);
+    const approvalReply = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: approvalReplyBaselineCount,
+      expectedPath: reminderPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(approvalReply)).toContain(
+      wakePreservationApprovalPendingReplyText,
+    );
+    const approvalSetupStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(approvalSetupStatus.lastErrorCode ?? null).toBeNull();
+    const approvalChallenge = await waitForLatestWakePreservationChallenge();
+    const approvalEffectId = buildApprovalOutcomeEffectId(approvalChallenge);
+    const deniedChallenge = await denyHostedSensitiveActionChallengeForTest({
+      environment: requireScenario().runtimeEnv,
+      tokenHash: approvalChallenge.tokenHash,
+    });
+    expect(deniedChallenge.approvalStatus).toBe("denied");
+
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     const scheduledReminderTimes = resolveScheduledReminderTimes();
     requireScenario().queueAssistantResponses(
@@ -141,6 +212,82 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     expect(setupStatus.lastErrorCode ?? null).toBeNull();
     await waitForHostedWorkspaceWakeNotLaterThan({
       latestAllowedWakeAt: scheduledReminderTimes.dueAtIso,
+      userId,
+    });
+    assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
+
+    const wakePreservationReplyBaselineCount =
+      requireLinqStub().countObservedSends(reminderPath);
+    requireScenario().queueAssistantResponses([
+      wakePreservationWindowReplyText,
+    ], {
+      matchInputContains: wakePreservationWindowRequestText,
+    });
+    let shutdownCheckpointBarrierArmed = false;
+    let systemMailboxImportedBaseline: bigint | null = null;
+    try {
+      await requireScenario().harness.armShutdownCheckpointPublicationBarrierForTest(userId);
+      shutdownCheckpointBarrierArmed = true;
+      const wakePreservationWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+        userId,
+        scheduledChatId,
+        {
+          eventId: `evt_scheduled_reminder_wake_window_${userId}`,
+          messageId: `msg_scheduled_reminder_wake_window_${userId}`,
+          text: wakePreservationWindowRequestText,
+        },
+      ));
+      expect(wakePreservationWebhookResponse.status).toBe(202);
+      await expect(wakePreservationWebhookResponse.json()).resolves.toMatchObject({
+        ok: true,
+        reason: "wake-appended-active-member",
+      });
+      await requireScenario().waitForLatestPendingWake(userId);
+      const wakePreservationReply = await requireLinqStub().waitForAdditionalSend({
+        baselineCount: wakePreservationReplyBaselineCount,
+        expectedPath: reminderPath,
+        scenario: requireScenario(),
+        userId,
+      });
+      expect(requireLinqStub().readObservedMessageText(wakePreservationReply))
+        .toBe(wakePreservationWindowReplyText);
+      await waitForShutdownCheckpointPublicationBarrier();
+      systemMailboxImportedBaseline =
+        readHostedSystemMailboxImportedSeq(
+          await requireScenario().harness.readUserStatus(userId),
+        );
+      const causalSystemWake = await requireScenario().runWake(
+        buildWakePreservationPendingEffectsWake({
+          effectId: approvalEffectId,
+          eventName: "causal-checkpoint",
+        }),
+        userId,
+      );
+      expect(causalSystemWake.wakeResult).toMatchObject({
+        action: "woken",
+        kind: "runtime_processing_accepted",
+      });
+    } finally {
+      if (shutdownCheckpointBarrierArmed) {
+        await expect(
+          requireScenario().harness.releaseShutdownCheckpointPublicationBarrierForTest(userId),
+        ).resolves.toEqual({ ok: true, released: true });
+      }
+    }
+    await expect(
+      requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(userId),
+    ).resolves.toEqual({ state: "unarmed" });
+    if (systemMailboxImportedBaseline === null) {
+      throw new Error("Reminder setup invocation did not reach the checkpoint barrier.");
+    }
+    const importedSystemMailboxSeq =
+      await waitForHostedSystemMailboxImportedAfter(systemMailboxImportedBaseline);
+    await waitForHostedSystemMailboxHandledThrough(importedSystemMailboxSeq);
+    const causalStatus = await requireScenario().waitForHostedCompletion(userId);
+    expect(causalStatus.lastErrorCode ?? null).toBeNull();
+    await waitForHostedWorkspaceWakeNotLaterThan({
+      latestAllowedWakeAt: scheduledReminderTimes.dueAtIso,
+      timeoutMs: shutdownCheckpointBarrierWaitMs,
       userId,
     });
     assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
@@ -548,6 +695,7 @@ async function startScenario(): Promise<void> {
       OPENAI_API_KEY: "stub-local-openai-key",
     },
     assistantProviderStubModelId: productionLikeAssistantModel,
+    faultInjection: true,
     localDatabaseUrl,
     persistDirOverride: workerPersistDirOverride,
     persistDirPrefix: "murph-hosted-local-linq-scheduled-reminder-",
@@ -574,6 +722,63 @@ function buildHostedAssistantAutomationSaveResponses(input: {
     }),
     input.text,
   ];
+}
+
+function buildWakePreservationPendingEffectsWake(input: {
+  effectId: string;
+  eventName: string;
+}) {
+  return buildHostedExecutionPendingEffectsReconcileRequestedWake({
+    effectId: input.effectId,
+    eventId:
+      `runtime-control:scheduled-reminder-wake-preservation:${input.eventName}:${userId}`,
+    occurredAt: new Date().toISOString(),
+    userId,
+  });
+}
+
+function buildApprovalOutcomeEffectId(
+  challenge: HostedSensitiveActionChallengeForTest,
+): string {
+  if (!challenge.approvalKey || !challenge.actionHash) {
+    throw new Error("Hosted wake-preservation approval identity was incomplete.");
+  }
+  const approvalGeneration = createHash("sha256")
+    .update([
+      approvalGenerationVersion,
+      challenge.approvalKey,
+      challenge.actionHash,
+      challenge.tokenHash,
+    ].join("\n"))
+    .digest("hex");
+  return buildHostedActionApprovalOutcomeEffectId({
+    approvalGeneration,
+    approvalId: challenge.approvalKey,
+    expiresAt: challenge.expiresAt.toISOString(),
+  });
+}
+
+async function waitForLatestWakePreservationChallenge():
+  Promise<HostedSensitiveActionChallengeForTest> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 60_000) {
+    const challenge = await readLatestHostedSensitiveActionChallengeForTest({
+      environment: requireScenario().runtimeEnv,
+      memberId: userId,
+    });
+    if (
+      challenge
+      && challenge.approvalStatus === "pending"
+      && challenge.consumedAt === null
+      && challenge.tokenHash.length > 0
+    ) {
+      return challenge;
+    }
+    await sleep(100);
+  }
+
+  throw new Error("Timed out waiting for the wake-preservation approval challenge.");
 }
 
 function createHeldAssistantProviderTextResponse(text: string): {
@@ -649,6 +854,7 @@ function assertScheduledReminderRunway(dueAtIso: string): void {
 
 async function waitForHostedWorkspaceWakeNotLaterThan(input: {
   latestAllowedWakeAt: string;
+  timeoutMs?: number;
   userId: string;
 }): Promise<string> {
   const latestAllowedWakeAtMs = Date.parse(input.latestAllowedWakeAt);
@@ -661,7 +867,7 @@ async function waitForHostedWorkspaceWakeNotLaterThan(input: {
   let latestNextAlarmAt: string | null = null;
   let latestError: string | null = null;
 
-  while ((Date.now() - startedAt) < 120_000) {
+  while ((Date.now() - startedAt) < (input.timeoutMs ?? 120_000)) {
     let status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>;
     try {
       status = await requireScenario().harness.readUserStatus(input.userId);
@@ -700,6 +906,84 @@ async function waitForHostedWorkspaceWakeNotLaterThan(input: {
     `latestNextAlarmAt: ${latestNextAlarmAt ?? "null"}`,
     latestError ? `latest status read error: ${latestError}` : null,
   ].filter((line): line is string => Boolean(line))));
+}
+
+async function waitForShutdownCheckpointPublicationBarrier(): Promise<void> {
+  const startedAt = Date.now();
+  let lastState: string | null = null;
+
+  while (Date.now() - startedAt < shutdownCheckpointBarrierWaitMs) {
+    const barrier = await requireScenario().harness
+      .readShutdownCheckpointPublicationBarrierForTest(userId);
+    lastState = barrier.state;
+    if (barrier.state === "entered") {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for shutdown checkpoint publication to enter its test barrier.",
+    `last barrier state: ${lastState ?? "unread"}`,
+  ]));
+}
+
+async function waitForHostedSystemMailboxHandledThrough(
+  expectedHandledThroughSeq: bigint,
+): Promise<void> {
+  const startedAt = Date.now();
+  let lastHandledThroughSeq = 0n;
+
+  while (Date.now() - startedAt < shutdownCheckpointBarrierWaitMs) {
+    const status = await requireScenario().harness.readUserStatus(userId);
+    lastHandledThroughSeq = readHostedSystemMailboxHandledThroughSeq(status);
+    if (lastHandledThroughSeq >= expectedHandledThroughSeq) {
+      return;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for the live invocation to handle the pending-effects system import.",
+    `expected handled-through seq: ${expectedHandledThroughSeq}`,
+    `last handled-through seq: ${lastHandledThroughSeq}`,
+  ]));
+}
+
+function readHostedSystemMailboxImportedSeq(
+  status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>,
+): bigint {
+  const value = status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq;
+  return typeof value === "string" ? BigInt(value) : 0n;
+}
+
+function readHostedSystemMailboxHandledThroughSeq(
+  status: Awaited<ReturnType<HostedLocalFullStackScenario["harness"]["readUserStatus"]>>,
+): bigint {
+  const value = status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq;
+  return typeof value === "string" ? BigInt(value) : 0n;
+}
+
+async function waitForHostedSystemMailboxImportedAfter(
+  baselineImportedSeq: bigint,
+): Promise<bigint> {
+  const startedAt = Date.now();
+  let lastImportedSeq = baselineImportedSeq;
+
+  while (Date.now() - startedAt < shutdownCheckpointBarrierWaitMs) {
+    const status = await requireScenario().harness.readUserStatus(userId);
+    lastImportedSeq = readHostedSystemMailboxImportedSeq(status);
+    if (lastImportedSeq > baselineImportedSeq) {
+      return lastImportedSeq;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(await requireScenario().buildFailureMessage(userId, [
+    "Timed out waiting for the live invocation to import the pending-effects system wake.",
+    `system mailbox imported seq: ${lastImportedSeq}`,
+    `imported baseline seq: ${baselineImportedSeq}`,
+  ]));
 }
 
 async function waitForScheduledReminderSendWithoutNudge(input: {

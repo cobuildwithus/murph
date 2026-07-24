@@ -1251,7 +1251,10 @@ export async function runHostedWorkspaceAssistantPhase(
         wake,
       });
       if (!systemMailboxMaintenance.result) {
-        return { progressed: false };
+        return withHostedRuntimeWakeCandidate({
+          result: { progressed: false },
+          wake: createExistingHostedAssistantWorkspaceWakeCandidate(input),
+        });
       }
       return withHostedDeviceSyncMaintenanceRan(
         systemMailboxMaintenance.result,
@@ -4423,6 +4426,9 @@ async function runSystemMailboxMaintenancePhase(input: {
     backgroundWake,
     createHostedRuntimeWakeCandidate(systemMailboxMetricsWakeAt, systemMailboxMetricsWakeReason),
     dirtyDeviceSyncWake,
+    phaseInput.foregroundCausalOnly === true
+      ? createExistingHostedAssistantWorkspaceWakeCandidate(phaseInput)
+      : null,
   ]);
   const nextWakeAt = nextWake.at;
   const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
@@ -4707,6 +4713,9 @@ async function runSystemMailboxPostCheckpointPhase(input: {
         input.systemMailboxMetricsWakeAt,
         input.systemMailboxMetricsWakeReason,
       ),
+      foregroundCausalOnly
+        ? createExistingHostedAssistantWorkspaceWakeCandidate(input.input)
+        : null,
     ]);
     const statusNextWakeAt = statusNextWake.at;
     const statusNextWakeReason = statusNextWake.reason;

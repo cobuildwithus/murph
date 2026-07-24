@@ -12011,14 +12011,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps assistant ask completions out of a causal-only pass without an input cutoff", async () => {
     const now = "2026-04-27T00:03:00.000Z";
+    const armedWakeAt = "2026-04-27T00:08:00.000Z";
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null);
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
       foregroundCausalOnly: true,
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => now,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
@@ -12029,6 +12033,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: armedWakeAt,
+      progressed: false,
+    }));
   });
 
   it("keeps due cron work out of a causal-only zero-effect pass", async () => {
@@ -12079,6 +12087,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       progressed: true,
+    }));
+  });
+
+  it("preserves an armed workspace wake through a causal-only system mailbox checkpoint", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const armedWakeAt = "2026-04-27T00:05:00.000Z";
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
+    }));
+
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      nextWakeReason: "assistant",
     }));
   });
 
