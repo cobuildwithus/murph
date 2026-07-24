@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v8: device_connection.hosted_connection_id (stable hosted hydration identity).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 8;
+// v9: device_connection_source.last_data_at (per-source data-arrival signal).
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 9;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -40,6 +40,10 @@ function readDeviceConnectionColumns(database: DatabaseSync): SqliteTableColumn[
 
 function readOAuthStateColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(oauth_state)").all() as SqliteTableColumn[];
+}
+
+function readConnectionSourceColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_connection_source)").all() as SqliteTableColumn[];
 }
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
@@ -195,6 +199,25 @@ function ensureHostedConnectionIdentityColumn(database: DatabaseSync): void {
   `);
 }
 
+/**
+ * `last_seen_at` records that the provider still lists this source, so a
+ * reconcile refreshes it whether or not any data arrived. `last_data_at`
+ * records the last inbound payload that actually carried this source's data,
+ * which is the only signal that can distinguish a live push carrier from one
+ * the provider has silently stopped feeding. It stays null until the first
+ * such payload lands.
+ */
+function ensureConnectionSourceLastDataColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "device_connection_source")) {
+    return;
+  }
+
+  const names = columnNames(readConnectionSourceColumns(database));
+  if (!names.has("last_data_at")) {
+    database.exec("alter table device_connection_source add column last_data_at text");
+  }
+}
+
 function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
   if (!tableExists(database, "webhook_trace")) {
     return;
@@ -291,6 +314,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         last_error_message text,
         first_seen_at text not null,
         last_seen_at text not null,
+        last_data_at text,
         created_at text not null,
         updated_at text not null,
         unique (connection_id, source_instance_key),
@@ -377,5 +401,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureDeviceConnectionSetupColumns(database);
   ensureHostedConnectionIdentityColumn(database);
   ensureWebhookTraceClaimTokenColumn(database);
+  ensureConnectionSourceLastDataColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

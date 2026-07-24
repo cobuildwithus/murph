@@ -72,6 +72,24 @@ safe: keep both the inline import and the floor. This follows the device-sync
 ingestion invariants — push delivers early, pull guarantees eventually, and
 neither path gates the other.
 
+A push-primary source has no pull guarantee, so its carrier can die without any
+observable error: the aggregator keeps reporting the connection `connected` with
+every resource `available`, and the floor fetch returns zero rows exactly as it
+would for a member who simply has no new data. Source rows therefore carry
+`last_data_at`, stamped at webhook ingress from the source the payload names.
+This is distinct from `last_seen_at`, which the reconcile projection refreshes
+whenever the aggregator still lists the source and which consequently cannot
+show a stall. Only an inbound payload moves `last_data_at`; the projection must
+leave it alone.
+
+`packages/device-syncd/src/source-staleness.ts` owns which sources are
+push-primary and how long each may stay silent, and the hosted device-sync
+maintenance pass reports breaches as `device-sync.source_stalled`. Evaluation is
+observation only: it never changes source status, gates ingestion, or triggers
+recovery, and a failure to evaluate or report must not fail the sync pass. A
+source that has never delivered is measured from `first_seen_at`, so a connect
+that emits its opening burst and then goes quiet is caught by the same rule.
+
 Junction historical progress is evaluated per advertised high-signal daily
 source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
 family (for example activity) is not evidence that Garmin sleep or

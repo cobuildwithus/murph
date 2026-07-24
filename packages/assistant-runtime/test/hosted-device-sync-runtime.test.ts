@@ -703,6 +703,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-04T09:00:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: {
               activity: true,
@@ -718,6 +719,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-04T09:00:00.000Z",
+            lastDataAt: null,
             resourceCount: 0,
             sourceProviderSlug: "legacy",
             status: "connected",
@@ -788,6 +790,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:12:00.000Z",
+            lastDataAt: null,
             resourceCount: 3,
             resourceAvailabilitySummary: {
               activity: true,
@@ -961,6 +964,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
             lastErrorMessage: "Historical data remained incomplete.",
             lastSeenAt: "2026-04-06T09:25:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: { activity: true, sleep: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -1012,6 +1016,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:30:00.000Z",
+            lastDataAt: null,
             resourceCount: 1,
             resourceAvailabilitySummary: { activity: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -1103,6 +1108,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:15:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: {
               activity: true,

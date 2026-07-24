@@ -407,6 +407,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
                 ? { firstSeenAt: source.firstSeenAt ?? null }
                 : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastDataAt")
+                ? { lastDataAt: source.lastDataAt ?? null }
+                : {}),
               lastSeenAt: source.lastSeenAt,
               tx,
             });
@@ -684,6 +687,7 @@ function toHostedRuntimeConnectionSourceSnapshot(
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
     lastSeenAt: source.lastSeenAt,
+    lastDataAt: source.lastDataAt,
     resourceCount: countHostedRuntimeConnectionSourceResources(
       source.resourceAvailabilitySummary,
     ),
@@ -915,7 +919,10 @@ function hostedRuntimeSourceUpdateMatchesCurrent(
     && current.lastErrorCode === (update.lastErrorCode ?? null)
     && current.lastErrorMessage === (update.lastErrorMessage ?? null)
     && current.firstSeenAt === (update.firstSeenAt ?? null)
-    && current.lastSeenAt === update.lastSeenAt;
+    && current.lastSeenAt === update.lastSeenAt
+    // A push carrier can deliver without any other field moving, so an
+    // arrival-only update must not be dropped as a no-op.
+    && (update.lastDataAt === undefined || current.lastDataAt === update.lastDataAt);
 }
 
 function equalHostedRuntimeSourceSummaries(

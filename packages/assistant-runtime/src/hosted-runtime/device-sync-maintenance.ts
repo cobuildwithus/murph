@@ -10,6 +10,7 @@ import {
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
+import { evaluatePushPrimarySourceStaleness } from "@murphai/device-syncd/source-staleness";
 import {
   pruneWearableDenseRawTimeseries,
 } from "@murphai/core";
@@ -190,6 +191,10 @@ export async function runHostedDeviceSyncPass(
       service,
       state: syncState,
       wake,
+    });
+    await writeHostedDeviceSyncSourceStalledRuntimeLogs({
+      platform: options.runtimeLogPlatform ?? null,
+      service,
     });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
@@ -487,6 +492,81 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
     return {
       hasMore: true,
     };
+  }
+}
+
+/**
+ * A push-primary source that has gone quiet is invisible everywhere else: the
+ * provider still reports the connection healthy, and the pull floor cannot
+ * distinguish "no data upstream" from "carrier dead". This is the only place
+ * that silence becomes observable, so it is emitted on the same hourly pass
+ * that already runs for the connection. The hosted log's event cooldown keeps a
+ * days-long stall from writing an entry every hour.
+ */
+async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+  service: DeviceSyncService;
+}): Promise<void> {
+  if (!input.platform?.logPort) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+
+  // Reporting a stall must never cost the member their sync pass, so this stays
+  // strictly best-effort: a failure here is logged and the pass continues.
+  try {
+    for (const account of input.service.listAccounts()) {
+      if (account.status !== "active") {
+        continue;
+      }
+
+      const stale = evaluatePushPrimarySourceStaleness({
+        now,
+        sources: (account.sources ?? []).map((source) => ({
+          firstSeenAt: source.firstSeenAt,
+          lastDataAt: source.lastDataAt,
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        })),
+      });
+
+      for (const entry of stale) {
+        await writeHostedRuntimeLogBestEffort({
+          entry: {
+            component: "device-sync",
+            eventCode: "device-sync.source_stalled",
+            level: "warn",
+            phase: "invoke",
+            redactedJson: {
+              lastDataAt: entry.lastDataAt,
+              provider: account.provider,
+              reason: entry.reason,
+              silentHours: entry.silentHours,
+              silentSinceAt: entry.silentSinceAt,
+              sourceProviderSlug: entry.sourceProviderSlug,
+              thresholdHours: entry.thresholdHours,
+            },
+          },
+          platform: input.platform,
+        });
+      }
+    }
+  } catch (error) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "device-sync",
+        eventCode: "device-sync.source_stalled",
+        level: "warn",
+        phase: "invoke",
+        redactedJson: {
+          errorSummary: sanitizeHostedDeviceSyncFailureSummary(errorToString(error))
+            ?? "source staleness evaluation failed",
+          failed: true,
+        },
+      },
+      platform: input.platform,
+    });
   }
 }
 

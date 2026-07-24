@@ -70,6 +70,10 @@
       "types": "./dist/provider-match.d.ts",
       "default": "./dist/provider-match.js"
     },
+    "./source-staleness": {
+      "types": "./dist/source-staleness.d.ts",
+      "default": "./dist/source-staleness.js"
+    },
     "./public-provider-descriptors": {
       "types": "./dist/public-provider-descriptors.d.ts",
       "default": "./dist/public-provider-descriptors.js"

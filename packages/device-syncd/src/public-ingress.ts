@@ -85,8 +85,10 @@ function toIngressWebhook(parsed: {
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
   resourceCategory?: string | null;
+  dataSourceProviderSlug?: string | null;
 }): DeviceSyncIngressWebhook {
   const resourceCategory = normalizeString(parsed.resourceCategory);
+  const dataSourceProviderSlug = normalizeString(parsed.dataSourceProviderSlug);
 
   return {
     acceptanceMode: parsed.acceptanceMode,
@@ -94,6 +96,7 @@ function toIngressWebhook(parsed: {
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
     ...(resourceCategory ? { resourceCategory } : {}),
+    ...(dataSourceProviderSlug ? { dataSourceProviderSlug } : {}),
   };
 }
 
@@ -1443,6 +1446,30 @@ export class DeviceSyncPublicIngress {
         failureCode: "DEVICE_SYNC_WEBHOOK_RECEIPT_TIMESTAMP_RECORD_FAILED",
         error: summarizePublicIngressError(error),
       });
+    }
+
+    // Connection-scoped receipt time cannot show that one source went quiet
+    // while a sibling on the same connection kept delivering, so record the
+    // arrival against the source the provider named. Like the receipt stamp,
+    // this runs after durable acceptance and never fails the webhook.
+    const dataSourceProviderSlug = webhook.dataSourceProviderSlug ?? null;
+    if (dataSourceProviderSlug && this.store.markConnectionSourceDataReceived) {
+      try {
+        await this.store.markConnectionSourceDataReceived({
+          connectionId: account.id,
+          now,
+          sourceProviderSlug: dataSourceProviderSlug,
+        });
+      } catch (error) {
+        this.logger.warn?.("Failed to record source data arrival after durable acceptance.", {
+          provider: provider.provider,
+          accountId: account.id,
+          eventType: webhook.eventType,
+          traceId,
+          failureCode: "DEVICE_SYNC_SOURCE_DATA_ARRIVAL_RECORD_FAILED",
+          error: summarizePublicIngressError(error),
+        });
+      }
     }
 
     return {

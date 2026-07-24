@@ -1716,6 +1716,7 @@ export function createJunctionDeviceSyncProvider(
       traceId: verified.messageId,
       occurredAt,
       resourceCategory: resource?.category ?? null,
+      dataSourceProviderSlug: isJunctionDataEvent(eventType) ? sourceProviderSlug : null,
       jobs,
       unknownAccountAction: "accept",
     };
