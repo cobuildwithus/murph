@@ -13,10 +13,13 @@ import {
   getHostedVaultShareDailyMetricProjectionSpec,
   HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS,
   HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
+  HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS,
   HOSTED_VAULT_SHARE_DELIVER_MAX_RECORDS,
   HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA,
   parseHostedVaultShareActiveProjectionKindsResponse,
   parseHostedVaultShareDeliveryRecord,
@@ -28,7 +31,12 @@ import {
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const ACTIVITY_SCOPE = { projectionKind: "activity-days.v0" } as const;
 const STEPS_SCOPE = { projectionKind: "steps-days.v0" } as const;
+const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
 const WORKOUT_SCOPE = { projectionKind: "workout-days.v0" } as const;
+const WORKOUT_LATEST_START_SCOPE = {
+  projectionKind: "workout-latest-start-days.v0",
+} as const;
 const HEART_RATE_ZONE_SCOPE = { projectionKind: "heart-rate-zones-days.v0" } as const;
 const PROFILE_SCOPE = { projectionKind: "profile-name.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
@@ -81,6 +89,17 @@ const VALID_WORKOUT_RECORD = {
     date: "2026-07-03",
     workoutCount: 2,
     workoutMinutes: 85,
+  },
+  occurredAt: "2026-07-03T00:00:00.000Z",
+  recordKey: "2026-07-03",
+};
+
+const VALID_WORKOUT_LATEST_START_RECORD = {
+  data: {
+    date: "2026-07-03",
+    latestStartLocalMs: 18 * 60 * 60 * 1_000,
+    timeSemantics:
+      HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
   },
   occurredAt: "2026-07-03T00:00:00.000Z",
   recordKey: "2026-07-03",
@@ -162,8 +181,11 @@ describe("vault-share contracts", () => {
       "group-email.v0",
       "sleep-times.v0",
       "sleep-duration-days.v0",
+      "deep-sleep-days.v0",
+      "rem-sleep-days.v0",
       "activity-days.v0",
       "workout-days.v0",
+      "workout-latest-start-days.v0",
       "heart-rate-zones-days.v0",
       "steps-days.v0",
       "max-heart-rate-days.v0",
@@ -211,6 +233,30 @@ describe("vault-share contracts", () => {
       "device-sync-status.v0",
     ]);
     expect(getHostedVaultShareDailyMetricProjectionSpec("group-email.v0")).toBeNull();
+  });
+
+  it("keeps daily metric projection kinds and specs one-to-one", () => {
+    expect(
+      HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.map(
+        (spec) => spec.projectionKind,
+      ),
+    ).toEqual(HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS);
+    expect(new Set(HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS).size).toBe(
+      HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS.length,
+    );
+    expect(
+      new Set(
+        HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.map(
+          (spec) => spec.metricKey,
+        ),
+      ).size,
+    ).toBe(HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.length);
+
+    for (const spec of HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS) {
+      expect(
+        getHostedVaultShareDailyMetricProjectionSpec(spec.projectionKind),
+      ).toEqual(spec);
+    }
   });
 
   it("parses a valid deliver request", () => {
@@ -742,6 +788,50 @@ describe("daily metric vault-share delivery records", () => {
       })
     ).toThrow(/date at UTC midnight/u);
   });
+
+  it("parses bounded deep and REM sleep minute records", () => {
+    for (const [projectionScope, metricKey] of [
+      [DEEP_SLEEP_SCOPE, "deep-sleep-minutes"],
+      [REM_SLEEP_SCOPE, "rem-sleep-minutes"],
+    ] as const) {
+      for (const value of [0, 1_440]) {
+        const record = {
+          ...VALID_DAILY_METRIC_RECORD,
+          data: {
+            ...VALID_DAILY_METRIC_RECORD.data,
+            metricKey,
+            unit: "minutes",
+            value,
+          },
+        };
+        expect(parseHostedVaultShareDeliverRequest({
+          projectionKind: projectionScope.projectionKind,
+          records: [record],
+        })).toEqual({
+          projectionKind: projectionScope.projectionKind,
+          projectionScope,
+          records: [record],
+        });
+      }
+
+      for (const value of [-1, 1_441]) {
+        expect(() =>
+          parseHostedVaultShareDeliverRequest({
+            projectionKind: projectionScope.projectionKind,
+            records: [{
+              ...VALID_DAILY_METRIC_RECORD,
+              data: {
+                ...VALID_DAILY_METRIC_RECORD.data,
+                metricKey,
+                unit: "minutes",
+                value,
+              },
+            }],
+          })
+        ).toThrow(/value must be between/u);
+      }
+    }
+  });
 });
 
 describe("workout-days.v0 delivery records", () => {
@@ -799,6 +889,94 @@ describe("workout-days.v0 delivery records", () => {
         }],
       })
     ).toThrow(/metricSemantics is invalid/u);
+  });
+});
+
+describe("workout-latest-start-days.v0 delivery records", () => {
+  it("parses the strict latest-local-start record shape", () => {
+    expect(parseHostedVaultShareDeliverRequest({
+      projectionKind: "workout-latest-start-days.v0",
+      records: [VALID_WORKOUT_LATEST_START_RECORD],
+    })).toEqual({
+      projectionKind: "workout-latest-start-days.v0",
+      projectionScope: WORKOUT_LATEST_START_SCOPE,
+      records: [VALID_WORKOUT_LATEST_START_RECORD],
+    });
+  });
+
+  it("accepts only integer local clock values within one day", () => {
+    for (const latestStartLocalMs of [0, 86_399_999]) {
+      expect(parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUT_LATEST_START_RECORD,
+          data: {
+            ...VALID_WORKOUT_LATEST_START_RECORD.data,
+            latestStartLocalMs,
+          },
+        },
+        WORKOUT_LATEST_START_SCOPE,
+      ).data).toMatchObject({ latestStartLocalMs });
+    }
+
+    for (const latestStartLocalMs of [-1, 1.5, 86_400_000]) {
+      expect(() =>
+        parseHostedVaultShareDeliveryRecord(
+          {
+            ...VALID_WORKOUT_LATEST_START_RECORD,
+            data: {
+              ...VALID_WORKOUT_LATEST_START_RECORD.data,
+              latestStartLocalMs,
+            },
+          },
+          WORKOUT_LATEST_START_SCOPE,
+        )
+      ).toThrow(/latestStartLocalMs/u);
+    }
+  });
+
+  it("rejects date drift, semantic drift, and extra details", () => {
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUT_LATEST_START_RECORD,
+          recordKey: "2026-07-02",
+        },
+        WORKOUT_LATEST_START_SCOPE,
+      )
+    ).toThrow(/recordKey/u);
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUT_LATEST_START_RECORD,
+          occurredAt: "2026-07-03T18:00:00.000Z",
+        },
+        WORKOUT_LATEST_START_SCOPE,
+      )
+    ).toThrow(/workout date at UTC midnight/u);
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUT_LATEST_START_RECORD,
+          data: {
+            ...VALID_WORKOUT_LATEST_START_RECORD.data,
+            timeSemantics: "utc.v0",
+          },
+        },
+        WORKOUT_LATEST_START_SCOPE,
+      )
+    ).toThrow(/timeSemantics is invalid/u);
+    expect(() =>
+      parseHostedVaultShareDeliveryRecord(
+        {
+          ...VALID_WORKOUT_LATEST_START_RECORD,
+          data: {
+            ...VALID_WORKOUT_LATEST_START_RECORD.data,
+            sport: "running",
+          },
+        },
+        WORKOUT_LATEST_START_SCOPE,
+      )
+    ).toThrow(/sport/u);
   });
 });
 

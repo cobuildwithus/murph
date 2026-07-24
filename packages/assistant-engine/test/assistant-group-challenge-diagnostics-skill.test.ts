@@ -13,6 +13,41 @@ async function readSkill(slug: string): Promise<string> {
 }
 
 describe('assistant group challenge diagnostics guidance', () => {
+  it('enumerates sleep-stage and latest-workout-start scoring semantics', async () => {
+    const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
+
+    expect(challenge).toContain('Deep sleep minutes: `deep-sleep-days.v0`')
+    expect(challenge).toContain('REM sleep minutes: `rem-sleep-days.v0`')
+    expect(challenge).toContain(
+      'Latest local workout start by day: `workout-latest-start-days.v0`',
+    )
+    expect(challenge).toContain(
+      'normalize the configured threshold once at kickoff to an integer number of milliseconds after local midnight',
+    )
+    expect(challenge).toContain('6:00 PM is `64,800,000`')
+    expect(challenge).toContain(
+      '`latestStartLocalMs > thresholdLocalMs`',
+    )
+    expect(challenge).toContain(
+      'a workout starting exactly at the threshold does not count as after it',
+    )
+    expect(challenge).toContain(
+      'A missing date record is not `false`, not zero, and not evidence that no workout happened',
+    )
+    expect(challenge).toContain(
+      'Treat the current local date as provisional until its reporting cutoff has passed.',
+    )
+    expect(challenge).toContain(
+      '`canonical-event-zone-or-vault-zone.v0`',
+    )
+    expect(challenge).toContain(
+      'canonical event timezone when available and otherwise the member vault timezone',
+    )
+    expect(challenge).toContain(
+      'original threshold wording and normalized integer `thresholdLocalMs`',
+    )
+  })
+
   it('builds complete or partial standings from the opted-in challenge roster', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')

@@ -27,9 +27,27 @@ import {
 const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
+const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
+const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
+const WORKOUT_LATEST_START_SCOPE = hostedVaultShareProjectionKindToScope(
+  "workout-latest-start-days.v0",
+);
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
+const DEEP_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(DEEP_SLEEP_SCOPE);
+const REM_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(REM_SLEEP_SCOPE);
+const WORKOUT_LATEST_START_KEY = buildHostedVaultShareProjectionScopeKey(
+  WORKOUT_LATEST_START_SCOPE,
+);
 const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
+
+type TestProjectionScope =
+  | typeof PROFILE_SCOPE
+  | typeof STEPS_SCOPE
+  | typeof DEEP_SLEEP_SCOPE
+  | typeof REM_SLEEP_SCOPE
+  | typeof WORKOUT_LATEST_START_SCOPE
+  | typeof DEVICE_SCOPE;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -44,7 +62,7 @@ function shareRow(input: {
   ciphertext?: string | null;
   id: string;
   memberId: string;
-  projectionScope: typeof PROFILE_SCOPE | typeof STEPS_SCOPE | typeof DEVICE_SCOPE;
+  projectionScope: TestProjectionScope;
 }) {
   return {
     destinationMemberId: RUNTIME_MEMBER_ID,
@@ -62,7 +80,7 @@ function shareRow(input: {
 function snapshot(input: {
   id: string;
   memberId: string;
-  projectionScope: typeof PROFILE_SCOPE | typeof STEPS_SCOPE;
+  projectionScope: TestProjectionScope;
   records: readonly HostedVaultShareDeliveryRecord[];
 }): string {
   const share = shareRow(input);
@@ -333,6 +351,182 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         })],
       })],
     })]);
+  });
+
+  it("returns the complete sleep-stage and workout-timing member-by-scope matrix", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const deepZero = snapshot({
+      id: "share_deep_a",
+      memberId: "member_a",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "deep-sleep-minutes",
+          unit: "minutes",
+          value: 0,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "A".repeat(32),
+      }],
+    });
+    const remAvailable = snapshot({
+      id: "share_rem_a",
+      memberId: "member_a",
+      projectionScope: REM_SLEEP_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "rem-sleep-minutes",
+          unit: "minutes",
+          value: 84,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "B".repeat(32),
+      }],
+    });
+    const latestMidnight = snapshot({
+      id: "share_latest_a",
+      memberId: "member_a",
+      projectionScope: WORKOUT_LATEST_START_SCOPE,
+      records: [{
+        data: {
+          date,
+          latestStartLocalMs: 0,
+          timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "C".repeat(32),
+      }],
+    });
+    const deepEmpty = snapshot({
+      id: "share_deep_b",
+      memberId: "member_b",
+      projectionScope: DEEP_SLEEP_SCOPE,
+      records: [],
+    });
+    installCiphertexts({ deepEmpty, deepZero, latestMidnight, remAvailable });
+    const { prisma } = createPrisma({
+      shares: [
+        shareRow({
+          ciphertext: "deepZero",
+          id: "share_deep_a",
+          memberId: "member_a",
+          projectionScope: DEEP_SLEEP_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "remAvailable",
+          id: "share_rem_a",
+          memberId: "member_a",
+          projectionScope: REM_SLEEP_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "latestMidnight",
+          id: "share_latest_a",
+          memberId: "member_a",
+          projectionScope: WORKOUT_LATEST_START_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "deepEmpty",
+          id: "share_deep_b",
+          memberId: "member_b",
+          projectionScope: DEEP_SLEEP_SCOPE,
+        }),
+        shareRow({
+          id: "share_rem_b",
+          memberId: "member_b",
+          projectionScope: REM_SLEEP_SCOPE,
+        }),
+        shareRow({
+          id: "share_latest_c",
+          memberId: "member_c",
+          projectionScope: WORKOUT_LATEST_START_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [
+        DEEP_SLEEP_SCOPE,
+        REM_SLEEP_SCOPE,
+        WORKOUT_LATEST_START_SCOPE,
+      ],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([
+      DEEP_SLEEP_KEY,
+      REM_SLEEP_KEY,
+      WORKOUT_LATEST_START_KEY,
+    ]);
+    expect(result.members).toHaveLength(3);
+    for (const member of result.members) {
+      expect(member.projections).toHaveLength(3);
+    }
+    expect(result.members[0]).toMatchObject({
+      memberId: "member_a",
+      participantId: "participant_a",
+      projections: [
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{ data: { value: 0 } }],
+        },
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{ data: { value: 84 } }],
+        },
+        {
+          dataStatus: "available",
+          grantStatus: "granted",
+          records: [{ data: { latestStartLocalMs: 0 } }],
+        },
+      ],
+    });
+    expect(result.members[1]?.projections).toEqual([
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+    ]);
+    expect(result.members[2]?.projections).toEqual([
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "not_granted",
+        records: [],
+      }),
+      expect.objectContaining({
+        dataStatus: "missing",
+        grantStatus: "granted",
+        records: [],
+      }),
+    ]);
+    expect(JSON.stringify(result)).not.toContain("sourceRevision");
   });
 
   it("does not read device state without an active device-status grant", async () => {

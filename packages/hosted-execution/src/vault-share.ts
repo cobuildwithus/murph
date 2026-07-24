@@ -35,6 +35,8 @@ export {
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "activity-days.v0",
   "sleep-duration-days.v0",
+  "deep-sleep-days.v0",
+  "rem-sleep-days.v0",
   "steps-days.v0",
   "max-heart-rate-days.v0",
   "distance-days.v0",
@@ -66,6 +68,8 @@ export interface HostedVaultShareDailyMetricProjectionSpec {
 export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
   { projectionKind: "activity-days.v0", metricKey: "activity-minutes", minValue: 0, maxValue: 1_440 },
   { projectionKind: "sleep-duration-days.v0", metricKey: "total-sleep-minutes", minValue: 0, maxValue: 1_440 },
+  { projectionKind: "deep-sleep-days.v0", metricKey: "deep-sleep-minutes", minValue: 0, maxValue: 1_440 },
+  { projectionKind: "rem-sleep-days.v0", metricKey: "rem-sleep-minutes", minValue: 0, maxValue: 1_440 },
   { projectionKind: "steps-days.v0", metricKey: "steps", minValue: 0, maxValue: 1_000_000 },
   { projectionKind: "max-heart-rate-days.v0", metricKey: "max-heart-rate", minValue: 0, maxValue: 260 },
   { projectionKind: "distance-days.v0", metricKey: "distance-km", minValue: 0, maxValue: 1_000 },
@@ -191,6 +195,7 @@ export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
   "profile-name.v0",
   "sleep-times.v0",
   "workout-days.v0",
+  "workout-latest-start-days.v0",
   "heart-rate-zones-days.v0",
   ...HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS,
 ] as const;
@@ -214,8 +219,11 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "group-email.v0",
   "sleep-times.v0",
   "sleep-duration-days.v0",
+  "deep-sleep-days.v0",
+  "rem-sleep-days.v0",
   "activity-days.v0",
   "workout-days.v0",
+  "workout-latest-start-days.v0",
   "heart-rate-zones-days.v0",
   "steps-days.v0",
   "max-heart-rate-days.v0",
@@ -396,6 +404,8 @@ export const HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS =
   "broad-movement" as const;
 export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
   "canonical-workout-day" as const;
+export const HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS =
+  "canonical-event-zone-or-vault-zone.v0" as const;
 
 export interface HostedVaultShareDailyMetricData {
   date: string;
@@ -410,6 +420,12 @@ export interface HostedVaultShareWorkoutDayData {
   metricSemantics?: typeof HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS;
   workoutCount: number;
   workoutMinutes: number;
+}
+
+export interface HostedVaultShareWorkoutLatestStartDayData {
+  date: string;
+  latestStartLocalMs: number;
+  timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS;
 }
 
 export interface HostedVaultShareActivityMinutesDayData {
@@ -475,7 +491,8 @@ export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
   | HostedVaultShareSleepTimesData
-  | HostedVaultShareWorkoutDayData;
+  | HostedVaultShareWorkoutDayData
+  | HostedVaultShareWorkoutLatestStartDayData;
 
 export interface HostedVaultShareDeliveryRecord {
   data: HostedVaultShareDeliveryRecordData;
@@ -943,6 +960,8 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareSleepTimesData(value, context);
     case "workout-days.v0":
       return parseHostedVaultShareWorkoutDayData(value, context);
+    case "workout-latest-start-days.v0":
+      return parseHostedVaultShareWorkoutLatestStartDayData(value, context);
   }
 
   throw new TypeError(
@@ -1244,6 +1263,54 @@ function parseHostedVaultShareWorkoutDayData(
     workoutCount,
     workoutMinutes,
   };
+}
+
+function parseHostedVaultShareWorkoutLatestStartDayData(
+  value: unknown,
+  context: { occurredAt: string; recordKey: string },
+): HostedVaultShareWorkoutLatestStartDayData {
+  const data = requireObject(
+    value,
+    "Vault share workout-latest-start-days data",
+  );
+  assertObjectKeys(
+    data,
+    "Vault share workout-latest-start-days data",
+    ["date", "latestStartLocalMs", "timeSemantics"],
+  );
+  const date = parseHostedVaultShareDailyDate(data.date, {
+    dataLabel: "Vault share workout-latest-start-days data",
+    occurredAt: context.occurredAt,
+    occurredAtDescription: "workout date at UTC midnight",
+    recordKey: context.recordKey,
+  });
+  const latestStartLocalMs = requireNumber(
+    data.latestStartLocalMs,
+    "Vault share workout-latest-start-days data latestStartLocalMs",
+  );
+  if (
+    !Number.isInteger(latestStartLocalMs)
+    || latestStartLocalMs < 0
+    || latestStartLocalMs >= 24 * 60 * 60 * 1_000
+  ) {
+    throw new TypeError(
+      "Vault share workout-latest-start-days latestStartLocalMs must be an integer between 0 and 86399999.",
+    );
+  }
+  const timeSemantics = requireString(
+    data.timeSemantics,
+    "Vault share workout-latest-start-days data timeSemantics",
+  );
+  if (
+    timeSemantics
+    !== HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS
+  ) {
+    throw new TypeError(
+      "Vault share workout-latest-start-days data timeSemantics is invalid.",
+    );
+  }
+
+  return { date, latestStartLocalMs, timeSemantics };
 }
 
 function parseHostedVaultShareActivityMinutesDayData(

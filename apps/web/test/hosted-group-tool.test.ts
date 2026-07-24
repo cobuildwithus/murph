@@ -214,6 +214,11 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
+const DEEP_SLEEP_SCOPE = { projectionKind: "deep-sleep-days.v0" } as const;
+const REM_SLEEP_SCOPE = { projectionKind: "rem-sleep-days.v0" } as const;
+const WORKOUT_LATEST_START_SCOPE = {
+  projectionKind: "workout-latest-start-days.v0",
+} as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -1330,7 +1335,10 @@ describe("hosted group join policy", () => {
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
+      DEEP_SLEEP_SCOPE,
+      REM_SLEEP_SCOPE,
       { projectionKind: "activity-days.v0" },
+      WORKOUT_LATEST_START_SCOPE,
       RUNNING_SCOPE,
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
@@ -1359,11 +1367,35 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "sleep-duration-days.v0",
       },
       {
+        description: "Shares your last 7 days of deep sleep minutes.",
+        label: "Deep sleep",
+        projectionKind: "deep-sleep-days.v0",
+        projectionScope: DEEP_SLEEP_SCOPE,
+        projectionScopeKey: "deep-sleep-days.v0",
+      },
+      {
+        description: "Shares your last 7 days of REM sleep minutes.",
+        label: "REM sleep",
+        projectionKind: "rem-sleep-days.v0",
+        projectionScope: REM_SLEEP_SCOPE,
+        projectionScopeKey: "rem-sleep-days.v0",
+      },
+      {
         description: "Shares your last 7 days of active minutes.",
         label: "Activity minutes",
         projectionKind: "activity-days.v0",
         projectionScope: { projectionKind: "activity-days.v0" },
         projectionScopeKey: "activity-days.v0",
+      },
+      {
+        description:
+          "Shares the latest observed local workout start time for each day in the last 7 days with an observed workout. Local time uses the workout event timezone when available, otherwise your vault timezone, and does not prove physical location. This is more detailed than daily workout counts or minutes. It does not share absolute timestamps, end times, sport, provider, routes, location, heart rate, or individual workout history.",
+        label: "Latest daily workout start",
+        offerDisclosure:
+          "the latest observed local workout start time for each day in the last 7 days with a workout",
+        projectionKind: "workout-latest-start-days.v0",
+        projectionScope: WORKOUT_LATEST_START_SCOPE,
+        projectionScopeKey: "workout-latest-start-days.v0",
       },
       {
         description: "Shares your last 7 days of heart-rate zone minutes.",

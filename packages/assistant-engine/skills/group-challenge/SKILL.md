@@ -76,9 +76,31 @@ grant Apple Health access.
 - Activity score: `activity-score-days.v0`
 - Max heart rate: `max-heart-rate-days.v0`
 - Sleep duration: `sleep-duration-days.v0`
+- Deep sleep minutes: `deep-sleep-days.v0`
+- REM sleep minutes: `rem-sleep-days.v0`
 - Sleep timing: `sleep-times.v0`
+- Latest local workout start by day: `workout-latest-start-days.v0`
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
+
+For a challenge such as "any workout starting after 6 PM," normalize the
+configured threshold once at kickoff to an integer number of milliseconds
+after local midnight and persist both the original wording and
+`thresholdLocalMs` in **Rules & metric**. For example, 6:00 PM is
+`64,800,000`. Match records to the exact challenge date and score a date as
+qualifying only when `latestStartLocalMs > thresholdLocalMs`; this comparison
+is deliberately strict, so a workout starting exactly at the threshold does
+not count as after it. The per-date maximum is sufficient for any "did any
+workout start after T?" predicate.
+
+`workout-latest-start-days.v0` is a bounded daily aggregate, not raw workout
+history. Its required `timeSemantics` value is
+`canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
+event timezone when available and otherwise the member vault timezone; it does
+not prove physical workout location. A missing date record
+is not `false`, not zero, and not evidence that no workout happened: leave the
+participant unscored for that date and report the data as missing. Treat the
+current local date as provisional until its reporting cutoff has passed.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -119,7 +141,8 @@ vault-cli knowledge upsert --slug challenge-<name>-<start-date> \
 The page carries these sections, kept current:
 
 - **Rules & metric** — the agreed metric, window, and the ruling that
-  settled any dispute about it.
+  settled any dispute about it. For a workout time-of-day rule, also store the
+  original threshold wording and normalized integer `thresholdLocalMs`.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
   `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered

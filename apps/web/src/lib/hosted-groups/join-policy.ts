@@ -111,6 +111,14 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
     label: "Sleep duration",
     description: "Shares your last 7 days of total sleep duration.",
   },
+  "deep-sleep-days.v0": {
+    label: "Deep sleep",
+    description: "Shares your last 7 days of deep sleep minutes.",
+  },
+  "rem-sleep-days.v0": {
+    label: "REM sleep",
+    description: "Shares your last 7 days of REM sleep minutes.",
+  },
   "steps-days.v0": {
     label: "Steps",
     description: "Shares your last 7 days of steps.",
@@ -122,6 +130,13 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   "workout-days.v0": {
     label: "Workout summaries",
     description: "Shares your last 7 days of workout counts and minutes.",
+  },
+  "workout-latest-start-days.v0": {
+    label: "Latest daily workout start",
+    description:
+      "Shares the latest observed local workout start time for each day in the last 7 days with an observed workout. Local time uses the workout event timezone when available, otherwise your vault timezone, and does not prove physical location. This is more detailed than daily workout counts or minutes. It does not share absolute timestamps, end times, sport, provider, routes, location, heart rate, or individual workout history.",
+    offerDisclosure:
+      "the latest observed local workout start time for each day in the last 7 days with a workout",
   },
   "workout-strain-days.v0": {
     label: "Workout strain",

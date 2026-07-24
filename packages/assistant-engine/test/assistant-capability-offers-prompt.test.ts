@@ -246,6 +246,13 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('coarse connection status')
     expect(prompt).toContain('connection-wide sync-job times')
     expect(prompt).toContain('raw provider or account identity')
+    expect(prompt).toContain('total/deep/REM sleep minutes')
+    expect(prompt).toContain('latest local start by day')
+    expect(prompt).toContain('date-keyed local clock')
+    expect(prompt).toContain('canonical event zone (validated vault fallback)')
+    expect(prompt).toContain(
+      'not an absolute timestamp, end time, sport, provider, route, location, or session history',
+    )
   })
 
   it('keeps the new-group contact handoff natural and reactive', () => {

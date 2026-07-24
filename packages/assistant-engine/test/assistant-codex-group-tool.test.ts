@@ -122,7 +122,13 @@ describe("murph.group dynamic tool", () => {
       sessionCountScopeSchema,
     ] = MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.items.oneOf;
     expect(fixedScopeSchema.properties.projectionKind.enum)
-      .toEqual(expect.arrayContaining(["sleep-times.v0", "steps-days.v0"]));
+      .toEqual(expect.arrayContaining([
+        "sleep-times.v0",
+        "deep-sleep-days.v0",
+        "rem-sleep-days.v0",
+        "steps-days.v0",
+        "workout-latest-start-days.v0",
+      ]));
     expect(minutesScopeSchema.properties.projectionKind.enum)
       .toEqual([HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND]);
     expect(distanceScopeSchema.properties.projectionKind.enum)
@@ -484,6 +490,25 @@ describe("murph.group dynamic tool", () => {
       },
     });
 
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [
+        { projectionKind: "deep-sleep-days.v0" },
+        { projectionKind: "rem-sleep-days.v0" },
+        { projectionKind: "workout-latest-start-days.v0" },
+      ],
+    }))).toEqual({
+      kind: "group",
+      request: {
+        action: "read_shared",
+        projectionScopes: [
+          { projectionKind: "deep-sleep-days.v0" },
+          { projectionKind: "rem-sleep-days.v0" },
+          { projectionKind: "workout-latest-start-days.v0" },
+        ],
+      },
+    });
+
     for (const invalid of [
       { action: "read_shared", projectionScopes: [] },
       {
@@ -680,6 +705,76 @@ describe("murph.group dynamic tool", () => {
           },
         ],
         status: "ok",
+      },
+    });
+  });
+
+  it("passes latest local workout-start records through the model-facing boundary", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_timing",
+        participantId: "participant_timing",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "workout-latest-start-days.v0" as const,
+          },
+          projectionScopeKey: "workout-latest-start-days.v0",
+          records: [{
+            data: {
+              date: "2026-07-18",
+              latestStartLocalMs: 64_800_001,
+              timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+            },
+            occurredAt: "2026-07-18T00:00:00.000Z",
+            recordKey: "2026-07-18",
+          }],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workout-latest-start-days.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workout-latest-start-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    expect(JSON.stringify(payload)).not.toContain("member_internal_timing");
+    expect(payload).toMatchObject({
+      action: "read_shared",
+      result: {
+        members: [{
+          participantId: "participant_timing",
+          projections: [{
+            records: [{
+              data: {
+                date: "2026-07-18",
+                latestStartLocalMs: 64_800_001,
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+              },
+            }],
+          }],
+        }],
       },
     });
   });

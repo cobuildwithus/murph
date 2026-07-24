@@ -41,6 +41,11 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
+const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
+const WORKOUT_LATEST_START_SCOPE = hostedVaultShareProjectionKindToScope(
+	"workout-latest-start-days.v0",
+);
 const RUNNING_MINUTES_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
 	activityKind: "running",
 });
@@ -132,6 +137,60 @@ describe("vault-share active-kinds route", () => {
 			projectionScopes: [
 				ACTIVITY_SCOPE,
 				RUNNING_MINUTES_SCOPE,
+			].sort((left, right) =>
+				buildHostedVaultShareProjectionScopeKey(left)
+					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))
+			),
+		});
+	});
+
+	it("filters new fixed challenge scopes from omitted-capability runners", async () => {
+		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
+			ACTIVITY_SCOPE,
+			DEEP_SLEEP_SCOPE,
+			REM_SLEEP_SCOPE,
+			WORKOUT_LATEST_START_SCOPE,
+		]);
+
+		const response = await activeKindsRoute.GET(buildRequest());
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			projectionKinds: ["activity-days.v0"],
+			projectionScopes: [ACTIVITY_SCOPE],
+		});
+	});
+
+	it("returns new fixed challenge scopes only to runners declaring exact support", async () => {
+		mocks.readDeliverableHostedVaultShareProjectionScopes.mockResolvedValue([
+			ACTIVITY_SCOPE,
+			DEEP_SLEEP_SCOPE,
+			REM_SLEEP_SCOPE,
+			WORKOUT_LATEST_START_SCOPE,
+		]);
+
+		const response = await activeKindsRoute.GET(buildRequest(
+			supportedScopeSearch(
+				ACTIVITY_SCOPE,
+				DEEP_SLEEP_SCOPE,
+				REM_SLEEP_SCOPE,
+				WORKOUT_LATEST_START_SCOPE,
+			),
+		));
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			projectionKinds: [
+				"activity-days.v0",
+				"deep-sleep-days.v0",
+				"rem-sleep-days.v0",
+				"workout-latest-start-days.v0",
+			],
+			projectionScopes: [
+				ACTIVITY_SCOPE,
+				DEEP_SLEEP_SCOPE,
+				REM_SLEEP_SCOPE,
+				WORKOUT_LATEST_START_SCOPE,
 			].sort((left, right) =>
 				buildHostedVaultShareProjectionScopeKey(left)
 					.localeCompare(buildHostedVaultShareProjectionScopeKey(right))

@@ -4,11 +4,16 @@ import path from "node:path";
 
 import {
   activityTextMatchesKind,
+  formatTimeZoneDateTimeParts,
   hasMemoryDisplayNameEvidence,
   isStrictIsoDate,
+  isStrictIsoDateTime,
   memoryDisplayNameSchema,
+  normalizeIanaTimeZone,
   parseFrontmatterDocument,
   resolveMemoryDisplayName,
+  validateCurrentVaultMetadata,
+  VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -22,6 +27,7 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
   type HostedVaultShareActivityDistanceProjectionSpec,
   type HostedVaultShareActivityMinutesProjectionSpec,
   type HostedVaultShareActivitySessionCountProjectionSpec,
@@ -50,7 +56,7 @@ const DAY_MAX_MINUTES = 24 * 60;
 const DAY_MAX_DISTANCE_METERS = 1_000_000;
 const DAY_MAX_SESSIONS = 100;
 const ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO = 0.8;
-// Above the source cap, fail closed instead of emitting partial daily counts.
+// Above the source cap, fail closed instead of emitting partial daily projections.
 const ACTIVITY_SESSION_SOURCE_ROW_LIMIT = 500;
 const ACTIVITY_SESSION_SOURCE_ROW_QUERY_LIMIT = ACTIVITY_SESSION_SOURCE_ROW_LIMIT + 1;
 const HEART_RATE_ZONE_MINUTES_METRIC_KEY_PATTERN = /^heart-rate-zone-(\d+)-minutes$/u;
@@ -99,6 +105,13 @@ export type ActivitySessionProjectionRow = MetricSourceRevisionPoint & {
   durationMinutes?: number | null;
   endedAt?: string | null;
   startedAt?: string | null;
+  timeZone?: string | null;
+};
+
+type ProjectableWorkoutLatestStartCandidate = {
+  latestStartLocalMs: number;
+  row: ActivitySessionProjectionRow;
+  timeZone: string;
 };
 
 type ProjectableProfileNameResolution = {
@@ -177,6 +190,7 @@ type HostedVaultShareOfferOutcome = HostedVaultShareProjectionOfferResult["outco
 
 export interface HostedVaultShareProjectionReadContext {
   activityRowsByVaultAndCutoff?: Map<string, Promise<ActivitySessionProjectionRow[]>>;
+  vaultTimeZoneByVault?: Map<string, Promise<string | null>>;
 }
 
 type ProjectableRecordReader = (input: {
@@ -226,6 +240,9 @@ function resolveProjectableRecordReader(
       return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot);
     case "workout-days.v0":
       return ({ vaultRoot }) => readProjectableWorkoutDays(vaultRoot);
+    case "workout-latest-start-days.v0":
+      return ({ context, vaultRoot }) =>
+        readProjectableWorkoutLatestStartDays(vaultRoot, context);
     default: {
       const activityMinutesSpec =
         getHostedVaultShareActivityMinutesProjectionSpec(projectionScope);
@@ -485,6 +502,55 @@ export async function readProjectableWorkoutDays(
   });
 }
 
+export async function readProjectableWorkoutLatestStartDays(
+  vaultRoot: string,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  const nowMs = Date.now();
+  const cutoffDate = new Date(
+    nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS,
+  ).toISOString().slice(0, 10);
+  const [rows, vaultTimeZone] = await Promise.all([
+    readProjectableActivitySessionRows(vaultRoot, cutoffDate, context),
+    readProjectableVaultTimeZone(vaultRoot, context),
+  ]);
+  return selectProjectableWorkoutLatestStartDays({
+    nowMs,
+    rows,
+    vaultTimeZone,
+  });
+}
+
+async function readProjectableVaultTimeZone(
+  vaultRoot: string,
+  context?: HostedVaultShareProjectionReadContext,
+): Promise<string | null> {
+  if (context) {
+    context.vaultTimeZoneByVault ??= new Map();
+    const cached = context.vaultTimeZoneByVault.get(vaultRoot);
+    if (cached) {
+      return cached;
+    }
+    const read = readProjectableVaultTimeZone(vaultRoot);
+    context.vaultTimeZoneByVault.set(vaultRoot, read);
+    return read;
+  }
+
+  try {
+    const rawMetadata: unknown = JSON.parse(
+      await readFile(path.join(vaultRoot, VAULT_LAYOUT.metadata), "utf8"),
+    );
+    const validation = validateCurrentVaultMetadata(rawMetadata, {
+      relativePath: VAULT_LAYOUT.metadata,
+    });
+    return validation.success
+      ? normalizeIanaTimeZone(validation.data.metadata.timezone)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function readProjectableActivityMinutesDays(
   vaultRoot: string,
   spec: HostedVaultShareActivityMinutesProjectionSpec,
@@ -728,6 +794,125 @@ export function selectProjectableWorkoutDays(
   }
 
   return records;
+}
+
+export function selectProjectableWorkoutLatestStartDays(
+  input: {
+    nowMs: number;
+    rows: readonly ActivitySessionProjectionRow[];
+    vaultTimeZone: string | null;
+  },
+): HostedVaultShareDeliveryRecord[] {
+  const cutoffMs =
+    input.nowMs - HOSTED_VAULT_SHARE_PROJECTION_MAX_DAILY_RECORD_AGE_DAYS * DAY_MS;
+  const vaultTimeZone = normalizeIanaTimeZone(input.vaultTimeZone);
+  const candidatesByRow = new Map<
+    ActivitySessionProjectionRow,
+    ProjectableWorkoutLatestStartCandidate
+  >();
+
+  for (const row of input.rows) {
+    if (row.sourceKind !== "activity_session") {
+      continue;
+    }
+    const startedAt = row.startedAt;
+    if (typeof startedAt !== "string" || !isStrictIsoDateTime(startedAt)) {
+      continue;
+    }
+    const timeZone = normalizeIanaTimeZone(row.timeZone) ?? vaultTimeZone;
+    if (!timeZone) {
+      continue;
+    }
+
+    const localStart = readProjectableWorkoutLocalStart(startedAt, timeZone);
+    if (!localStart) {
+      continue;
+    }
+    const dayMs = Date.parse(`${localStart.date}T00:00:00.000Z`);
+    if (!Number.isFinite(dayMs) || dayMs < cutoffMs) {
+      continue;
+    }
+
+    const projectionRow = { ...row, date: localStart.date };
+    candidatesByRow.set(projectionRow, {
+      latestStartLocalMs: localStart.localMs,
+      row: projectionRow,
+      timeZone,
+    });
+  }
+
+  const groups = new Map<string, ProjectableWorkoutLatestStartCandidate[]>();
+  for (const row of dedupeActivitySessionRows([...candidatesByRow.keys()])) {
+    const candidate = candidatesByRow.get(row);
+    if (!candidate) {
+      continue;
+    }
+    const group = groups.get(row.date) ?? [];
+    group.push(candidate);
+    groups.set(row.date, group);
+  }
+
+  const records: HostedVaultShareDeliveryRecord[] = [];
+  for (const [date, candidates] of [...groups.entries()].sort(
+    ([leftDate], [rightDate]) => rightDate.localeCompare(leftDate),
+  )) {
+    const latestStartLocalMs = Math.max(
+      ...candidates.map((candidate) => candidate.latestStartLocalMs),
+    );
+    if (
+      !Number.isInteger(latestStartLocalMs)
+      || latestStartLocalMs < 0
+      || latestStartLocalMs >= DAY_MS
+    ) {
+      continue;
+    }
+
+    records.push({
+      data: {
+        date,
+        latestStartLocalMs,
+        timeSemantics:
+          HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+      },
+      occurredAt: `${date}T00:00:00.000Z`,
+      recordKey: date,
+      ...sourceRevisionField(
+        deriveWorkoutLatestStartSourceRevision({
+          candidates,
+          date,
+          latestStartLocalMs,
+        }),
+      ),
+    });
+
+    if (records.length >= HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW) {
+      break;
+    }
+  }
+
+  return records;
+}
+
+function readProjectableWorkoutLocalStart(
+  startedAt: string,
+  timeZone: string,
+): { date: string; localMs: number } | null {
+  try {
+    const parts = formatTimeZoneDateTimeParts(startedAt, timeZone);
+    const timestampMs = Date.parse(startedAt);
+    if (!Number.isFinite(timestampMs)) {
+      return null;
+    }
+    const millisecond = ((timestampMs % 1_000) + 1_000) % 1_000;
+    const localMs = (
+      ((parts.hour * 60 + parts.minute) * 60 + parts.second) * 1_000
+    ) + millisecond;
+    return Number.isInteger(localMs) && localMs >= 0 && localMs < DAY_MS
+      ? { date: parts.dayKey, localMs }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function selectProjectableActivityMinutesDays(
@@ -1047,7 +1232,9 @@ async function readProjectableActivitySessionRows(
 
   for (const entity of entities) {
     const row = toActivitySessionProjectionRow(entity);
-    if (row && row.date >= cutoffDate) {
+    if (row) {
+      // Each selector applies its own date cutoff. The latest-start projection
+      // first re-derives the local date from the selected timezone.
       rows.push(row);
     }
   }
@@ -1080,17 +1267,14 @@ function toActivitySessionProjectionRow(
     && rawDurationMinutes <= DAY_MAX_MINUTES
       ? rawDurationMinutes
       : null;
+  const timing = readCanonicalWorkoutTiming(entity);
   const date = entity.kind === "intervention_session"
     ? readInterventionSessionDate(entity)
-    : readActivitySessionDate(entity);
+    : readActivitySessionDate(entity, timing.startedAt);
   if (!date) {
     return null;
   }
 
-  const startedAt = readOptionalString(entity.attributes.startAt)
-    ?? entity.occurredAt
-    ?? null;
-  const endedAt = readOptionalString(entity.attributes.endAt);
   const observedAt = readOptionalString(entity.attributes.recordedAt)
     ?? entity.occurredAt
     ?? undefined;
@@ -1101,13 +1285,28 @@ function toActivitySessionProjectionRow(
     date,
     ...(distanceMeters === null ? {} : { distanceMeters }),
     ...(durationMinutes === null ? {} : { durationMinutes }),
-    endedAt,
+    endedAt: timing.endedAt,
     observedAt,
     pointIds: [`event:${entity.entityId}`],
     recordIds: [entity.entityId],
     sourceFamily: "event",
     sourceKind: entity.kind,
-    startedAt,
+    startedAt: timing.startedAt,
+    timeZone: readOptionalString(entity.attributes.timeZone),
+  };
+}
+
+function readCanonicalWorkoutTiming(
+  entity: CanonicalEntity,
+): { endedAt: string | null; startedAt: string | null } {
+  const workout = readRecord(entity.attributes.workout);
+  return {
+    endedAt: readOptionalString(workout?.endedAt)
+      ?? readOptionalString(entity.attributes.endAt),
+    startedAt: readOptionalString(workout?.startedAt)
+      ?? readOptionalString(entity.attributes.startAt)
+      ?? entity.occurredAt
+      ?? null,
   };
 }
 
@@ -1116,7 +1315,10 @@ function isNonProjectableInterventionSessionStatus(value: unknown): boolean {
   return status === "missed" || status === "skipped";
 }
 
-function readActivitySessionDate(entity: CanonicalEntity): string | null {
+function readActivitySessionDate(
+  entity: CanonicalEntity,
+  startedAt: string | null,
+): string | null {
   for (const value of [
     entity.date,
     readOptionalString(entity.attributes.dayKey),
@@ -1127,10 +1329,7 @@ function readActivitySessionDate(entity: CanonicalEntity): string | null {
     }
   }
 
-  for (const value of [
-    readOptionalString(entity.attributes.startAt),
-    entity.occurredAt,
-  ]) {
+  for (const value of [startedAt, entity.occurredAt]) {
     const date = readIsoTimestampDate(value);
     if (date) {
       return date;
@@ -1286,9 +1485,13 @@ function activitySessionRowsOverlap(
   right: ActivitySessionProjectionRow,
   activityKind?: string,
 ): boolean {
-  const leftActivityKind = activityKind ?? left.activityKind;
-  const rightActivityKind = activityKind ?? right.activityKind;
-  if (leftActivityKind !== rightActivityKind || left.date !== right.date) {
+  if (left.date !== right.date) {
+    return false;
+  }
+  if (
+    activityKind === undefined
+    && !activitySessionRowsHaveEquivalentKinds(left, right)
+  ) {
     return false;
   }
 
@@ -1308,6 +1511,20 @@ function activitySessionRowsOverlap(
   return overlapMs
     / Math.min(leftWindow.durationMs, rightWindow.durationMs)
     >= ACTIVITY_SESSION_DUPLICATE_MIN_OVERLAP_RATIO;
+}
+
+function activitySessionRowsHaveEquivalentKinds(
+  left: ActivitySessionProjectionRow,
+  right: ActivitySessionProjectionRow,
+): boolean {
+  if (left.activityKind === right.activityKind) {
+    return true;
+  }
+  if (!left.activityKind || !right.activityKind) {
+    return false;
+  }
+  return activityTextMatchesKind(left.activityKind, right.activityKind)
+    || activityTextMatchesKind(right.activityKind, left.activityKind);
 }
 
 function activitySessionRowWindow(
@@ -1421,6 +1638,30 @@ function deriveCompositeMetricSeriesSourceRevision(
   }
 
   return hashOpaqueSourceRevision({ revisions: revisions.sort() });
+}
+
+function deriveWorkoutLatestStartSourceRevision(input: {
+  candidates: readonly ProjectableWorkoutLatestStartCandidate[];
+  date: string;
+  latestStartLocalMs: number;
+}): string | undefined {
+  const revisions = input.candidates.map((candidate) =>
+    deriveMetricSeriesPointSourceRevision(candidate.row)
+  );
+  if (revisions.some((revision) => !revision)) {
+    return undefined;
+  }
+
+  return hashOpaqueSourceRevision({
+    date: input.date,
+    latestStartLocalMs: input.latestStartLocalMs,
+    projectionKind: "workout-latest-start-days.v0",
+    revisions: revisions.sort(),
+    timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_LATEST_START_TIME_SEMANTICS,
+    timeZones: sortedStrings(
+      input.candidates.map((candidate) => candidate.timeZone),
+    ),
+  });
 }
 
 function sourceRevisionField(sourceRevision: string | undefined): { sourceRevision?: string } {
