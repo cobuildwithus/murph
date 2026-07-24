@@ -408,9 +408,11 @@ export function MurphContactCardPicker({
 }
 
 /**
- * Resolves true only once this document goes away, which is the sole
- * observable acknowledgement that the host accepted the Safari scheme
- * navigation. A suppressed or declined launch resolves false instead.
+ * Resolves true only once this document is being unloaded, which is the
+ * closest observable acknowledgement that the host accepted the Safari
+ * scheme navigation. `visibilitychange` is deliberately not accepted: it
+ * fires for any backgrounding, so an app switch or screen lock during the
+ * launch window would otherwise be misread as a successful launch.
  */
 function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
@@ -421,7 +423,6 @@ function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
     function settle(launched: boolean) {
       clearTimeout(deadline);
       window.removeEventListener("pagehide", onPageHide);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
       signal.removeEventListener("abort", onAbort);
       resolve(launched);
     }
@@ -430,17 +431,12 @@ function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
       settle(true);
     }
 
-    function onVisibilityChange() {
-      if (document.visibilityState === "hidden") settle(true);
-    }
-
     function onAbort() {
       settle(false);
     }
 
     deadline = setTimeout(() => settle(false), MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS);
     window.addEventListener("pagehide", onPageHide);
-    document.addEventListener("visibilitychange", onVisibilityChange);
     signal.addEventListener("abort", onAbort);
   });
 }

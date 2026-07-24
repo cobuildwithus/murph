@@ -775,6 +775,126 @@ test("contact card picker keeps the normal download action in Android webviews",
   }
 });
 
+test("contact card picker ignores backgrounding and times out an unacknowledged launch", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ claim: "claim.for.gremlin" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const onAddToContacts = vi.fn();
+  const onOpenChange = vi.fn();
+  const props = {
+    initialAvatarId: "gremlin",
+    onAddToContacts,
+    onOpenChange,
+    open: true,
+  };
+  const rendered = await renderClientComponent(
+    <MurphContactCardPicker {...props} />,
+    {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/onboarding",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    },
+  );
+
+  vi.stubGlobal("navigator", {
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+  });
+  await rendered.rerender(<MurphContactCardPicker {...props} />);
+
+  try {
+    const launch = findButton(rendered.container, "Open in Safari to add Murph");
+    assert.ok(launch);
+    await act(async () => {
+      launch.click();
+      await flushPromises();
+    });
+
+    // `assign` returned normally, so only a real unload may complete the handoff.
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "x-safari-https://app.example.com/api/murph-contact-card?handoff=claim.for.gremlin",
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("blur"));
+      await flushPromises();
+    });
+    expect(onAddToContacts).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(rendered.container.querySelector("[role='alert']")).toBeNull();
+
+    await expireSafariLaunchWindow();
+
+    expect(onAddToContacts).not.toHaveBeenCalled();
+    expect(rendered.container.querySelector("[role='alert']")?.textContent)
+      .toContain("Couldn't open Safari");
+    expect(findButton(rendered.container, "Open in Safari to add Murph")?.disabled)
+      .toBe(false);
+    expect(rendered.container.querySelector("[data-drawer-open='true']"))
+      .not.toBeNull();
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("contact card picker completes an acknowledged launch exactly once", async () => {
+  const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+    new Response(JSON.stringify({ claim: "claim.for.gremlin" }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const onAddToContacts = vi.fn();
+  const props = {
+    initialAvatarId: "gremlin",
+    onAddToContacts,
+    onOpenChange: vi.fn(),
+    open: true,
+  };
+  const rendered = await renderClientComponent(
+    <MurphContactCardPicker {...props} />,
+    {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/onboarding",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    },
+  );
+
+  vi.stubGlobal("navigator", {
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+  });
+  await rendered.rerender(<MurphContactCardPicker {...props} />);
+
+  try {
+    const launch = findButton(rendered.container, "Open in Safari to add Murph");
+    assert.ok(launch);
+    await act(async () => {
+      launch.click();
+      await flushPromises();
+    });
+
+    await acknowledgeSafariLaunch();
+    await acknowledgeSafariLaunch();
+
+    expect(onAddToContacts).toHaveBeenCalledTimes(1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 /**
  * The picker treats a launch as real only once this document goes away, so
  * tests must supply that acknowledgement rather than relying on `assign`.
