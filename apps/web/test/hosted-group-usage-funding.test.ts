@@ -239,6 +239,28 @@ describe("hosted group usage funding", () => {
     });
   });
 
+  it("resolves a signed locator through the join-code entry the funding page uses", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+
+    await expect(readHostedGroupUsageFundingTargetByJoinCode({
+      joinCode: locator ?? "",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      joinCode: locator,
+      kind: "custom",
+      runtimeMemberId: "member_group_runtime",
+    });
+  });
+
   it("fails closed on a locator for a missing or inactive container", async () => {
     const locator =
       buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");

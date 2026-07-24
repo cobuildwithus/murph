@@ -45,13 +45,20 @@ export interface HostedGroupUsageStatus {
   remainingPercent: number;
 }
 
+// Accepts the full funding-locator namespace: an owner-created join code or
+// the signed funding-only locator.
 export async function readHostedGroupUsageFundingTargetByJoinCode(input: {
   joinCode: string;
   prisma?: HostedGroupUsageFundingClient;
 }): Promise<HostedGroupUsageFundingTarget | null> {
   const joinCode = normalizeHostedGroupUsageJoinCode(input.joinCode);
   if (!joinCode) {
-    return null;
+    return readHostedGroupUsageFundingLocatorRuntimeMemberId(input.joinCode) !== null
+      ? readHostedGroupUsageFundingTargetByLocator({
+          locator: input.joinCode,
+          prisma: input.prisma,
+        })
+      : null;
   }
 
   const prisma = input.prisma ?? getPrisma();
