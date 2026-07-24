@@ -1432,11 +1432,11 @@ describe("device sync settings routes", () => {
     expect(mocks.startConnection).not.toHaveBeenCalled();
   });
 
-  it("allows a new member to take the ninth current WHOOP slot", async () => {
+  it("allows a new member to take the second current WHOOP slot", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
     mocks.findManyDeviceConnections.mockResolvedValueOnce(
-      Array.from({ length: 8 }, (_, index) => ({ userId: `member_existing_${index}` })),
+      Array.from({ length: 1 }, (_, index) => ({ userId: `member_existing_${index}` })),
     );
 
     const response = await connectSourceStartRoute.POST(
