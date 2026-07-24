@@ -49,7 +49,7 @@ function searchArgs(overrides?: Partial<{
 
 function responsesApiPayload(outputJson: unknown): Response {
   return responsesApiTextPayload(JSON.stringify(outputJson), {
-    evidenceUrls: readPostUrls(outputJson),
+    evidenceUrls: readPostCitationUrls(outputJson),
   })
 }
 
@@ -57,7 +57,7 @@ function responsesApiTextPayload(
   outputText: string,
   options: {
     evidenceUrls?: readonly string[]
-    includeXSearchCall?: boolean
+    includeXSearchToolCall?: boolean
   } = {},
 ): Response {
   const evidenceUrls = options.evidenceUrls ?? []
@@ -65,9 +65,18 @@ function responsesApiTextPayload(
     JSON.stringify({
       status: 'completed',
       output: [
-        ...(options.includeXSearchCall === false
+        ...(options.includeXSearchToolCall === false
           ? []
-          : [{ id: 'xsearch_1', status: 'completed', type: 'x_search_call' }]),
+          : [
+              {
+                call_id: 'call_xsearch_1',
+                id: 'xsearch_1',
+                input: '{"query":"creatine"}',
+                name: 'x_keyword_search',
+                status: 'completed',
+                type: 'custom_tool_call',
+              },
+            ]),
         {
           type: 'message',
           role: 'assistant',
@@ -91,7 +100,7 @@ function responsesApiTextPayload(
   )
 }
 
-function readPostUrls(value: unknown): string[] {
+function readPostCitationUrls(value: unknown): string[] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return []
   }
@@ -104,7 +113,13 @@ function readPostUrls(value: unknown): string[] {
       return []
     }
     const url = (entry as Record<string, unknown>).url
-    return typeof url === 'string' ? [url] : []
+    if (typeof url !== 'string') {
+      return []
+    }
+    const match =
+      /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]{1,15}\/status\/([0-9]{1,25})$/u
+        .exec(url.trim())
+    return match ? [`https://x.com/i/status/${match[1]}`] : []
   })
 }
 
@@ -403,7 +418,7 @@ describe('executeXSearchTool response handling', () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiTextPayload(
         '```json\n' + JSON.stringify({ posts: [post()] }) + '\n```',
-        { evidenceUrls: [post().url] },
+        { evidenceUrls: ['https://x.com/i/status/1947000000000000001'] },
       ),
     )
 
@@ -529,11 +544,11 @@ describe('executeXSearchTool response handling', () => {
     }
   })
 
-  it('accepts provider URL citations when the response omits a separate x_search_call item', async () => {
+  it('accepts provider URL citations when the response omits a separate custom tool-call item', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
-        evidenceUrls: [post().url],
-        includeXSearchCall: false,
+        evidenceUrls: ['https://x.com/i/status/1947000000000000001'],
+        includeXSearchToolCall: false,
       }),
     )
 
@@ -550,7 +565,7 @@ describe('executeXSearchTool response handling', () => {
   it('rejects well-formed JSON when the response has no x_search evidence', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
-        includeXSearchCall: false,
+        includeXSearchToolCall: false,
       }),
     )
 
@@ -569,7 +584,7 @@ describe('executeXSearchTool response handling', () => {
   it('rejects a canonical post URL absent from the response citation evidence', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       responsesApiTextPayload(JSON.stringify({ posts: [post()] }), {
-        evidenceUrls: ['https://x.com/other_author/status/1947000000000000002'],
+        evidenceUrls: ['https://x.com/i/status/1947000000000000002'],
       }),
     )
 

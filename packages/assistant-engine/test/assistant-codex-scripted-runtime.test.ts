@@ -715,9 +715,12 @@ describe('real codex app-server with scripted provider', () => {
           status: 'completed',
           output: [
             {
+              call_id: 'call_xsearch_1',
               id: 'xsearch_1',
+              input: '{"query":"creatine"}',
+              name: 'x_keyword_search',
               status: 'completed',
-              type: 'x_search_call',
+              type: 'custom_tool_call',
             },
             {
               type: 'message',
@@ -730,7 +733,7 @@ describe('real codex app-server with scripted provider', () => {
                       start_index: 0,
                       title: 'X post',
                       type: 'url_citation',
-                      url: 'https://x.com/runner_dave/status/1947000000000000001',
+                      url: 'https://x.com/i/status/1947000000000000001',
                     },
                   ],
                   type: 'output_text',

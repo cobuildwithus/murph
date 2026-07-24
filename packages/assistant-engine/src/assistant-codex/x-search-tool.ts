@@ -232,8 +232,8 @@ interface XSearchPost {
 }
 
 interface CanonicalXPostUrl {
-  evidenceKey: string
   handle: string
+  statusId: string
   url: string
 }
 
@@ -247,8 +247,8 @@ function readValidatedXSearchPosts(
   payload: unknown,
   profileHandle: string | null,
 ): XSearchPost[] | null {
-  const citedPostUrlKeys = readXSearchCitationUrlKeys(payload)
-  if (citedPostUrlKeys === null) {
+  const citedPostStatusIds = readXSearchCitationStatusIds(payload)
+  if (citedPostStatusIds === null) {
     return null
   }
   const outputText = extractResponsesOutputText(payload)
@@ -296,7 +296,7 @@ function readValidatedXSearchPosts(
     if (excerpt.length === 0) {
       continue
     }
-    if (!citedPostUrlKeys.has(canonicalUrl.evidenceKey)) {
+    if (!citedPostStatusIds.has(canonicalUrl.statusId)) {
       return null
     }
     const createdAt = typeof post.createdAt === 'string'
@@ -313,8 +313,10 @@ function readValidatedXSearchPosts(
   return posts
 }
 
-function readXSearchCitationUrlKeys(payload: unknown): Set<string> | null {
-  const citedPostUrlKeys = new Set<string>()
+function readXSearchCitationStatusIds(payload: unknown): Set<string> | null {
+  // xAI cites posts as x.com/i/status/<id> while output_text uses a display
+  // handle, so the globally unique numeric status id is the evidence join key.
+  const citedPostStatusIds = new Set<string>()
   let hasXSearchEvidence = false
   const output = asRecord(payload)?.output
   if (!Array.isArray(output)) {
@@ -323,7 +325,12 @@ function readXSearchCitationUrlKeys(payload: unknown): Set<string> | null {
 
   for (const item of output) {
     const itemRecord = asRecord(item)
-    if (itemRecord?.type === 'x_search_call' && itemRecord.status === 'completed') {
+    if (
+      itemRecord?.type === 'custom_tool_call' &&
+      itemRecord.status === 'completed' &&
+      typeof itemRecord.name === 'string' &&
+      itemRecord.name.startsWith('x_')
+    ) {
       hasXSearchEvidence = true
       continue
     }
@@ -350,15 +357,15 @@ function readXSearchCitationUrlKeys(payload: unknown): Set<string> | null {
         if (!canonicalUrl) {
           continue
         }
-        citedPostUrlKeys.add(canonicalUrl.evidenceKey)
+        citedPostStatusIds.add(canonicalUrl.statusId)
         // URL citations are provider-authored response metadata, so they also
         // prove that this response contains x_search evidence even if the API
-        // omits a separate completed x_search_call item.
+        // omits a separate completed x_-prefixed custom tool-call item.
         hasXSearchEvidence = true
       }
     }
   }
-  return hasXSearchEvidence ? citedPostUrlKeys : null
+  return hasXSearchEvidence ? citedPostStatusIds : null
 }
 
 function readCanonicalXPostUrl(value: string): CanonicalXPostUrl | null {
@@ -369,8 +376,8 @@ function readCanonicalXPostUrl(value: string): CanonicalXPostUrl | null {
   const handle = urlMatch[1]
   const statusId = urlMatch[2]
   return {
-    evidenceKey: `${handle.toLowerCase()}/status/${statusId}`,
     handle,
+    statusId,
     url: `https://x.com/${handle}/status/${statusId}`,
   }
 }

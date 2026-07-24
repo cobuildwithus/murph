@@ -36,12 +36,15 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    (`{"posts":[{"url","authorHandle","createdAt","excerpt"}]}`), pinned model, only the
    `x_search` tool (with `allowed_x_handles=[username]` for `profile_posts`,
    `from_date`/`to_date` from `lookbackDays`), bounded `max_output_tokens`, `store: false`.
-   Parse fail-closed: a completed `output[].type="x_search_call"` item or a canonical
+   Parse fail-closed: a completed `output[].type="custom_tool_call"` item with an
+   `x_`-prefixed `name` (observed `x_keyword_search`) or a canonical
    `output[].type="message"` → `content[].type="output_text"` →
    `annotations[].type="url_citation"` establishes same-response x_search evidence,
-   and every relayed post URL must match a `url_citation.url` from
-   that response. `profile_posts` also requires the cited URL's handle to match the
-   requested handle. Invalid JSON fails; a post without a canonical
+   and every relayed post's globally unique numeric status id must match a
+   `url_citation.url` in that response. xAI citations use
+   `https://x.com/i/status/<id>` while the model-authored JSON carries the display
+   handle; `profile_posts` requires that authored handle to match the requested
+   handle. Invalid JSON fails; a post without a canonical
    `https://x.com/<handle>/status/<id>` URL keeps the existing drop behavior; zero valid
    posts with completed x_search evidence returns an explicit no-results failure.
 3. **Billing follows the existing egress pattern exactly** (`runner-egress-intercept.ts`,
