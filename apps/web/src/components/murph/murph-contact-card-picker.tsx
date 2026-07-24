@@ -199,6 +199,8 @@ const PICKER_DESCRIPTION =
 export const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
 export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
+const IN_APP_BROWSER_HANDOFF_ERROR =
+  "Couldn't open Safari. Check your connection and try again.";
 const MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS = 10_000;
 // Long enough that a host "Open in Safari?" confirmation can still be tapped
 // before the attempt is treated as never launched.
@@ -324,7 +326,7 @@ export function MurphContactCardPicker({
               className="px-2 text-center text-sm leading-5 text-destructive"
               role="alert"
             >
-              Couldn't open Safari. Check your connection and try again.
+              {IN_APP_BROWSER_HANDOFF_ERROR}
             </p>
           ) : null}
         </>
@@ -418,8 +420,6 @@ function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
   if (signal.aborted) return Promise.resolve(false);
 
   return new Promise((resolve) => {
-    let deadline: ReturnType<typeof setTimeout>;
-
     function settle(launched: boolean) {
       clearTimeout(deadline);
       window.removeEventListener("pagehide", onPageHide);
@@ -435,7 +435,7 @@ function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
       settle(false);
     }
 
-    deadline = setTimeout(() => settle(false), MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS);
+    const deadline = setTimeout(() => settle(false), MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS);
     window.addEventListener("pagehide", onPageHide);
     signal.addEventListener("abort", onAbort);
   });
