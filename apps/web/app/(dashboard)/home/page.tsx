@@ -8,6 +8,10 @@ import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
+import {
+  MessageMurphActionFallback,
+  MessageMurphContactAction,
+} from "@/src/components/home/message-murph-action";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   resolveHomeTrialBillingBannerVariant,
@@ -31,6 +35,8 @@ import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-com
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { resolveHostedMemberMessagingState } from "@/src/lib/hosted-onboarding/messaging-state";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -83,6 +89,12 @@ export default async function HomePage({
     showInitialVisitPersonaPicker
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
+    member
+      ? readHostedMemberMessagingSetupState({
+          memberId: member.id,
+          prisma,
+        })
+      : Promise.resolve(null),
   ]);
   const [
     showDeviceStepResult,
@@ -90,6 +102,7 @@ export default async function HomePage({
     deviceSyncCompletionDialogResult,
     connectedAppCompletionDialogResult,
     initialVisitContactActionResult,
+    messagingSetupStateResult,
   ] = homeProjectionResults;
   const showDeviceStep = readSettledValue(showDeviceStepResult, false);
   const usageGate = readSettledValue(usageGateResult, null);
@@ -108,6 +121,15 @@ export default async function HomePage({
   const shouldRenderInitialVisitPersonaPicker =
     showInitialVisitPersonaPicker
     && initialVisitContactActionResult.status === "fulfilled";
+  const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
+  // Telegram bots cannot open a conversation, so a member can finish signup
+  // with a linked account Murph still cannot send to. Keep asking for that
+  // first message until it arrives, since Murph cannot ask for it itself.
+  const awaitingFirstMemberMessage = Boolean(
+    messagingSetupState
+    && !resolveHostedMemberMessagingState(messagingSetupState)
+      .hasDirectMessagingChannel,
+  );
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
@@ -193,6 +215,13 @@ export default async function HomePage({
 
       <BrowserVaultOnboardingStepsContent
         protocols={listHealthCommonsExperimentBrowseProtocols()}
+        messageMurphAction={
+          awaitingFirstMemberMessage ? (
+            <Suspense fallback={<MessageMurphActionFallback />}>
+              <MessageMurphContactAction />
+            </Suspense>
+          ) : null
+        }
         showDeviceStep={showDeviceStep}
         uploadLabsAction={
           <Suspense fallback={<UploadLabsActionFallback />}>
