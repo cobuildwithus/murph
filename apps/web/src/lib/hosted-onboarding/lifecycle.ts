@@ -14,6 +14,19 @@ export function requiresHostedBillingCheckout(
     || billingStatus === HostedBillingStatus.incomplete;
 }
 
+/**
+ * Billing that lapsed after activation (`paused`, `past_due`, `canceled`,
+ * `unpaid`). These members already completed checkout once, so they recover from
+ * the existing billing surface rather than a fresh checkout or a support-only
+ * dead end. Statuses that still owe first-time checkout are excluded.
+ */
+export function isHostedLapsedBillingStatus(
+  billingStatus: HostedBillingStatus,
+): boolean {
+  return billingStatus !== HostedBillingStatus.active
+    && !requiresHostedBillingCheckout(billingStatus);
+}
+
 export function deriveHostedOnboardingStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
@@ -68,13 +81,14 @@ function hasHostedOnboardingRecoverySurfaceAccess(input: {
   sponsoredAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): boolean {
-  // This is a web-navigation decision, not runtime entitlement. Paused members
-  // stay dashboard-accessible so existing billing can be resumed without
-  // entering a fresh checkout or support-only flow.
+  // This is a web-navigation decision, not runtime entitlement. Members whose
+  // billing lapsed after activation stay dashboard-accessible so existing
+  // billing can be resumed without entering a fresh checkout or a support-only
+  // dead end.
   return !isHostedMemberSuspended(input.suspendedAt)
     && (
       hasHostedMemberOwnActiveBilling(input)
       || input.sponsoredAccessActive === true
-      || input.billingStatus === HostedBillingStatus.paused
+      || isHostedLapsedBillingStatus(input.billingStatus)
     );
 }

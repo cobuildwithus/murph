@@ -1,7 +1,5 @@
 import "server-only";
 
-import { HostedBillingStatus } from "@prisma/client";
-
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
@@ -9,6 +7,8 @@ import {
   parseJoinInvitePreviewStage,
 } from "./join-invite-preview";
 import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import { isHostedLapsedBillingStatus } from "@/src/lib/hosted-onboarding/lifecycle";
+import { redirect } from "next/navigation";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -40,7 +40,6 @@ export interface JoinInvitePageModel {
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
-  recoveryRedirectPath: typeof HOSTED_APP_HOME_PATH | null;
   status: HostedInviteStatusPayload;
   telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
 }
@@ -70,7 +69,6 @@ export async function buildJoinInvitePageModel(input: {
         status: "preview",
       },
       preview: true,
-      recoveryRedirectPath: null,
       status,
       telegramAccountForMessagingSetup: null,
     };
@@ -88,14 +86,21 @@ export async function buildJoinInvitePageModel(input: {
     memberId: authSnapshot.authenticatedMember?.id ?? null,
     status,
   });
-  const recoveryRedirectPath =
+  // A member whose billing lapsed after activation recovers from the existing
+  // billing surface, so send them there instead of rendering an invite stage
+  // that cannot help them. Redirecting from here matches the existing hosted
+  // page-auth snapshot, which owns the same kind of navigation decision.
+  const lapsedMember = authSnapshot.authenticatedMember;
+  if (
     !launchConsent.gateActive
-    && authSnapshot.authenticatedMember?.billingStatus === HostedBillingStatus.paused
+    && lapsedMember
+    && isHostedLapsedBillingStatus(lapsedMember.billingStatus)
     && status.session.authenticated
     && status.session.matchesInvite
     && (status.stage === "active" || status.stage === "activating")
-      ? HOSTED_APP_HOME_PATH
-      : null;
+  ) {
+    redirect(HOSTED_APP_HOME_PATH);
+  }
   const telegramAccountForMessagingSetup =
     !launchConsent.gateActive
     && status.stage === "checkout"
@@ -110,7 +115,6 @@ export async function buildJoinInvitePageModel(input: {
     inviteCode: input.inviteCode,
     launchConsent,
     preview: false,
-    recoveryRedirectPath,
     status,
     telegramAccountForMessagingSetup,
   };

@@ -142,9 +142,31 @@ describe("/join session resume page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/home");
   });
 
+  it("sends a lapsed member to the billing recovery surface", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.past_due,
+    });
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: member,
+      session: {
+        expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+        member,
+        privyUserId: "did:privy:user_123",
+        sessionId: "hws_123",
+      },
+    });
+
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+
+    expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+  });
+
   it("does not issue an invite for blocked members", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.past_due,
+      suspendedAt: new Date("2026-06-01T00:00:00.000Z"),
     });
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticated: true,

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 
 import { buildJoinInvitePageModel } from "@/src/components/hosted-onboarding/join-invite-page-model";
 import { JoinInvitePageView } from "@/src/components/hosted-onboarding/join-invite-page-view";
@@ -41,10 +40,6 @@ export default async function JoinInvitePage(input: {
     inviteCode: decodedInviteCode,
     preview: searchParams.preview,
   });
-
-  if (model.recoveryRedirectPath) {
-    redirect(model.recoveryRedirectPath);
-  }
 
   return <JoinInvitePageView model={model} />;
 }

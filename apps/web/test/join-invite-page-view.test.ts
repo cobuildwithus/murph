@@ -505,7 +505,6 @@ function createModel(
       status: "not_required",
     },
     preview: false,
-    recoveryRedirectPath: null,
     status,
     telegramAccountForMessagingSetup: null,
     ...overrides,

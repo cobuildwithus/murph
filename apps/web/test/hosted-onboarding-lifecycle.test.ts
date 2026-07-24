@@ -41,10 +41,29 @@ describe("hosted onboarding lifecycle", () => {
     })).toBe("blocked");
   });
 
-  it("does not broaden other non-active billing states", () => {
-    expect(deriveHostedPostVerificationStage({
-      billingStatus: HostedBillingStatus.past_due,
-      suspendedAt: null,
-    })).toBe("blocked");
+  it("routes every lapsed billing state to the recovery surface", () => {
+    for (const billingStatus of [
+      HostedBillingStatus.paused,
+      HostedBillingStatus.past_due,
+      HostedBillingStatus.canceled,
+      HostedBillingStatus.unpaid,
+    ]) {
+      expect(deriveHostedPostVerificationStage({
+        billingStatus,
+        suspendedAt: null,
+      }), billingStatus).toBe("active");
+    }
+  });
+
+  it("keeps checkout-owing billing states in the checkout flow", () => {
+    for (const billingStatus of [
+      HostedBillingStatus.not_started,
+      HostedBillingStatus.incomplete,
+    ]) {
+      expect(deriveHostedPostVerificationStage({
+        billingStatus,
+        suspendedAt: null,
+      }), billingStatus).toBe("checkout");
+    }
   });
 });
