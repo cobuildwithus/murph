@@ -466,9 +466,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Choose who Murph is",
         summary:
-          "First run now opens with fifteen concrete Murph personas, a text style, and five persona-matched voices you can preview before saving.",
+          "First run now opens with a main Murph personality, an optional supporting one to blend in, a text style, and voices you can preview before saving.",
         details:
-          "The persona sets sensible defaults for tone and voice; Humor, Push, and Detail stay adjustable afterwards in Settings or mid-conversation. Skipping writes nothing.",
+          "The personality sets sensible defaults for tone and voice; Humor, Push, and Detail stay adjustable afterwards in Settings or mid-conversation. Skipping writes nothing.",
         relevanceTags: ["onboarding", "personalization", "voice", "assistant"],
         sourcePullRequests: [801, 833],
         tryIt: {

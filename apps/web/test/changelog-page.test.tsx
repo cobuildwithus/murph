@@ -52,20 +52,25 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Clearer standings, smoother account setup");
+    expect(markup).toContain("Group chats that read the room");
+    expect(markup).toContain(
+      "Updated documents, honest reactions, usage you can see",
+    );
+    expect(markup).toContain("Onboarding that sounds like a person");
+    expect(markup).toContain("Pick who Murph is");
+    expect(markup).toContain(
+      "Standings that explain themselves, payments that finish",
+    );
     expect(markup).toContain("Medical records, without the integration jargon");
     expect(markup).toContain("Replies that know what they are answering");
-    expect(markup).toContain("Your records and measurements, in one place");
-    expect(markup).toContain("More follow-through, less friction");
-    expect(markup).toContain("A lighter way to say yes");
-    expect(markup).toContain("Your plan, groups, and next appointment");
     expect(markup).toContain("Improvements");
     expect(markup).not.toContain("Under the hood");
+    expect(markup).not.toContain("Your records and measurements, in one place");
     expect(markup).not.toContain("More control, less waiting");
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-13"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-17"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-07-19#medical-records-plain-language"',
     );
@@ -79,8 +84,11 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain("Add usage");
-    expect(markup).toContain("What a product record shows");
-    expect(markup).toContain("Family plan");
+    expect(markup).toContain("Independent product testing");
+    expect(markup).toContain("Group texts per day");
+    expect(markup).toContain("Continue to Garmin");
+    expect(markup).toContain("Add to Contacts");
+    expect(markup).toContain("Try again");
   });
 
   it("renders the requested older seven-day window with newer and older links", async () => {
@@ -97,7 +105,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-06"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-02"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -115,10 +123,10 @@ describe("ChangelogPage", () => {
 
   it("publishes a canonical URL for each valid archive page", async () => {
     const editions = listChangelogEditions();
-    const pageTwoEditions = editions.slice(7, 14);
-    const pageTwoCardUrl = buildAbsoluteChangelogUrl(
+    const pageThreeEditions = editions.slice(14, 21);
+    const pageThreeCardUrl = buildAbsoluteChangelogUrl(
       buildChangelogCardPath(
-        pageTwoEditions
+        pageThreeEditions
           .flatMap((edition) => edition.items)
           .slice(0, CHANGELOG_PREVIEW_CARD_ITEMS)
           .map((item) => item.id),
@@ -137,11 +145,11 @@ describe("ChangelogPage", () => {
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-13" },
+        alternates: { canonical: "/changelog?edition=2026-07-10" },
         openGraph: expect.objectContaining({
-          images: [expect.objectContaining({ url: pageTwoCardUrl })],
+          images: [expect.objectContaining({ url: pageThreeCardUrl })],
         }),
-        title: "Murph Changelog, page 2",
+        title: "Murph Changelog, page 3",
       }),
     );
     expect(metadata).not.toEqual(

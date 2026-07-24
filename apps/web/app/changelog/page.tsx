@@ -30,13 +30,16 @@ import {
   AssessmentCard,
   CalendarMock,
   ChecklistMock,
+  ContactCardMock,
   DeviceList,
+  DialogMock,
   EmailMock,
   ExerciseGrid,
   GoalsRegimenCard,
   ImagePreview,
   MealCard,
   MetricCardMock,
+  PanelGrid,
   PdfPreview,
   PreferenceCard,
   PrivacyTimeline,
@@ -81,14 +84,57 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
+  "group-contact-card-reshare": (
+    <ContactCardMock
+      name="Murph"
+      subtitle="Shared to the group again on request"
+      fields={[
+        { label: "Mobile", value: "(415) 555-0142" },
+        { label: "Backup", value: "(415) 555-0188" },
+      ]}
+      action="Add to Contacts"
+    />
+  ),
+  "group-work-requests-declined": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "murph write me a react hook for this" },
+        {
+          from: "murph",
+          body: "That one is outside what I do. Ask me anything about health, though, and I'm around for the rest of it.",
+        },
+      ]}
+    />
+  ),
+  "usage-top-up-returns-to-chat": (
+    <DialogMock
+      label="Usage added"
+      title="You're topped up"
+      body="The credit is on the account now. Pick up where you left off."
+      primary="Text Murph"
+      secondary="Close"
+    />
+  ),
+  "telegram-signup-completes-setup": (
+    <ChecklistMock
+      label="Finish signup"
+      items={[
+        { label: "Verify your account", done: true },
+        { label: "Link Telegram", done: true },
+        { label: "Messaging setup complete", done: true },
+        { label: "Answer how Murph should reach you again", done: false },
+      ]}
+    />
+  ),
   "updated-legal-documents-keep-chat-working": (
     <ChecklistMock
       label="While your review is outstanding"
       items={[
         { label: "Group joins by reaction keep working", done: true },
         { label: "Meal photos keep uploading", done: true },
-        { label: "Confirmation taps keep working", done: true },
         { label: "Devices stay connected and syncing", done: true },
+        { label: "Anything interrupts your conversation", done: false },
       ]}
     />
   ),
@@ -98,13 +144,81 @@ const VISUALS: Record<string, ReactNode> = {
       messages={[
         {
           from: "murph",
-          body: "Chest pain with shortness of breath is a call-911 situation, not a wait-and-see one.",
+          body: "I'd hold off on adding creatine until your kidney panel is back.",
           reaction: "❤️",
         },
         {
           from: "murph",
-          body: "Read that as you seeing it, not as confirmation. Are you having symptoms right now?",
+          body: "Taking that as read, not as a yes. Want me to flag it when the results land?",
         },
+      ]}
+    />
+  ),
+  "signup-holds-under-a-rush": (
+    <ChecklistMock
+      label="During a signup rush"
+      items={[
+        { label: "Account creation completes", done: true },
+        { label: "Trial activation completes", done: true },
+        { label: "Phone line assigned", done: true },
+        { label: "Waiting behind one global lock", done: false },
+      ]}
+    />
+  ),
+  "meal-capture-closes-the-day-itself": (
+    <PreferenceCard
+      label="Meal capture"
+      meta="iPhone"
+      entries={[
+        { label: "Photos access", note: "Your one opt-in", value: "On" },
+        { label: "Daily closeout", note: "9:00 PM local", value: "Automatic" },
+        { label: "Extra setup", note: "Nothing else to turn on", value: "None" },
+      ]}
+    />
+  ),
+  "whoop-at-capacity-opens-full-sync-guide": (
+    <ChecklistMock
+      label="When direct slots are full"
+      items={[
+        { label: "The full-sync guide opens straight away", done: true },
+        { label: "Voice walkthrough of the Apple Health path", done: true },
+        { label: "Continue with Murph on your usual thread", done: true },
+        { label: "A separate inline dead end", done: false },
+      ]}
+    />
+  ),
+  "home-survives-a-failed-panel": (
+    <PanelGrid
+      label="Home"
+      panels={[
+        { state: "ok", title: "Sleep last night", value: "7h 12m" },
+        { state: "ok", title: "Steps today", value: "8,940" },
+        { state: "retry", title: "Experiments" },
+        { state: "ok", title: "Recovery", value: "68%" },
+      ]}
+    />
+  ),
+  "invites-explain-which-email-to-use": (
+    <DialogMock
+      label="Join Murph"
+      title="Continue with the invited address"
+      body="This invite was sent to one address, so signing in with a different one will not find it. You can ask the sender to reissue it."
+      choices={[{ label: "invited@example.com", note: "Invited" }]}
+      primary="Continue"
+      secondary="Use a different address"
+    />
+  ),
+  "group-song-and-contact-card-together": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "make us a song and drop your contact card" },
+        {
+          bare: true,
+          body: <SongBubble title="Four Weeks of Wednesdays" duration="1:12" />,
+          from: "murph",
+        },
+        { from: "murph", body: "And here's my card so everyone can save me." },
       ]}
     />
   ),
@@ -157,9 +271,8 @@ const VISUALS: Record<string, ReactNode> = {
       label="Yesterday"
       title="Workouts"
       value="2"
-      caption="Lift 48m, evening walk 32m"
+      caption="48m lift plus a 32m walk, 80m combined"
       sparkline={[1, 0, 1, 2, 1, 1, 2]}
-      delta={{ direction: "up", text: "80 min total" }}
     />
   ),
   "onboarding-sounds-like-a-conversation": (
@@ -179,9 +292,8 @@ const VISUALS: Record<string, ReactNode> = {
       label="Biomarkers"
       title="HbA1c"
       value="5.4%"
-      caption="Lab range under 5.7%"
+      caption="Your lab's range: under 5.7%"
       sparkline={[5.8, 5.7, 5.7, 5.6, 5.5, 5.4]}
-      delta={{ direction: "down", text: "0.4 since March" }}
     />
   ),
   "family-usage-top-ups": (
@@ -189,22 +301,63 @@ const VISUALS: Record<string, ReactNode> = {
       label="Settings · Family"
       meta="Per member"
       entries={[
-        { label: "Add usage", note: "For this member only", value: "$5" },
-        { label: "Add usage", note: "For this member only", value: "$10" },
-        { label: "Add usage", note: "For this member only", value: "$25" },
+        { label: "Dad", note: "Active", value: "Add usage" },
+        { label: "Mom", note: "Active", value: "Add usage" },
+        { label: "Sister", note: "Active", value: "Add usage" },
       ]}
     />
   ),
   "garmin-historical-permission-preflight": (
-    <PhoneMock
-      channel="Connect Garmin"
-      messages={[
-        {
-          from: "murph",
-          body: "Turn on Historical Data on Garmin's next screen. It is off by default and it is what lets me see anything before today.",
-        },
-        { bare: true, body: <VoiceBubble duration="0:08" />, from: "murph" },
+    <DialogMock
+      label="Before you continue"
+      title="Turn on Historical Data"
+      body="Garmin leaves this permission off by default. It is what lets Murph see anything from before today."
+      media={<VoiceBubble duration="0:08" />}
+      primary="Continue to Garmin"
+      secondary="Cancel"
+    />
+  ),
+  "text-murph-after-personalizing": (
+    <DialogMock
+      label="Welcome to Murph"
+      title="You're set. Say hello."
+      body="Murph is on your usual thread. Pick a channel and start the conversation."
+      choices={[
+        { label: "Messages", note: "Ready" },
+        { label: "Telegram", note: "Ready" },
       ]}
+      primary="Text Murph"
+      secondary="Not now"
+    />
+  ),
+  "mobile-settings-and-connect-polish": (
+    <PreferenceCard
+      label="Settings · Family"
+      meta="On a phone"
+      entries={[
+        { label: "Dad", note: "Owner", value: "Manage" },
+        { label: "Mom", note: "Active member", value: "Manage" },
+        { label: "Sister", note: "Invite pending", value: "Copy link" },
+      ]}
+    />
+  ),
+  "whoop-full-sync-dialog-actions": (
+    <DialogMock
+      label="Get full sync"
+      title="Two steps to full WHOOP history"
+      body="Install the companion app, then hand the rest back to Murph in your usual thread."
+      primary="Download App"
+      secondary="Continue with Murph"
+    />
+  ),
+  "experiment-results-match-the-dashboard": (
+    <MetricCardMock
+      label="Run report"
+      title="Time asleep"
+      value="7h 04m"
+      caption="14 baseline days beside 14 intervention days"
+      sparkline={[6.3, 6.5, 6.4, 6.7, 6.9, 7, 7.1]}
+      delta={{ direction: "up", text: "22 min vs baseline" }}
     />
   ),
   "knowledge-page": (
@@ -270,9 +423,17 @@ const VISUALS: Record<string, ReactNode> = {
       label="Who do you want in your corner?"
       meta="First run"
       entries={[
-        { label: "Persona", note: "15 to choose from", value: "Chosen" },
-        { label: "Voice", note: "5 matched to that persona", value: "Preview" },
-        { label: "Text style", note: "Standard or lowercase", value: "Set" },
+        {
+          label: "Main personality",
+          note: "Six to choose from",
+          value: "Scientist",
+        },
+        {
+          label: "Supporting",
+          note: "Optional second personality",
+          value: "Hype Coach",
+        },
+        { label: "Voice", note: "Preview before you save", value: "Husky" },
       ]}
     />
   ),
@@ -324,12 +485,13 @@ const VISUALS: Record<string, ReactNode> = {
     />
   ),
   "group-newsletter-setup": (
-    <CalendarMock
+    <PreferenceCard
       label="Group newsletter"
+      meta="Saved once"
       entries={[
-        { day: "Sun", time: "8:00 AM", what: "Weekly recap to the group chat" },
-        { day: "Sun", time: "8:00 AM", what: "Movement and sleep scopes" },
-        { day: "Sun", time: "8:00 AM", what: "Pinned to this thread only" },
+        { label: "Cadence", note: "Sunday mornings", value: "Weekly" },
+        { label: "Delivery", note: "The chat that set it up", value: "This group" },
+        { label: "Scopes", note: "Nothing outside these", value: "Movement, sleep" },
       ]}
     />
   ),
@@ -344,13 +506,90 @@ const VISUALS: Record<string, ReactNode> = {
     />
   ),
   "scheduled-messages-get-the-full-murph": (
-    <CalendarMock
-      label="Scheduled check-in"
-      entries={[
-        { day: "Fri", time: "7:30 AM", what: "Same prompt as a live chat" },
-        { day: "Fri", time: "7:30 AM", what: "Same skills and tools" },
-        { day: "Fri", time: "7:30 AM", what: "Same voice and style" },
+    <ChecklistMock
+      label="A scheduled check-in"
+      items={[
+        { label: "Same prompt as a live chat", done: true },
+        { label: "Same skills and tools", done: true },
+        { label: "Same voice and style", done: true },
+        { label: "A stripped-down second profile", done: false },
       ]}
+    />
+  ),
+  "challenge-standings-explain-missing-data": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        {
+          from: "murph",
+          body: "Standings through Thursday: 412k steps between four of you. Two people are not counted yet, one needs to reconnect a watch and one has not shared steps.",
+        },
+      ]}
+    />
+  ),
+  "phone-link-settings-recovery": (
+    <DialogMock
+      label="Settings"
+      title="Link your phone"
+      body="We'll text a code to confirm it is you. This replaces any number already on the account."
+      choices={[{ label: "(415) 555-0142", note: "Your number" }]}
+      primary="Send code"
+      secondary="Cancel"
+    />
+  ),
+  "weekly-insights-skip-obvious-weekend": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "This week's one thing: your recovery held up on the four days you ate before 8pm and dropped on the three you did not. Worth a closer look than the Saturday night.",
+        },
+      ]}
+    />
+  ),
+  "named-lab-marker-answers-faster": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "what was my last ferritin?" },
+        {
+          from: "murph",
+          body: "62 ng/mL on May 14, inside the 30 to 400 range your lab uses. Up from 41 in January.",
+        },
+      ]}
+    />
+  ),
+  "dense-voice-memo-keeps-onboarding-moving": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { bare: true, body: <VoiceBubble duration="2:47" />, from: "user" },
+        {
+          from: "murph",
+          body: "Got all of that. I'm sorting the training, the supplements, and the medical history at the same time. One more question while that runs.",
+        },
+      ]}
+    />
+  ),
+  "welcome-continues-your-conversation": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "murph", body: "Hey, this is Murph. Good to have you." },
+        { from: "user", body: "hey, my knee has been bugging me on runs" },
+        {
+          from: "murph",
+          body: "Let's start there. Which part of the knee, and how far in does it show up?",
+        },
+      ]}
+    />
+  ),
+  "approval-page-sign-in-recovery": (
+    <ApprovalCard
+      action="Send your lab results PDF"
+      detail="This browser is signed out. Sign in on this device to finish approving."
+      cta="Sign in to approve"
     />
   ),
   "pulse-finishes-after-payment-setup": (
