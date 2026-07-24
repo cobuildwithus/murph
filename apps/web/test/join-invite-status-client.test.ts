@@ -184,5 +184,6 @@ function createStatusPayload(): HostedInviteStatusPayload {
     },
     messagingSetupRequired: false,
     stage: "verify",
+    telegramStartRequired: false,
   };
 }

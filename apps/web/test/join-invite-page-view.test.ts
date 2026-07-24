@@ -544,6 +544,7 @@ function createStatus(
       matchesInvite: false,
     },
     stage: "verify",
+    telegramStartRequired: false,
     ...overrides,
   };
 }

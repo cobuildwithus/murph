@@ -40,6 +40,11 @@ export interface HostedInviteStatusPayload {
     matchesInvite: boolean;
   };
   stage: HostedOnboardingStage;
+  /**
+   * Telegram is linked but Murph cannot message the member until they open the
+   * bot chat, because Telegram bots cannot send the first message.
+   */
+  telegramStartRequired: boolean;
 }
 
 export type HostedInvitePhoneAuthTarget =
