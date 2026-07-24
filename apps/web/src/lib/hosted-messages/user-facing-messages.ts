@@ -14,6 +14,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
+  "linq.ai_usage.billing_inactive",
   "linq.ai_usage.trial_conversion_pending",
   "linq.ai_usage.trial_limit_reached",
   "linq.ai_usage.edge_limit_reached",
@@ -36,6 +37,9 @@ export interface UserFacingMessageContextByKey {
   }
   "linq.home_redirect": {
     homeRecipientPhone: string
+  }
+  "linq.ai_usage.billing_inactive": {
+    homeUrl: string
   }
   "linq.ai_usage.trial_conversion_pending": {
     homeUrl: string
@@ -335,6 +339,44 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Let's move this over. My number for you:
 {homeRecipientPhone}`,
+  ],
+  "linq.ai_usage.billing_inactive": [
+    `Your Murph plan isn't active right now. You can sort that out here:
+{homeUrl}`,
+    `I'm paused on your account until billing is current. Details here:
+{homeUrl}`,
+    `Billing needs a look before I can pick back up:
+{homeUrl}`,
+    `Your plan isn't active at the moment. Here's where to fix it:
+{homeUrl}`,
+    `I'm on hold until your plan is active again: {homeUrl}`,
+    `Something's up with billing on your account. You can check it here:
+{homeUrl}`,
+    `Your account is paused. Here's where to start it back up:
+{homeUrl}`,
+    `Murph is on hold until billing is current. Take a look here:
+{homeUrl}`,
+    `Your plan needs attention before we keep going:
+{homeUrl}`,
+    `Billing is out of date, so I'm paused. You can update it here:
+{homeUrl}`,
+    `I'm not active on your account right now. That's fixable here: {homeUrl}`,
+    `Your subscription isn't active. Here's where to handle it:
+{homeUrl}`,
+    `Murph is paused on your account. Pick it back up here:
+{homeUrl}`,
+    `Billing needs updating before I can keep going:
+{homeUrl}`,
+    `Your plan is inactive right now. You can restart it here:
+{homeUrl}`,
+    `I'm paused until your plan is active. Details: {homeUrl}`,
+    `Your account needs billing sorted before I can reply:
+{homeUrl}`,
+    `Payment needs a quick fix, then I'm back: {homeUrl}`,
+    `Murph is paused while billing is inactive. Here's the page:
+{homeUrl}`,
+    `Your plan went inactive. You can pick it back up here:
+{homeUrl}`,
   ],
   "linq.ai_usage.trial_conversion_pending": [
     `Trial's done. Head to the site to keep this going:

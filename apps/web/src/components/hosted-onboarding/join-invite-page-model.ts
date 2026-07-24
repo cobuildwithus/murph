@@ -1,11 +1,14 @@
 import "server-only";
 
+import { HostedBillingStatus } from "@prisma/client";
+
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { extractHostedPrivyTelegramAccount } from "@/src/lib/hosted-onboarding/privy-shared";
 import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
 } from "./join-invite-preview";
+import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -37,6 +40,7 @@ export interface JoinInvitePageModel {
   inviteCode: string;
   launchConsent: JoinInviteLaunchConsentState;
   preview: boolean;
+  recoveryRedirectPath: typeof HOSTED_APP_HOME_PATH | null;
   status: HostedInviteStatusPayload;
   telegramAccountForMessagingSetup: JoinInviteTelegramAccountSeed | null;
 }
@@ -66,6 +70,7 @@ export async function buildJoinInvitePageModel(input: {
         status: "preview",
       },
       preview: true,
+      recoveryRedirectPath: null,
       status,
       telegramAccountForMessagingSetup: null,
     };
@@ -83,6 +88,14 @@ export async function buildJoinInvitePageModel(input: {
     memberId: authSnapshot.authenticatedMember?.id ?? null,
     status,
   });
+  const recoveryRedirectPath =
+    !launchConsent.gateActive
+    && authSnapshot.authenticatedMember?.billingStatus === HostedBillingStatus.paused
+    && status.session.authenticated
+    && status.session.matchesInvite
+    && (status.stage === "active" || status.stage === "activating")
+      ? HOSTED_APP_HOME_PATH
+      : null;
   const telegramAccountForMessagingSetup =
     !launchConsent.gateActive
     && status.stage === "checkout"
@@ -97,6 +110,7 @@ export async function buildJoinInvitePageModel(input: {
     inviteCode: input.inviteCode,
     launchConsent,
     preview: false,
+    recoveryRedirectPath,
     status,
     telegramAccountForMessagingSetup,
   };

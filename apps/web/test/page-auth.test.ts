@@ -322,6 +322,29 @@ describe("hosted dashboard page auth", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
   });
 
+  it("keeps paused members on the dashboard recovery surface", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.paused,
+    });
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      authenticatedMember: member,
+      session,
+    });
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
   it("does not redirect Family-sponsored dashboard reads that no longer have direct member billing", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.not_started,

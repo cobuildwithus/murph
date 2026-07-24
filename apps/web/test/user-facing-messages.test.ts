@@ -46,6 +46,9 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.ai_usage.family_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
+  "linq.ai_usage.billing_inactive": {
+    homeUrl: "https://withmurph.ai/home",
+  },
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: "https://withmurph.ai/home",
   },

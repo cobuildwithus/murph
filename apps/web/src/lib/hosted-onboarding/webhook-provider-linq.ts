@@ -6,10 +6,14 @@ import {
 } from "@murphai/hosted-execution";
 
 import { issueHostedInviteTx } from "./invite-service";
+import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { readActiveHostedMemberAccess } from "./member-access";
+import {
+  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
+} from "./member-access";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -68,6 +72,8 @@ import {
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
+  buildInactiveMemberAccessNoticeResponse,
+  HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
   hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
   resolveHostedOnboardingLinqMessageContext,
@@ -553,6 +559,63 @@ export async function planHostedOnboardingLinqWebhook(input: {
       memberId: existingMember.id,
       prisma: input.prisma,
     });
+  }
+
+  // A member whose billing lapsed after activation can never be onboarded as a
+  // first contact on their own bound home chat: the pending-bind write would hit
+  // the home-route race guard and 503 on every retry, forever. Answer from their
+  // access decision and stop here instead. Members who still owe billing checkout
+  // (`not_started`/`incomplete`) are mid-signup, so they keep flowing to the
+  // signup-link and fallback-retry paths below.
+  if (
+    existingMember
+    && !existingMemberEffectiveActive
+    && !requiresHostedBillingCheckout(existingMember.billingStatus)
+    && incomingHomeLinqChatOwnerLookup?.routing.memberId === existingMember.id
+  ) {
+    const accessDecision = await readHostedRuntimeAiAccessDecision({
+      memberId: existingMember.id,
+      noticeSeed: input.event.event_id,
+      now: new Date(occurredAt),
+      prisma: input.prisma,
+    });
+    if (!accessDecision.allowed) {
+      const userNotice = accessDecision.userNotice;
+      if (userNotice) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildInactiveMemberAccessNoticeResponse({
+            chatId: summary.chatId,
+            memberId: existingMember.id,
+            message: userNotice.message,
+            messageId: summary.messageId,
+            noticeCode: userNotice.code,
+            occurredAt,
+            sourceEventId: input.event.event_id,
+          }),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            accessReason: accessDecision.reason,
+            existingMemberActive: false,
+            existingMemberMatch,
+            homeRoutePresent: true,
+            noticeCode: userNotice.code,
+            reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[userNotice.code],
+            routeStage: "inactive-member-home-access-notice",
+          }),
+        );
+      }
+
+      return logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildIgnoredLinqWebhookPlan("inactive-member-home-route"),
+        buildHostedLinqWebhookPlannerDetails(input.event, context, {
+          accessReason: accessDecision.reason,
+          existingMemberActive: false,
+          existingMemberMatch,
+          homeRoutePresent: true,
+          reason: "inactive-member-home-route",
+          routeStage: "ignored-inactive-member-home-route",
+        }),
+      );
+    }
   }
 
   if (existingMember && existingMemberEffectiveActive) {

@@ -35,7 +35,7 @@ export function deriveHostedOnboardingStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
+  if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
@@ -56,9 +56,25 @@ export function deriveHostedPostVerificationStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
+  if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
   return requiresHostedBillingCheckout(input.billingStatus) ? "checkout" : "blocked";
+}
+
+function hasHostedOnboardingRecoverySurfaceAccess(input: {
+  billingStatus: HostedBillingStatus;
+  sponsoredAccessActive?: boolean;
+  suspendedAt?: Date | null;
+}): boolean {
+  // This is a web-navigation decision, not runtime entitlement. Paused members
+  // stay dashboard-accessible so existing billing can be resumed without
+  // entering a fresh checkout or support-only flow.
+  return !isHostedMemberSuspended(input.suspendedAt)
+    && (
+      hasHostedMemberOwnActiveBilling(input)
+      || input.sponsoredAccessActive === true
+      || input.billingStatus === HostedBillingStatus.paused
+    );
 }
