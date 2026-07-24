@@ -63,11 +63,509 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-24",
+    publishedOn: "2026-07-24",
+    title: "Group chats that read the room",
+    summary:
+      "Group replies stay as short as the question allows, Murph resends its contact card when someone missed it, and every group now has a working way to add usage before the conversation stops.",
+    items: [
+      {
+        id: "group-replies-stay-short",
+        kind: "improvement",
+        priority: 4,
+        title: "Group replies stay as short as the question allows",
+        summary:
+          "A group's Detail setting is now a hard ceiling on message length rather than a target, covering the whole turn including every follow-on bubble.",
+        details:
+          "A direct question still gets its complete answer, as tight as accuracy allows. What the ceiling cuts is volunteered length: scoring frameworks, multi-topic essays, and background nobody asked for.",
+        relevanceTags: ["groups", "assistant", "messaging", "polish"],
+        sourcePullRequests: [913, 921],
+      },
+      {
+        id: "group-usage-always-fundable",
+        kind: "feature",
+        priority: 4,
+        title: "Every group chat has a working way to add usage",
+        summary:
+          "A group that never created a join code now still gets a first-party funding link, and Murph offers it while the conversation can still continue instead of after it stops.",
+        relevanceTags: ["groups", "billing", "usage", "messaging"],
+        sourcePullRequests: [905],
+        tryIt: {
+          label: "Check group usage",
+          prompt: "How much usage does this group have left?",
+        },
+      },
+      {
+        id: "group-contact-card-reshare",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph resends its contact card when someone missed it",
+        summary:
+          "Asking Murph to share its card again in a group now posts a new card instead of refusing, with a 90-second guard that only collapses duplicate retries.",
+        relevanceTags: ["groups", "imessage", "messaging"],
+        sourcePullRequests: [912, 918],
+      },
+      {
+        id: "group-work-requests-declined",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph stays out of work tasks in group chats",
+        summary:
+          "Group rooms and unverified outside threads now decline code reviews and work deliverables in one plain sentence, while ordinary conversation and quick general questions stay in scope.",
+        relevanceTags: ["groups", "assistant", "safety"],
+        sourcePullRequests: [922],
+      },
+      {
+        id: "group-join-permissions-preselected",
+        kind: "improvement",
+        priority: 3,
+        title: "Group joins arrive with the requested sharing already selected",
+        summary:
+          "The join screen now preselects exactly the permissions a group or challenge asked for and explains them in one line, so joining is a single confirmation.",
+        relevanceTags: ["groups", "sharing", "privacy", "challenges"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "usage-top-up-returns-to-chat",
+        kind: "improvement",
+        priority: 3,
+        title: "Adding usage returns you to the conversation",
+        summary:
+          "Family top-ups now start from each member's manage window, and a finished purchase opens Messages instead of ending at a confirmation with nowhere to go.",
+        relevanceTags: ["billing", "usage", "family", "settings"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "telegram-signup-completes-setup",
+        kind: "improvement",
+        priority: 3,
+        title: "Linking Telegram finishes the signup step",
+        summary:
+          "A linked Telegram account now completes messaging setup at join instead of asking again how Murph should reach you.",
+        relevanceTags: ["telegram", "onboarding", "auth"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
+    id: "2026-07-23",
+    publishedOn: "2026-07-23",
+    title: "Updated documents, honest reactions, usage you can see",
+    summary:
+      "Murph's refreshed legal set went live without interrupting anyone's chat, a heart on a message stopped being read as yes, and a group can now ask how much usage it has left.",
+    items: [
+      {
+        id: "updated-legal-documents-keep-chat-working",
+        kind: "improvement",
+        priority: 5,
+        title: "Updated legal documents without losing your conversation",
+        summary:
+          "The refreshed privacy, health-data, and health-AI documents ask for one review while your account, connections, sync, and current conversation keep working.",
+        details:
+          "Members whose acceptance was merely out of date no longer hit silent failures: hearting a group join offer, sending a meal photo, and tapping a confirmation inside Messages all keep working while the review reminder is outstanding. The homepage also carries a distinct Consumer Health Data Privacy Notice link.",
+        relevanceTags: ["privacy", "security", "health", "messaging"],
+        sourcePullRequests: [884, 889, 907],
+      },
+      {
+        id: "reactions-read-in-context",
+        kind: "improvement",
+        priority: 5,
+        title: "A heart on a message no longer means yes",
+        summary:
+          "Murph now sees which reaction you used and reads it as acknowledgement by default, treating it as agreement only when the message it answers asked a single yes-or-no question.",
+        relevanceTags: ["reactions", "imessage", "safety", "assistant"],
+        sourcePullRequests: [899],
+      },
+      {
+        id: "group-usage-percent-visible",
+        kind: "feature",
+        priority: 4,
+        title: "Ask a group chat how much usage is left",
+        summary:
+          "Group Murph now answers with the percent remaining for the current period, when it resets, and a funding link, instead of only saying usage is healthy.",
+        details:
+          "Settings dropped the exact purchased credit balance in the same change. Percentages and reset timing stay visible; dollar accounting, who paid, and purchase history do not.",
+        relevanceTags: ["groups", "usage", "billing", "settings"],
+        sourcePullRequests: [895, 901],
+        tryIt: {
+          label: "Ask about group usage",
+          prompt: "What's our usage at right now?",
+        },
+      },
+      {
+        id: "group-daily-text-cap-doubled",
+        kind: "improvement",
+        priority: 4,
+        title: "Group threads get 200 texts a day",
+        summary:
+          "Everyone's messages in a group share one daily bucket, so the cap that was sized for a one-to-one chat doubled to 200. Direct chats keep 100.",
+        relevanceTags: ["groups", "imessage", "messaging"],
+        sourcePullRequests: [900],
+      },
+      {
+        id: "challenge-kickoff-asks-for-intros",
+        kind: "improvement",
+        priority: 4,
+        title: "Challenge kickoffs ask everyone for an intro and a photo",
+        summary:
+          "Every confirmed participant now gets one short ask for a one-line intro and a photo for challenge comics, and someone who opts in later gets the same ask.",
+        details:
+          "Sharing either one stays optional and the challenge starts without waiting. Setup also asks its next question directly instead of first announcing that setup is about to happen.",
+        relevanceTags: ["groups", "challenges", "images", "messaging"],
+        sourcePullRequests: [887, 888],
+      },
+      {
+        id: "generated-images-actually-arrive",
+        kind: "improvement",
+        priority: 4,
+        title: "Pictures Murph makes actually arrive",
+        summary:
+          "A generated image now uploads and sends instead of failing after generation and leaving Murph to report that the upload did not work.",
+        relevanceTags: ["images", "messaging", "reliability", "groups"],
+        sourcePullRequests: [902],
+      },
+      {
+        id: "daily-activity-totals-count-every-workout",
+        kind: "improvement",
+        priority: 4,
+        title: "Daily activity totals count every workout",
+        summary:
+          "A day with more than one workout now reports the full count and combined duration in replies, group comparisons, and newsletters, with the current day labeled so far.",
+        relevanceTags: ["wearables", "data", "groups", "reliability"],
+        sourcePullRequests: [892],
+      },
+      {
+        id: "signup-holds-under-a-rush",
+        kind: "improvement",
+        priority: 3,
+        title: "Signing up holds up under a rush",
+        summary:
+          "Account creation, trial activation, and phone-line assignment no longer queue behind one global lock, and a brief database stall shows the ordinary homepage instead of an error.",
+        relevanceTags: ["auth", "reliability", "performance"],
+        sourcePullRequests: [886, 896, 903],
+      },
+      {
+        id: "meal-capture-closes-the-day-itself",
+        kind: "improvement",
+        priority: 3,
+        title: "Meal capture closes out the day on its own",
+        summary:
+          "Accepting your first automatic meal capture now sets up the 9pm local closeout without another setting or prompt.",
+        relevanceTags: ["nutrition", "meals", "automation", "iphone"],
+        sourcePullRequests: [890],
+      },
+      {
+        id: "whoop-at-capacity-opens-full-sync-guide",
+        kind: "improvement",
+        priority: 3,
+        title: "WHOOP at capacity opens the full-sync guide",
+        summary:
+          "When direct WHOOP slots are full, connecting now opens the same Apple Health setup guide with its voice walkthrough instead of a separate inline dead end.",
+        relevanceTags: ["wearables", "whoop", "apple-health", "connect"],
+        sourcePullRequests: [879],
+      },
+      {
+        id: "home-survives-a-failed-panel",
+        kind: "improvement",
+        priority: 3,
+        title: "Home keeps working when one panel fails",
+        summary:
+          "A section of the dashboard that cannot load is now left out with one retry notice, instead of taking down the page or recommending you connect devices Murph cannot currently see.",
+        relevanceTags: ["dashboard", "reliability", "web"],
+        sourcePullRequests: [882],
+      },
+      {
+        id: "invites-explain-which-email-to-use",
+        kind: "improvement",
+        priority: 3,
+        title: "Invites say which email address to use",
+        summary:
+          "Joining from an emailed invite now locks to the invited address and explains how to switch senders, instead of failing with a mismatch you cannot act on.",
+        relevanceTags: ["invites", "auth", "family", "email"],
+        sourcePullRequests: [],
+      },
+      {
+        id: "group-song-and-contact-card-together",
+        kind: "improvement",
+        priority: 3,
+        title: "A group can ask for a song and a contact card at once",
+        summary:
+          "Murph now completes both supported requests in the same turn instead of doing one and describing the other as a messaging limitation that did not exist.",
+        relevanceTags: ["groups", "music", "messaging"],
+        sourcePullRequests: [894],
+      },
+    ],
+  },
+  {
+    id: "2026-07-22",
+    publishedOn: "2026-07-22",
+    title: "Onboarding that sounds like a person",
+    summary:
+      "First-run questions now show what a useful answer looks like, biomarker pages explain the number you are looking at, and approved files finish sending on their own.",
+    items: [
+      {
+        id: "onboarding-sounds-like-a-conversation",
+        kind: "improvement",
+        priority: 5,
+        title: "Onboarding sounds like a conversation, not a form",
+        summary:
+          "The early questions now give concrete examples of a useful answer, repeat your actual goals back to you, and hand off a device connection in Murph's own words.",
+        details:
+          "Murph no longer asks you to come back and say a quoted magic word after connecting a wearable, and it only asks the labs question by voice if you answered by voice.",
+        relevanceTags: ["onboarding", "assistant", "voice", "polish"],
+        sourcePullRequests: [853, 854, 863, 864, 869, 870],
+      },
+      {
+        id: "biomarker-pages-explain-the-number",
+        kind: "feature",
+        priority: 4,
+        title: "Biomarker pages explain the number you are looking at",
+        summary:
+          "A result page now leads with status, value, and date, plots one-sided lab limits such as under 5.7 percent, and can add a reviewed plain-language description.",
+        details:
+          "When an imported result arrives without its own range, the page can show a clearly labeled published adult comparator without changing the reporting lab's status or presenting the comparator as that lab's range.",
+        relevanceTags: ["biomarkers", "labs", "health", "dashboard"],
+        sourcePullRequests: [838, 844, 871],
+        tryIt: {
+          href: "/biomarkers",
+          label: "Open Biomarkers",
+        },
+      },
+      {
+        id: "family-usage-top-ups",
+        kind: "feature",
+        priority: 4,
+        title: "Buy usage for one family member",
+        summary:
+          "A family plan owner can add a $5, $10, or $25 usage pack to a specific member from Settings, with every step naming who the credit is for.",
+        relevanceTags: ["family", "billing", "usage", "settings"],
+        sourcePullRequests: [855],
+        tryIt: {
+          href: "/settings",
+          label: "Open Settings",
+        },
+      },
+      {
+        id: "garmin-historical-permission-preflight",
+        kind: "feature",
+        priority: 4,
+        title: "A reminder before Garmin's permission screen",
+        summary:
+          "Garmin leaves Historical Data sharing off by default, so Murph now shows one sentence and plays a short reminder in your chosen voice before sending you to authorize.",
+        relevanceTags: ["wearables", "garmin", "connect", "voice"],
+        sourcePullRequests: [875],
+      },
+      {
+        id: "knowledge-page",
+        kind: "feature",
+        priority: 4,
+        title: "A page explaining what Murph actually knows",
+        summary:
+          "A public Knowledge page covers the research, specialist skills, evidence grades, and personal data Murph works from, linked from the main navigation.",
+        relevanceTags: ["web", "health", "search"],
+        sourcePullRequests: [862],
+        tryIt: {
+          href: "/knowledge",
+          label: "Open Knowledge",
+        },
+      },
+      {
+        id: "two-week-experiment-baselines",
+        kind: "improvement",
+        priority: 4,
+        title: "Experiments measure two weeks before they change anything",
+        summary:
+          "New repeated-measure runs baseline for 14 days instead of 7, which makes the before-and-after comparison far less noisy. Saved runs keep their original timing.",
+        relevanceTags: ["experiments", "health", "data"],
+        sourcePullRequests: [848, 868],
+      },
+      {
+        id: "progress-updates-before-slow-work",
+        kind: "improvement",
+        priority: 4,
+        title: "Murph says what it is doing before a slow step",
+        summary:
+          "A newly shared lab report gets one short receipt before Murph preserves and reads it, and a check across several health areas says which areas it is about to read.",
+        details:
+          "Routine single reads stay quiet, and overlapping onboarding work collapses into one update rather than several.",
+        relevanceTags: ["assistant", "onboarding", "labs", "messaging"],
+        sourcePullRequests: [856],
+      },
+      {
+        id: "approved-files-send-themselves",
+        kind: "improvement",
+        priority: 4,
+        title: "Approved files send themselves",
+        summary:
+          "After you approve a secure file, Murph finishes that exact send on its own as one attachment, without a second approval request, a typed confirmation, or a caption bubble.",
+        relevanceTags: ["approvals", "vault", "media", "reliability"],
+        sourcePullRequests: [814, 831, 841],
+      },
+      {
+        id: "group-ask-answers-come-back-promptly",
+        kind: "improvement",
+        priority: 4,
+        title: "An answer from a group you asked comes back promptly",
+        summary:
+          "Asking a group you joined now starts the read-only group turn right away and wakes your own Murph when the answer lands, instead of parking it until your next message.",
+        relevanceTags: ["groups", "assistant", "performance", "hosted"],
+        sourcePullRequests: [832, 840],
+      },
+      {
+        id: "hosted-work-runs-on-two-cores",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph's hosted work runs on twice the CPU",
+        summary:
+          "Hosted containers moved from one to two vCPU with double the memory, which shortens the heavier reads Murph does mid-conversation.",
+        relevanceTags: ["performance", "hosted", "reliability"],
+        sourcePullRequests: [878],
+      },
+      {
+        id: "text-murph-after-personalizing",
+        kind: "improvement",
+        priority: 3,
+        title: "Personalizing Murph ends with a way to text it",
+        summary:
+          "Finishing the first-visit persona and tone step now opens the welcome dialog with a Text Murph action on your resolved channel, instead of ending on a blank page.",
+        relevanceTags: ["onboarding", "messaging", "web"],
+        sourcePullRequests: [852],
+      },
+      {
+        id: "mobile-settings-and-connect-polish",
+        kind: "improvement",
+        priority: 3,
+        title: "Settings and Connect read properly on a phone",
+        summary:
+          "The family manager becomes readable cards instead of a clipped table, the customization drawers fill the screen, and every Connect card anchors its action to the same place.",
+        relevanceTags: ["settings", "mobile", "polish", "connect"],
+        sourcePullRequests: [872, 873],
+      },
+      {
+        id: "whoop-full-sync-dialog-actions",
+        kind: "improvement",
+        priority: 3,
+        title: "The WHOOP full-sync guide has real buttons",
+        summary:
+          "The guide after connecting WHOOP now offers a clear Download App action and a Continue with Murph handoff to your existing Messages or Telegram thread.",
+        relevanceTags: ["wearables", "whoop", "apple-health", "polish"],
+        sourcePullRequests: [867],
+      },
+    ],
+  },
+  {
+    id: "2026-07-21",
+    publishedOn: "2026-07-21",
+    title: "Pick who Murph is",
+    summary:
+      "New members choose one of fifteen Murph personas with a matching voice, a group can ask your private Murph a question you explicitly allowed, and Biomarkers became a page you can scan.",
+    items: [
+      {
+        id: "murph-personas",
+        kind: "feature",
+        priority: 5,
+        title: "Choose who Murph is",
+        summary:
+          "First run now opens with fifteen concrete Murph personas, a text style, and five persona-matched voices you can preview before saving.",
+        details:
+          "The persona sets sensible defaults for tone and voice; Humor, Push, and Detail stay adjustable afterwards in Settings or mid-conversation. Skipping writes nothing.",
+        relevanceTags: ["onboarding", "personalization", "voice", "assistant"],
+        sourcePullRequests: [801, 833],
+        tryIt: {
+          href: "/settings",
+          label: "Change your Murph",
+        },
+      },
+      {
+        id: "consented-group-to-member-questions",
+        kind: "feature",
+        priority: 5,
+        title: "A group can ask your Murph one question, with your permission",
+        summary:
+          "Group Murph posts the exact permission it wants, you accept by liking that message, and your own Murph answers one bounded question. Membership alone is never consent.",
+        details:
+          "The group runtime never receives your vault or your connected accounts. A second fresh reviewer sees only the permission, the question, and the draft answer, and can allow or deny it.",
+        relevanceTags: ["groups", "privacy", "sharing", "consent"],
+        sourcePullRequests: [750],
+      },
+      {
+        id: "group-usage-funding",
+        kind: "feature",
+        priority: 4,
+        title: "Anyone in a group can chip in for usage",
+        summary:
+          "A person with the group link can add a $5, $10, or $25 usage pack to that group, even without a paid plan of their own.",
+        details:
+          "Group Murph can report only healthy, low, or exhausted and the period end. Internal accounting, who paid, and purchase history stay hidden.",
+        relevanceTags: ["groups", "billing", "usage"],
+        sourcePullRequests: [821, 845],
+      },
+      {
+        id: "biomarkers-index-rebuilt",
+        kind: "feature",
+        priority: 4,
+        title: "Biomarkers is a page you can actually scan",
+        summary:
+          "Device readings come first, recognized lab results group into health areas you can search and filter, and each history now uses one canonical unit.",
+        details:
+          "Equivalent lab spellings such as BUN and blood urea nitrogen collapse into a single history, and report metadata no longer lands in a catch-all Other group. Qualitative and incompatible-unit results stay in the form the lab reported them.",
+        relevanceTags: ["biomarkers", "labs", "dashboard", "design"],
+        sourcePullRequests: [816, 817, 818, 826, 829],
+        tryIt: {
+          href: "/biomarkers",
+          label: "Open Biomarkers",
+        },
+      },
+      {
+        id: "low-usage-mentioned-in-conversation",
+        kind: "improvement",
+        priority: 4,
+        title: "Low usage comes up in conversation, not as a billing notice",
+        summary:
+          "At the existing 20 percent threshold Murph finishes what you asked first, then may add one casual sentence that the conversation could pause soon. The separate automated warning is gone.",
+        relevanceTags: ["usage", "billing", "assistant", "messaging"],
+        sourcePullRequests: [823],
+      },
+      {
+        id: "group-newsletter-setup",
+        kind: "improvement",
+        priority: 4,
+        title: "Set up a recurring group newsletter in one pass",
+        summary:
+          "From an authenticated group chat, Murph collects the name, cadence, delivery target, tone, and health scopes and saves them once, then waits for the natural first occurrence.",
+        details:
+          "Delivery stays pinned to the chat that was authorized. If that thread is replaced or revoked, the occurrence fails instead of sending shared health data somewhere new.",
+        relevanceTags: ["groups", "newsletter", "automations", "privacy"],
+        sourcePullRequests: [813, 827],
+      },
+      {
+        id: "completed-experiments-show-daily-points",
+        kind: "improvement",
+        priority: 4,
+        title: "Completed experiments show every measured day again",
+        summary:
+          "A finished report now draws the saved baseline and intervention measurements day by day, with the summary averages consistent with those points.",
+        relevanceTags: ["experiments", "data", "dashboard"],
+        sourcePullRequests: [836, 839],
+      },
+      {
+        id: "experiment-results-match-the-dashboard",
+        kind: "improvement",
+        priority: 3,
+        title: "Private experiment results read like the rest of the dashboard",
+        summary:
+          "Run reports now use the ordinary page margins, one metric chart per row, and the standard trend chart, and finished runs drop the repetitive saved-result narrative.",
+        relevanceTags: ["experiments", "dashboard", "design", "polish"],
+        sourcePullRequests: [825],
+      },
+    ],
+  },
+  {
     id: "2026-07-20",
     publishedOn: "2026-07-20",
-    title: "Clearer standings, smoother account setup",
+    title: "Standings that explain themselves, payments that finish",
     summary:
-      "Group standings now explain partial coverage, phone linking starts in the right state, and weekly insights skip obvious weekend conclusions that do not help.",
+      "Group standings now explain partial coverage, starting Pulse completes itself after Stripe, and scheduled messages run as ordinary Murph turns rather than a stripped-down second profile.",
     items: [
       {
         id: "challenge-standings-explain-missing-data",
@@ -109,6 +607,104 @@ const RAW_CHANGELOG_EDITIONS = [
           "That conclusion is treated as obvious and unhelpful here, so Murph can choose a different evidence-backed candidate while keeping causal claims appropriately cautious.",
         relevanceTags: ["insights", "sleep", "recovery", "assistant"],
         sourcePullRequests: [],
+      },
+      {
+        id: "scheduled-messages-get-the-full-murph",
+        kind: "improvement",
+        priority: 4,
+        title: "Scheduled messages get the same Murph as a live chat",
+        summary:
+          "An automation now runs as an ordinary conversation turn with your usual prompt, skills, style, and tools, instead of a separate reduced profile with its own thread policy.",
+        relevanceTags: ["automations", "assistant", "reminders"],
+        sourcePullRequests: [800],
+      },
+      {
+        id: "pulse-finishes-after-payment-setup",
+        kind: "improvement",
+        priority: 4,
+        title: "Starting Pulse finishes after you add a card",
+        summary:
+          "Confirming Start Pulse once now completes automatically when you return from Stripe, whether you began in Settings or from a link Murph sent in chat.",
+        details:
+          "Cancelling returns to ordinary Settings without starting billing, and a terminal failure offers one retry you control.",
+        relevanceTags: ["billing", "pulse", "settings", "web"],
+        sourcePullRequests: [798, 804],
+      },
+      {
+        id: "contaminant-tests-on-product-pages",
+        kind: "feature",
+        priority: 4,
+        title: "Product pages carry independent contaminant test results",
+        summary:
+          "Food and supplement records now show source-attributed contaminant observations with their sample provenance and honest result ranges, matched only by exact product identity.",
+        details:
+          "Bounded results are never collapsed into exact values, and no safe or unsafe verdict is inferred from the presence of testing. The same evidence is available through public search and the CLI.",
+        relevanceTags: ["supplements", "nutrition", "search", "health"],
+        sourcePullRequests: [786],
+      },
+      {
+        id: "private-experiments-open-from-home",
+        kind: "improvement",
+        priority: 4,
+        title: "Every private experiment on Home opens again",
+        summary:
+          "Runs whose source protocol left the public catalog kept their saved data but lost their links. They now open to the progress, measurements, and conclusions already saved in your vault.",
+        relevanceTags: ["experiments", "dashboard", "vault"],
+        sourcePullRequests: [807],
+      },
+      {
+        id: "named-lab-marker-answers-faster",
+        kind: "improvement",
+        priority: 3,
+        title: "Asking about one blood marker answers faster",
+        summary:
+          "A question about a single named marker now uses one targeted lookup that carries the value, unit, flag, and reference range, instead of loading your whole lab history first.",
+        relevanceTags: ["labs", "biomarkers", "performance", "assistant"],
+        sourcePullRequests: [802],
+        tryIt: {
+          label: "Ask about a marker",
+          prompt: "What was my last ferritin result?",
+        },
+      },
+      {
+        id: "dense-voice-memo-keeps-onboarding-moving",
+        kind: "improvement",
+        priority: 3,
+        title: "A dense voice memo no longer stalls onboarding",
+        summary:
+          "When one memo covers movement, supplements, and medical history, Murph sorts all three at once and says it is working instead of going quiet.",
+        relevanceTags: ["onboarding", "voice", "performance"],
+        sourcePullRequests: [809],
+      },
+      {
+        id: "welcome-continues-your-conversation",
+        kind: "improvement",
+        priority: 3,
+        title: "Your first message continues the welcome",
+        summary:
+          "Murph now sees the welcome it already sent when you reply, so it answers your message instead of introducing itself a second time.",
+        relevanceTags: ["onboarding", "messaging", "telegram", "imessage"],
+        sourcePullRequests: [811],
+      },
+      {
+        id: "approval-page-sign-in-recovery",
+        kind: "improvement",
+        priority: 3,
+        title: "An approval link recovers when the browser is signed out",
+        summary:
+          "The approval screen now offers Sign in to approve as soon as it knows the browser is not authenticated, rather than waiting out a loading timeout.",
+        relevanceTags: ["approvals", "auth", "web", "reliability"],
+        sourcePullRequests: [805],
+      },
+      {
+        id: "strava-connections-paused",
+        kind: "improvement",
+        priority: 3,
+        title: "Strava connections are paused",
+        summary:
+          "Murph no longer offers new or renewed Strava connections and says so plainly. Existing connections keep their data, status, and disconnect control.",
+        relevanceTags: ["wearables", "connect", "integrations"],
+        sourcePullRequests: [808],
       },
     ],
   },
