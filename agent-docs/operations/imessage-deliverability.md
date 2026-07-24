@@ -1,6 +1,6 @@
 # iMessage Deliverability and Reply Safety
 
-Last verified: 2026-07-16
+Last verified: 2026-07-24
 
 ## Purpose
 
@@ -87,7 +87,9 @@ Murph pauses model-capable automation wakes for Linq members with no inbound day
 
 Linq egress should stay small and obvious:
 
-- Participant-target sends are signup-welcome only, tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line.
+- Participant-target first-contact egress is closed by default and has exactly two kind-specific authorities. Signup welcome remains tied to `signup-welcome:<memberId>`, the member's verified phone, and the assigned home line. Group-join outreach is tied to `group-join-outreach:<outreachId>` and a pending `HostedGroupJoinOutreach` row whose participant blind index and selected healthy line match the attempted send. The group-join authority is separate from, and does not broaden, the runtime signup-welcome assertion.
+- A non-member's affirmative reaction to an active group join offer creates at most one `HostedGroupJoinOutreach` for that offer and participant. The existing minute-level hosted-onboarding cron drains at most one due row per invocation. It claims the existing per-line proactive counter, applies the lower of 50 and the line warmup limit, enforces a one-minute global attempt interval, and refuses unhealthy lines. Recipient quiet hours are derived conservatively from supported calling-code regions; an unknown or ambiguous region remains a typed durable deferral rather than a terminal drop.
+- Group-join outreach sends one short, group-specific, link-free sentence that asks for a reply. It sends no automated follow-up. Once any provider attempt begins for a participant, later cold outreaches for other groups are suppressed intentionally, including when the first recipient never replies. Only the recipient's inbound reply enters the existing first-contact admission path and earns the first-party group-aware signup link.
 - Activation and Linq routing serialize only the member's durable row, then read and reserve proactive capacity while choosing the home line. Linq route ownership uses `FOR NO KEY UPDATE`: it still conflicts with activation and another route owner, but remains compatible with the `KEY SHARE` taken by Telegram, Linq, or another channel's mailbox foreign-key insert after updating the shared routing row. There is no separate per-member route advisory lock. Active-member targets are advisory selection inputs; the daily proactive counter is the only atomic shared-pool capacity gate. A degraded-line first-contact fallback carries the selected line snapshot into the webhook planner and claims its capacity only after the final member route and `createHostedLinqChat` sending line agree. `HostedLinqLine` owns the current UTC day and proactive-conversation count; the effective per-line limit is the lower of 50 and any configured `maxNewConversationsPerDay` warmup limit.
 - A capped preferred line falls through to another healthy assignable line. A lost atomic claim is retried once for a day-rollover race, then activation tries another eligible line inside the same request. If every healthy line is at its proactive limit, activation still assigns a home line but omits the signup welcome. This preserves the onboarding “Text Murph” path without exceeding the line cap.
 - A member-initiated first text or existing-thread reply on the incoming line does not claim proactive capacity. If that line is degraded and the response must open a participant-target chat from another line, the fallback line must atomically claim capacity; when no fallback has room, web accepts the inbound event without starting that new chat.

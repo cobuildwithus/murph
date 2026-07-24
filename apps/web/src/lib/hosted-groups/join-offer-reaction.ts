@@ -10,6 +10,7 @@ import {
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
+import { logHostedOnboardingDiagnostic } from "../hosted-onboarding/logging";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
@@ -25,7 +26,11 @@ import {
 import {
   acceptHostedGroupDisclosurePermissionReactionTx,
 } from "./group-disclosure-store";
-import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import { enqueueHostedGroupJoinOutreachTx } from "./group-join-outreach-store";
+import {
+  acceptHostedGroupJoinOfferTx,
+  readHostedGroupJoinOfferTargetTx,
+} from "./group-store";
 import {
   createHostedPostCommitDeadline,
   readHostedPostCommitRemainingMs,
@@ -40,11 +45,12 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "no_offer_match"
   | "offer_revoked"
   | "not_a_member"
+  | "non_phone_handle"
   | "reaction_removed"
   | "unsupported_reaction";
 
 export type HostedGroupJoinOfferReactionResult =
-  | { status: "accepted"; reason: "accepted" }
+  | { status: "accepted"; reason: "accepted" | "outreach_enqueued" }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
 export async function handleHostedGroupJoinOfferReaction(input: {
@@ -87,24 +93,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
 
-  const member = await resolveHostedGroupJoinOfferReactionMember({
-    handle: input.event.reactionFromHandle,
-    prisma: input.prisma,
-  });
-  if (!member) {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "not_a_member",
-    });
-  }
-  if (
-    member.suspendedAt
-    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
-  ) {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "member_inactive",
-    });
-  }
-
   const messageLookupKeyReadCandidates = normalizeLookupKeyCandidates(
     input.event.messageLookupKeyReadCandidates.length > 0
       ? input.event.messageLookupKeyReadCandidates
@@ -114,6 +102,51 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     channel: "linq",
     threadId: input.event.linqChatId,
   });
+
+  const member = await resolveHostedGroupJoinOfferReactionMember({
+    handle: input.event.reactionFromHandle,
+    prisma: input.prisma,
+  });
+  if (!member) {
+    const participantPhoneNumber = input.event.reactionFromHandle.includes("@")
+      ? null
+      : normalizePhoneNumber(input.event.reactionFromHandle);
+    if (!participantPhoneNumber) {
+      return skipHostedGroupJoinOfferReaction({ reason: "non_phone_handle" });
+    }
+
+    try {
+      await input.prisma.$transaction(async (tx) => {
+        const offer = await readHostedGroupJoinOfferTargetTx({
+          messageLookupKeyReadCandidates,
+          threadIdentityLookupKeyReadCandidates,
+          tx,
+        });
+        await enqueueHostedGroupJoinOutreachTx({
+          groupId: offer.groupId,
+          offerId: offer.offerId,
+          participantPhoneNumber,
+          requestedAt: input.event.providerCreatedAt,
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    } catch (error) {
+      const reason = readHostedGroupJoinOfferReactionSkipReason(error);
+      if (!reason) {
+        throw error;
+      }
+      return skipHostedGroupJoinOfferReaction({ reason });
+    }
+    return { status: "accepted", reason: "outreach_enqueued" };
+  }
+  if (
+    member.suspendedAt
+    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
+  ) {
+    return skipHostedGroupJoinOfferReaction({
+      reason: "member_inactive",
+    });
+  }
 
   if (isDisclosureConsentReaction) {
     const disclosureResult = await input.prisma.$transaction(async (tx) =>
@@ -280,5 +313,8 @@ async function resolveHostedGroupJoinOfferReactionMember(input: {
 function skipHostedGroupJoinOfferReaction(input: {
   reason: HostedGroupJoinOfferReactionSkipReason;
 }): HostedGroupJoinOfferReactionResult {
+  logHostedOnboardingDiagnostic("hosted-groups.join-offer-reaction-skip", {
+    reason: input.reason,
+  });
   return { status: "ignored", reason: input.reason };
 }

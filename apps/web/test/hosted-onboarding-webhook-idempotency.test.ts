@@ -1719,6 +1719,12 @@ function createPrismaStub() {
     $executeRaw: vi.fn().mockResolvedValue([]),
     $queryRaw: vi.fn().mockResolvedValue([{ id: "member_123" }]),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
+    // Inbound planning consults pending pre-member group-join outreach to
+    // recover the originating group. This fixture has no outreach rows.
+    hostedGroupJoinOutreach: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     hostedLinqAlert: {
       createMany: vi.fn().mockResolvedValue({ count: 1 }),
     },

@@ -1421,6 +1421,36 @@ model HostedGroupJoinOffer {
   @@map("hosted_group_join_offer")
 }
 
+model HostedGroupJoinOutreach {
+  id                        String          @id
+  groupId                   String          @map("group_id")
+  offerId                   String          @map("offer_id")
+  participantPhoneLookupKey String          @map("participant_phone_lookup_key")
+  participantPhoneEncrypted String          @map("participant_phone_encrypted")
+  requestedAt               DateTime        @map("requested_at")
+  nextAttemptAt             DateTime        @map("next_attempt_at")
+  dispatchStartedAt         DateTime?       @map("dispatch_started_at")
+  attemptCount              Int             @default(0) @map("attempt_count")
+  phoneNumberLookupKey      String?         @map("phone_number_lookup_key")
+  linqChatLookupKey         String?         @map("linq_chat_lookup_key")
+  messageLookupKey          String?         @unique @map("message_lookup_key")
+  sentAt                    DateTime?       @map("sent_at")
+  repliedAt                 DateTime?       @map("replied_at")
+  skippedAt                 DateTime?       @map("skipped_at")
+  skipReason                String?         @map("skip_reason")
+  lastDeferredAt            DateTime?       @map("last_deferred_at")
+  lastDeferralReason        String?         @map("last_deferral_reason")
+  createdAt                 DateTime        @default(now()) @map("created_at")
+  updatedAt                 DateTime        @updatedAt @map("updated_at")
+  line                      HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+
+  @@unique([offerId, participantPhoneLookupKey], map: "hosted_group_join_outreach_offer_participant_key")
+  @@index([sentAt, skippedAt, nextAttemptAt, requestedAt], map: "hosted_group_join_outreach_due_idx")
+  @@index([participantPhoneLookupKey, dispatchStartedAt, sentAt], map: "hosted_group_join_outreach_participant_attempt_idx")
+  @@index([linqChatLookupKey, sentAt], map: "hosted_group_join_outreach_chat_idx")
+  @@map("hosted_group_join_outreach")
+}
+
 model HostedGroupMember {
   id        String       @id
   groupId   String       @map("group_id")
@@ -1580,6 +1610,7 @@ model HostedLinqLine {
   providerEvents             HostedLinqProviderEvent[]
   deliveries                 HostedLinqDelivery[]
   alerts                     HostedLinqAlert[]
+  groupJoinOutreaches        HostedGroupJoinOutreach[]
 
   @@index([healthStatus, egressPolicy])
   @@index([configuredAt, egressPolicy, healthStatus])

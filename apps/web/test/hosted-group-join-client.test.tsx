@@ -7,6 +7,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
     description: string;
+    inviteCode?: string | null;
     onCompleted?: (payload: {
       initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
@@ -31,6 +32,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     description: string;
+    inviteCode?: string | null;
     onCompleted?: (payload: {
       initialVisitEligible?: boolean;
       stage: "active" | "activating" | "blocked" | "checkout";
@@ -125,7 +127,9 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
     "@/src/components/hosted-groups/group-join-client"
   );
   const { cleanup, container } = await renderClientComponent(
-    createElement(GroupJoinSignInButton),
+    createElement(GroupJoinSignInButton, {
+      inviteCode: "invite_opaque",
+    }),
     {
       location: {
         hash: "",
@@ -142,6 +146,7 @@ test("automatically opens the intent-first auth prompt on a valid group join pag
   });
 
   expect(container.textContent).toContain("Continue to join");
+  expect(mocks.authDialogProps?.inviteCode).toBe("invite_opaque");
   expect(container.querySelector(
     '[data-auth-title="Continue to join this Murph group"]',
   )).toBeTruthy();

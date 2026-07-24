@@ -95,6 +95,9 @@ import type {
 } from "./linq-first-contact-admission";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
+  claimHostedGroupJoinOutreachReplyContextTx,
+} from "../hosted-groups/group-join-outreach-store";
+import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
   consumeHostedLinqThreadRoutePendingContextTx,
   readHostedThreadRouteByThreadIdentity,
@@ -763,6 +766,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  const groupJoinCode = participantPhoneNumber
+    ? (await claimHostedGroupJoinOutreachReplyContextTx({
+        linqChatId: summary.chatId,
+        now: new Date(occurredAt),
+        participantPhoneNumber,
+        tx: input.prisma,
+      }))?.joinCode ?? null
+    : null;
+
   const existingDailyState = existingMember
     ? await readHostedLinqDailyState({
         memberId: existingMember.id,
@@ -823,6 +835,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFallbackSignupLinkResponse({
         assignedPhone: retryableFallbackRecipientPhone,
+        groupJoinCode,
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: existingMember.id,
@@ -931,6 +944,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFallbackSignupLinkResponse({
         assignedPhone,
+        groupJoinCode,
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: member.id,
@@ -982,6 +996,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildSignupLinkResponse({
       chatId: summary.chatId,
+      groupJoinCode,
       inviteCode: invite.inviteCode,
       inviteId: invite.id,
       memberId: member.id,

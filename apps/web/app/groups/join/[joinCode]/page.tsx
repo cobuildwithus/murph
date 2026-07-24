@@ -30,6 +30,7 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 type GroupJoinSearchParams = {
+  invite?: string | string[] | undefined;
   postJoin?: string | string[] | undefined;
 };
 
@@ -69,6 +70,7 @@ export default async function GroupJoinPage({
     resolveDecodedRouteParam(params, "joinCode"),
     searchParams ?? Promise.resolve<GroupJoinSearchParams>({}),
   ]);
+  const inviteCode = readSingleSearchParam(resolvedSearchParams.invite);
   const postJoinDestination = resolveGroupJoinPostJoinDestination(
     readGroupJoinPostAuthHandoff(resolvedSearchParams.postJoin),
   );
@@ -95,6 +97,7 @@ export default async function GroupJoinPage({
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-8 px-6 py-16">
       {renderGroupJoin({
         authenticated: auth.authenticated,
+        inviteCode,
         joinCode,
         launchConsentStatus,
         postJoinContactOption,
@@ -115,6 +118,7 @@ async function resolveGroupJoinPostJoinContactOption(): Promise<MurphContactOpti
 
 function renderGroupJoin(input: {
   authenticated: boolean;
+  inviteCode: string | null;
   joinCode: string;
   launchConsentStatus: HostedConsentStatus | null;
   postJoinContactOption: MurphContactOption | null;
@@ -203,7 +207,7 @@ function renderGroupJoin(input: {
           </div>
         ) : (
           <div className="flex flex-col gap-2">
-            <GroupJoinSignInButton />
+            <GroupJoinSignInButton inviteCode={input.inviteCode} />
             <p className="text-center text-xs leading-5 text-muted-foreground">
               Create or open your private Murph account, and we&apos;ll bring you back here.
             </p>
@@ -212,6 +216,14 @@ function renderGroupJoin(input: {
       </div>
     </div>
   );
+}
+
+function readSingleSearchParam(
+  value: string | string[] | undefined,
+): string | null {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  const normalized = candidate?.trim() ?? "";
+  return normalized.length > 0 ? normalized : null;
 }
 
 async function readGroupJoinLaunchConsentStatus(input: {

@@ -22,7 +22,7 @@ import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
 import { sanitizeHostedOnboardingLogString } from "./http";
-import { buildHostedInviteUrl } from "./invite-service";
+import { buildHostedGroupAwareInviteUrl } from "../hosted-groups/group-join-invite-link";
 import { normalizePhoneNumber } from "./phone";
 import { buildHostedLinqInviteSignupEffectId } from "./linq-invite-signup-effect-id";
 import {
@@ -118,6 +118,7 @@ export type HostedLinqAiUsageQuotaPayload =
 
 export type HostedLinqInviteSignupMessagePayload = {
   chatId: string;
+  groupJoinCode?: string | null;
   inviteId: string;
   memberId: string;
   occurredAt: string;
@@ -130,6 +131,7 @@ export type HostedLinqInviteSignupMessagePayload = {
 export type HostedLinqInviteSignupFallbackMessagePayload = {
   assignedRecipientPhone: string;
   chatId: null;
+  groupJoinCode?: string | null;
   inviteId: string;
   memberId: string;
   memberPhone: string;
@@ -228,6 +230,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       assignedRecipientPhone: string;
+      groupJoinCode?: string | null;
       inviteId: string;
       memberId: string;
       memberPhone: string;
@@ -237,6 +240,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      groupJoinCode?: string | null;
       inviteId: string;
       memberId: string;
       occurredAt: string;
@@ -1002,7 +1006,12 @@ async function buildHostedInviteSideEffectMessage(input: {
   }
 
   return buildHostedInviteReply({
-    joinUrl: buildHostedInviteUrl(invite.inviteCode),
+    joinUrl: buildHostedGroupAwareInviteUrl({
+      groupJoinCode: "groupJoinCode" in input.payload
+        ? input.payload.groupJoinCode
+        : null,
+      inviteCode: invite.inviteCode,
+    }),
     seed: input.effectId,
   });
 }
@@ -1078,6 +1087,9 @@ function buildHostedWebhookLinqMessagePayload(
     case "invite_signup":
       return {
         chatId: input.chatId,
+        ...(input.groupJoinCode
+          ? { groupJoinCode: input.groupJoinCode }
+          : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
@@ -1090,6 +1102,9 @@ function buildHostedWebhookLinqMessagePayload(
       return {
         assignedRecipientPhone: input.assignedRecipientPhone,
         chatId: null,
+        ...(input.groupJoinCode
+          ? { groupJoinCode: input.groupJoinCode }
+          : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
         memberPhone: input.memberPhone,

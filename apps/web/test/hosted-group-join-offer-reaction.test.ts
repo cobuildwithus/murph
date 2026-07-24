@@ -14,8 +14,11 @@ import {
 const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
+  enqueueHostedGroupJoinOutreachTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
+  lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
+  readHostedGroupJoinOfferTargetTx: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   resolveHostedPublicBaseUrl: vi.fn(),
@@ -30,6 +33,11 @@ vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
   acceptHostedGroupJoinOfferTx: mocks.acceptHostedGroupJoinOfferTx,
+  readHostedGroupJoinOfferTargetTx: mocks.readHostedGroupJoinOfferTargetTx,
+}));
+
+vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
+  enqueueHostedGroupJoinOutreachTx: mocks.enqueueHostedGroupJoinOutreachTx,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -46,6 +54,11 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
   lookupHostedMemberIdentityByPhoneNumber: mocks.lookupHostedMemberIdentityByPhoneNumber,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  lookupHostedMemberByVerifiedEmailAddress:
+    mocks.lookupHostedMemberByVerifiedEmailAddress,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
@@ -94,8 +107,22 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       revokedVaultShareProjectionKinds: [],
       selectedVaultShareProjectionKinds: ["sleep-times.v0"],
     });
+    mocks.enqueueHostedGroupJoinOutreachTx.mockResolvedValue({
+      kind: "enqueued",
+      outreachId: "hgrpjoa_opaque",
+    });
+    mocks.lookupHostedMemberByVerifiedEmailAddress.mockResolvedValue(null);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValue({
       core: { id: "member_reactor", suspendedAt: null },
+    });
+    mocks.readHostedGroupJoinOfferTargetTx.mockResolvedValue({
+      displayName: "Training circle",
+      groupId: "hgrp_opaque",
+      joinCode: "join_opaque",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      offerId: "hgrpjo_opaque",
+      projectionKindsJson: [],
+      runtimeMemberId: "hbm_runtime",
     });
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
@@ -232,18 +259,74 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("does not turn a nonmember's disclosure Like into a join", async () => {
-    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
-      kind: "not_group_member",
-    });
+  it("durably enqueues first outreach for a nonmember phone reaction", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
-    })).resolves.toEqual({ status: "ignored", reason: "not_a_member" });
+    })).resolves.toEqual({
+      status: "accepted",
+      reason: "outreach_enqueued",
+    });
 
+    expect(mocks.readHostedGroupJoinOfferTargetTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageLookupKeyReadCandidates: expect.arrayContaining([
+          expect.stringMatching(/^hbidx:linq-message:/u),
+        ]),
+      }),
+    );
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).toHaveBeenCalledWith({
+      groupId: "hgrp_opaque",
+      offerId: "hgrpjo_opaque",
+      participantPhoneNumber: "+15551234567",
+      // Reaction events carry `reacted_at` as providerCreatedAt, matching the
+      // existing join path's `now`.
+      requestedAt: new Date("2026-03-26T12:01:00.000Z"),
+      tx: expect.anything(),
+    });
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  it("records a non-phone pre-member handle instead of silently dropping it", async () => {
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        handle: "usr_pre@example.test",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({
+      status: "ignored",
+      reason: "non_phone_handle",
+    });
+
+    expect(mocks.lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalled();
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+  });
+
+  it("records a revoked pre-member offer before enqueue", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    mocks.readHostedGroupJoinOfferTargetTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_GROUP_JOIN_OFFER_REVOKED",
+        httpStatus: 410,
+        message: "This group offer has been revoked.",
+        retryable: false,
+      }),
+    );
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "like" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "offer_revoked" });
+
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
   });
 
   it("does not treat a reaction from the hosted line as member consent", async () => {
@@ -461,6 +544,7 @@ describe("handleHostedGroupJoinOfferReaction", () => {
 function parseReactionEvent(input: {
   customEmoji?: string | null;
   eventType?: "reaction.added" | "reaction.removed";
+  handle?: string;
   isFromMe?: boolean;
   reactionType: string;
 }) {
@@ -471,7 +555,10 @@ function parseReactionEvent(input: {
       data: {
         chat_id: "chat_group_1",
         custom_emoji: input.customEmoji ?? undefined,
-        from_handle: { handle: "+15551234567", service: "iMessage" },
+        from_handle: {
+          handle: input.handle ?? "+15551234567",
+          service: "iMessage",
+        },
         is_from_me: input.isFromMe,
         line: { phone_number: "+15550000000" },
         message_id: "msg_offer_123",

@@ -766,6 +766,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGroupJoinOutreachMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260724190000_hosted_group_join_outreach/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -886,6 +893,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260721160000_clinical_retrieval_wire_identity",
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
+      "20260724190000_hosted_group_join_outreach",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
@@ -1119,6 +1127,27 @@ describe("hosted Prisma baseline migration", () => {
     );
     expect(hostedGroupJoinOfferMigrationSql).not.toContain(
       'ALTER TABLE "hosted_group"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'CREATE TABLE "hosted_group_join_outreach"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_lookup_key" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      '"participant_phone_encrypted" TEXT NOT NULL',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'hosted_group_join_outreach_offer_participant_key',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).toContain(
+      'REFERENCES "hosted_linq_line"("phone_number_lookup_key")',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      '"participant_phone_number"',
+    );
+    expect(hostedGroupJoinOutreachMigrationSql).not.toContain(
+      'REFERENCES "hosted_group_join_offer"',
     );
     for (const sql of [
       'CREATE TABLE "hosted_group_disclosure_permission"',

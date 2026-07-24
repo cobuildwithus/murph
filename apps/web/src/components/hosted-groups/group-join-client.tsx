@@ -34,7 +34,9 @@ export interface GroupJoinPermissionDisplay {
   projectionScopeKey: string;
 }
 
-export function GroupJoinSignInButton() {
+export function GroupJoinSignInButton(input: {
+  inviteCode?: string | null;
+}) {
   const [open, setOpen] = useState(true);
 
   function handleCompleted(payload: HostedPrivyCompletionPayload) {
@@ -50,6 +52,7 @@ export function GroupJoinSignInButton() {
         Continue to join
       </Button>
       <AuthDialog
+        inviteCode={input.inviteCode}
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}

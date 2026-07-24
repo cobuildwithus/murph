@@ -41,6 +41,8 @@ export type HostedLinqRuntimeEgressAssertionResult = {
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
+const HOSTED_LINQ_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX =
+  "group-join-outreach:";
 const HOSTED_LINQ_RECENT_DIRECT_INBOUND_SCAN_LIMIT = 100;
 
 const HOSTED_LINQ_DIRECT_INBOUND_MAILBOX_ITEM_SELECT = {
@@ -504,11 +506,59 @@ async function assertHostedLinqSignupWelcomeParticipantEgressAuthority(input: {
   }
 }
 
+export async function assertHostedLinqGroupJoinOutreachParticipantEgressAuthority(input: {
+  fromPhoneNumber: string;
+  idempotencyKey: string;
+  outreachId: string;
+  prisma: HostedLinqEngagementClient;
+  targetPhoneNumber: string;
+}): Promise<void> {
+  if (
+    normalizeNullable(input.idempotencyKey)
+      !== `${HOSTED_LINQ_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX}${input.outreachId}`
+  ) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+
+  const targetPhoneNumber = normalizePhoneNumber(input.targetPhoneNumber);
+  const fromPhoneNumber = normalizePhoneNumber(input.fromPhoneNumber);
+  if (!targetPhoneNumber || !fromPhoneNumber) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+
+  const targetPhoneLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(targetPhoneNumber);
+  const fromPhoneLookupKeys =
+    createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber);
+  const outreach = await input.prisma.hostedGroupJoinOutreach.findUnique({
+    where: { id: input.outreachId },
+    select: {
+      dispatchStartedAt: true,
+      participantPhoneLookupKey: true,
+      phoneNumberLookupKey: true,
+      sentAt: true,
+      skippedAt: true,
+    },
+  });
+
+  if (
+    !outreach
+    || !outreach.dispatchStartedAt
+    || outreach.sentAt
+    || outreach.skippedAt
+    || !outreach.phoneNumberLookupKey
+    || !targetPhoneLookupKeys.includes(outreach.participantPhoneLookupKey)
+    || !fromPhoneLookupKeys.includes(outreach.phoneNumberLookupKey)
+  ) {
+    throwHostedLinqParticipantEgressAuthorityMismatch();
+  }
+}
+
 function throwHostedLinqParticipantEgressAuthorityMismatch(): never {
   throw hostedOnboardingError({
     code: "HOSTED_LINQ_PARTICIPANT_AUTHORITY_MISMATCH",
     httpStatus: 403,
-    message: "Linq participant egress requires signup welcome authority for the runtime user.",
+    message: "Linq participant egress requires an exact approved first-contact authority.",
     retryable: false,
   });
 }
