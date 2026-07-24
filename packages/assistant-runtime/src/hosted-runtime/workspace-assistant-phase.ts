@@ -5489,11 +5489,17 @@ function resolveHostedPostDeliveryBaseNextWake(
     return baseNextWake;
   }
 
+  const futureWakeAt = normalizeHostedFutureWakeAt(
+    baseNextWake.at,
+    resolveHostedAssistantPhaseNowMs(input.input),
+  );
+  if (!futureWakeAt && !input.canConsumeWorkspaceAssistantWake) {
+    // A non-consuming drain must keep a due assistant wake armed; normalizing
+    // it away here would disarm cron with no later candidate to re-arm it.
+    return baseNextWake;
+  }
   return createHostedRuntimeWakeCandidate(
-    normalizeHostedFutureWakeAt(
-      baseNextWake.at,
-      resolveHostedAssistantPhaseNowMs(input.input),
-    ),
+    futureWakeAt,
     baseNextWake.reason ?? HOSTED_ASSISTANT_WAKE_REASON,
   );
 }
