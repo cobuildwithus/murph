@@ -62,7 +62,7 @@ describe("hosted Linq contact-card share reservation privacy", () => {
       entries: { ...TEST_KEYRING_ENTRIES },
     });
     prisma.rows.push(createContactCardShareRow({
-      lastContactCardShareAttemptedAt: new Date("2026-06-27T11:55:00.000Z"),
+      lastContactCardShareAttemptedAt: new Date("2026-06-27T11:59:30.000Z"),
       linqChatLookupKey: oldLookupKey,
     }));
 

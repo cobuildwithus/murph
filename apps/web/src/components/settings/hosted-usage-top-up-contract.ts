@@ -1,3 +1,6 @@
+import type { VariantProps } from "class-variance-authority";
+
+import type { buttonVariants } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 const PURCHASE_STATUSES = [
@@ -41,6 +44,9 @@ interface HostedUsageTopUpDialogProps {
   purchaseReturn?: HostedUsageTopUpReturn | null;
   scope?: "family" | "group" | "personal";
   targetLabel?: string;
+  triggerClassName?: string;
+  triggerSize?: VariantProps<typeof buttonVariants>["size"];
+  triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
 }
 
 interface HostedUsageTopUpPurchaseResponse {

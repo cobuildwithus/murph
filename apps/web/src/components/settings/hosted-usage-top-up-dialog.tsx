@@ -149,9 +149,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           render={
             <Button
               type="button"
-              size={props.scope === "group" ? "xl" : "lg"}
-              variant={props.scope === "group" ? "default" : "outline"}
-              className={props.scope === "group" ? "w-full" : undefined}
+              size={props.triggerSize ?? (props.scope === "group" ? "xl" : "lg")}
+              variant={
+                props.triggerVariant ??
+                (props.scope === "group" ? "default" : "outline")
+              }
+              className={cn(
+                props.scope === "group" ? "w-full" : undefined,
+                props.triggerClassName,
+              )}
               aria-label={
                 familyTarget ? `${triggerLabel} for ${familyTarget}` : undefined
               }

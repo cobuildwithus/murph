@@ -1241,10 +1241,7 @@ function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) =>
-      display.offerDisclosure
-      ?? formatHostedGroupJoinOfferShareScopeLabel(display.label)
-    );
+    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   return `your ${formatHumanList(["Murph profile name", ...labels])}`;
 }
 

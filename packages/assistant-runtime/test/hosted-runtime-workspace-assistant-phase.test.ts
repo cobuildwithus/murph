@@ -12011,14 +12011,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps assistant ask completions out of a causal-only pass without an input cutoff", async () => {
     const now = "2026-04-27T00:03:00.000Z";
+    const armedWakeAt = "2026-04-27T00:08:00.000Z";
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null);
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
       foregroundCausalOnly: true,
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => now,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
@@ -12029,6 +12033,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: armedWakeAt,
+      progressed: false,
+    }));
   });
 
   it("keeps due cron work out of a causal-only zero-effect pass", async () => {
@@ -12079,6 +12087,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       progressed: true,
+    }));
+  });
+
+  it("preserves an armed workspace wake through a causal-only system mailbox checkpoint", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const armedWakeAt = "2026-04-27T00:05:00.000Z";
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
+    }));
+
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      nextWakeReason: "assistant",
     }));
   });
 
@@ -12192,6 +12243,71 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           wake: approvalWake,
         }),
       );
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a due workspace wake armed through a causal-only exact delivery post-checkpoint", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-causal-due-wake-"));
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    const effectId = "vault-file-send:effect_causal_due_wake";
+
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const approvalWake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId,
+        eventId: "evt_runtime_pending_effects_causal_due_wake",
+        occurredAt: now,
+        userId: "member_synthetic_phase",
+      });
+      const outcome = await systemMailbox.enqueueHostedSystemMailboxItem({
+        item: createResolvedForegroundAdmissionMailboxItem({
+          kind: approvalWake.kind,
+          occurredAt: approvalWake.occurredAt,
+        }),
+        vaultRoot,
+        wake: approvalWake,
+      });
+      expect(outcome.status).toBe("imported");
+
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId,
+      };
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([deliveryEffect]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        foregroundCausalOnly: true,
+        conversationImportedCount: 0,
+        importedCount: 1,
+        now: () => now,
+        operatorHomeRoot,
+        shouldYieldBackgroundMaintenance: () => true,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace({ nextWakeAt: now }),
+      }));
+
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+      expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        nextWakeAt: now,
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }

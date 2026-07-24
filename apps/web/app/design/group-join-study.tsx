@@ -1,0 +1,174 @@
+"use client";
+
+import Link from "next/link";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  type HostedVaultShareProjectionScope,
+} from "@murphai/hosted-execution/vault-share";
+
+import {
+  GroupJoinAcceptForm,
+  GroupJoinLeaveButton,
+  type GroupJoinPermissionDisplay,
+} from "@/src/components/hosted-groups/group-join-client";
+
+const DESIGN_GROUP_NAME = "Sunday Sleep Crew";
+const DESIGN_JOIN_CODE = "DESIGN_JOIN";
+
+const DESIGN_ACTIVITY_SCOPE: HostedVaultShareProjectionScope = {
+  projectionKind: "activity-days.v0",
+};
+
+const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
+  {
+    description: "Shares your last 7 days of active minutes.",
+    label: "Activity minutes",
+    projectionScope: DESIGN_ACTIVITY_SCOPE,
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
+  },
+  {
+    description: "Shares your last 7 days of active calories.",
+    label: "Active calories",
+    projectionScope: { projectionKind: "active-calories-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "active-calories-days.v0",
+    }),
+  },
+];
+
+export function GroupJoinStudy() {
+  return (
+    <div
+      className="grid gap-6 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8 lg:grid-cols-2"
+      data-design-study="group-join"
+      id="group-join"
+    >
+      <GroupJoinVariant
+        caption="Existing member re-opens the invite link. Save changes and Leave group stay as buttons; Back to Murph is the new quiet exit."
+        title="Existing member"
+      >
+        <GroupJoinPageMock alreadyActiveMember>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[DESIGN_ACTIVITY_SCOPE]}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_PERMISSIONS}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+          <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
+          <GroupJoinHomeLink label="Back to Murph" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Signed-in invitee deciding whether to join. Not now matches the consent gate's existing decline link."
+        title="New invitee"
+      >
+        <GroupJoinPageMock alreadyActiveMember={false}>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[]}
+            alreadyActiveMember={false}
+            expectedMembershipId={null}
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_PERMISSIONS}
+            postJoinContactOption={null}
+            postJoinDestination="/home"
+          />
+          <GroupJoinHomeLink label="Not now" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
+    </div>
+  );
+}
+
+function GroupJoinVariant({
+  caption,
+  children,
+  title,
+}: {
+  caption: string;
+  children: React.ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+          {title}
+        </span>
+        <p className="max-w-md text-sm text-muted-foreground">{caption}</p>
+      </div>
+      <div className="rounded-2xl border border-dashed border-border px-6 py-10">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function GroupJoinPageMock({
+  alreadyActiveMember,
+  children,
+}: {
+  alreadyActiveMember: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-md flex-col gap-8">
+      <header className="flex flex-col items-center gap-4 text-center">
+        <div className="flex size-[76px] items-center justify-center rounded-full bg-[#d4c4a8] font-serif text-[2rem] font-semibold text-[#2d3436]">
+          S
+        </div>
+        <div className="flex flex-col items-center gap-2.5">
+          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.13em] text-muted-foreground">
+            Family · 4 members
+          </span>
+          <h1 className="font-serif text-[2rem] leading-[1.05] font-semibold tracking-tight text-balance text-foreground">
+            {alreadyActiveMember
+              ? `You're in ${DESIGN_GROUP_NAME}`
+              : `Join ${DESIGN_GROUP_NAME}`}
+          </h1>
+          <p className="max-w-[20rem] text-pretty text-[15px] leading-relaxed text-muted-foreground">
+            Get healthier with people you trust. You choose exactly what you share.
+          </p>
+        </div>
+      </header>
+
+      <div className="flex flex-col gap-3">
+        <div className="flex gap-4">
+          <span className="w-[74px] shrink-0 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Shared
+          </span>
+          <p className="text-sm leading-relaxed text-foreground">
+            Your name, plus what you choose below.
+          </p>
+        </div>
+        <div className="h-px bg-border" />
+        <div className="flex gap-4">
+          <span className="w-[74px] shrink-0 pt-0.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Private
+          </span>
+          <p className="text-sm leading-relaxed text-foreground">
+            Your chats and vault. Anything you don&apos;t choose to share stays private.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">{children}</div>
+    </div>
+  );
+}
+
+function GroupJoinHomeLink({ label }: { label: string }) {
+  return (
+    <Link
+      href="/home"
+      className="inline-flex min-h-10 items-center justify-center text-center text-xs font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+    >
+      {label}
+    </Link>
+  );
+}

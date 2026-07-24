@@ -60,7 +60,7 @@ import {
 } from "@/src/lib/hosted-onboarding/linq-contact-card-share";
 
 describe("hosted Linq contact-card share reservations", () => {
-  it("throttles repeat vCard shares for 10 minutes, then allows a re-share", async () => {
+  it("throttles repeat vCard shares for 90 seconds, then allows a re-share", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
@@ -74,14 +74,14 @@ describe("hosted Linq contact-card share reservations", () => {
     await expect(reserveHostedLinqContactCardShareAttempt({
       chatId: "chat_123",
       memberId: "member_123",
-      now: new Date("2026-06-27T12:09:59.000Z"),
+      now: new Date("2026-06-27T12:01:29.000Z"),
       prisma: prisma.client,
     })).resolves.toEqual({
       action: "skip",
       reason: "recent_attempt",
     });
 
-    const nextAttempt = new Date("2026-06-27T12:10:00.000Z");
+    const nextAttempt = new Date("2026-06-27T12:01:30.000Z");
     await expect(reserveHostedLinqContactCardShareAttempt({
       chatId: "chat_123",
       memberId: "member_123",
@@ -225,7 +225,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     expect(shareSendMocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 
-  it("reports already_shared inside the 10-minute throttle without sending again", async () => {
+  it("reports already_shared inside the 90-second throttle without sending again", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-07-24T12:00:00.000Z");
 
@@ -246,7 +246,7 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
       chatId: "chat_123",
       idempotencyKeyPrefix: "signup-contact-card",
       memberId: "member_123",
-      now: new Date("2026-07-24T12:05:00.000Z"),
+      now: new Date("2026-07-24T12:00:45.000Z"),
       prisma: prisma.client as never,
     })).resolves.toEqual({ status: "already_shared" });
 
