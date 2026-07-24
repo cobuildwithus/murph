@@ -197,8 +197,8 @@ export function MurphAddToContactsButton({
 const PICKER_TITLE = "Add Murph to your contacts";
 const PICKER_DESCRIPTION =
   "Pick the photo Murph shows up with in your contacts. Same Murph either way.";
-const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
-const IN_APP_BROWSER_DESCRIPTION =
+export const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
+export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
 const DEFAULT_PICKER_COPY = {
   description: PICKER_DESCRIPTION,
