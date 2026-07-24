@@ -81,7 +81,11 @@ function renderInvite(input: {
         title="This invite was already used"
         body="If that was you, open Murph to continue."
         action={
-          <Button render={<Link href="/home" />} nativeButton={false} size="xl">
+          <Button
+            render={<Link href="/home" prefetch={false} />}
+            nativeButton={false}
+            size="xl"
+          >
             Open Murph
           </Button>
         }

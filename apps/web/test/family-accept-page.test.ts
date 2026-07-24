@@ -246,6 +246,139 @@ test("shows web sign-in and Telegram for an unbound invite without a Messages li
   });
 });
 
+test.each([
+  {
+    action: null,
+    excludedCopy: [
+      "This invite has expired",
+      "This invite was canceled",
+      "This invite was already used",
+      "This family plan isn&#x27;t active yet",
+      "This family plan is full",
+    ],
+    expectedCopy: [
+      "Link no longer works",
+      "This invite isn&#x27;t valid",
+      "This family invite is no longer available. Ask the person who invited you to send a new one.",
+    ],
+    name: "invalid link",
+    view: null,
+  },
+  {
+    action: null,
+    excludedCopy: [
+      "This family plan isn&#x27;t active yet",
+      "This family plan is full",
+    ],
+    expectedCopy: [
+      "Link no longer works",
+      "This invite has expired",
+      "Ask the plan owner to send you a fresh family invite.",
+    ],
+    name: "expired invite before lower-priority plan state",
+    view: {
+      ...BASE_VIEW,
+      groupActive: false,
+      seatAvailable: false,
+      status: "expired",
+    },
+  },
+  {
+    action: null,
+    excludedCopy: [
+      "This family plan isn&#x27;t active yet",
+      "This family plan is full",
+    ],
+    expectedCopy: [
+      "Link no longer works",
+      "This invite was canceled",
+      "Ask the plan owner for a new invite.",
+    ],
+    name: "revoked invite before lower-priority plan state",
+    view: {
+      ...BASE_VIEW,
+      groupActive: false,
+      seatAvailable: false,
+      status: "revoked",
+    },
+  },
+  {
+    action: "Open Murph",
+    excludedCopy: [
+      "This family plan isn&#x27;t active yet",
+      "This family plan is full",
+    ],
+    expectedCopy: [
+      "Murph Family",
+      "This invite was already used",
+      "If that was you, open Murph to continue.",
+    ],
+    name: "accepted invite before lower-priority plan state",
+    view: {
+      ...BASE_VIEW,
+      groupActive: false,
+      seatAvailable: false,
+      status: "accepted",
+    },
+  },
+  {
+    action: null,
+    excludedCopy: ["This family plan is full"],
+    expectedCopy: [
+      "Almost ready",
+      "This family plan isn&#x27;t active yet",
+      "Ask the plan owner to finish setting up billing, then open this invite again.",
+    ],
+    name: "inactive plan before seat availability",
+    view: {
+      ...BASE_VIEW,
+      groupActive: false,
+      seatAvailable: false,
+    },
+  },
+  {
+    action: null,
+    excludedCopy: [],
+    expectedCopy: [
+      "Family is full",
+      "This family plan is full",
+      "The plan has no open paid seats. Ask the owner to add a Family seat.",
+    ],
+    name: "full family plan",
+    view: {
+      ...BASE_VIEW,
+      seatAvailable: false,
+    },
+  },
+])("renders the $name terminal branch without join controls", async ({
+  action,
+  excludedCopy,
+  expectedCopy,
+  view,
+}) => {
+  mocks.readHostedFamilyInviteAcceptanceView.mockResolvedValue(view);
+
+  const markup = await renderFamilyAcceptPage("CODE");
+
+  for (const copy of expectedCopy) {
+    expect(markup).toContain(copy);
+  }
+  for (const copy of excludedCopy) {
+    expect(markup).not.toContain(copy);
+  }
+  if (action) {
+    expect(markup).toContain(action);
+  } else {
+    expect(markup).not.toContain("Open Murph");
+  }
+  expect(markup).not.toContain("Continue in Messages");
+  expect(markup).not.toContain("Continue in Telegram");
+  expect(markup).not.toContain("Sign in to join");
+  expect(markup).not.toContain("Accept invite");
+  expect(mocks.signInButtonRendered).toBe(false);
+  expect(mocks.webAcceptButtonProps).toBeNull();
+});
+
 async function renderFamilyAcceptPage(inviteCode: string): Promise<string> {
   const { default: FamilyAcceptPage } = await import("../app/family/accept/[inviteCode]/page");
 
