@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, useSyncExternalStore } from "react";
+import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { ContactRoundIcon } from "lucide-react";
 
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -41,10 +41,6 @@ export {
 
 export function murphContactCardDownloadHref(avatarId: string): string {
   return `/api/murph-contact-card?avatar=${encodeURIComponent(avatarId)}`;
-}
-
-function murphContactCardHandoffHref(claim: string): string {
-  return `/api/murph-contact-card?handoff=${encodeURIComponent(claim)}`;
 }
 
 function subscribeToBrowserSnapshot() {
@@ -95,9 +91,11 @@ export function MurphContactAvatarArt({
 }
 
 export function MurphContactAvatarGrid({
+  disabled = false,
   onChange,
   value,
 }: {
+  disabled?: boolean;
   onChange: (id: string) => void;
   value: string;
 }) {
@@ -113,12 +111,13 @@ export function MurphContactAvatarGrid({
         const selected = option.id === value;
         return (
           <label
-            className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl px-1 py-1.5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+            className="group flex cursor-pointer flex-col items-center gap-2 rounded-xl px-1 py-1.5 has-[:disabled]:pointer-events-none has-[:disabled]:cursor-default has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
             key={option.id}
           >
             <input
               checked={selected}
               className="sr-only"
+              disabled={disabled}
               name={groupName}
               onChange={() => onChange(option.id)}
               type="radio"
@@ -171,11 +170,6 @@ export function MurphContactCardPreview({
   );
 }
 
-/**
- * Self-contained "Add Murph to Contacts" button that opens the picker.
- * Drop-in for server components (signup success, settings) that just need
- * the entry point.
- */
 export function MurphAddToContactsButton({
   size = "lg",
   variant = "outline",
@@ -205,8 +199,7 @@ const PICKER_DESCRIPTION =
 export const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
 export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
-const IN_APP_BROWSER_HANDOFF_ERROR =
-  "Couldn't open Safari. Check your connection and try again.";
+const MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS = 10_000;
 const DEFAULT_PICKER_COPY = {
   description: PICKER_DESCRIPTION,
   primaryAction: "Add Murph to Contacts",
@@ -226,7 +219,7 @@ export function MurphContactCardPicker({
 }: {
   copy?: MurphContactCardPickerCopy;
   initialAvatarId?: string;
-  onAddToContacts?: (option: MurphContactAvatarOption) => void;
+  onAddToContacts: (option: MurphContactAvatarOption) => void;
   onOpenChange: (open: boolean) => void;
   onSkip?: () => void;
   open: boolean;
@@ -238,15 +231,43 @@ export function MurphContactCardPicker({
     readBrowserServerSnapshot,
   );
   const [selectedId, setSelectedId] = useState(initialAvatarId);
-  const [handoffPending, setHandoffPending] = useState(false);
-  const [handoffError, setHandoffError] = useState<string | null>(null);
+  const [handoffStatus, setHandoffStatus] = useState<"error" | "pending" | null>(null);
+  const handoffController = useRef<AbortController | null>(null);
   const selected = findMurphContactAvatarOption(selectedId);
   const browser = detectInAppBrowser(userAgent);
   const opensInSafari = browser.inAppBrowser && browser.isIos;
-  const pickerCopy = {
-    ...DEFAULT_PICKER_COPY,
-    ...copy,
-  };
+  const pickerCopy = { ...DEFAULT_PICKER_COPY, ...copy };
+
+  function handleOpenChange(nextOpen: boolean) {
+    const controller = handoffController.current;
+    if (!nextOpen && controller) {
+      handoffController.current = null;
+      controller.abort();
+      setHandoffStatus("error");
+      return;
+    }
+    onOpenChange(nextOpen);
+  }
+
+  async function handleSafariHandoff() {
+    if (handoffController.current) return;
+    const controller = new AbortController();
+    handoffController.current = controller;
+    setHandoffStatus("pending");
+    try {
+      const claim = await issueMurphContactCardHandoff(selected.id, controller.signal);
+      window.location.assign(
+        `x-safari-https://${window.location.host}/api/murph-contact-card?handoff=${encodeURIComponent(claim)}`,
+      );
+    } catch {
+      if (handoffController.current === controller) setHandoffStatus("error");
+      return;
+    } finally {
+      if (handoffController.current === controller) handoffController.current = null;
+    }
+    setHandoffStatus(null);
+    onAddToContacts(selected);
+  }
 
   const actions = (
     <div className="flex flex-col gap-2">
@@ -254,62 +275,43 @@ export function MurphContactCardPicker({
         <>
           <Button
             className="w-full"
-            disabled={handoffPending}
-            onClick={() => {
-              setHandoffError(null);
-              setHandoffPending(true);
-              void issueMurphContactCardHandoff(selected.id)
-                .then((claim) => {
-                  window.location.assign(
-                    `x-safari-https://${window.location.host}${murphContactCardHandoffHref(claim)}`,
-                  );
-                })
-                .catch(() => {
-                  setHandoffError(IN_APP_BROWSER_HANDOFF_ERROR);
-                })
-                .finally(() => {
-                  setHandoffPending(false);
-                });
-            }}
+            disabled={handoffStatus === "pending"}
+            onClick={() => void handleSafariHandoff()}
             size="xl"
             type="button"
           >
             <ContactRoundIcon data-icon="inline-start" />
-            {handoffPending ? "Opening Safari…" : IN_APP_BROWSER_PRIMARY_ACTION}
+            {handoffStatus === "pending" ? "Opening Safari…" : IN_APP_BROWSER_PRIMARY_ACTION}
           </Button>
           <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
             {IN_APP_BROWSER_DESCRIPTION}
           </p>
-          {handoffError ? (
+          {handoffStatus === "error" ? (
             <p
               className="px-2 text-center text-sm leading-5 text-destructive"
               role="alert"
             >
-              {handoffError}
+              Couldn't open Safari. Check your connection and try again.
             </p>
           ) : null}
         </>
       ) : (
-        <>
-          {/* No `download` attribute: the route serves the vCard inline so iOS
-              Safari opens its native contact preview; a download hint would
-              route it into Files instead. */}
-          <a
-            className={buttonVariants({ className: "w-full", size: "xl" })}
-            href={murphContactCardDownloadHref(selected.id)}
-            onClick={() => onAddToContacts?.(selected)}
-          >
-            <ContactRoundIcon data-icon="inline-start" />
-            {pickerCopy.primaryAction}
-          </a>
-        </>
+        /* Keep the vCard inline so iOS opens its contact preview instead of Files. */
+        <a
+          className={buttonVariants({ className: "w-full", size: "xl" })}
+          href={murphContactCardDownloadHref(selected.id)}
+          onClick={() => onAddToContacts(selected)}
+        >
+          <ContactRoundIcon data-icon="inline-start" />
+          {pickerCopy.primaryAction}
+        </a>
       )}
       <Button
         className="w-full"
-        disabled={opensInSafari && handoffPending}
+        disabled={handoffStatus === "pending"}
         onClick={() => {
           onSkip?.();
-          onOpenChange(false);
+          handleOpenChange(false);
         }}
         size="xl"
         type="button"
@@ -322,7 +324,7 @@ export function MurphContactCardPicker({
 
   if (isMobile) {
     return (
-      <Drawer onOpenChange={onOpenChange} open={open}>
+      <Drawer onOpenChange={handleOpenChange} open={open}>
         <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-center text-center">
             <DrawerTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
@@ -335,7 +337,7 @@ export function MurphContactCardPicker({
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-1">
             <div className="flex flex-col gap-6">
               <MurphContactCardPreview option={selected} />
-              <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
+              <MurphContactAvatarGrid disabled={handoffStatus === "pending"} onChange={setSelectedId} value={selectedId} />
             </div>
           </div>
           <DrawerFooter className="border-t border-border px-4 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-3">
@@ -346,18 +348,8 @@ export function MurphContactCardPicker({
     );
   }
 
-  const body = (
-    <div className="flex flex-col gap-6">
-      <MurphContactCardPreview option={selected} />
-      <div className="-mx-1 max-h-[42dvh] overflow-y-auto px-1 py-1">
-        <MurphContactAvatarGrid onChange={setSelectedId} value={selectedId} />
-      </div>
-      {actions}
-    </div>
-  );
-
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
+    <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent
         className="max-h-[calc(100dvh-2rem)] max-w-xl gap-6 overflow-y-auto rounded-2xl border border-border bg-popover p-6 text-popover-foreground ring-border md:p-7"
         showCloseButton={false}
@@ -370,13 +362,20 @@ export function MurphContactCardPicker({
             {pickerCopy.description}
           </DialogDescription>
         </DialogHeader>
-        {body}
+        <div className="flex flex-col gap-6">
+          <MurphContactCardPreview option={selected} />
+          <div className="-mx-1 max-h-[42dvh] overflow-y-auto px-1 py-1">
+            <MurphContactAvatarGrid disabled={handoffStatus === "pending"} onChange={setSelectedId} value={selectedId} />
+          </div>
+          {actions}
+        </div>
       </DialogContent>
     </Dialog>
   );
 }
 
-async function issueMurphContactCardHandoff(avatarId: string): Promise<string> {
+async function issueMurphContactCardHandoff(avatarId: string, cancellationSignal: AbortSignal): Promise<string> {
+  const signal = AbortSignal.any([cancellationSignal, AbortSignal.timeout(MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS)]);
   const response = await fetch("/api/murph-contact-card", {
     body: JSON.stringify({ avatar: avatarId }),
     credentials: "same-origin",
@@ -385,6 +384,7 @@ async function issueMurphContactCardHandoff(avatarId: string): Promise<string> {
       "Content-Type": "application/json",
     },
     method: "POST",
+    signal,
   });
 
   if (!response.ok) {
@@ -392,13 +392,10 @@ async function issueMurphContactCardHandoff(avatarId: string): Promise<string> {
   }
 
   const payload: unknown = await response.json();
-  if (
-    !isRecord(payload)
-    || typeof payload.claim !== "string"
-    || payload.claim.length === 0
-  ) {
+  if (!isRecord(payload) || typeof payload.claim !== "string" || !payload.claim) {
     throw new Error("Murph contact-card handoff response was invalid.");
   }
 
+  signal.throwIfAborted();
   return payload.claim;
 }

@@ -430,7 +430,7 @@ describe("CustomizeMurphSettings", () => {
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=settings.current-member.claim",
     );
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
-      .not.toBeNull();
+      .toBeNull();
 
     await rendered.cleanup();
   });
