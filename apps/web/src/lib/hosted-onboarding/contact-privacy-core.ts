@@ -37,6 +37,7 @@ export type HostedBlindIndexKind =
   | "stripe-subscription"
   | "stripe-subscription-item"
   | "stripe-subscription-schedule"
+  | "telegram-message"
   | "telegram-username"
   | "telegram-user"
   | "wallet-address";
@@ -162,6 +163,44 @@ export function createHostedLinqMessageLookupKeyReadCandidates(
   value: string | number | null | undefined,
 ): string[] {
   return createHostedLookupKeyReadCandidates("linq-message", normalizeHostedOpaqueInput(value));
+}
+
+/**
+ * Telegram message ids repeat across chats, so the blind index must cover the
+ * chat too. Linq message ids are provider-global and keep their own namespace,
+ * which also keeps the two channels' keys from ever colliding.
+ */
+function normalizeHostedTelegramMessageLookupInput(input: {
+  chatId: string | number | null | undefined;
+  messageId: string | number | null | undefined;
+}): string | null {
+  const chatId = normalizeHostedOpaqueInput(input.chatId);
+  const messageId = normalizeHostedOpaqueInput(input.messageId);
+
+  if (!chatId || !messageId) {
+    return null;
+  }
+  return `${chatId}:${messageId}`;
+}
+
+export function createHostedTelegramMessageLookupKey(input: {
+  chatId: string | number | null | undefined;
+  messageId: string | number | null | undefined;
+}): string | null {
+  return createHostedLookupKey(
+    "telegram-message",
+    normalizeHostedTelegramMessageLookupInput(input),
+  );
+}
+
+export function createHostedTelegramMessageLookupKeyReadCandidates(input: {
+  chatId: string | number | null | undefined;
+  messageId: string | number | null | undefined;
+}): string[] {
+  return createHostedLookupKeyReadCandidates(
+    "telegram-message",
+    normalizeHostedTelegramMessageLookupInput(input),
+  );
 }
 
 export const HOSTED_EXTERNAL_THREAD_CHANNELS = [

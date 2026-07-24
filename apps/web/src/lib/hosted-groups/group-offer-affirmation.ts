@@ -1,0 +1,190 @@
+import "server-only";
+
+import type { PrismaClient } from "@prisma/client";
+
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import {
+  createHostedPostCommitDeadline,
+  readHostedPostCommitRemainingMs,
+  waitForHostedPostCommitOperation,
+} from "../hosted-onboarding/bounded-post-commit";
+import { signalHostedRuntimeMaintenanceRuntime } from "../hosted-orchestration/signal-runtime";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
+import { enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort } from "./group-newsletter";
+import {
+  materializePendingHostedGroupJoinConfirmationsBestEffort,
+  signalHostedGroupJoinConfirmationRuntimeBestEffort,
+} from "./group-join-confirmation";
+import { acceptHostedGroupDisclosurePermissionReactionTx } from "./group-disclosure-store";
+import { acceptHostedGroupJoinOfferTx } from "./group-store";
+import type { HostedGroupOfferChannel } from "./offer-message-binding";
+
+export type HostedGroupOfferAffirmationSkipReason =
+  | "disclosure_grant_limit_reached"
+  | "launch_consent_missing"
+  | "no_offer_match"
+  | "not_a_member"
+  | "offer_revoked";
+
+export type HostedGroupOfferAffirmationResult =
+  | { status: "accepted"; kind: "disclosure" | "join" }
+  | { status: "ignored"; reason: HostedGroupOfferAffirmationSkipReason };
+
+/**
+ * Which card the affirmation is allowed to satisfy, in attempt order.
+ *
+ * A Linq like is ambiguous: the same gesture accepts a join offer or a
+ * disclosure request, so it tries disclosure first and falls through when the
+ * message is not one. A Telegram button names its own card, so it declares the
+ * single kind it may accept and can never cross over to the other.
+ */
+export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
+
+/**
+ * The one place a chat affirmation becomes a durable group grant. Provider
+ * adapters classify the gesture and resolve the actor; this owns matching the
+ * offer, running the existing acceptance transactions, and the post-commit work
+ * that must happen identically on every channel.
+ */
+export async function acceptHostedGroupOfferAffirmation(input: {
+  affirmationEventId: string;
+  channel: HostedGroupOfferChannel;
+  kinds: readonly HostedGroupOfferAffirmationKind[];
+  memberId: string;
+  messageLookupKeyReadCandidates: readonly string[];
+  now: Date;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+  threadIdentityLookupKeyReadCandidates: readonly string[];
+}): Promise<HostedGroupOfferAffirmationResult> {
+  if (input.kinds.includes("disclosure")) {
+    const disclosureResult = await input.prisma.$transaction(async (tx) =>
+      acceptHostedGroupDisclosurePermissionReactionTx({
+        channel: input.channel,
+        memberId: input.memberId,
+        messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+        now: input.now,
+        reactionEventId: input.affirmationEventId,
+        threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    if (disclosureResult.kind === "accepted") {
+      return { status: "accepted", kind: "disclosure" };
+    }
+    if (disclosureResult.kind === "not_group_member") {
+      return { status: "ignored", reason: "not_a_member" };
+    }
+    if (disclosureResult.kind === "wrong_thread") {
+      return { status: "ignored", reason: "no_offer_match" };
+    }
+    if (disclosureResult.kind === "limit_reached") {
+      return { status: "ignored", reason: "disclosure_grant_limit_reached" };
+    }
+    if (!input.kinds.includes("join")) {
+      return { status: "ignored", reason: "no_offer_match" };
+    }
+  }
+  if (!input.kinds.includes("join")) {
+    return { status: "ignored", reason: "no_offer_match" };
+  }
+
+  let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
+  try {
+    result = await input.prisma.$transaction(async (tx) =>
+      acceptHostedGroupJoinOfferTx({
+        channel: input.channel,
+        confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
+        memberId: input.memberId,
+        messageLookupKeyReadCandidates: input.messageLookupKeyReadCandidates,
+        now: input.now,
+        threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
+        tx,
+      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  } catch (error) {
+    const reason = readHostedGroupOfferAffirmationSkipReason(error);
+    if (!reason) {
+      throw error;
+    }
+    return { status: "ignored", reason };
+  }
+
+  const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
+  if (result.joinConfirmationSignal) {
+    await signalHostedGroupJoinConfirmationRuntimeBestEffort({
+      ...result.joinConfirmationSignal,
+      prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
+      timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+    });
+  }
+  await materializePendingHostedGroupJoinConfirmationsBestEffort({
+    memberId: input.memberId,
+    membershipId: result.membershipId,
+    prisma: input.prisma,
+    ...(input.signal ? { signal: input.signal } : {}),
+    timeoutMs: readHostedPostCommitRemainingMs(postCommitDeadlineMs),
+  });
+
+  if (result.grantedVaultShareProjectionKinds.length > 0) {
+    await runHostedGroupOfferAffirmationPostCommitBestEffort({
+      deadlineMs: postCommitDeadlineMs,
+      operation: (abortSignal) => signalHostedRuntimeMaintenanceRuntime({
+        abortSignal,
+        userId: input.memberId,
+      }),
+      signal: input.signal,
+    });
+  }
+
+  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
+    await runHostedGroupOfferAffirmationPostCommitBestEffort({
+      deadlineMs: postCommitDeadlineMs,
+      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
+        groupId: result.groupId,
+        memberId: input.memberId,
+        prisma: input.prisma,
+      }),
+      signal: input.signal,
+    });
+  }
+  return { status: "accepted", kind: "join" };
+}
+
+async function runHostedGroupOfferAffirmationPostCommitBestEffort(input: {
+  deadlineMs: number;
+  operation: (signal: AbortSignal) => Promise<unknown>;
+  signal?: AbortSignal;
+}): Promise<void> {
+  try {
+    await waitForHostedPostCommitOperation({
+      deadlineMs: input.deadlineMs,
+      operation: input.operation,
+      signal: input.signal,
+    });
+  } catch {
+    // The durable join, grants, and mailbox items remain available for a later wake.
+  }
+}
+
+function readHostedGroupOfferAffirmationSkipReason(
+  error: unknown,
+): HostedGroupOfferAffirmationSkipReason | null {
+  if (!isHostedOnboardingError(error)) {
+    return null;
+  }
+  if (error.code === "HOSTED_CONSENT_REQUIRED") {
+    return "launch_consent_missing";
+  }
+  if (error.code === "HOSTED_GROUP_JOIN_OFFER_REVOKED") {
+    return "offer_revoked";
+  }
+  if (
+    error.code === "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND"
+    || error.code === "HOSTED_GROUP_NOT_ACTIVE"
+    || error.code === "HOSTED_GROUP_RUNTIME_UNSUPPORTED"
+  ) {
+    return "no_offer_match";
+  }
+  return null;
+}

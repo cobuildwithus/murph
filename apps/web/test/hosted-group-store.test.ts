@@ -804,7 +804,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_123",
+      message: { channel: "linq" as const, messageId: "msg_offer_123" },
       postedAt,
       projectionKinds: ["sleep-times.v0", "profile-name.v0"],
       tx,
@@ -921,7 +921,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
     const input = {
       groupId: "group_1",
-      messageId: "msg_offer_same",
+      message: { channel: "linq" as const, messageId: "msg_offer_same" },
       postedAt,
       projectionScopes: [SLEEP_SCOPE],
       tx,
@@ -980,7 +980,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(recordHostedGroupJoinOfferTx({
       groupId: inputGroupId,
-      messageId,
+      message: { channel: "linq" as const, messageId },
       postedAt: new Date("2026-07-03T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
@@ -1000,6 +1000,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1046,6 +1047,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     }));
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:00:00.000Z"),
@@ -1071,6 +1073,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       confirmationPublicBaseUrl: "https://murph.example",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1114,6 +1117,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1168,6 +1172,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates,
       now,
@@ -1216,6 +1221,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:06:00.000Z"),
@@ -1237,20 +1243,21 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     const firstOffer = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_a",
+      message: { channel: "linq" as const, messageId: "msg_offer_a" },
       postedAt: firstPostedAt,
       projectionKinds: ["sleep-times.v0"],
       tx,
     });
     await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_b",
+      message: { channel: "linq" as const, messageId: "msg_offer_b" },
       postedAt: secondPostedAt,
       projectionKinds: ["activity-days.v0"],
       tx,
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
       now,

@@ -107,10 +107,32 @@ export interface TelegramMessageLike {
   [key: string]: unknown;
 }
 
+/**
+ * The message an inline-keyboard button was attached to. Telegram may send an
+ * "inaccessible" variant for old messages, which still carries the chat and
+ * message id, so only those two fields are relied on.
+ */
+export interface TelegramCallbackQueryMessageLike {
+  chat: TelegramChat;
+  message_id: number;
+  [key: string]: unknown;
+}
+
+export interface TelegramCallbackQueryLike {
+  id: string;
+  from: TelegramUser;
+  data?: string | null;
+  /** Absent for inline-mode callbacks, which carry `inline_message_id` instead. */
+  message?: TelegramCallbackQueryMessageLike | null;
+  inline_message_id?: string | null;
+  [key: string]: unknown;
+}
+
 export interface TelegramUpdateLike {
   update_id: number;
   message?: TelegramMessageLike;
   business_message?: TelegramMessageLike;
+  callback_query?: TelegramCallbackQueryLike;
   [key: string]: unknown;
 }
 

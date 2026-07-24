@@ -142,3 +142,15 @@ Last verified: 2026-07-22
 - Assistant turns and outbound sends should prefer system-emitted receipts plus idempotent outbox intents over model-authored logs. The receipt trail must stay non-canonical, compact, and safe to inspect through `murph status` / `murph doctor` even when transcripts are partially corrupted.
 - Assistant observability and recovery surfaces should stay persisted and replay-safe: diagnostics/status snapshots must tolerate missing files, and fault-injection coverage should exercise retryable provider/delivery/automation failure paths before those recovery hooks are trusted.
 - Observability writes (logs, latency traces, diagnostics, metrics) must never block user-facing latency: queue or fire-and-forget them off the reply hot path and flush at invocation end, per the `Foreground Reply Critical Path` invariants in `docs/contracts/00-invariants.md`. Only warn/error crash-tail writes may block, bounded by the process exit backstop.
+- Chat-affirmation group joins (Linq reaction, Telegram inline button) are
+  at-least-once, not exactly-once. The provider-event ledger records that an
+  event was *received*, not that it was *applied*, so a redelivered event
+  re-runs acceptance. Membership creation is the only non-idempotent step: the
+  disclosure path derives its grant id from the affirmation event, but
+  `leaveHostedGroupMemberTx` deletes the membership row, so a redelivery that
+  lands after a departure can silently rejoin that member. Gating acceptance on
+  the ledger's duplicate flag is not the fix: it would drop legitimate joins
+  whenever a first attempt failed after the ledger write. Closing this needs a
+  consumed-event record written in the same transaction as acceptance; it is
+  deliberately deferred until a real occurrence or a broader offer-state change
+  justifies the table.

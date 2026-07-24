@@ -23,6 +23,9 @@ import {
   type HostedOnboardingTelegramWebhookResponse,
 } from "./webhook-provider-telegram";
 import {
+  handleHostedTelegramGroupOfferCallback,
+} from "../hosted-groups/telegram-offer-callback";
+import {
   sendPendingHostedLinqAlertsBestEffort,
 } from "./linq-alert-email";
 import {
@@ -909,6 +912,23 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
   assertHostedTelegramWebhookSecret(input.secretToken);
 
   const update = parseHostedTelegramWebhookUpdate(input.rawBody);
+
+  // An inline-button tap grants membership or a disclosure directly, so it runs
+  // outside the planning transaction: acceptance owns its own transactions and
+  // post-commit work, exactly as the Linq reaction path does.
+  if (update.callback_query) {
+    const callbackResult = await handleHostedTelegramGroupOfferCallback({
+      callbackQuery: update.callback_query,
+      prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    return {
+      ok: true,
+      ...(callbackResult.handled ? {} : { ignored: true }),
+      reason: callbackResult.reason,
+    };
+  }
+
   const plan = await runHostedOnboardingWebhookTransaction(
     prisma,
     (transaction) =>
