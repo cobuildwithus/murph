@@ -7295,6 +7295,74 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  // Every lapsed-after-activation billing state must answer on the member's own
+  // bound home chat. Reaching the first-contact tail here raises a retryable
+  // HOSTED_LINQ_HOME_ROUTE_CHANGED that can never succeed, which silently drops
+  // the message on every provider retry.
+  it.each([
+    [HostedBillingStatus.paused, "sent-trial-conversion-notice"],
+    [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
+    [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
+    [HostedBillingStatus.unpaid, "sent-billing-inactive-notice"],
+    [HostedBillingStatus.incomplete, "sent-billing-inactive-notice"],
+  ] as const)(
+    "answers a %s member on their bound home chat instead of dropping the text",
+    async (billingStatus, expectedReason) => {
+      const fixture = await buildPausedHostedMemberHomeRouteFixture({ billingStatus });
+      const scheduledTasks: Array<() => Promise<void>> = [];
+      const prisma = asPrismaTransactionClient({
+        hostedLinqProviderEvent: {
+          createMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+        hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+        hostedMember: { findUnique: vi.fn().mockResolvedValue(fixture.member) },
+        hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
+      });
+
+      const response = await handleHostedOnboardingLinqWebhook({
+        prisma,
+        rawBody: buildHostedLinqWebhookBody({
+          createdAt: "2026-07-23T12:00:00.000Z",
+          data: {
+            chat: {
+              id: fixture.homeChatId,
+              owner_handle: {
+                handle: fixture.homeLinePhone,
+                id: "handle_owner_home",
+                is_me: true,
+                service: "iMessage",
+              },
+            },
+            sent_at: "2026-07-23T12:00:00.000Z",
+          },
+          eventId: `evt_lapsed_${billingStatus}`,
+          service: "iMessage",
+        }),
+        scheduleAfterResponse: (task) => {
+          scheduledTasks.push(task);
+        },
+        signature: null,
+        timestamp: null,
+      });
+
+      for (const task of scheduledTasks) {
+        await task();
+      }
+
+      expect(response).toMatchObject({ ok: true, reason: expectedReason });
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: fixture.homeChatId,
+          message: expect.stringContaining("https://withmurph.ai/home"),
+        }),
+      );
+      expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
+      expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    },
+  );
+
   it("keeps the home-line redirect when a paused member texts another hosted line", async () => {
     const fixture = await buildPausedHostedMemberHomeRouteFixture();
     const scheduledTasks: Array<() => Promise<void>> = [];
