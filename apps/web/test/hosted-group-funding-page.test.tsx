@@ -53,7 +53,7 @@ vi.mock("@/src/components/ui/card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
-  readHostedGroupUsageFundingTargetByJoinCode:
+  readHostedGroupUsageFundingTargetByLocator:
     mocks.readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));

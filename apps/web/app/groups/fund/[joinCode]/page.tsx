@@ -16,7 +16,7 @@ import {
   CardHeader,
 } from "@/src/components/ui/card";
 import {
-  readHostedGroupUsageFundingTargetByJoinCode,
+  readHostedGroupUsageFundingTargetByLocator,
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -66,7 +66,7 @@ export default async function GroupFundingPage({
   const prisma = getPrisma();
   const [auth, target] = await Promise.all([
     getHostedPageAuthSnapshot(),
-    readHostedGroupUsageFundingTargetByJoinCode({ joinCode, prisma }),
+    readHostedGroupUsageFundingTargetByLocator({ locator: joinCode, prisma }),
   ]);
   if (!target) {
     return <GroupFundingUnavailable />;

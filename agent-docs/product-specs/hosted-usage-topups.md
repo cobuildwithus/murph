@@ -691,14 +691,15 @@ same fixed $5, $10, and $25 packs. The browser never submits payer or
 beneficiary identity.
 
 A group chat that has only ever talked to Murph has no `HostedGroup` row or
-join code. When the group `read_usage` action or the exhausted-notice
-projection needs a funding URL and none exists, Web self-heals only the bare
-minimum: the `HostedGroup` row (owner and runtime references) and the join
-code. The self-heal never creates memberships, vault-share projections, or
-profile-name or email grants; those stay behind explicit owner actions, and
-the `read_usage` tool description discloses the mint. Provisioning failures
-keep the existing linkless result and are logged; they never block the read
-or the notice.
+join code. Its funding URL uses a signed funding-only locator instead:
+`gf1.<runtimeMemberId>.<hmac>` derived from the app-session HMAC key with a
+dedicated domain separator. The locator is accepted only by the funding page
+and checkout target resolution, resolves to the exact runtime member after
+re-verifying the container and active access, and is rejected by every join
+surface because it is not a join code. It writes nothing: no `HostedGroup`
+row, membership, join code, vault-share projection, or profile-name/email
+grant is created. Owner-created join codes keep funding exactly as before,
+and enrollment stays behind the owner-minted join link.
 
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and

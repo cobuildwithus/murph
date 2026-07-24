@@ -328,9 +328,10 @@ inventing a billing menu:
   heads-up segment, matching the room's tone; a `healthy` read suppresses the
   heads-up entirely. Playful payer nomination is allowed, but who actually
   paid, purchase status, and amounts stay private, and the assistant never
-  promises a URL the read did not return. Web self-heals a missing group
-  funding link at that read (bare group row and join code only, never
-  memberships or sharing grants), so the URL is normally present.
+  promises a URL the read did not return. For a group without an
+  owner-created join code, the funding URL carries a signed funding-only
+  locator that grants no enrollment or sharing, so the URL is normally
+  present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
@@ -358,11 +359,10 @@ current request before mentioning the low capacity casually. A deterministic
 group exhaustion notice may use only the exact originating external-thread
 target after Web re-authorizes its persisted thread authority; no personal-home
 fallback is valid for an accepted group conversation. At delivery time Web
-rechecks the exhausted state and may append the group's
-`/groups/fund/[joinCode]` link, self-healing a missing group shell or join
-code through the owner-scoped mint before it gives up on the link. The notice
-does not name a payer, claim that payment occurred, or add a separate
-scheduler or money-prompt lifecycle.
+rechecks the exhausted state and may append the group's funding link, using
+the owner join code when one exists or the signed funding-only locator when
+none does. The notice does not name a payer, claim that payment occurred, or
+add a separate scheduler or money-prompt lifecycle.
 
 ## Non-Goals
 

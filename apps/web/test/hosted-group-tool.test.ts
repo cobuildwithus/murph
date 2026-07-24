@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
-  readHostedGroupUsageStatusEnsuringFundingUrl: vi.fn(),
+  readHostedGroupUsageStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   recordHostedGroupJoinOfferTx: vi.fn(),
   recordHostedGroupDisclosurePermissionTx: vi.fn(),
@@ -146,7 +146,7 @@ vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
-  readHostedGroupUsageStatusEnsuringFundingUrl: mocks.readHostedGroupUsageStatusEnsuringFundingUrl,
+  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -292,7 +292,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
       truncated: false,
     });
-    mocks.readHostedGroupUsageStatusEnsuringFundingUrl.mockResolvedValue({
+    mocks.readHostedGroupUsageStatus.mockResolvedValue({
       capacityState: "low",
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
@@ -390,7 +390,7 @@ describe("handleHostedRuntimeGroupTool", () => {
         },
       },
     });
-    expect(mocks.readHostedGroupUsageStatusEnsuringFundingUrl).toHaveBeenCalledWith({
+    expect(mocks.readHostedGroupUsageStatus).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
     });
   });
