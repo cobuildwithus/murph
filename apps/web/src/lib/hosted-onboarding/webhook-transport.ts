@@ -41,6 +41,11 @@ import {
   createHostedLinqChat,
 } from "./linq-client";
 import {
+  isHostedLinqContactCardAutoShareEligible,
+  type MurphHostedLinqContactCardVcfShareOutcome,
+  shareMurphHostedLinqContactCardVcfToChat,
+} from "./linq-contact-card-share";
+import {
   assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
   type HostedLinqThreadRouteEgressAuthority,
@@ -549,6 +554,15 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
+    if (effect.payload.template === "invite_signup") {
+      queueHostedLinqContactCardShareAfterInviteSignup({
+        chatId: result.chatId ?? effect.payload.chatId,
+        memberId: effect.payload.memberId,
+        prisma: options.prisma,
+        scheduleAfterResponse: options.scheduleAfterResponse,
+        service: effect.payload.service ?? null,
+      });
+    }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
       chatId: result.chatId ?? effect.payload.chatId,
       effect: deliveryEffect,
@@ -625,6 +639,91 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
     );
   }
   return BigInt(value);
+}
+
+/**
+ * After the invite-signup reply lands, share Murph's first-party `.vcf` into
+ * the same thread so text-first members can save the contact without visiting
+ * the web app. Direct and group threads are both eligible; the share module
+ * owns the iMessage-only gate and the 48h per-chat reservation. Best effort:
+ * a share failure never fails or delays the reply delivery, and the request
+ * signal is deliberately not forwarded because the share may run after the
+ * response completes.
+ */
+function queueHostedLinqContactCardShareAfterInviteSignup(input: {
+  chatId: string;
+  memberId: string;
+  prisma: HostedLinqTransportPersistenceClient;
+  scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
+  service: string | null;
+}): void {
+  const { chatId, memberId } = input;
+  if (!isHostedLinqContactCardAutoShareEligible({ service: input.service })) {
+    return;
+  }
+  if (!isHostedLinqTransportPrismaClient(input.prisma)) {
+    // Invite-signup drains run on the root client; a transactional client
+    // could close before this post-response share runs.
+    console.warn("Hosted Linq contact-card share skipped inside a transaction.", {
+      chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
+    });
+    return;
+  }
+  const prisma = input.prisma;
+  const task = async () => {
+    try {
+      const outcome = await shareMurphHostedLinqContactCardVcfToChat({
+        chatId,
+        idempotencyKeyPrefix: "signup-contact-card",
+        memberId,
+        prisma,
+      });
+      if (outcome.status === "failed" || outcome.status === "skipped") {
+        console.warn(
+          "Hosted Linq contact-card share did not send.",
+          buildHostedLinqContactCardShareLogDetails(chatId, outcome),
+        );
+      }
+    } catch (error) {
+      console.warn(
+        "Hosted Linq contact-card share failed.",
+        buildHostedLinqContactCardShareLogDetails(chatId, {
+          status: "failed",
+          reason: "send_failed",
+          error,
+        }),
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    input.scheduleAfterResponse(task);
+    return;
+  }
+  void task();
+}
+
+function buildHostedLinqContactCardShareLogDetails(
+  chatId: string,
+  outcome: Extract<
+    MurphHostedLinqContactCardVcfShareOutcome,
+    { status: "failed" | "skipped" }
+  >,
+): Record<string, boolean | number | string | null> {
+  const error = outcome.status === "failed" ? outcome.error : null;
+  const errorRecord = error && typeof error === "object"
+    ? error as Record<string, unknown>
+    : null;
+
+  return sanitizeHostedOnboardingStructuredLogDetails({
+    chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
+    errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : null,
+    errorName: error instanceof Error ? error.name : null,
+    operation: "share_contact_card_vcf",
+    provider: "linq",
+    reason: outcome.reason,
+    status: outcome.status,
+  });
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(

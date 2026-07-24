@@ -1,7 +1,7 @@
 # Murph Contact Card Picker
 
-Last verified: 2026-07-23
-Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, and initial-visit handoff); persisted avatar choice not started
+Last verified: 2026-07-24
+Status: Implemented (picker on `/design?tab=components`, vCard route, signup-success placement, initial-visit handoff, and automatic invite-signup thread share); persisted avatar choice not started
 
 ## Why
 
@@ -30,7 +30,8 @@ Target range is five to ten options. Option ids are stable identifiers; never re
 
 - Implemented: "Add Murph to Contacts" is a download link to `GET /api/murph-contact-card?avatar=<id>` (`apps/web/app/api/murph-contact-card/route.ts`), which returns `Murph.vcf` built with the existing `buildMurphHostedLinqContactCardVcf` (`apps/web/src/lib/hosted-onboarding/linq-contact-card.ts`): the member's own line as the `mobile` number, a second healthy pool line under the `backup` label, and the chosen avatar embedded as `PHOTO` (fetched from the deployment's own public assets). The optional backup comes from the existing `HostedLinqLine` projection maintained by scheduled provider reconciliation, so a download never performs live provider inventory or reconciliation work; a missing or unreadable projection omits only the backup. `avatar=none` omits `PHOTO`; unknown ids fall back to the default headshot. The route requires an active hosted member session and resolves the member's line server-side from hosted member routing.
 - Saving the vCard sets the contact photo in the member's own address book. That is the entire per-user effect.
-- Invite-signup replies do not invoke Linq's native `share_contact_card` endpoint. The first-party vCard picker is the sole automatic onboarding contact-card flow, so a provider-side image cannot overwrite the member's avatar choice.
+- After a successful iMessage invite-signup reply, the Linq transport automatically shares the same first-party `Murph.vcf` into that thread as an attachment (`shareMurphHostedLinqContactCardVcfToChat` in `apps/web/src/lib/hosted-onboarding/linq-contact-card-share.ts`), so a text-first member can save Murph without visiting the web app. Direct and group threads are both eligible; non-iMessage services are skipped. The share is best-effort (it never fails or delays the reply delivery), uses the canonical headshot, and shares the per-chat 48-hour reservation with the explicit group `share_contact_card` tool so the two flows cannot double-send.
+- Linq's native `share_contact_card` endpoint is never invoked automatically, so a provider-side image cannot overwrite the member's avatar choice. The first-party `.vcf` (picker download or automatic thread share) is the only automatic onboarding contact-card mechanism.
 - Members without a phone line get a 409 (`MURPH_TEXT_LINE_NOT_READY`); signup surfaces should skip the picker for them and keep the current CTA-only welcome shape.
 
 ## Invariants and non-goals

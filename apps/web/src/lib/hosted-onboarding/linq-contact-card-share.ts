@@ -1,6 +1,19 @@
-import { Prisma } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
+import {
+  getHostedLinqChatHandles,
+  isHostedLinqAttachmentSendPrepareFailure,
+  sendHostedLinqAttachmentMessage,
+} from "./linq-client";
+import {
+  buildMurphHostedLinqContactCardVcf,
+  fetchMurphHostedLinqContactCardVcfPhoto,
+  MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
+  MURPH_CONTACT_CARD_VCF_FILE_NAME,
+  resolveMurphHostedLinqContactCardBackupPhoneNumber,
+} from "./linq-contact-card";
+import { normalizePhoneNumber } from "./phone";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -234,4 +247,120 @@ function isPrismaUniqueViolation(
   error: unknown,
 ): error is Prisma.PrismaClientKnownRequestError {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+/**
+ * Automatic shares stay iMessage-only: the `.vcf` renders there as a native
+ * tappable contact bubble, while SMS/MMS delivery of a vCard attachment is
+ * unproven for pooled lines. Group and direct threads are both eligible; the
+ * per-chat reservation in this module is the volume guard.
+ */
+export function isHostedLinqContactCardAutoShareEligible(eligibility: {
+  service: string | null;
+}): boolean {
+  return eligibility.service?.trim().toLowerCase() === "imessage";
+}
+
+export type MurphHostedLinqContactCardVcfShareOutcome =
+  | { status: "already_shared" }
+  | { status: "sent" }
+  | {
+      status: "skipped";
+      reason: "line_unresolved" | "missing_chat_id" | "provider_unavailable";
+    }
+  | { status: "failed"; reason: "send_failed"; error: unknown };
+
+/**
+ * Share Murph's first-party vCard into a Linq chat as an attachment. This is
+ * the only provider-side contact-card share mechanism: it never calls Linq's
+ * native contact-card share, so a member-chosen avatar photo can not be
+ * overwritten. Callers own eligibility and thread authority; this owns line
+ * resolution, the 48h per-chat reservation, the build and send, and releasing
+ * the reservation when a failure provably never reached the chat. Send
+ * failures are returned, not thrown.
+ */
+export async function shareMurphHostedLinqContactCardVcfToChat(input: {
+  chatId: string;
+  idempotencyKeyPrefix: string;
+  memberId: string;
+  now?: Date;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<MurphHostedLinqContactCardVcfShareOutcome> {
+  let linePhoneNumber: string | null = null;
+  let rosterPresent = false;
+  try {
+    const handles = await getHostedLinqChatHandles({
+      chatId: input.chatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    rosterPresent = handles.length > 0;
+    linePhoneNumber = normalizePhoneNumber(
+      handles.find((handle) => handle.isMe)?.handle ?? null,
+    );
+  } catch {
+    return { status: "skipped", reason: "provider_unavailable" };
+  }
+  if (!rosterPresent) {
+    return { status: "skipped", reason: "provider_unavailable" };
+  }
+  if (!linePhoneNumber) {
+    return { status: "skipped", reason: "line_unresolved" };
+  }
+
+  const reservation = await reserveHostedLinqContactCardShareAttempt({
+    chatId: input.chatId,
+    memberId: input.memberId,
+    ...(input.now ? { now: input.now } : {}),
+    prisma: input.prisma,
+  });
+  if (reservation.action !== "share") {
+    return reservation.reason === "recent_attempt"
+      ? { status: "already_shared" }
+      : { status: "skipped", reason: reservation.reason };
+  }
+
+  const [photo, backupPhoneNumber] = await Promise.all([
+    fetchMurphHostedLinqContactCardVcfPhoto(),
+    resolveMurphHostedLinqContactCardBackupPhoneNumber({
+      excludePhoneNumber: linePhoneNumber,
+      prisma: input.prisma,
+    }),
+  ]);
+  const vcf = buildMurphHostedLinqContactCardVcf({
+    backupPhoneNumber,
+    phoneNumber: linePhoneNumber,
+    photo,
+  });
+  try {
+    await sendHostedLinqAttachmentMessage({
+      bytes: new Uint8Array(Buffer.from(vcf, "utf8")),
+      chatId: input.chatId,
+      contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
+      fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
+      // Chat id + day: dedupes duplicate provider submissions of this share
+      // without suppressing an intentional re-share after the 48h throttle.
+      // The chat id is Linq's own identifier, so no new exposure.
+      idempotencyKey: `${input.idempotencyKeyPrefix}:${input.chatId}:${(input.now ?? new Date()).toISOString().slice(0, 10)}`,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  } catch (error) {
+    if (isHostedLinqAttachmentSendPrepareFailure(error)) {
+      // Nothing reached the chat; free the 48h reservation so a later retry
+      // is not locked out. Ambiguous message-send failures keep it.
+      try {
+        await releaseHostedLinqContactCardShareAttempt({
+          attemptedAt: reservation.attemptedAt,
+          chatId: input.chatId,
+          memberId: input.memberId,
+          prisma: input.prisma,
+        });
+      } catch {
+        // Best effort: a stuck reservation only delays the next attempt.
+      }
+    }
+    return { status: "failed", reason: "send_failed", error };
+  }
+
+  return { status: "sent" };
 }
