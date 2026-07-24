@@ -6,6 +6,7 @@ import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { createVaultReadModel } from "../src/model.ts";
 import {
   buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
   buildActivitySessionMetricCandidate,
   buildSleepStageAggregateCandidates,
   buildSleepWindowMetricCandidate,
@@ -206,6 +207,44 @@ function makeSleepWindowCandidate(
     title: overrides.title ?? null,
   };
 }
+
+test("activity session day rollups stay date-bounded across a multi-year history", () => {
+  const days = 3_650;
+  const candidates: WearableMetricCandidate[] = [];
+
+  for (let dayIndex = 0; dayIndex < days; dayIndex += 1) {
+    const date = new Date(Date.UTC(2016, 0, 1) + dayIndex * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+    for (const [sessionIndex, durationMinutes] of [10, 20, 30].entries()) {
+      const candidateId = `session-${dayIndex}-${sessionIndex}`;
+      candidates.push(makeMetricCandidate({
+        activityType: "Running",
+        candidateId,
+        date,
+        externalRef: makeExternalRef({
+          resourceId: candidateId,
+          resourceType: "activity_session",
+          system: "garmin",
+        }),
+        metric: "sessionMinutes",
+        provider: "garmin",
+        sourceFamily: "event",
+        sourceKind: "activity_session",
+        unit: "minutes",
+        value: durationMinutes,
+      }));
+    }
+  }
+
+  const rollups = buildActivitySessionDayRollups(candidates);
+
+  assert.equal(rollups.length, days);
+  assert.equal(rollups[0]?.date, "2025-12-28");
+  assert.equal(rollups.at(-1)?.date, "2016-01-01");
+  assert.equal(rollups.every((rollup) => rollup.sessionMinutes === 60), true);
+  assert.equal(rollups.every((rollup) => rollup.sessionCount === 3), true);
+});
 
 test("collectWearableDataset covers the candidate builders, provenance diagnostics, and provider filtering branches", () => {
   const sampleRowsData: Array<{

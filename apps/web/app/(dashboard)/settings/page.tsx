@@ -231,6 +231,23 @@ export default async function SettingsPage({
     resolvedVoiceTestOption && resolvedVoiceTestOption.kind !== "email"
       ? resolvedVoiceTestOption
       : null;
+  // Shown after a fulfilled usage top-up so the payer can hop back into the
+  // conversation without leaving the confirmation.
+  const usageTopUpContactOptions = account
+    ? resolveMurphContactOptions({
+        contactChannels: {
+          email: Boolean(account.email.murphEmailAddress),
+          telegram: Boolean(account.telegram.telegramUserId),
+          text: Boolean(account.phone.number),
+        },
+        message: {
+          body: "Hey Murph, I just added more usage.",
+        },
+        murphEmailAddress: account.email.murphEmailAddress ?? null,
+        murphPhoneNumber: routing?.linqRecipientPhone ?? null,
+        userEmailAddress: account.email.address,
+      })
+    : [];
 
   return (
     <div className="flex flex-col gap-12">
@@ -280,6 +297,7 @@ export default async function SettingsPage({
           }
           usageStatus={usageStatus}
           usageTopUpActivePurchase={personalUsageTopUpActivePurchase}
+          usageTopUpContactOptions={usageTopUpContactOptions}
           usageTopUpInitialOpen={openUsageTopUp}
           usageTopUpOffers={usageTopUpOffers}
           usageTopUpPurchaseReturn={personalUsageTopUpPurchaseReturn}
@@ -310,6 +328,7 @@ export default async function SettingsPage({
             ownerSnapshot={familyOwner}
             usageTopUpActiveMemberId={familyUsageTopUpActiveMemberId}
             usageTopUpActivePurchase={familyUsageTopUpActivePurchase}
+            usageTopUpContactOptions={usageTopUpContactOptions}
             usageTopUpOffers={familyUsageTopUpOffers}
             usageTopUpPurchaseReturn={familyUsageTopUpPurchaseReturn}
             usageTopUpReturnMemberId={familyUsageTopUpReturnMemberId}

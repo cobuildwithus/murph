@@ -9,6 +9,7 @@ import {
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  isoTimestampSchema,
   localDateSchema,
   occurredAtOptionSchema,
   listResultSchema,
@@ -24,9 +25,11 @@ import {
 import {
   deleteMealRecord,
   editMealRecord,
+  listAutomaticMealPhotoCloseoutWorkRecords,
   listMealRecords,
   mealLookupSchema,
   rawImportManifestResultSchema,
+  removeAutomaticMealPhotoRecord,
   showMealManifest,
   showMealRecord,
 } from '@murphai/vault-usecases/records'
@@ -517,6 +520,33 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
     },
     additionalCommands: [
       {
+        name: 'closeout-work',
+        args: z.object({}),
+        description:
+          'List same-occurrence retries, then the oldest automatic-capture meals that still retain photos.',
+        hint:
+          'Use this bounded oldest-first queue for automatic meal closeout; remove each returned photo with meal remove-photo after enrichment.',
+        options: {
+          limit: commonListLimitOptionSchema,
+          occurrenceAt: isoTimestampSchema
+            .describe('Scheduled occurrence instant used to include same-occurrence removal revisions.'),
+          to: localDateSchema
+            .optional()
+            .describe('Optional inclusive latest capture date in YYYY-MM-DD form.'),
+        },
+        output: listResultSchema,
+        async run({ options }) {
+          return listAutomaticMealPhotoCloseoutWorkRecords({
+            limit: typeof options.limit === 'number'
+              ? options.limit
+              : undefined,
+            occurrenceAt: String(options.occurrenceAt),
+            to: typeof options.to === 'string' ? options.to : undefined,
+            vault: String(options.vault ?? ''),
+          })
+        },
+      },
+      {
         name: 'import-json',
         args: z.object({}),
         description:
@@ -569,6 +599,24 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
             requestId: typeof requestId === 'string' ? requestId : null,
             from: typeof options.from === 'string' ? options.from : undefined,
             to: typeof options.to === 'string' ? options.to : undefined,
+          })
+        },
+      },
+      {
+        name: 'remove-photo',
+        args: z.object({
+          id: mealLookupSchema.describe('Automatic-capture meal id (`meal_*`).'),
+        }),
+        description:
+          'Remove retained image bytes from one automatic-capture meal while preserving the meal record and structured nutrition.',
+        hint:
+          'Use only after inspecting the automatic meal photo and saving any supported ingredients or nutrition. The operation is idempotent and rejects ordinary meal photos.',
+        options: {},
+        output: showResultSchema,
+        async run({ args, options }) {
+          return removeAutomaticMealPhotoRecord({
+            vault: String(options.vault ?? ''),
+            lookup: String(args.id ?? ''),
           })
         },
       },

@@ -13,7 +13,6 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
 }));
 
 import {
-  hostedRuntimeMailboxEntryNeedsAiUsageGate,
   resolveHostedRuntimeAiUsageGate,
 } from "@/src/lib/hosted-orchestration/runtime-usage-decision";
 import {
@@ -155,31 +154,6 @@ function buildAllowedUsageGateDecision(input: {
   };
 }
 
-describe("hostedRuntimeMailboxEntryNeedsAiUsageGate", () => {
-  it("gates conversation-lane items and manual runs only", () => {
-    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
-      kind: "conversation.message",
-      lane: "conversation",
-    })).toBe(true);
-    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
-      kind: "runtime.manual-requested",
-      lane: "system",
-    })).toBe(true);
-    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
-      kind: "runtime.maintenance-requested",
-      lane: "system",
-    })).toBe(false);
-    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
-      kind: "runtime.browser-vault-refresh-requested",
-      lane: "system",
-    })).toBe(false);
-    expect(hostedRuntimeMailboxEntryNeedsAiUsageGate({
-      kind: "device-sync.wake",
-      lane: "device-sync",
-    })).toBe(false);
-  });
-});
-
 describe("hostedMailboxItemsRequireAiUsageAccess", () => {
   it("gates conversation rows only above both imported and consumed floors", () => {
     expect(hostedMailboxItemsRequireAiUsageAccess({
@@ -243,7 +217,7 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
     })).toBe(false);
   });
 
-  it("keeps manual system work gated and other system work ungated", () => {
+  it("does not gate deterministic system work", () => {
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [],
       items: [buildHostedMailboxAiUsageGateItem({
@@ -252,7 +226,7 @@ describe("hostedMailboxItemsRequireAiUsageAccess", () => {
         laneSeq: "1",
       })],
       lanes: [],
-    })).toBe(true);
+    })).toBe(false);
 
     expect(hostedMailboxItemsRequireAiUsageAccess({
       consumedSeqByLane: [],

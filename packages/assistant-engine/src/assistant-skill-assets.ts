@@ -89,7 +89,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
-      'Use for steps, NEAT, sedentary time, walking breaks, activity snacks, daily movement pattern interpretation, and practical movement targets outside formal training. Use running-cardio or strength-training for structured workouts.',
+      'Use for daily movement and wearable day facts: steps, NEAT, sedentary time, walking breaks, all workouts, or total workout time for a date. Use running-cardio or strength-training for workout programming.',
   },
   {
     slug: 'mobility-posture',
@@ -161,7 +161,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'automatic-meal-capture',
     name: 'automatic-meal-capture',
     triggerHint:
-      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive nutrition turns when calorie or macro tracking is explicitly active.',
+      'Use for Murph iPhone automatic meal capture setup, App Store handoff, Full Photos permission, best-effort background behavior, the on-device Meals review page, missing or delayed photo imports, verifying what Murph received, the automatic 9pm closeout, retained-photo privacy cleanup, and calorie- or macro-aware enrichment of photo-backed device meals without duplicate logging. Always co-load with food-journal on eligible interactive meal turns.',
   },
   {
     slug: 'food-journal',

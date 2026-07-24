@@ -12,9 +12,14 @@ import {
   type WearableSummaryBundle,
   type WearableSummaryFilters,
 } from "../wearables.ts";
+import {
+  buildActivitySessionAggregates,
+  buildActivitySessionDayRollups,
+} from "../wearables/candidates.ts";
+import { resolveWearablePublicSourceProvider } from "../wearables/origin.ts";
 import type {
-  WearableActivityDay,
-  WearableActivitySessionAggregate,
+  WearableActivityMetricCandidateEvidence,
+  WearableActivitySessionEvidence,
   WearableBodyStateDay,
   WearableCandidateSourceFamily,
   WearableDataset,
@@ -29,7 +34,6 @@ import type {
   WearableSourceHealthSummary,
 } from "../wearables/types.ts";
 import {
-  ACTIVITY_METRIC_KEYS,
   BODY_METRIC_KEYS,
   RECOVERY_METRIC_KEYS,
   SLEEP_METRIC_KEYS,
@@ -42,8 +46,11 @@ import {
 import {
   parseJsonValue,
 } from "./schema.ts";
-import { projectPublicWearableSummaryBundle } from "./wearable-summary-public-json.ts";
 import {
+  projectPublicWearableSummaryBundle,
+} from "./wearable-summary-public-json.ts";
+import {
+  parseStoredWearableActivityRow,
   parseStoredWearableSummary,
   type StoredWearableMetricSummaryKind,
 } from "./wearable-summary-stored-codec.ts";
@@ -63,9 +70,18 @@ export function composePublicWearableSummaryBundleFromStoredRows(
     return emptyProjectedWearableSummaryBundle();
   }
 
+  const { activityEvidenceRows, bundle: providerBundle } =
+    publicWearableSummaryBundleFromRows(
+      stored.rows,
+      filters,
+      options,
+    );
   return stored.providers.length === 1
-    ? publicWearableSummaryBundleFromRows(stored.rows, filters, options)
-    : composePublicWearableSummaryBundleFromProviderRows(stored.rows, filters, options);
+    ? providerBundle
+    : composePublicWearableSummaryBundleFromProviderRows(
+        providerBundle,
+        activityEvidenceRows,
+      );
 }
 
 function emptyProjectedWearableSummaryBundle(): ProjectedWearableSummaryBundle {
@@ -84,7 +100,12 @@ function publicWearableSummaryBundleFromRows(
   options: {
     retainSourceHealthOutsideDateFilters?: boolean;
   },
-): ProjectedWearableSummaryBundle {
+): {
+  activityEvidenceRows: StoredActivityEvidenceRow[];
+  bundle: ProjectedWearableSummaryBundle;
+} {
+  const activityEvidenceRows: StoredActivityEvidenceRow[] = [];
+  const activityRowKeys = new Set<string>();
   const bundle: ProjectedWearableSummaryBundle = {
     activityDays: [],
     bodyStateDays: [],
@@ -115,8 +136,45 @@ function publicWearableSummaryBundleFromRows(
 
         switch (row.summaryKind) {
           case "activity": {
-            const summary = parseStoredWearableSummary<ProjectedWearableActivitySummary>(row.summaryKind, row.summaryJson);
-            if (summary) bundle.activityDays.push(summary);
+            const parsed =
+              parseStoredWearableActivityRow<ProjectedWearableActivitySummary>(
+                row.summaryJson,
+              );
+            const provider = storedRowProvider(row);
+            if (
+              !parsed
+              || !provider
+              || !row.summaryDate
+              || parsed.summary.date !== row.summaryDate
+            ) {
+              throw invalidStoredActivityEvidenceError();
+            }
+
+            const rowKey = `${provider}\u0000${row.summaryDate}`;
+            if (
+              activityRowKeys.has(rowKey)
+              || parsed.metricCandidates.some((candidate) =>
+                candidate.date !== row.summaryDate
+                || normalizeWearableProviders([candidate.publicProvider])[0]
+                  !== provider
+                || resolveStoredActivityMetricCandidatePublicProvider(candidate)
+                  !== provider
+              )
+              || parsed.sessions.some((session) =>
+                session.date !== row.summaryDate
+                || normalizeWearableProviders([session.provider])[0]
+                  !== provider
+              )
+            ) {
+              throw invalidStoredActivityEvidenceError();
+            }
+
+            activityRowKeys.add(rowKey);
+            bundle.activityDays.push(parsed.summary);
+            activityEvidenceRows.push({
+              metricCandidates: parsed.metricCandidates,
+              sessions: parsed.sessions,
+            });
             break;
           }
           case "body_state": {
@@ -139,18 +197,17 @@ function publicWearableSummaryBundleFromRows(
     }
   }
 
-  return bundle;
+  return { activityEvidenceRows, bundle };
 }
 
 function composePublicWearableSummaryBundleFromProviderRows(
-  rows: readonly QueryWearableSummaryRow[],
-  filters: WearableSummaryFilters | WearableMetricSummaryFilters,
-  options: {
-    retainSourceHealthOutsideDateFilters?: boolean;
-  },
+  providerBundle: ProjectedWearableSummaryBundle,
+  activityEvidenceRows: readonly StoredActivityEvidenceRow[],
 ): ProjectedWearableSummaryBundle {
-  const providerBundle = publicWearableSummaryBundleFromRows(rows, filters, options);
-  const dataset = wearableDatasetFromProjectedBundle(providerBundle);
+  const dataset = wearableDatasetFromProjectedBundle(
+    providerBundle,
+    activityEvidenceRows,
+  );
   const composed = mergeStoredMetricConflictEvidence(
     buildWearableSummaryBundleFromDataset(dataset),
     providerBundle,
@@ -175,9 +232,6 @@ function mergeStoredMetricConflictEvidence(
 ): WearableSummaryBundle {
   return {
     ...bundle,
-    activityDays: bundle.activityDays.map((summary) =>
-      mergeStoredSummaryMetricConflicts(summary, stored.activityDays, ACTIVITY_METRIC_KEYS)
-    ),
     bodyStateDays: bundle.bodyStateDays.map((summary) =>
       mergeStoredSummaryMetricConflicts(summary, stored.bodyStateDays, BODY_METRIC_KEYS)
     ),
@@ -191,11 +245,9 @@ function mergeStoredMetricConflictEvidence(
 }
 
 type WearableMetricSummary =
-  | WearableActivityDay
   | WearableBodyStateDay
   | WearableRecoveryDay
   | WearableSleepNight
-  | ProjectedWearableActivitySummary
   | ProjectedWearableBodyStateSummary
   | ProjectedWearableRecoverySummary
   | ProjectedWearableSleepSummary;
@@ -231,7 +283,8 @@ function mergeStoredSummaryMetricConflicts<TSummary extends WearableMetricSummar
         summary: storedSummary,
       }))
       .filter((entry): entry is { metric: WearableResolvedMetric; summary: WearableMetricSummary } =>
-        entry.metric !== null && storedMetricSelfConflicts(entry.metric, participantProviders).length > 0
+        entry.metric !== null
+        && storedMetricSelfConflicts(entry.metric, participantProviders).length > 0
       );
     if (storedMetrics.length === 0) {
       continue;
@@ -448,6 +501,9 @@ function mergeStoredSourceHealthContext(
 
     return {
       ...summary,
+      exactDuplicatesSuppressed:
+        storedSummary?.exactDuplicatesSuppressed
+        ?? summary.exactDuplicatesSuppressed,
       notes: uniqueStringValues([...summary.notes, ...(diagnosticNotes ?? [])]),
     };
   });
@@ -500,7 +556,7 @@ function buildStoredSourceHealthCoverageRow(
     bodyStateDays: 0,
     candidateMetrics: hasDiagnostics ? summary.candidateMetrics : 0,
     conflictCount: 0,
-    exactDuplicatesSuppressed: 0,
+    exactDuplicatesSuppressed: summary.exactDuplicatesSuppressed,
     firstDate: summary.firstDate,
     lastDate: summary.lastDate,
     lastSleepDate: summary.lastSleepDate ?? null,
@@ -540,28 +596,28 @@ function compareSourceHealthSummaries(
   return left.provider.localeCompare(right.provider);
 }
 
-function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBundle): WearableDataset {
+function wearableDatasetFromProjectedBundle(
+  bundle: ProjectedWearableSummaryBundle,
+  activityEvidenceRows: readonly StoredActivityEvidenceRow[],
+): WearableDataset {
   const metricCandidates: WearableMetricCandidate[] = [];
-  const activitySessionAggregates: WearableActivitySessionAggregate[] = [];
+  const activitySessionCandidates: WearableMetricCandidate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
 
-  for (const summary of bundle.activityDays) {
-    metricCandidates.push(...projectedMetricCandidatesFromResolvedMetrics(
-      summary.date,
-      "activity",
-      activityResolvedMetrics(summary),
+  for (const evidenceRow of activityEvidenceRows) {
+    metricCandidates.push(...projectedActivityMetricCandidates(
+      evidenceRow.metricCandidates,
     ));
-    const aggregate = projectedActivitySessionAggregate(summary);
-    if (aggregate) {
-      activitySessionAggregates.push(aggregate);
-    }
+    activitySessionCandidates.push(...projectedActivitySessionCandidates(
+      evidenceRow.sessions,
+    ));
   }
 
   for (const summary of bundle.sleepNights) {
     metricCandidates.push(...projectedMetricCandidatesFromResolvedMetrics(
       summary.date,
       "sleep",
-      sleepResolvedMetrics(summary),
+      sleepResolvedMetrics(summary).filter((metric) => metric.metric !== "sessionMinutes"),
     ));
     sleepWindows.push(...projectedSleepWindows(summary));
   }
@@ -582,14 +638,165 @@ function wearableDatasetFromProjectedBundle(bundle: ProjectedWearableSummaryBund
     ));
   }
 
+  const activitySessionAggregates =
+    buildActivitySessionAggregates(activitySessionCandidates);
+
   return {
+    activitySessionCandidates,
     activitySessionAggregates,
+    activitySessionDayRollups: buildActivitySessionDayRollups(activitySessionCandidates),
     metricSuppressionEvidence: [],
     metricCandidates,
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows,
   };
+}
+
+interface StoredActivityEvidenceRow {
+  metricCandidates: readonly WearableActivityMetricCandidateEvidence[];
+  sessions: readonly WearableActivitySessionEvidence[];
+}
+
+function storedRowProvider(row: QueryWearableSummaryRow): string | undefined {
+  const providerScope = parseJsonValue<unknown>(row.providerScopeJson, null);
+  const providers = Array.isArray(providerScope)
+    ? normalizeWearableProviders(providerScope.filter((value): value is string => typeof value === "string"))
+    : [];
+  return providers.length === 1 ? providers[0] : undefined;
+}
+
+function invalidStoredActivityEvidenceError(): Error {
+  return new Error(
+    "Stored activity evidence is malformed; rebuild the query projection.",
+  );
+}
+
+function projectedActivityMetricCandidates(
+  evidence: readonly WearableActivityMetricCandidateEvidence[],
+): WearableMetricCandidate[] {
+  return evidence.map((candidate) => ({
+    candidateId: candidate.candidateKey,
+    dataOrigin: storedActivityMetricCandidateDataOrigin(candidate),
+    date: candidate.date,
+    externalRef: {
+      facet: candidate.hasDayStrainFacet ? "day-strain" : null,
+      resourceId: candidate.exactKey,
+      resourceType: storedActivityMetricCandidateResourceType(candidate),
+      system: candidate.provider,
+      version: null,
+    },
+    metric: candidate.metric,
+    occurredAt: candidate.occurredAt,
+    paths: [],
+    provider: candidate.provider,
+    recordedAt: candidate.recordedAt,
+    recordIds: [candidate.candidateKey],
+    sourceFamily: candidate.sourceFamily,
+    sourceKind: candidate.sourceKind,
+    title: null,
+    unit: candidate.unit,
+    value: candidate.value,
+  }));
+}
+
+function storedActivityMetricCandidateDataOrigin(
+  candidate: WearableActivityMetricCandidateEvidence,
+): WearableMetricCandidate["dataOrigin"] {
+  const { aggregatorProvider, sourceProviderSlug, sourceType } = candidate.origin;
+  if (!aggregatorProvider && !sourceProviderSlug && !sourceType) {
+    return null;
+  }
+
+  return {
+    version: 1,
+    ...(aggregatorProvider ? { aggregatorProvider } : {}),
+    ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+    ...(sourceType ? { sourceType } : {}),
+  };
+}
+
+function storedActivityMetricCandidateResourceType(
+  candidate: WearableActivityMetricCandidateEvidence,
+): string | null {
+  switch (candidate.resourceClass) {
+    case "activity":
+      return "activity";
+    case "cycle":
+      return "cycle";
+    case "generic":
+      return "resource";
+    case "none":
+      return null;
+  }
+}
+
+function resolveStoredActivityMetricCandidatePublicProvider(
+  candidate: WearableActivityMetricCandidateEvidence,
+): string {
+  return resolveWearablePublicSourceProvider({
+    dataOrigin: storedActivityMetricCandidateDataOrigin(candidate),
+    externalRef: {
+      facet: candidate.hasDayStrainFacet ? "day-strain" : null,
+      resourceId: candidate.exactKey,
+      resourceType: storedActivityMetricCandidateResourceType(candidate),
+      system: candidate.provider,
+      version: null,
+    },
+    provider: candidate.provider,
+  }, {
+    suppressJunctionSourceInstanceFallback: true,
+  });
+}
+
+function projectedActivitySessionCandidates(
+  evidence: readonly WearableActivitySessionEvidence[],
+): WearableMetricCandidate[] {
+  return evidence.flatMap((session, index) => {
+    const provider = normalizeWearableProviders([session.provider])[0];
+    if (
+      !provider
+      || !Number.isFinite(session.durationMinutes)
+      || session.durationMinutes <= 0
+    ) {
+      return [];
+    }
+
+    const recordId = `projected:activity-session-evidence:${provider}:${session.date}:${index}`;
+    return [{
+      activityType: session.activityType,
+      candidateId: recordId,
+      dataOrigin: null,
+      date: session.date,
+      externalRef: session.reconciliationResourceKey
+        ? {
+            facet: null,
+            resourceId: session.reconciliationResourceKey,
+            resourceType: "activity_session",
+            system: provider,
+            version: null,
+          }
+        : null,
+      heartRateZones: session.heartRateZones.map((zone) => ({ ...zone })),
+      metric: "sessionMinutes",
+      occurredAt: session.startedAt,
+      paths: [],
+      provider,
+      reconciliationDurationConsistent: session.durationConsistent,
+      reconciliationExactKey: session.reconciliationExactKey,
+      recordedAt: session.recordedAt,
+      recordIds: [recordId],
+      sessionEndAt: session.endedAt,
+      sessionStartAt: session.startedAt,
+      sourceFamily: "event",
+      sourceKind: "activity_session",
+      title: `${formatProviderName(provider)} activity session`,
+      unit: "minutes",
+      value: session.durationMinutes,
+      workoutMetricKeys: [...session.workoutMetricKeys],
+      workoutMetricValues: { ...session.workoutMetricValues },
+    }];
+  });
 }
 
 function projectedMetricCandidatesFromResolvedMetrics(
@@ -621,14 +828,6 @@ function projectedMetricCandidateFromResolvedMetric(
   if (!provider) {
     return null;
   }
-  const projectedRecordIds = projectedMetricRecordIds({
-    date,
-    provider,
-    resolved,
-    selectionRecordIds: selection.recordIds,
-    summaryKind,
-  });
-
   return {
     candidateId: `projected:${summaryKind}:${provider}:${date}:${resolved.metric}`,
     dataOrigin: null,
@@ -639,75 +838,13 @@ function projectedMetricCandidateFromResolvedMetric(
     paths: [],
     provider,
     recordedAt: selection.recordedAt,
-    recordIds: projectedRecordIds,
+    recordIds: [...selection.recordIds],
     sourceFamily: projectedSourceFamily(selection.sourceFamily),
     sourceKind: selection.sourceKind ?? `projected-${summaryKind}`,
     title: selection.title,
     unit: selection.unit,
     value: selection.value,
   };
-}
-
-function projectedActivitySessionAggregate(
-  summary: ProjectedWearableActivitySummary,
-): WearableActivitySessionAggregate | null {
-  const sessionMinutes = summary.sessionMinutes.selection.value;
-  const sessionCount = summary.sessionCount.selection.value;
-  const provider = normalizeWearableProviders([
-    summary.sessionMinutes.selection.provider ?? summary.sessionCount.selection.provider ?? "",
-  ])[0];
-
-  if (
-    !provider ||
-    sessionMinutes === null ||
-    sessionCount === null ||
-    !Number.isFinite(sessionMinutes) ||
-    !Number.isFinite(sessionCount)
-  ) {
-    return null;
-  }
-
-  return {
-    activityTypes: [...summary.activityTypes],
-    candidateId: `projected:activity-session:${provider}:${summary.date}`,
-    dataOrigin: null,
-    date: summary.date,
-    heartRateZones: (summary.heartRateZones ?? []).map((zone) => ({ ...zone })),
-    paths: [],
-    provider,
-    recordedAt: latestNullableIso([
-      summary.sessionMinutes.selection.recordedAt,
-      summary.sessionCount.selection.recordedAt,
-    ]),
-    recordIds: [projectedActivitySessionRecordId(provider, summary.date)],
-    sessionCount,
-    sessionMinutes,
-    workoutMetricKeys: [],
-  };
-}
-
-function projectedMetricRecordIds(input: {
-  date: string;
-  provider: string;
-  resolved: WearableResolvedMetric;
-  selectionRecordIds: readonly string[];
-  summaryKind: string;
-}): string[] {
-  if (input.selectionRecordIds.length > 0) {
-    return [...input.selectionRecordIds];
-  }
-  if (
-    input.summaryKind === "activity"
-    && input.resolved.selection.sourceFamily === "derived"
-    && input.resolved.selection.sourceKind === "activity-session-aggregate"
-  ) {
-    return [projectedActivitySessionRecordId(input.provider, input.date)];
-  }
-  return [];
-}
-
-function projectedActivitySessionRecordId(provider: string, date: string): string {
-  return `projected:activity-session:${provider}:${date}`;
 }
 
 function projectedSleepWindows(summary: ProjectedWearableSleepSummary): WearableSleepWindowCandidate[] {
@@ -786,26 +923,6 @@ function projectedSelectedSleepWindow(
   };
 }
 
-function activityResolvedMetrics(summary: ProjectedWearableActivitySummary): WearableResolvedMetric[] {
-  return [
-    summary.activityScore,
-    summary.activeCalories,
-    summary.altitudeChangeMeters,
-    summary.dayStrain,
-    summary.distanceKm,
-    summary.estimatedVo2Max,
-    summary.floorsClimbed,
-    summary.maxHeartRate,
-    summary.percentRecorded,
-    summary.sessionCount,
-    summary.sessionMinutes,
-    summary.steps,
-    summary.totalCalories,
-    summary.totalElevationGainMeters,
-    summary.workoutStrain,
-  ];
-}
-
 function sleepResolvedMetrics(summary: ProjectedWearableSleepSummary): WearableResolvedMetric[] {
   return [
     summary.averageHeartRate,
@@ -857,13 +974,6 @@ function bodyStateResolvedMetrics(summary: ProjectedWearableBodyStateSummary): W
 
 function projectedSourceFamily(sourceFamily: WearableCandidateSourceFamily | null): WearableCandidateSourceFamily {
   return sourceFamily ?? "derived";
-}
-
-function latestNullableIso(values: readonly (string | null)[]): string | null {
-  return values
-    .filter((value): value is string => value !== null && value.length > 0)
-    .sort()
-    .at(-1) ?? null;
 }
 
 function wearableSummaryRowMatchesDateFilters(

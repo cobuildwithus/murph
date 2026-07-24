@@ -1,24 +1,6 @@
 import { Prisma } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
-import {
-  hasHostedMemberGeneralAccess,
-  isHostedMemberSuspended,
-} from "./entitlement";
-import { hostedOnboardingError } from "./errors";
-import { readActiveHostedMemberAccess } from "./member-access";
-import { shareHostedLinqContactCard } from "./linq-client";
-import {
-  sanitizeHostedOnboardingStructuredLogDetails,
-  toHostedOnboardingLogIdSuffix,
-} from "./logging";
-import {
-  assertHostedThreadRouteEgressAuthority,
-  type HostedLinqThreadRouteEgressAuthority,
-} from "../hosted-routing/thread-route-store";
-import type {
-  HostedOnboardingReadClient,
-} from "./shared";
 
 type HostedLinqContactCardSharePersistenceClient =
   {
@@ -66,18 +48,11 @@ type HostedLinqContactCardShareFindManyInput = {
 
 const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 48 * 60 * 60 * 1000;
 
-export type HostedLinqContactCardShareEligibility = {
-  service: string | null;
-  threadIsDirect: boolean | null;
-};
-
 type HostedLinqContactCardShareSkipReason =
-  | "ineligible_chat"
   | "missing_chat_id"
-  | "recent_attempt"
-  | "state_unavailable";
+  | "recent_attempt";
 
-export type HostedLinqContactCardShareDecision =
+type HostedLinqContactCardShareDecision =
   | {
       action: "share";
     }
@@ -89,166 +64,6 @@ export type HostedLinqContactCardShareDecision =
 type HostedLinqContactCardShareReserveDecision =
   | { action: "share"; attemptedAt: Date }
   | Extract<HostedLinqContactCardShareDecision, { action: "skip" }>;
-
-export async function maybeShareHostedLinqContactCardAfterOutboundForRuntime(input: {
-  authority?: HostedLinqThreadRouteEgressAuthority | null;
-  boundUserId: string;
-  chatId: string;
-  eligibility: HostedLinqContactCardShareEligibility;
-  prisma: HostedOnboardingReadClient & HostedLinqContactCardSharePersistenceClient;
-  signal?: AbortSignal;
-}): Promise<HostedLinqContactCardShareDecision> {
-  await assertHostedLinqContactCardShareAuthority({
-    authority: input.authority,
-    boundUserId: input.boundUserId,
-    chatId: input.chatId,
-    prisma: input.prisma,
-  });
-
-  return await maybeShareHostedLinqContactCardAfterOutbound({
-    chatId: input.chatId,
-    eligibility: input.eligibility,
-    memberId: input.boundUserId,
-    prisma: input.prisma,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-}
-
-export async function maybeShareHostedLinqContactCardAfterOutboundWithAuthority(input: {
-  authority: HostedLinqThreadRouteEgressAuthority;
-  boundUserId: string;
-  chatId: string;
-  eligibility: HostedLinqContactCardShareEligibility;
-  prisma: HostedOnboardingReadClient & HostedLinqContactCardSharePersistenceClient;
-  signal?: AbortSignal;
-}): Promise<HostedLinqContactCardShareDecision> {
-  return await maybeShareHostedLinqContactCardAfterOutboundForRuntime(input);
-}
-
-async function assertHostedLinqContactCardShareAuthority(input: {
-  authority?: HostedLinqThreadRouteEgressAuthority | null;
-  boundUserId: string;
-  chatId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<void> {
-  if (input.authority) {
-    if (input.authority.containerMemberId !== input.boundUserId) {
-      throwHostedLinqContactCardShareUnauthorized(
-        "HOSTED_LINQ_CONTACT_CARD_SHARE_BOUND_USER_MISMATCH",
-        "Hosted Linq contact-card share authority does not match the runtime user.",
-      );
-    }
-    if (input.authority.threadId !== input.chatId) {
-      throwHostedLinqContactCardShareUnauthorized(
-        "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
-        "Hosted Linq contact-card share authority does not match the requested chat.",
-      );
-    }
-
-    await assertHostedThreadRouteEgressAuthority({
-      authority: input.authority,
-      prisma: input.prisma,
-    });
-    return;
-  }
-
-  await assertHostedLinqContactCardShareMemberChat(input);
-}
-
-async function assertHostedLinqContactCardShareMemberChat(input: {
-  boundUserId: string;
-  chatId: string;
-  prisma: HostedOnboardingReadClient;
-}): Promise<void> {
-  const chatLookup = resolveHostedLinqContactCardShareLookup(input.chatId);
-  if (!chatLookup) {
-    throwHostedLinqContactCardShareUnauthorized(
-      "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
-      "Hosted Linq contact-card share requires a known Linq chat.",
-    );
-  }
-
-  const routing = await input.prisma.hostedMemberRouting.findUnique({
-    where: {
-      memberId: input.boundUserId,
-    },
-    select: {
-      linqChatLookupKey: true,
-      member: {
-        select: {
-          billingStatus: true,
-          createdAt: true,
-          id: true,
-          suspendedAt: true,
-          updatedAt: true,
-        },
-      },
-      pendingLinqChatLookupKey: true,
-    },
-  });
-
-  const readCandidates = new Set(chatLookup.readCandidates);
-  // First-contact members are not_started until they accept the invite, but we
-  // still want them to receive Murph's contact card so they can save the
-  // number during onboarding. Gate on general access (blocks suspended and
-  // canceled/paused/unpaid own billing) OR resolver access, so a sponsored
-  // member with a stale blocked own status keeps the side effect, while still
-  // requiring the chat to match the member's own bound route below.
-  if (
-    !routing
-    || !(
-      hasHostedMemberGeneralAccess(routing.member)
-      || (
-        !isHostedMemberSuspended(routing.member.suspendedAt)
-        && await readActiveHostedMemberAccess({
-          memberId: input.boundUserId,
-          prisma: input.prisma,
-        })
-      )
-    )
-    || !(
-      (routing.linqChatLookupKey && readCandidates.has(routing.linqChatLookupKey))
-      || (
-        routing.pendingLinqChatLookupKey
-        && readCandidates.has(routing.pendingLinqChatLookupKey)
-      )
-    )
-  ) {
-    throwHostedLinqContactCardShareUnauthorized(
-      "HOSTED_LINQ_CONTACT_CARD_SHARE_THREAD_MISMATCH",
-      "Hosted Linq contact-card share authority does not match the requested chat.",
-    );
-  }
-}
-
-function throwHostedLinqContactCardShareUnauthorized(
-  code: string,
-  message: string,
-): never {
-  throw hostedOnboardingError({
-    code,
-    httpStatus: 403,
-    message,
-    retryable: false,
-  });
-}
-
-async function reserveHostedLinqContactCardShareAttemptAfterOutbound(input: {
-  chatId: string;
-  eligibility: HostedLinqContactCardShareEligibility;
-  memberId: string;
-  now?: Date;
-  prisma: HostedLinqContactCardSharePersistenceClient;
-}): Promise<HostedLinqContactCardShareReserveDecision> {
-  if (!isHostedLinqContactCardShareEligible(input.eligibility)) {
-    return {
-      action: "skip",
-      reason: "ineligible_chat",
-    };
-  }
-
-  return await reserveHostedLinqContactCardShareAttempt(input);
-}
 
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
@@ -343,60 +158,6 @@ export async function reserveHostedLinqContactCardShareAttempt(input: {
   };
 }
 
-export async function maybeShareHostedLinqContactCardAfterOutbound(input: {
-  chatId: string;
-  eligibility: HostedLinqContactCardShareEligibility;
-  memberId: string;
-  now?: Date;
-  prisma: HostedLinqContactCardSharePersistenceClient;
-  signal?: AbortSignal;
-}): Promise<HostedLinqContactCardShareDecision> {
-  let reservation: HostedLinqContactCardShareReserveDecision;
-  try {
-    reservation = await reserveHostedLinqContactCardShareAttemptAfterOutbound({
-      chatId: input.chatId,
-      eligibility: input.eligibility,
-      memberId: input.memberId,
-      now: input.now,
-      prisma: input.prisma,
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareFailure({
-      chatId: input.chatId,
-      error,
-      phase: "reserve",
-    });
-    return {
-      action: "skip",
-      reason: "state_unavailable",
-    };
-  }
-
-  if (reservation.action !== "share") {
-    return reservation;
-  }
-
-  try {
-    await shareHostedLinqContactCard({
-      chatId: input.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-  } catch (error) {
-    logHostedLinqContactCardShareFailure({
-      chatId: input.chatId,
-      error,
-      phase: "provider",
-    });
-    return {
-      action: "share",
-    };
-  }
-
-  return {
-    action: "share",
-  };
-}
-
 function resolveHostedLinqContactCardShareLookup(
   chatId: string,
 ): { readCandidates: readonly string[]; writeKey: string } | null {
@@ -409,13 +170,6 @@ function resolveHostedLinqContactCardShareLookup(
     readCandidates,
     writeKey,
   };
-}
-
-function isHostedLinqContactCardShareEligible(
-  eligibility: HostedLinqContactCardShareEligibility,
-): boolean {
-  return eligibility.service?.trim().toLowerCase() === "imessage"
-    && eligibility.threadIsDirect === true;
 }
 
 async function createHostedLinqContactCardShareAttemptReservation(input: {
@@ -474,47 +228,6 @@ export async function releaseHostedLinqContactCardShareAttempt(input: {
       lastContactCardShareAttemptedAt: null,
     },
   });
-}
-
-function logHostedLinqContactCardShareFailure(input: {
-  chatId: string;
-  error: unknown;
-  phase: string;
-}): void {
-  const errorRecord = input.error && typeof input.error === "object"
-    ? input.error as Record<string, unknown>
-    : null;
-  const details = errorRecord?.details && typeof errorRecord.details === "object"
-    ? errorRecord.details as Record<string, unknown>
-    : null;
-
-  console.warn(
-    "Hosted Linq contact-card share failed.",
-    sanitizeHostedOnboardingStructuredLogDetails({
-      chatIdSuffix: toHostedOnboardingLogIdSuffix(input.chatId),
-      errorCode: readHostedLinqContactCardShareString(errorRecord, "code"),
-      errorMessage: input.error instanceof Error ? input.error.message : null,
-      errorName: input.error instanceof Error ? input.error.name : null,
-      operation: "share_contact_card",
-      phase: input.phase,
-      provider: "linq",
-      status: readHostedLinqContactCardShareNumber(details, "status"),
-    }),
-  );
-}
-
-function readHostedLinqContactCardShareString(
-  record: Record<string, unknown> | null,
-  key: string,
-): string | null {
-  return record && typeof record[key] === "string" ? record[key] : null;
-}
-
-function readHostedLinqContactCardShareNumber(
-  record: Record<string, unknown> | null,
-  key: string,
-): number | null {
-  return record && typeof record[key] === "number" ? record[key] : null;
 }
 
 function isPrismaUniqueViolation(

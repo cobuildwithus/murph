@@ -1,7 +1,3 @@
-export const HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS = [
-  "runtime.manual-requested",
-] as const;
-
 export interface HostedMailboxAiUsageGateLaneCursor {
   importedSeq: bigint | number | string;
   lane: string;
@@ -14,17 +10,10 @@ export interface HostedMailboxAiUsageGateConsumedSeq {
 
 export interface HostedMailboxAiUsageGateItem {
   consumedAt?: string | null;
-  kind: string;
   lane: string;
   laneSeq: bigint | number | string;
   payloadInlineCiphertext: string | null;
   payloadRef: string | null;
-}
-
-export function hostedMailboxSystemItemKindNeedsAiUsageGate(kind: string): boolean {
-  return HOSTED_MAILBOX_SYSTEM_AI_USAGE_GATED_KINDS.some((gatedKind) =>
-    gatedKind === kind
-  );
 }
 
 export function hostedMailboxItemsRequireAiUsageAccess(input: {
@@ -42,10 +31,6 @@ export function hostedMailboxItemsRequireAiUsageAccess(input: {
   });
 
   return input.items.some((item) => {
-    if (item.lane === "system") {
-      return hostedMailboxSystemItemKindNeedsAiUsageGate(item.kind);
-    }
-
     if (item.lane !== "conversation") {
       return false;
     }

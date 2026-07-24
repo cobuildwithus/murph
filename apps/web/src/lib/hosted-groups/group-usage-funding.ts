@@ -11,6 +11,7 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { normalizeNullableString } from "../primitives";
 import { getPrisma } from "../prisma";
 import {
+  calculateHostedGroupUsageRemainingPercent,
   classifyHostedGroupUsageCapacity,
   type HostedGroupUsageCapacityState,
 } from "./group-usage-capacity";
@@ -41,6 +42,7 @@ export interface HostedGroupUsageStatus {
   capacityState: HostedGroupUsageCapacityState;
   fundingUrl: string | null;
   periodEnd: string;
+  remainingPercent: number;
 }
 
 export async function readHostedGroupUsageFundingTargetByJoinCode(input: {
@@ -129,6 +131,10 @@ export async function readHostedGroupUsageStatus(input: {
       ? buildHostedGroupUsageFundingUrl({ joinCode: locator })
       : null,
     periodEnd: decision.periodEnd.toISOString(),
+    remainingPercent: calculateHostedGroupUsageRemainingPercent({
+      limitUsdMicros: decision.limitUsdMicros,
+      remainingUsdMicros: decision.remainingUsdMicros,
+    }),
   };
 }
 

@@ -1090,7 +1090,7 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("rejects manual runtime-control mailbox items when the AI usage gate denies runtime consumption", async () => {
+  it("does not AI-gate manual runtime-control mailbox imports", async () => {
     mocks.fetchHostedMailboxItemsAfterLaneCursors.mockResolvedValue({
       items: [
         {
@@ -1117,10 +1117,6 @@ describe("hosted runtime internal web routes", () => {
         maxSeq: "12",
       },
     ]);
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
-    });
-
     const response = await mailboxFetchRoute.POST(jsonRequest(
       "/api/internal/hosted-mailbox/fetch",
       {
@@ -1135,11 +1131,8 @@ describe("hosted runtime internal web routes", () => {
       },
     ));
 
-    expect(response.status).toBe(403);
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "read_first",
-      userId: "member_routes_1",
-    });
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
   });
 
   it("does not AI-gate non-manual system mailbox consumption", async () => {
@@ -1369,13 +1362,7 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
   });
 
-  it("rejects manual runtime-control mailbox payload fetches when the AI usage gate denies runtime consumption", async () => {
-    mocks.readHostedMailboxConsumedSeqByLane.mockResolvedValueOnce([
-      {
-        consumedSeq: "11",
-        lane: "system",
-      },
-    ]);
+  it("does not AI-gate manual runtime-control mailbox payload imports", async () => {
     mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce({
       id: "mailbox_manual_2",
       kind: "runtime.manual-requested",
@@ -1383,8 +1370,16 @@ describe("hosted runtime internal web routes", () => {
       laneSeq: "12",
       userId: "member_routes_1",
     });
-    mocks.resolveHostedRuntimeAiUsageGate.mockResolvedValueOnce({
-      status: "denied",
+    mocks.fetchHostedMailboxPayload.mockResolvedValue({
+      fetchedAt: FIXED_NOW,
+      payload: {
+        createdAt: FIXED_NOW,
+        mailboxItemId: "mailbox_manual_2",
+        payloadCiphertext: "cipher_ref_manual",
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        userId: "member_routes_1",
+      },
+      unavailable: null,
     });
 
     const response = await mailboxPayloadFetchRoute.POST(jsonRequest(
@@ -1397,16 +1392,10 @@ describe("hosted runtime internal web routes", () => {
       },
     ));
 
-    expect(response.status).toBe(403);
-    expect(mocks.readHostedMailboxConsumedSeqByLane).toHaveBeenCalledWith({
-      lanes: ["system"],
-      userId: "member_routes_1",
-    });
-    expect(mocks.resolveHostedRuntimeAiUsageGate).toHaveBeenCalledWith({
-      mode: "read_first",
-      userId: "member_routes_1",
-    });
-    expect(mocks.fetchHostedMailboxPayload).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.readHostedMailboxConsumedSeqByLane).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRuntimeAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedMailboxPayload).toHaveBeenCalled();
   });
 
   it("does not AI-gate consumed conversation mailbox payload replay", async () => {

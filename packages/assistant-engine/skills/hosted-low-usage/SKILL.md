@@ -172,7 +172,8 @@ not permission to choose an amount, start Checkout, or claim usage was added.
   shared Family management gate above. Otherwise offer to use less included
   usage or wait for the reset.
 - **Group:** Call `read_usage` again when the state may have changed. Share
-  only its returned coarse state, period end when relevant, and first-party
+  its returned state, the remaining percentage when the result includes
+  remainingPercent, the period end when relevant, and the first-party
   funding URL.
   Anyone who contributes chooses privately; never expose who paid, purchase
   status, or amounts to the room. If no funding URL is returned, say that no

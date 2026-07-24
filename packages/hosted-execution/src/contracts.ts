@@ -385,17 +385,28 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  | "linq"
-  | "telegram";
+export type HostedExecutionDirectRoute =
+  | {
+      channel: "linq" | "telegram";
+      threadId: string;
+    }
+  | {
+      channel: "email";
+      deliveryTarget: string;
+    };
 
-export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
-  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
-  threadId: string;
-}
+export type HostedExecutionDirectRouteChannel =
+  HostedExecutionDirectRoute["channel"];
+
+/** @deprecated Use HostedExecutionDirectRouteChannel. */
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  HostedExecutionDirectRouteChannel;
+/** @deprecated Use HostedExecutionDirectRoute. */
+export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
+  HostedExecutionDirectRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -660,7 +671,7 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
 }
 
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -677,6 +688,7 @@ export interface HostedExecutionMealPhotoCapturedPayload {
 }
 
 export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  directRoute: HostedExecutionDirectRoute;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }

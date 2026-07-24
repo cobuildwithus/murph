@@ -1226,10 +1226,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
     )
     expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
+      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
       'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
@@ -1977,25 +1977,6 @@ describe('assistant experiment onboarding guidance', () => {
       'Returning between messages is a core edge over stateless chatbots.',
     )
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
-  })
-
-  it('routes running and cardio through the compact movement overlap rules', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
-    )
-    expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
-    )
-    expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
-    )
-    expect(prompt).toContain(
-      'behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.',
-    )
-    expect(prompt).not.toContain('- running-cardio: Use for running')
-    expect(prompt).not.toContain('File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.')
   })
 
   it('routes acute stress support through the Murph stress skill', () => {

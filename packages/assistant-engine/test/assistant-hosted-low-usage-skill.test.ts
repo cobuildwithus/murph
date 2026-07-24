@@ -77,6 +77,8 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('Never switch it automatically')
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
+    expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(skill).not.toContain('Share only its')
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {

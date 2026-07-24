@@ -324,14 +324,14 @@ inventing a billing menu:
   owner must make the change, while Family Edge has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once and
-  may include the returned coarse state and first-party funding URL in the
-  heads-up segment, matching the room's tone; a `healthy` read suppresses the
-  heads-up entirely. Playful payer nomination is allowed, but who actually
-  paid, purchase status, and amounts stay private, and the assistant never
-  promises a URL the read did not return. For a group without an
-  owner-created join code, the funding URL carries a signed funding-only
-  locator that grants no enrollment or sharing, so the URL is normally
-  present without any write.
+  may include the returned state, the integer percent of the current period's
+  usage remaining, and the first-party funding URL in the heads-up segment,
+  matching the room's tone; a `healthy` read suppresses the heads-up entirely.
+  Playful payer nomination is allowed, but who actually paid, purchase status,
+  and amounts stay private, and the assistant never promises a URL the read
+  did not return. For a group without an owner-created join code, the funding
+  URL carries a signed funding-only locator that grants no enrollment or
+  sharing, so the URL is normally present without any write.
 
 For an explicit Family member-usage management request, the assistant first
 calls `murph.family_plan action="read_status"`. It may provide
@@ -349,9 +349,11 @@ Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` still returns
 `group_not_supported`; group capacity is not projected as a personal plan or a
 synthetic personal allowance. The existing `murph.group` tool's `read_usage`
-action reports only `healthy`, `low`, or `exhausted` plus the current period and
-first-party funding URL. It never exposes internal USD-micro accounting,
-contributors, receipts, or payer identity.
+action reports `healthy`, `low`, or `exhausted`, the current period end, the
+first-party funding URL, and the current period's usage remaining as an
+integer percentage. Web rounds the percentage down and clamps it to 0–100.
+The action never exposes internal USD-micro accounting, contributors, receipts,
+or payer identity.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the

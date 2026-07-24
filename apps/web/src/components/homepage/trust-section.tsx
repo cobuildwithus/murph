@@ -1,3 +1,5 @@
+import { MessageVolumeLine } from "@/src/components/homepage/message-volume-line";
+
 const PILLARS = [
   {
     anchor: "5,972",
@@ -43,7 +45,7 @@ export function TrustSection() {
             </span>
           </div>
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.18em] text-[#736a58]">
-            6,000+ messages and counting
+            <MessageVolumeLine />
           </span>
         </div>
 

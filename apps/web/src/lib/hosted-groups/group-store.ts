@@ -28,7 +28,10 @@ import {
 import {
   formatHostedDeviceSyncSourceLabel,
 } from "../device-sync/provider-label";
-import { assertHostedLaunchRequiredConsentGranted } from "../legal/consent";
+import {
+  assertHostedHistoricalLaunchConsentGranted,
+  assertHostedLaunchRequiredConsentGranted,
+} from "../legal/consent";
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   createHostedEmailLookupKeyReadCandidates,
@@ -1626,7 +1629,14 @@ async function acceptHostedGroupJoinTx(input: {
   await assertHostedGroupRuntimeDestinationTx(input.tx, group.runtimeMemberId);
   // Joining always shares the memory-backed preferred display name, so the launch consent
   // gate applies to every join, not only joins that select health projections.
-  await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
+  // Chat-reaction joins have no consent UI, so a historical grant is enough there;
+  // members with no grant at all still fail closed. Web joins render the consent
+  // card inline and keep requiring the current document versions.
+  if (input.joinOrigin === "group_chat_reaction") {
+    await assertHostedHistoricalLaunchConsentGranted({ memberId: input.memberId, prisma: input.tx });
+  } else {
+    await assertHostedLaunchRequiredConsentGranted({ memberId: input.memberId, prisma: input.tx });
+  }
 
   let membershipId: string;
   let alreadyMember = false;

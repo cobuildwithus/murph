@@ -258,6 +258,7 @@ export function buildConversationHomeRedirectResponse(input: {
 
 export function buildQuotaReplyResponse(input: {
   chatId: string;
+  dailyTextLimit: number;
   memberId: string;
   messageId: string;
   occurredAt: string;
@@ -268,6 +269,7 @@ export function buildQuotaReplyResponse(input: {
     desiredSideEffects: [
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId: input.messageId,

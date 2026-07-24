@@ -1,6 +1,6 @@
 ---
 name: automatic-meal-capture
-description: Use for Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, and calorie-aware enrichment of automatically captured meal photos.
+description: Use for Murph iPhone automatic meal capture setup, Photos permissions, background behavior, the on-device Meals review page, missing or delayed imports, the automatic 9pm closeout, retained-photo cleanup, and calorie-aware enrichment of automatically captured meal photos.
 ---
 
 # Automatic meal capture
@@ -15,10 +15,11 @@ Automatic capture already creates a canonical photo-only meal. This skill owns
 the iPhone setup and arrival-verification workflow; it does not create a second
 meal store or a duplicate meal record. Read
 `$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md` before estimating nutrition
-or interpreting meal patterns. When calorie or macro tracking is explicitly
-active, load this skill alongside `food-journal` on every eligible interactive
-nutrition turn and check recent unresolved device meals. Use
-`nutrition-strategy` for forward-looking decisions about what to eat.
+or interpreting meal patterns. A successful automatic import ensures one
+private 9pm managed closeout for that member; there is no separate automation
+opt-in. Load this skill alongside `food-journal` on every eligible interactive
+meal turn and check recent unresolved device meals. Use `nutrition-strategy` for
+forward-looking decisions about what to eat.
 
 ## Set up the iPhone app
 
@@ -27,8 +28,10 @@ Use the shortest relevant setup path:
 1. Automatic meal capture requires an iPhone on iOS 26.1 or later.
 2. Download or open Murph from
    `https://apps.apple.com/us/app/murph-ai/id6786145859` and sign in to the same
-   Murph account used in the conversation. Follow the developer prompt's URL
-   placement rule when sending the link.
+   Murph account used in the conversation. The automatic closeout needs an
+   existing private iMessage or Telegram conversation, or a verified email
+   address; this is a delivery prerequisite, not a second automation opt-in.
+   Follow the developer prompt's URL placement rule when sending the link.
 3. In Murph, open the menu, open Settings, choose Meal capture, and choose Set
    up. If Meal capture is absent after updating, the installed build does not
    support it; do not send the member through a setup retry loop.
@@ -55,6 +58,8 @@ adapter during setup.
 - A successful upload lands asynchronously as one canonical meal with the
   sanitized photo, `source: device`, and the photo's original capture time. It
   starts without identified foods, calories, or macros.
+- The canonical import also ensures one managed daily closeout at 9:00pm in the
+  vault timezone. Replayed and later captures reuse that automation.
 - The original capture instant—not upload or import time—owns meal timing.
   Infer breakfast, lunch, dinner, and day context in the member's vault
   timezone. If travel or a timezone change could materially alter the answer,
@@ -69,10 +74,10 @@ credential may require renewal by opening Murph.
 
 Automatic capture does not itself require a chat reply and its import does not
 start a model turn. If the member asks whether a photo arrived, verify the meal
-record instead of using conversation silence as evidence of failure. When
-calorie or macro tracking is explicitly active, inspect and enrich unresolved
-device meals on the next eligible interactive turn; do not claim this happened
-at import time.
+record instead of using conversation silence as evidence of failure. Inspect and
+enrich unresolved device meals on the next eligible interactive turn. The 9pm
+closeout handles the same unresolved work independently. Do not claim enrichment
+happened at import time.
 
 ## Verify an import
 
@@ -99,13 +104,13 @@ reads. Suggest resending only after later evidence shows the upload failed. Also
 distinguish a pending import from a candidate that is still local in Review and
 cannot yet be visible to Murph.
 
-## Enrich calorie or macro tracking
+## Enrich calorie and macro tracking by default
 
-Treat calorie or macro tracking as active only when the member's request,
-current plan, or durable context makes that focus explicit. Do not infer it from
-a generic health or weight goal.
+Estimate calories and macros by default when enriching a captured meal. Skip
+estimation only for intuitive-eating contexts, eating-disorder risk, or
+number-sensitive members.
 
-When this skill is loaded for a calorie-tracking turn:
+When enriching a captured meal:
 
 1. List recent meals and find photo-backed device meals with missing nutrition.
 2. Before editing, compare nearby canonical meals for a likely manual,
@@ -125,20 +130,55 @@ When this skill is loaded for a calorie-tracking turn:
    `--nutrition-source database` for matched database facts, and
    `--nutrition-source estimated` only for visual ingredient or portion
    estimates. For mixed evidence, describe both and set confidence from the
-   weakest material assumption. Preserve the meal's occurred-at time, source,
-   and photo attachment.
+   weakest material assumption. Preserve the meal's occurred-at time and
+   source. Keep the photo until saved structure has been read back.
 6. Read the edited meal back before claiming it was logged.
 
 Do not run `meal add` for a captured photo that already has a meal id. The
-automatic import is the meal log; `meal edit` adds the useful structure. A
-standing calorie-tracking focus is enough to save a bounded photo estimate
-without asking for confirmation on every meal, but the estimate must retain
-provenance and uncertainty. If the photo cannot support a meaningful estimate,
-leave the photo-only meal intact and ask one narrow portion or identity question
-only when the member is present and the answer would materially help.
+automatic import is the meal log; `meal edit` adds the useful structure. By
+default, save a bounded photo estimate without asking for confirmation on every
+meal, but the estimate must retain provenance and uncertainty. If the photo
+cannot support a meaningful estimate, leave the photo-only meal intact and ask
+one narrow portion or identity question only when the member is present and the
+answer would materially help.
 
-Do not surface unsolicited calorie numbers for simple meal logging,
-intuitive-eating contexts, eating-disorder risk, or number-sensitive members.
+Do not surface calorie numbers for intuitive-eating contexts, eating-disorder
+risk, or number-sensitive members.
+
+## Run the automatic 9pm closeout
+
+On a scheduled run:
+
+1. Use the engine-supplied `Occurrence local date` from the `Scheduled
+   occurrence context` as the action and latest-capture boundary, even when the
+   wall-clock `Today's date` differs. Run `vault-cli meal closeout-work
+   --occurrence-at <scheduled-occurrence-instant> --to
+   <occurrence-local-date> --limit 20 --format json`. It returns
+   same-occurrence retry evidence first, then the oldest bounded batch of
+   automatic captures that still retain photos. Those photos are the queue,
+   with no separate cursor or state.
+2. Treat each retained photo as pending closeout work. Also include an
+   automatic capture with no photo when its latest `recordedAt` is at or after
+   this scheduled occurrence instant: that removal revision proves an earlier
+   attempt of the same occurrence already cleaned it. `closeout-work` includes
+   that evidence without carrying it into a later occurrence. Group captures
+   by local capture date. A late import gets one dated catch-up.
+3. Compare nearby meals before counting so a manual record or second photo of
+   the same eating occasion is not silently double counted.
+4. Run `vault-cli meal show <meal-id> --format json` for each selected meal and
+   inspect the actual attachment for a photo-backed selection. For
+   same-occurrence retry evidence, use only the already-saved structured fields
+   and uncertainty. Enrich the existing meal when supported and read it back.
+5. Run `vault-cli meal remove-photo <meal-id>` and read the meal back again.
+   This automatic-capture-only command preserves the structured meal and
+   replaces retained image bytes with a privacy tombstone. Any removal failure
+   fails the run. On retry, combine photos that remain with same-occurrence
+   removal revisions so a provider or partial-cleanup failure loses no meal.
+6. Send one compact closeout covering the selected dates. Include supported
+   calorie and macro totals by default; label partial totals as partial. Never
+   surface numbers in intuitive-eating, eating-disorder-risk, or number-sensitive
+   context, and never attach the photos. Suppress the message only when neither
+   a retained photo nor a same-occurrence removal revision is selected.
 
 ## Handle edge cases
 

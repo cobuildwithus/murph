@@ -29,6 +29,7 @@ import {
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -229,6 +230,7 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -576,6 +578,7 @@ export function HostedFamilyManager(props: {
                             : null
                         }
                         checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(member.memberId)}/usage-credit/checkout`}
+                        contactOptions={props.usageTopUpContactOptions}
                         offers={props.usageTopUpActivePurchase
                           ? []
                           : props.usageTopUpOffers ?? []}

@@ -106,7 +106,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
-  expect(sectionsMarkup).toContain("Group usage funding");
+  expect(sectionsMarkup).toContain("Group usage funding and top-up follow-up");
   expect(sectionsMarkup).toContain("Personal usage credit states");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
@@ -119,6 +119,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Sunday sleep crew");
   expect(sectionsMarkup).toContain("Add group credit");
   expect(sectionsMarkup).toContain("Choose amount");
+  expect(sectionsMarkup).toContain('data-design-state="usage-added-text-murph"');
+  expect(sectionsMarkup).toContain("Preview usage added with Text Murph");
+  expect(sectionsMarkup).toContain("Preview usage added with channel choices");
   expect(sectionsMarkup).toContain("personal-usage-credit-owner");
   expect(sectionsMarkup).toContain("Pulse included AI usage");
   expect(sectionsMarkup).toContain("Static owner-layout preview");

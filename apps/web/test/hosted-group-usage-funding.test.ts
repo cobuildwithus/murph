@@ -21,6 +21,9 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 }));
 
 import {
+  calculateHostedGroupUsageRemainingPercent,
+} from "@/src/lib/hosted-groups/group-usage-capacity";
+import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
   normalizeHostedGroupUsageFundingLocator,
   normalizeHostedGroupUsageJoinCode,
@@ -72,12 +75,15 @@ describe("hosted group usage funding", () => {
   });
 
   it.each([
-    [3_000_000n, "healthy"],
-    [900_000n, "low"],
-    [0n, "exhausted"],
+    [3_000_000n, "healthy", 66],
+    [900_000n, "low", 20],
+    [1n, "low", 0],
+    [0n, "exhausted", 0],
+    [9_000_000n, "healthy", 100],
   ] as const)("projects %s remaining as %s without exposing accounting", async (
     remainingUsdMicros,
     capacityState,
+    remainingPercent,
   ) => {
     const prisma = {
       hostedGroup: {
@@ -104,8 +110,19 @@ describe("hosted group usage funding", () => {
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
       periodEnd: "2026-08-01T00:00:00.000Z",
+      remainingPercent,
     });
   });
+
+  it.each([0n, -1n])(
+    "reports zero percent when the period limit %s is not a valid denominator",
+    (limitUsdMicros) => {
+      expect(calculateHostedGroupUsageRemainingPercent({
+        limitUsdMicros,
+        remainingUsdMicros: 1_000_000n,
+      })).toBe(0);
+    },
+  );
 
   it("derives a signed funding-only locator URL for a chat with no group row", async () => {
     const prisma = {
@@ -136,6 +153,7 @@ describe("hosted group usage funding", () => {
       capacityState: "exhausted",
       fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
       periodEnd: "2026-08-01T00:00:00.000Z",
+      remainingPercent: 0,
     });
     expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
   });

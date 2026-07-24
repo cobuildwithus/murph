@@ -967,6 +967,8 @@ export interface HostedRuntimeGroupUsageStatus {
   capacityState: HostedRuntimeGroupUsageCapacityState;
   fundingUrl: string | null;
   periodEnd: string;
+  // Optional until the Cloudflare-first rollout and old-Web rollback window close.
+  remainingPercent?: number;
 }
 
 export const HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX = 25;
@@ -2478,6 +2480,7 @@ export interface HostedWorkspaceInvocationBudget {
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
   "inbox_media_retention",
+  "system_mailbox",
 ] as const;
 
 export type HostedWorkspaceInvocationProcessingMode =

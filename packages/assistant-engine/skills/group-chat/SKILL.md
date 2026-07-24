@@ -42,6 +42,21 @@ someone must link an external workspace. If the room asks to create the group,
 join it, or approve sharing, call `create_join_link` or `post_join_offer`; those
 actions create the hosted group record as part of the existing flow.
 
+## Shared fact limits
+
+Say only what the current `read_shared` result proves. A granted projection
+with no usable record means the shared read lacks that metric; its cause is
+unverified. Do not infer anything about private records, provider sync, import,
+or share refresh. Separately granted `device-sync-status.v0` evidence permits
+only its literal status and timestamp meanings, never an explanation for an
+absent metric. A record timestamp does not prove projection completeness.
+
+Treat every current-local-day value as provisional: say "so far" and do not
+use it for a settled winner, crown, challenge result, or complete total.
+
+Use a returned canonical combined workout-day value as-is; do not rebuild it
+from raw records.
+
 ## Creating a hosted group
 
 In interactive group setup and additive-permission flows, call `read_current`

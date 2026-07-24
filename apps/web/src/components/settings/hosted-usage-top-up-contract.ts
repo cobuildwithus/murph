@@ -1,3 +1,5 @@
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+
 const PURCHASE_STATUSES = [
   "checkout_open",
   "payment_pending",
@@ -32,6 +34,7 @@ interface HostedUsageTopUpReturn {
 interface HostedUsageTopUpDialogProps {
   activePurchase?: HostedUsageTopUpActivePurchase | null;
   checkoutUrl?: string;
+  contactOptions?: readonly MurphContactOption[];
   deferTerminalRefreshUntilClose?: boolean;
   initialOpen?: boolean;
   offers: readonly HostedUsageTopUpOffer[];

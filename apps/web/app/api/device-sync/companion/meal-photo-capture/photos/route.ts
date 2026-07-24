@@ -16,6 +16,9 @@ import {
 import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  readCurrentHostedMemberDirectRoute,
+} from "@/src/lib/hosted-routing/member-direct-route";
 import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
@@ -25,6 +28,19 @@ export const POST = withJsonError(async (request: Request) => {
     request,
   });
   const upload = await readAndValidateMealPhotoUpload(request);
+  const directRoute = await readCurrentHostedMemberDirectRoute({
+    memberId: enrollment.memberId,
+    prisma,
+  });
+  if (!directRoute) {
+    throw hostedOnboardingError({
+      code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
+      httpStatus: 409,
+      message:
+        "Connect iMessage, Telegram, or a verified email before retrying meal capture.",
+      retryable: false,
+    });
+  }
   const control = readHostedExecutionControlClientIfConfigured();
   if (!control) {
     throw hostedOnboardingError({
@@ -45,6 +61,7 @@ export const POST = withJsonError(async (request: Request) => {
     byteLength: staged.byteLength,
     captureId: upload.captureId,
     capturedAt: upload.capturedAt,
+    directRoute,
     eventId,
     mealPhotoKey: staged.mealPhotoKey,
     memberId: enrollment.memberId,

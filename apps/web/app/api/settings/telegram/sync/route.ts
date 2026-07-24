@@ -12,7 +12,9 @@ import {
 } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import { resolveHostedPrivyTelegramAccountSelection } from "@/src/lib/hosted-onboarding/privy-shared";
 import { requireFreshPrivyMemberAuthForHostedAppSession } from "@/src/lib/hosted-onboarding/request-auth";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+} from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 
 export const POST = withJsonError(async (request: Request) => {

@@ -68,7 +68,105 @@ describe("hostedUserRuntimeWorkflow loop", () => {
     await runUntilContinueAsNew(machine);
 
     expect(runtime.reconciliationRequests).toEqual([{ userId: "member_test" }]);
-    expect(runtime.executionRequests).toHaveLength(1);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "system_mailbox",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("dispatches fresh conversation work ahead of retryable system lag", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      mailboxLag: [
+        mailboxLag({ lane: "conversation" }),
+        mailboxLag({ lane: "system" }),
+      ],
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+    machine.applySignal(mailboxSignal());
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        userId: "member_test",
+      },
+    ]);
+  });
+
+  it("admits deterministic system import while model work is blocked", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(reconciliationFacts({
+      blocked: {
+        reason: "ai_usage_denied",
+        retryAt: isoAfter(30_000),
+      },
+      mailboxLag: [mailboxLag({ lane: "system" })],
+    }));
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 1 },
+      userId: "member_test",
+    });
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "system_mailbox",
+        userId: "member_test",
+      },
+    ]);
+    expect(runtime.waits).toEqual([]);
+  });
+
+  it("wakes signal-only idle workflows for fresh system mailbox signals", async () => {
+    const runtime = new FakeWorkflowRuntime();
+    runtime.facts.push(
+      reconciliationFacts(),
+      reconciliationFacts({
+        mailboxLag: [mailboxLag({ lane: "system" })],
+      }),
+    );
+    runtime.executions.push(processingAccepted());
+
+    const machine = createMachine(runtime, {
+      options: { continueAsNewAfterIterations: 2 },
+      userId: "member_test",
+    });
+    runtime.onWait = () => {
+      runtime.onWait = null;
+      machine.applySignal(mailboxSignal({
+        lane: "system",
+        mailboxItemId: "mailbox_system_test",
+      }));
+    };
+
+    await runUntilContinueAsNew(machine);
+
+    expect(runtime.waits).toEqual([null]);
+    expect(runtime.reconciliationRequests).toEqual([
+      { userId: "member_test" },
+      { userId: "member_test" },
+    ]);
+    expect(runtime.executionRequests).toEqual([
+      {
+        orchestrationAttemptId: "orchestration-attempt-1",
+        processingMode: "system_mailbox",
+        userId: "member_test",
+      },
+    ]);
   });
 
   it("does not sleep on failed runtime execution when a recheck signal arrives", async () => {

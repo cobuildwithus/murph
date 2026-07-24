@@ -133,7 +133,7 @@ export function JoinInvitePhoneVerificationIsland({
         <HostedEmailAuthButton
           active
           inline
-          initialEmailAddress={
+          lockedEmailAddress={
             emailAuthTarget?.kind === "saved" ? emailAuthTarget.emailAddress : null
           }
           onAuthenticated={emailAuthCompletion.completeAuth}
