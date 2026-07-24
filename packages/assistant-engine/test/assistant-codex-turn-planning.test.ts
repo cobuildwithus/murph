@@ -1288,7 +1288,6 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
-          conversationScope: 'direct',
           progressUpdatesAvailable: false,
           voiceMemoGenerationAvailable: false,
         }),
@@ -2007,7 +2006,6 @@ describe('assistant Codex turn planning', () => {
         'newsletter',
         'assistant_style',
         'personalization',
-        'wait_for_replies',
       ]),
     )
     for (const personalTool of [

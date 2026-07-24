@@ -98,7 +98,7 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'When people are still typing or responding to each other and your reply can wait, call `murph.wait_for_replies` for a few seconds',
+      'When people are still typing or responding to each other and your reply can wait, run a short shell `sleep` for a few seconds, never more than about 10, then run the ladder against the whole burst.',
     )
     expect(normalized).toContain(
       'Do not wait when someone needs an answer now.',
@@ -110,10 +110,10 @@ describe('assistant group-chat style guidance', () => {
       'prefer one reply after the burst over serial replies.',
     )
     expect(normalized).toContain(
-      'never mention waiting, sleeping, or tools.',
+      'never mention waiting, sleeping, or commands.',
     )
     expect(normalized).toContain(
-      'After waiting, answer the whole burst once; natural `---` bubbles are allowed.',
+      'After the sleep, answer the whole burst once; natural `---` bubbles are allowed.',
     )
     expect(normalized).toContain(
       'If that answer targets an earlier message rather than the burst as a whole, use the stale-message reply-target rule below.',

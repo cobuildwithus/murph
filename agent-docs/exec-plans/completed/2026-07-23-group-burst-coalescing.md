@@ -19,12 +19,10 @@ In group chats, a burst of N inbound messages produces N serial Murph replies:
 
 ### A. Model-discretion waiting inside a live turn
 
-The pre-turn hold was replaced by model-discretion waiting through
-`murph.wait_for_replies`, available only in group scope with a 3-10 second
-clamp and a two-call, 15-second cumulative turn budget. Because the turn is
-already live, messages arriving during the wait enter it through the existing
-active-turn steering path, so Murph can answer the whole burst once or reply
-immediately when the moment calls for it.
+When a live group turn is still mid-burst and the reply can wait, Murph uses
+its own shell `sleep` for a few seconds, never more than about 10, then answers
+once against everything that arrived. The model answers immediately when the
+moment calls for it; there is no dedicated tool or pipeline machinery.
 
 ### B. Last-wins steered finals in groups
 
@@ -63,8 +61,8 @@ longer the latest inbound or when multiple conversations interleave.
 ## Files (expected)
 
 - `packages/assistant-engine/src/assistant-codex/dynamic-tools.ts` and
-  `packages/assistant-engine/src/assistant-codex.ts` — group-only wait tool and
-  turn-local call/time budget.
+  `packages/assistant-engine/src/assistant-codex.ts` — remove the dedicated
+  wait tool; existing shell access owns optional waits.
 - `packages/assistant-engine/src/assistant/automation/` — remove the scanner
   hold and restore immediate pre-turn selection.
 - `packages/assistant-engine/src/assistant/local-service.ts` — group-scope
@@ -83,10 +81,8 @@ longer the latest inbound or when multiple conversations interleave.
 
 ## Verification
 
-- Dynamic-tool tests: group-only availability and execution authority, strict
-  arguments, 3-10 second clamping, two-call/15-second turn budget, and
-  abort-aware early completion; prompt and skill assertions for discretionary
-  waiting; group last-wins gating (superseded segments dropped in group scope,
+- Prompt and skill assertions for discretionary shell waiting; group last-wins
+  gating (superseded segments dropped in group scope,
   last completed answer promoted after no-reply, segments delivered in direct
   scope; transcript entries follow).
 - `pnpm test:diff` over touched paths; assistant-engine owner suite; typecheck.

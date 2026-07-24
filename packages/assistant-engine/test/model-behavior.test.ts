@@ -124,13 +124,13 @@ describe('assistant execution prompt contract', () => {
       'Make it stand alone and carry forward anything still worth saying.',
     )
     expect(groupPrompt).toContain(
-      'When the room is actively mid-burst and your reply can wait, call `murph.wait_for_replies` for a few seconds',
+      'When the room is actively mid-burst and your reply can wait, run a short shell `sleep` for a few seconds, never more than about 10, then answer once against everything that arrived.',
     )
     expect(groupPrompt).toContain(
       'Answer immediately when directly addressed with something time-sensitive or when immediacy is the moment.',
     )
     expect(groupPrompt).toContain(
-      'Messages that arrive during the wait appear as normal messages; rule 7 covers replacing an unsent answer.',
+      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
     )
     expect(directPrompt).not.toContain(
       'that answer still sends',
@@ -138,7 +138,10 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).not.toContain(
       'that response replaces the earlier answer',
     )
-    expect(directPrompt).not.toContain('murph.wait_for_replies')
+    expect(groupPrompt).toContain(
+      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-burst',
+    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
   })
 
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
