@@ -217,6 +217,25 @@ describe('assistant group-chat style guidance', () => {
     }
   })
 
+  it('names the inbound timestamp as the signal for what the room is doing', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // Every auto-reply prompt already carries an `Occurred at:` header
+    // (buildAssistantAutoReplyContextLines). Without naming it, judging
+    // "mid-volley" falls back to guessing from message content.
+    expect(normalized).toContain(
+      'Each inbound message carries an `Occurred at:` time, and the ones before it stay visible earlier in this conversation.',
+    )
+    expect(normalized).toContain(
+      'a few seconds apart means it is live and mid-volley; a long quiet stretch before the newest message means you are catching up, or someone has been waiting on you.',
+    )
+    // A cold thread or a compacted one may not expose earlier times; the safe
+    // default is to answer rather than sit on a reply.
+    expect(normalized).toContain(
+      'When those times are missing or ambiguous, do not wait.',
+    )
+  })
+
   it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
