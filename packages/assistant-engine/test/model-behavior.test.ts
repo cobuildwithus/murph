@@ -124,10 +124,15 @@ describe('assistant execution prompt contract', () => {
       'Make it stand alone and carry forward anything still worth saying.',
     )
     expect(groupPrompt).toContain(
-      'When the room is actively mid-burst and your reply can wait, run a short shell `sleep` for a few seconds, never more than about 10, then answer once against everything that arrived.',
+      'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
     )
+    // Watching must not turn into a catch-all digest of the burst.
     expect(groupPrompt).toContain(
-      'Answer immediately when directly addressed with something time-sensitive or when immediacy is the moment.',
+      'Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point.',
+    )
+    expect(groupPrompt).not.toContain('everything that arrived')
+    expect(groupPrompt).toContain(
+      'Answer immediately when someone needs you or the beat is yours.',
     )
     expect(groupPrompt).toContain(
       'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
@@ -139,7 +144,7 @@ describe('assistant execution prompt contract', () => {
       'that response replaces the earlier answer',
     )
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-burst',
+      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley',
     )
     expect(directPrompt).not.toContain('run a short shell `sleep`')
   })

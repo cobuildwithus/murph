@@ -132,29 +132,66 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).not.toContain('Exactly one message per turn.')
   })
 
-  it('waits selectively for a live volley and answers the burst once', async () => {
+  it('watches a live volley instead of buffering a reply to it', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'When people are still typing or responding to each other and your reply can wait, run a short shell `sleep` for a few seconds, never more than about 10, then run the ladder against the whole burst.',
+      'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+    )
+    // Waiting must never become an excuse to override the ladder's silence,
+    // closed-room, and not-for-you rules.
+    expect(normalized).toContain(
+      'Waiting never overrides the ladder',
     )
     expect(normalized).toContain(
-      'Do not wait when someone needs an answer now.',
+      'a wait that ends in no message is a correct outcome.',
     )
     expect(normalized).toContain(
-      'a comedic interjection can be better because it lands immediately.',
+      'Do not wait when someone needs an answer now',
     )
     expect(normalized).toContain(
-      'prefer one reply after the burst over serial replies.',
+      'a comedic interjection can be better precisely because it lands immediately.',
     )
     expect(normalized).toContain(
       'never mention waiting, sleeping, or commands.',
     )
+  })
+
+  it('answers a moment rather than covering the whole backlog', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
     expect(normalized).toContain(
-      'After the sleep, answer the whole burst once; natural `---` bubbles are allowed.',
+      'After watching, say one thing or nothing.',
     )
     expect(normalized).toContain(
-      'If that answer targets an earlier message rather than the burst as a whole, use the stale-message reply-target rule below.',
+      'You are answering a moment, not a backlog: never recap what you read, never work through it point by point, and never write a message whose job is to cover everything that arrived.',
+    )
+    expect(normalized).toContain(
+      'Often a reaction alone is the better move.',
+    )
+    expect(normalized).toContain(
+      'When what you say targets an earlier message, use the stale-message reply-target rule below.',
+    )
+    // The digest framing this replaced is what pushed Murph toward one big
+    // catch-all reply per burst.
+    expect(normalized).not.toContain('answer the whole burst once')
+    expect(normalized).not.toContain('the ladder against the whole burst')
+  })
+
+  it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'react to what deserves it, reply to the one or two things actually meant for you (targeting that message when the room has moved on), and let the rest go.',
+    )
+    expect(normalized).toContain(
+      'Nobody writes a recap of what they missed.',
+    )
+    expect(normalized).toContain(
+      'mostly read and enjoy it; jump in when someone asks you something, when a beat is clearly yours, or when you have a genuinely funny line and you have not already been talking a lot.',
+    )
+    expect(normalized).toContain(
+      'Before jumping in, notice how much you have already said recently. If you just posted, the bar for speaking again is much higher.',
     )
   })
 

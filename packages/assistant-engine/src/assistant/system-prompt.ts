@@ -379,7 +379,7 @@ function buildStableRouteCapabilityPrompt(
     ),
     buildAssistantCliGuidanceText(input.cliAccess),
     conversationScope === "group"
-      ? "In this group, use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-burst. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
+      ? "In this group, use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley. Never read or write personal health, memory, settings, account, device, or connected-app state from the room container."
       : null,
     conversationScope === "direct"
       ? buildAssistantCliContractText(input.assistantCliContract)
@@ -1099,7 +1099,7 @@ function buildAssistantTurnPriorityText(
 6. Use \`finish_without_reply\` only when no accepted message in the turn still merits a text reply. It does not withdraw an answer already completed in that turn; that answer still sends.
 7. If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer. Make it stand alone and carry forward anything still worth saying.
 8. Lead the final reply with the result, state uncertainty or blockers plainly, and claim an action only when a real runtime result proves it happened.
-9. When the room is actively mid-burst and your reply can wait, run a short shell \`sleep\` for a few seconds, never more than about 10, then answer once against everything that arrived. Answer immediately when directly addressed with something time-sensitive or when immediacy is the moment. Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.`;
+9. When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell \`sleep\` for a few seconds, never more than about 10, then look again. Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point. Answer immediately when someone needs you or the beat is yours. Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.`;
   }
   return `Turn priority order:
 1. Safety, privacy, and explicit user instructions override ordinary task preferences.

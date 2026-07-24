@@ -1505,7 +1505,6 @@ export async function sendAssistantMessageLocal(
         const conversationScope = resolveAssistantConversationScope(
           sharedPlan.conversationPolicy.audience,
         )
-        const noReplySelected = providerResult.finalAction?.kind === 'none'
         const resolvedFinalReplyDeliveryContext =
           resolveAssistantReplyDeliveryContextForSegment({
             contexts: replyDeliveryContexts,
@@ -1602,6 +1601,7 @@ export async function sendAssistantMessageLocal(
             vault: input.vault,
           })
         }
+        const noReplySelected = providerResult.finalAction?.kind === 'none'
         const rawFinalResponseText = noReplySelected
           ? null
           : resolveAssistantProviderFinalResponseText(providerResult)
