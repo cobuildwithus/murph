@@ -98,6 +98,11 @@ test("initial-visit contact handoff advances to persona setup after Safari launc
     assert.deepEqual(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)), {
       avatar: "classic",
     });
+    await act(async () => {
+      window.dispatchEvent(new Event("pagehide"));
+      await flushPromises();
+    });
+
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=initial-visit.claim",

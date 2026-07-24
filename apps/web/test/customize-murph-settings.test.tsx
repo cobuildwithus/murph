@@ -429,6 +429,7 @@ describe("CustomizeMurphSettings", () => {
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=settings.current-member.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .toBeNull();
 
@@ -530,6 +531,14 @@ function makeVoiceTestOption(): MurphContactOption {
     kind: "text",
     label: "Messages",
   };
+}
+
+/** The picker completes only once this document goes away. */
+async function acknowledgeSafariLaunch(): Promise<void> {
+  await React.act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+    await flushPromises();
+  });
 }
 
 async function flushPromises(): Promise<void> {

@@ -14,6 +14,7 @@ import {
   DEFAULT_MURPH_CONTACT_AVATAR_ID,
   findMurphContactAvatarOption,
   MURPH_CONTACT_AVATAR_OPTIONS,
+  MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS,
   MurphContactAvatarArt,
   MurphContactAvatarGrid,
   MurphAddToContactsButton,
@@ -246,6 +247,7 @@ test("contact card picker issues a bound handoff and keeps launch failures retry
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=claim.for.gremlin",
     );
+    await expireSafariLaunchWindow();
     expect(rendered.container.querySelector("[role='alert']")?.textContent)
       .toContain("Couldn't open Safari");
     expect(findButton(rendered.container, "Open in Safari to add Murph")?.disabled)
@@ -333,6 +335,7 @@ test("contact card picker keeps an issuance denial open and retryable", async ()
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=retry.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(onAddToContacts).toHaveBeenCalledWith(
       findMurphContactAvatarOption("gremlin"),
     );
@@ -389,6 +392,7 @@ test("hosted-onboarding add-to-contacts caller closes after a successful Safari 
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=standalone.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .toBeNull();
     expect(rendered.container.textContent).not.toContain("Skip for now");
@@ -406,11 +410,15 @@ test("hosted-onboarding add-to-contacts caller closes after a successful Safari 
 });
 
 test("contact card picker times out issuance and stays open for retry", async () => {
-  const timeoutController = new AbortController();
-  const retryTimeoutController = new AbortController();
-  const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
-    .mockReturnValueOnce(timeoutController.signal)
-    .mockReturnValue(retryTimeoutController.signal);
+  // The deadline is an owned setTimeout, not AbortSignal.timeout, so that older
+  // iOS WebKit builds without the static combinators still reach the network.
+  const scheduled: Array<() => void> = [];
+  const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(
+    ((handler: () => void) => {
+      scheduled.push(handler);
+      return scheduled.length as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout,
+  );
   const fetchMock = vi.fn<typeof fetch>()
     .mockImplementationOnce((_url, init) => rejectOnAbort(init?.signal))
     .mockResolvedValueOnce(
@@ -457,7 +465,7 @@ test("contact card picker times out issuance and stays open for retry", async ()
       await Promise.resolve();
     });
 
-    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 10_000);
     expect(findButton(rendered.container, "Opening Safari…")?.disabled).toBe(true);
     expect(findButton(rendered.container, "Skip for now")?.disabled).toBe(true);
     expect(
@@ -467,7 +475,7 @@ test("contact card picker times out issuance and stays open for retry", async ()
     ).toBe(true);
 
     await act(async () => {
-      timeoutController.abort(new Error("Handoff timed out."));
+      scheduled.forEach((fire) => fire());
       await flushPromises();
     });
 
@@ -493,6 +501,7 @@ test("contact card picker times out issuance and stays open for retry", async ()
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=timeout.retry.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(onAddToContacts).toHaveBeenCalledWith(
       findMurphContactAvatarOption("gremlin"),
     );
@@ -600,6 +609,7 @@ test("contact card picker aborts dismissal during issuance and stays retryable",
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=dismissal.retry.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(onAddToContacts).toHaveBeenCalledWith(
       findMurphContactAvatarOption("gremlin"),
     );
@@ -700,6 +710,7 @@ test("contact card picker freezes the selected avatar during issuance", async ()
     expect(rendered.assign).toHaveBeenCalledWith(
       "x-safari-https://app.example.com/api/murph-contact-card?handoff=gremlin.claim",
     );
+    await acknowledgeSafariLaunch();
     expect(onAddToContacts).toHaveBeenCalledWith(
       findMurphContactAvatarOption("gremlin"),
     );
@@ -763,6 +774,26 @@ test("contact card picker keeps the normal download action in Android webviews",
     await rendered.cleanup();
   }
 });
+
+/**
+ * The picker treats a launch as real only once this document goes away, so
+ * tests must supply that acknowledgement rather than relying on `assign`.
+ */
+async function acknowledgeSafariLaunch(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+    await flushPromises();
+  });
+}
+
+async function expireSafariLaunchWindow(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS + 250);
+    });
+    await flushPromises();
+  });
+}
 
 async function flushPromises(): Promise<void> {
   await Promise.resolve();

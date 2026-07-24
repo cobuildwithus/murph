@@ -200,6 +200,9 @@ export const IN_APP_BROWSER_PRIMARY_ACTION = "Open in Safari to add Murph";
 export const IN_APP_BROWSER_DESCRIPTION =
   "You're in an in-app browser, which can't save contacts. This opens Safari instead.";
 const MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS = 10_000;
+// Long enough that a host "Open in Safari?" confirmation can still be tapped
+// before the attempt is treated as never launched.
+export const MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS = 5_000;
 const DEFAULT_PICKER_COPY = {
   description: PICKER_DESCRIPTION,
   primaryAction: "Add Murph to Contacts",
@@ -249,22 +252,52 @@ export function MurphContactCardPicker({
     onOpenChange(nextOpen);
   }
 
+  function failHandoff(controller: AbortController) {
+    // Aborting settles any launch wait so its listeners cannot outlive the attempt.
+    controller.abort();
+    if (handoffController.current !== controller) return;
+    handoffController.current = null;
+    setHandoffStatus("error");
+  }
+
   async function handleSafariHandoff() {
     if (handoffController.current) return;
     const controller = new AbortController();
     handoffController.current = controller;
     setHandoffStatus("pending");
+    const issuanceDeadline = setTimeout(
+      () => controller.abort(),
+      MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS,
+    );
+
+    let claim: string;
     try {
-      const claim = await issueMurphContactCardHandoff(selected.id, controller.signal);
+      claim = await issueMurphContactCardHandoff(selected.id, controller.signal);
+    } catch {
+      failHandoff(controller);
+      return;
+    } finally {
+      clearTimeout(issuanceDeadline);
+    }
+
+    // `assign` returns void whether or not the host accepted the scheme
+    // navigation, so completion waits for this document to actually go away.
+    const launched = waitForMurphContactCardLaunch(controller.signal);
+    try {
       window.location.assign(
         `x-safari-https://${window.location.host}/api/murph-contact-card?handoff=${encodeURIComponent(claim)}`,
       );
     } catch {
-      if (handoffController.current === controller) setHandoffStatus("error");
+      failHandoff(controller);
       return;
-    } finally {
-      if (handoffController.current === controller) handoffController.current = null;
     }
+    if (!(await launched)) {
+      failHandoff(controller);
+      return;
+    }
+
+    if (handoffController.current !== controller) return;
+    handoffController.current = null;
     setHandoffStatus(null);
     onAddToContacts(selected);
   }
@@ -374,8 +407,45 @@ export function MurphContactCardPicker({
   );
 }
 
-async function issueMurphContactCardHandoff(avatarId: string, cancellationSignal: AbortSignal): Promise<string> {
-  const signal = AbortSignal.any([cancellationSignal, AbortSignal.timeout(MURPH_CONTACT_CARD_HANDOFF_TIMEOUT_MS)]);
+/**
+ * Resolves true only once this document goes away, which is the sole
+ * observable acknowledgement that the host accepted the Safari scheme
+ * navigation. A suppressed or declined launch resolves false instead.
+ */
+function waitForMurphContactCardLaunch(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    let deadline: ReturnType<typeof setTimeout>;
+
+    function settle(launched: boolean) {
+      clearTimeout(deadline);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      signal.removeEventListener("abort", onAbort);
+      resolve(launched);
+    }
+
+    function onPageHide() {
+      settle(true);
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === "hidden") settle(true);
+    }
+
+    function onAbort() {
+      settle(false);
+    }
+
+    deadline = setTimeout(() => settle(false), MURPH_CONTACT_CARD_LAUNCH_TIMEOUT_MS);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    signal.addEventListener("abort", onAbort);
+  });
+}
+
+async function issueMurphContactCardHandoff(avatarId: string, signal: AbortSignal): Promise<string> {
   const response = await fetch("/api/murph-contact-card", {
     body: JSON.stringify({ avatar: avatarId }),
     credentials: "same-origin",
@@ -396,6 +466,9 @@ async function issueMurphContactCardHandoff(avatarId: string, cancellationSignal
     throw new Error("Murph contact-card handoff response was invalid.");
   }
 
-  signal.throwIfAborted();
+  if (signal.aborted) {
+    throw new Error("Murph contact-card handoff was cancelled.");
+  }
+
   return payload.claim;
 }
