@@ -624,6 +624,14 @@ async function writeHostedMemberLinqBindingTx(input: {
       })
     : null;
   if (input.kind === "pending" && lockedHomeRoute?.linqChatLookupKey) {
+    // The member already owns this exact chat at the stronger home level, so a
+    // pending bind would be redundant. This is a durable state, not a mid-flight
+    // change: raising the retryable error here would make every provider retry
+    // fail identically and silently drop the member's message.
+    if (linqChatLookupKeys.includes(lockedHomeRoute.linqChatLookupKey)) {
+      return lockedHomeRoute.participantContact ?? input.participantContact;
+    }
+
     throw hostedOnboardingError({
       code: "HOSTED_LINQ_HOME_ROUTE_CHANGED",
       httpStatus: 503,

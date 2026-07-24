@@ -2112,6 +2112,41 @@ describe("hosted-member-store", () => {
     expect(findUnique).not.toHaveBeenCalled();
   });
 
+  it("no-ops a capacity-reserving pending bind that targets the member's own home chat", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const queryRaw = createMemberRowLockQueryRaw();
+    const findUnique = vi.fn().mockResolvedValue({
+      linqChatLookupKey: createHostedLinqChatLookupKeyReadCandidates("chat_home")[0],
+      linqParticipantContactKind: "phone",
+      linqParticipantContactLookupKey: "hbidx:phone:v1:home",
+    });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $executeRaw: executeRaw,
+      $queryRaw: queryRaw,
+      hostedMemberRouting: {
+        findUnique,
+        updateMany,
+        upsert,
+      },
+    } as never;
+
+    // Owning this chat at the home level is durable, not a mid-flight change.
+    // Raising the retryable error here would fail identically on every provider
+    // retry and silently drop the member's inbound message.
+    await expect(upsertHostedMemberPendingLinqBindingTx({
+      homeLineAssignedAt: new Date("2026-07-12T12:00:00.000Z"),
+      linqChatId: "chat_home",
+      memberId: "member_123",
+      prisma,
+      recipientPhone: "+15550100001",
+    })).resolves.toBeUndefined();
+
+    expect(upsert).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
   it("retries a capacity-reserving pending bind when a home route wins the member lock", async () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const queryRaw = createMemberRowLockQueryRaw();
