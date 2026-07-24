@@ -831,25 +831,6 @@ export async function approveHostedSensitiveActionChallengeForTest(input: {
   });
 }
 
-export async function denyHostedSensitiveActionChallengeForTest(input: {
-  environment?: NodeJS.ProcessEnv;
-  tokenHash: string;
-}): Promise<HostedSensitiveActionChallengeForTest> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) =>
-    await deps.prisma.hostedSensitiveActionChallenge.update({
-      data: {
-        approvalStatus: "denied",
-        consumedAt: null,
-        consumedBy: null,
-        decidedAt: new Date(),
-      },
-      where: {
-        tokenHash: input.tokenHash,
-      },
-    })
-  );
-}
-
 export async function listHostedAiUsageForTest(input: {
   environment?: NodeJS.ProcessEnv;
   limit?: number;

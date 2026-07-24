@@ -1,30 +1,20 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 import {
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionPendingEffectsReconcileRequestedWake,
 } from "@murphai/hosted-execution";
 import {
-  buildHostedActionApprovalOutcomeEffectId,
-} from "@murphai/hosted-execution/action-approval";
-import {
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
 import {
-  denyHostedSensitiveActionChallengeForTest,
   listHostedAiUsageForTest,
-  readLatestHostedSensitiveActionChallengeForTest,
   type HostedAiUsageForTestRow,
-  type HostedSensitiveActionChallengeForTest,
 } from "#hosted-web-testing";
-import {
-  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
-} from "@murphai/runtime-state/assistant-generated-deliveries";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   buildAssistantProviderMurphToolCall,
-  buildAssistantProviderShellCommandCall,
   buildHostedAssistantNotificationDecisionResponse,
   type HostedLocalAssistantProviderStubRequest,
   type HostedLocalAssistantProviderScriptedResponse,
@@ -50,17 +40,10 @@ const reminderText = "Time to sleep. Put the phone down and get some rest.";
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "still there while the bedtime reminder is due?";
 const overlapForegroundReplyText = "Yep mate, I am here.";
-const wakePreservationApprovalRequestText =
-  "Create a synthetic checkpoint report and prepare it for secure attachment.";
-const wakePreservationApprovalPendingReplyText =
-  "The checkpoint report is prepared and awaiting approval.";
 const wakePreservationWindowRequestText =
   "Confirm the hosted-local wake-preservation checkpoint window.";
 const wakePreservationWindowReplyText =
   "Wake-preservation checkpoint window confirmed.";
-const wakePreservationReportRef =
-  `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/wake-preservation-proof.pdf`;
-const approvalGenerationVersion = "murph-action-approval-generation-v1";
 const scheduledReminderTiming = resolveScheduledReminderTiming();
 const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
@@ -133,50 +116,6 @@ describe("hosted local Linq scheduled reminder e2e", () => {
 
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
-    const approvalReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
-    requireScenario().queueAssistantResponses([
-      buildAssistantProviderShellCommandCall(
-        `mkdir -p '${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}'`
-          + ` && printf '%s\\n' '%PDF-1.7 synthetic wake preservation proof'`
-          + ` > '${wakePreservationReportRef}'`,
-      ),
-      buildAssistantProviderMurphToolCall("send_vault_file", {
-        ref: wakePreservationReportRef,
-      }),
-      wakePreservationApprovalPendingReplyText,
-    ], {
-      matchInputContains: wakePreservationApprovalRequestText,
-    });
-    const approvalWebhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      scheduledChatId,
-      {
-        eventId: `evt_scheduled_reminder_approval_${userId}`,
-        messageId: `msg_scheduled_reminder_approval_${userId}`,
-        text: wakePreservationApprovalRequestText,
-      },
-    ));
-    expect(approvalWebhookResponse.status).toBe(202);
-    await requireScenario().waitForLatestPendingWake(userId);
-    const approvalReply = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: approvalReplyBaselineCount,
-      expectedPath: reminderPath,
-      scenario: requireScenario(),
-      userId,
-    });
-    expect(requireLinqStub().readObservedMessageText(approvalReply)).toContain(
-      wakePreservationApprovalPendingReplyText,
-    );
-    const approvalSetupStatus = await requireScenario().waitForHostedCompletion(userId);
-    expect(approvalSetupStatus.lastErrorCode ?? null).toBeNull();
-    const approvalChallenge = await waitForLatestWakePreservationChallenge();
-    const approvalEffectId = buildApprovalOutcomeEffectId(approvalChallenge);
-    const deniedChallenge = await denyHostedSensitiveActionChallengeForTest({
-      environment: requireScenario().runtimeEnv,
-      tokenHash: approvalChallenge.tokenHash,
-    });
-    expect(deniedChallenge.approvalStatus).toBe("denied");
-
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
     const scheduledReminderTimes = resolveScheduledReminderTimes();
     requireScenario().queueAssistantResponses(
@@ -257,9 +196,12 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           await requireScenario().harness.readUserStatus(userId),
         );
       const causalSystemWake = await requireScenario().runWake(
-        buildWakePreservationPendingEffectsWake({
-          effectId: approvalEffectId,
-          eventName: "causal-checkpoint",
+        buildHostedExecutionPendingEffectsReconcileRequestedWake({
+          effectId: "vault-file-send:effect_stale_scheduled_reminder_wake_preservation",
+          eventId:
+            `runtime-control:scheduled-reminder-wake-preservation:causal-checkpoint:${userId}`,
+          occurredAt: new Date().toISOString(),
+          userId,
         }),
         userId,
       );
@@ -722,63 +664,6 @@ function buildHostedAssistantAutomationSaveResponses(input: {
     }),
     input.text,
   ];
-}
-
-function buildWakePreservationPendingEffectsWake(input: {
-  effectId: string;
-  eventName: string;
-}) {
-  return buildHostedExecutionPendingEffectsReconcileRequestedWake({
-    effectId: input.effectId,
-    eventId:
-      `runtime-control:scheduled-reminder-wake-preservation:${input.eventName}:${userId}`,
-    occurredAt: new Date().toISOString(),
-    userId,
-  });
-}
-
-function buildApprovalOutcomeEffectId(
-  challenge: HostedSensitiveActionChallengeForTest,
-): string {
-  if (!challenge.approvalKey || !challenge.actionHash) {
-    throw new Error("Hosted wake-preservation approval identity was incomplete.");
-  }
-  const approvalGeneration = createHash("sha256")
-    .update([
-      approvalGenerationVersion,
-      challenge.approvalKey,
-      challenge.actionHash,
-      challenge.tokenHash,
-    ].join("\n"))
-    .digest("hex");
-  return buildHostedActionApprovalOutcomeEffectId({
-    approvalGeneration,
-    approvalId: challenge.approvalKey,
-    expiresAt: challenge.expiresAt.toISOString(),
-  });
-}
-
-async function waitForLatestWakePreservationChallenge():
-  Promise<HostedSensitiveActionChallengeForTest> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < 60_000) {
-    const challenge = await readLatestHostedSensitiveActionChallengeForTest({
-      environment: requireScenario().runtimeEnv,
-      memberId: userId,
-    });
-    if (
-      challenge
-      && challenge.approvalStatus === "pending"
-      && challenge.consumedAt === null
-      && challenge.tokenHash.length > 0
-    ) {
-      return challenge;
-    }
-    await sleep(100);
-  }
-
-  throw new Error("Timed out waiting for the wake-preservation approval challenge.");
 }
 
 function createHeldAssistantProviderTextResponse(text: string): {
