@@ -46,7 +46,7 @@ type HostedLinqContactCardShareFindManyInput = {
   };
 };
 
-const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 48 * 60 * 60 * 1000;
+const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 10 * 60 * 1000;
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -67,7 +67,9 @@ type HostedLinqContactCardShareReserveDecision =
 
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
- * checks; this only guards the attempt cadence (one per chat per 48h).
+ * checks; this only dedupes duplicate attempts within one turn/wake (one per
+ * chat per 10 minutes). Every share is an intentional assistant decision, so
+ * a requested re-share outside that window must go through.
  */
 export async function reserveHostedLinqContactCardShareAttempt(input: {
   chatId: string;

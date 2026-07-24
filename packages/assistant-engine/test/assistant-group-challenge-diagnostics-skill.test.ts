@@ -59,6 +59,12 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'Never present a partial table as the full standings.',
     )
+    expect(challenge).toContain(
+      'The scheduled dispatch is the one group message where the required completeness statement and per-person missing-data lines always count as substance',
+    )
+    expect(challenge).toContain(
+      'never trim them for length, keep them to about one line per person, keep the whole dispatch compact, and put ranking mechanics or anything longer on the challenge page',
+    )
     expect(groupChat).toContain(
       'It is the only hosted model-facing path to the current Web-owned shared snapshot',
     )

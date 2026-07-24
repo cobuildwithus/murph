@@ -277,6 +277,9 @@ describe('assistant execution prompt contract', () => {
     expect(layers.threadContextPrompt).toContain(
       'Assistant personality preferences for this private conversation:',
     )
+    expect(layers.threadContextPrompt).not.toContain(
+      'In this group room, Detail is a hard ceiling on message length',
+    )
     expect(layers.threadContextPrompt).toContain(
       'Humor 9/10: initiate when there is an opening and commit to the bit',
     )
@@ -2186,6 +2189,15 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
     expect(prompt).toContain('synthetic room container, not the human speaker')
+    expect(prompt).toContain(
+      'Group messages stay phone-screen short: a few short sentences, whatever the ask, and the ceiling covers the whole reply.',
+    )
+    expect(prompt).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
+    expect(prompt).toContain(
+      "Never send a multi-paragraph reply unless someone explicitly asked this turn for the full write-up or the room's saved style calls for maximum detail",
+    )
     expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
@@ -2260,6 +2272,12 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Humor 9/10')
     expect(prompt).toContain('Push 8/10')
     expect(prompt).toContain('Detail 7/10')
+    expect(prompt).toContain(
+      'In this group room, Detail is a hard ceiling on message length, never a floor: below 10/10, keep each reply to a few short sentences and let members ask for more instead of front-loading detail.',
+    )
+    expect(prompt).toContain(
+      'Only Detail 10/10 or an explicit member request this turn for a full write-up permits a multi-paragraph reply.',
+    )
     expect(prompt).toContain(
       'Casual is a persistent user-facing writing invariant',
     )

@@ -37,6 +37,44 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('caps group message length behind the room Detail ceiling', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'Group messages are phone-screen short: a few short sentences is the default shape for any reply, whatever the ask.',
+    )
+    expect(normalized).toContain(
+      "The room's Detail setting is a hard ceiling on length, never a target.",
+    )
+    expect(normalized).toContain(
+      'Unless Detail is 10/10 or someone explicitly asked this turn for the full write-up, do not send a multi-paragraph message, and the ceiling covers the whole turn, including every `---` bubble.',
+    )
+    expect(normalized).toContain(
+      'send the headline decision or answer, let the room ask for more, and keep durable detail on the owning vault page instead of in the chat',
+    )
+    expect(normalized).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
+  })
+
+  it('keeps challenge kickoff conversational instead of a rulebook dump', async () => {
+    const groupChallenge = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'group-challenge', 'SKILL.md'),
+      'utf8',
+    )
+    const normalized = groupChallenge.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      "Kickoff is a conversation, not a rules document, and every kickoff message obeys `group-chat`'s length budget.",
+    )
+    expect(normalized).toContain(
+      'Pitch a format or scoring idea in a few short sentences, settle one decision at a time, and ask at most one question per message.',
+    )
+    expect(normalized).toContain(
+      "Do not post a multi-section framework or numbered rulebook into the room unless the room's Detail is 10/10 or a member explicitly asks this turn for the full rules.",
+    )
+  })
+
   it('keeps emoji use occasional instead of habitual', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
