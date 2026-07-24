@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
@@ -248,6 +250,34 @@ describe("meal photo companion routes", () => {
       },
     });
     expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
+  });
+
+  it("rejects never-consented scoped uploads before validation or staging", async () => {
+    mocks.requireActiveMealPhotoCaptureEnrollment.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the Murph legal consent before continuing.",
+      }),
+    );
+
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "HOSTED_CONSENT_REQUIRED",
+        message: "Accept the Murph legal consent before continuing.",
+      },
+    });
+    expect(mocks.readAndValidateMealPhotoUpload).not.toHaveBeenCalled();
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+    expect(mocks.stageMealPhoto).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("lets the narrow scoped credential revoke only itself without a body", async () => {

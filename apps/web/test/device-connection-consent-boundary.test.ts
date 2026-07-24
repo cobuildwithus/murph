@@ -35,6 +35,42 @@ test("stale launch-document versions do not stop historically authorized device 
   assert.match(connectStartSource, /assertHostedWhoopConnectCapacityAvailable/u);
 });
 
+test("stale launch-document versions do not stop chat-adjacent companion actions", () => {
+  // These surfaces have no consent UI of their own, so they accept historical
+  // launch grants; members with no grant at all still fail closed.
+  const nonblockingCompanionPaths = [
+    "src/lib/device-sync/meal-photo-capture.ts",
+    "app/api/device-sync/companion/imessage-mini-app/proof-action/route.ts",
+  ];
+
+  for (const relativePath of nonblockingCompanionPaths) {
+    assert.doesNotMatch(
+      readSource(relativePath),
+      /assertHostedLaunchRequiredConsentGranted/u,
+      `${relativePath} must remain available when launch-document acceptance is stale`,
+    );
+    assert.match(
+      readSource(relativePath),
+      /assertHostedHistoricalLaunchConsentGranted/u,
+      `${relativePath} must retain historical launch authorization`,
+    );
+  }
+
+  // Reaction joins relax to the historical assert while web joins keep the
+  // current-version gate; both live in group-store, so assert the branch.
+  const groupStoreSource = readSource("src/lib/hosted-groups/group-store.ts");
+  assert.match(
+    groupStoreSource,
+    /joinOrigin === "group_chat_reaction"[\s\S]{0,200}assertHostedHistoricalLaunchConsentGranted/u,
+    "reaction joins must accept historical launch consent",
+  );
+  assert.match(
+    groupStoreSource,
+    /\} else \{\s*await assertHostedLaunchRequiredConsentGranted\(\{ memberId: input\.memberId/u,
+    "web joins must keep requiring current launch consent",
+  );
+});
+
 test("Strava stays disabled as a separate provider product gate", () => {
   const targetSource = readSource(
     "../../packages/device-syncd/src/config/connect-targets.ts",
