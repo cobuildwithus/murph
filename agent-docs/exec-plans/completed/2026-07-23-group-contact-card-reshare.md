@@ -35,9 +35,11 @@ Three stacked causes:
 3. `packages/assistant-engine/skills/group-chat/SKILL.md` and
    `packages/assistant-engine/src/assistant/system-prompt.ts`
    - Both surfaces now say: do not re-send unprompted, but if someone asks to
-     resend or re-share the card, share it again; `already_shared` means a
-     send within the last few minutes, so say the card was just sent instead
-     of claiming the chat blocks duplicates.
+     resend or re-share the card, share it again. The skill explains that
+     `already_shared` proves only a recent share attempt, not delivery (the
+     reservation survives ambiguous send failures), so the assistant points
+     to the visible card or offers to retry shortly, and never claims the
+     chat blocks duplicates.
 4. Focused tests updated: throttle-window test, idempotency-key assertion, and
    prompt/skill string assertions (including a regression assertion that
    "Never try to re-send it" stays gone).
@@ -49,3 +51,6 @@ Three stacked causes:
 - The failed-send release path is unchanged.
 - No new persisted state; the existing `hostedLinqContactCardShare` row and
   reservation seam are reused.
+Status: completed
+Updated: 2026-07-24
+Completed: 2026-07-24
