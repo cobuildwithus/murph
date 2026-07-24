@@ -640,7 +640,8 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
  * iMessage-only gate and the per-chat throttle reservation. Best effort:
  * a share failure never fails or delays the reply delivery, and the request
  * signal is deliberately not forwarded because the share may run after the
- * response completes.
+ * response completes. With or without a post-response scheduler, this returns
+ * before the provider attachment work settles.
  */
 export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input: {
   chatId: string | null;
@@ -648,7 +649,7 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
   prisma: HostedLinqTransportPersistenceClient;
   scheduleAfterResponse?: HostedLinqTransportPostResponseScheduler;
   service: string | null;
-}): Promise<void> | void {
+}): void {
   if (
     !input.chatId
     || !isHostedLinqContactCardAutoShareEligible({ service: input.service })
@@ -695,7 +696,7 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
     input.scheduleAfterResponse(task);
     return;
   }
-  return task();
+  void task();
 }
 
 function buildHostedLinqContactCardShareLogDetails(
@@ -893,7 +894,7 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
       return milestone;
     });
     if (milestone.restoreOnboardingLink) {
-      await queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
+      void queueHostedLinqContactCardShareAfterDeliveredInviteSignup({
         chatId: milestone.restoreOnboardingLink.linqChatId,
         memberId: milestone.restoreOnboardingLink.memberId,
         prisma: input.prisma,

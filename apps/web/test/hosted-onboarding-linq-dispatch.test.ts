@@ -241,16 +241,14 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
   };
 });
 
-vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", async () => {
-  const actual = await vi.importActual<
-    typeof import("@/src/lib/hosted-onboarding/linq-contact-card-share")
-  >("@/src/lib/hosted-onboarding/linq-contact-card-share");
-  return {
-    ...actual,
-    shareMurphHostedLinqContactCardVcfToChat:
-      mocks.shareMurphHostedLinqContactCardVcfToChat,
-  };
-});
+// Keep this mock self-contained: importing the actual module here can expose
+// this mocked namespace to another serialized file in the CI Vitest project.
+vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  isHostedLinqContactCardAutoShareEligible: (input: { service: string | null }) =>
+    input.service?.trim().toLowerCase() === "imessage",
+  shareMurphHostedLinqContactCardVcfToChat:
+    mocks.shareMurphHostedLinqContactCardVcfToChat,
+}));
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
   nudgeHostedRunnerBestEffort: vi.fn(async () => "wake"),

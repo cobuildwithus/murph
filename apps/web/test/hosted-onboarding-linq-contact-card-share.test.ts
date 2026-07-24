@@ -288,13 +288,19 @@ describe("shareMurphHostedLinqContactCardVcfToChat", () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-07-24T12:00:00.000Z");
 
-    await shareMurphHostedLinqContactCardVcfToChat({
+    await expect(shareMurphHostedLinqContactCardVcfToChat({
       chatId: "chat_123",
       idempotencyKeyPrefix: "group-contact-card",
       memberId: "member_123",
       now,
       prisma: prisma.client as never,
-    });
+    })).resolves.toEqual({ status: "sent" });
+    expect(prisma.rows).toEqual([
+      expect.objectContaining({
+        lastContactCardShareAttemptedAt: now,
+        memberId: "member_123",
+      }),
+    ]);
     await expect(shareMurphHostedLinqContactCardVcfToChat({
       chatId: "chat_123",
       idempotencyKeyPrefix: "signup-contact-card",
