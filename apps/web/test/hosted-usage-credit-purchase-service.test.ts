@@ -83,9 +83,17 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-stripe-customer", () => ({
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
   buildHostedGroupUsageFundingPath: (joinCode: string) =>
     `/groups/fund/${encodeURIComponent(joinCode)}`,
-  normalizeHostedGroupUsageJoinCode: (value: unknown) =>
+  normalizeHostedGroupUsageFundingLocator: (value: unknown) =>
     typeof value === "string" && value.length >= 16 ? value : null,
-  readHostedGroupUsageFundingTargetByJoinCode:
+  normalizeHostedGroupUsageJoinCode: (value: unknown) =>
+    typeof value === "string" && value.length >= 16 && !value.startsWith("gf1.")
+      ? value
+      : null,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId: (value: unknown) =>
+    typeof value === "string" && value.startsWith("gf1.")
+      ? value.split(".")[1] ?? null
+      : null,
+  readHostedGroupUsageFundingTargetByLocator:
     mocks.readHostedGroupUsageFundingTargetByJoinCode,
 }));
 

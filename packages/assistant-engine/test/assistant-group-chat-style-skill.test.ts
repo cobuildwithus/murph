@@ -41,16 +41,16 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'Group messages are phone-screen short: a few short sentences is the default shape for any reply, whatever the ask.',
+      "the room's Detail setting is a ceiling on unrequested length, never a target",
     )
     expect(normalized).toContain(
-      "The room's Detail setting is a hard ceiling on length, never a target.",
+      'Never skimp on asked-for substance: when someone directly asks a question whose complete answer genuinely needs a few paragraphs, give that answer, as tight as accuracy allows.',
     )
     expect(normalized).toContain(
-      'Unless Detail is 10/10 or someone explicitly asked this turn for the full write-up, do not send a multi-paragraph message, and the ceiling covers the whole turn, including every `---` bubble.',
+      'What the ceiling kills is volunteered length — frameworks, multi-topic essays, background beyond the question, detail nobody asked for — and it covers the whole turn, including every `---` bubble.',
     )
     expect(normalized).toContain(
-      'send the headline decision or answer, let the room ask for more, and keep durable detail on the owning vault page instead of in the chat',
+      'For open-ended setup, planning, or brainstorm asks, depth arrives incrementally: headline first, one decision per message, more on request',
     )
     expect(normalized).toContain(
       "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
