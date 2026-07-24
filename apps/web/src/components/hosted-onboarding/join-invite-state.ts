@@ -96,6 +96,7 @@ function buildJoinInviteStatusRefreshFingerprint(
       matchesInvite: status.session.matchesInvite,
     },
     stage: status.stage,
+    telegramStartRequired: status.telegramStartRequired,
   }));
 }
 
@@ -159,6 +160,9 @@ export function resolveJoinInviteSubtitle(status: HostedInviteStatusPayload): st
     case "blocked":
       return "This account can’t continue from this invite.";
     case "active":
+      if (status.telegramStartRequired) {
+        return "Message Murph on Telegram to start.";
+      }
       return status.murphPhoneNumber
         ? "Text Murph below to start."
         : "You’re all set.";

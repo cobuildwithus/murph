@@ -138,7 +138,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("keeps a Telegram identity setup-required until an inbound thread exists", () => {
+  it("treats a linked Telegram identity as setup-complete while delivery still waits for an inbound thread", () => {
     const input = {
       identity: null,
       routing: {
@@ -151,9 +151,10 @@ describe("hosted member messaging authority", () => {
     expect(messaging).toMatchObject({
       hasDirectMessagingChannel: false,
       hasTelegram: false,
+      telegramAwaitingInbound: true,
       telegramTarget: null,
     });
-    expect(isHostedMemberMessagingSetupRequired(input)).toBe(true);
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
     expect(resolveHostedMemberChannels({
       ...input,
       emailLinked: false,
@@ -167,6 +168,38 @@ describe("hosted member messaging authority", () => {
       memberId: "member_telegram",
       messaging,
     })).toBeNull();
+  });
+
+  it("stops awaiting inbound once the Telegram thread exists", () => {
+    const messaging = resolveHostedMemberMessagingState({
+      identity: null,
+      routing: {
+        telegramThreadId: "456",
+        telegramUserId: "456",
+      },
+    });
+
+    expect(messaging).toMatchObject({
+      hasDirectMessagingChannel: true,
+      hasTelegram: true,
+      telegramAwaitingInbound: false,
+    });
+  });
+
+  it("does not await inbound when no Telegram account is linked", () => {
+    const input = {
+      identity: null,
+      routing: {
+        telegramThreadId: null,
+        telegramUserId: null,
+      },
+    };
+
+    expect(resolveHostedMemberMessagingState(input)).toMatchObject({
+      hasDirectMessagingChannel: false,
+      telegramAwaitingInbound: false,
+    });
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(true);
   });
 
   it("uses the exact inbound-observed Telegram thread for delivery", () => {

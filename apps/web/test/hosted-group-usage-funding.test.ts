@@ -24,13 +24,21 @@ import {
   calculateHostedGroupUsageRemainingPercent,
 } from "@/src/lib/hosted-groups/group-usage-capacity";
 import {
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  normalizeHostedGroupUsageFundingLocator,
+  normalizeHostedGroupUsageJoinCode,
+  readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByJoinCode,
+  readHostedGroupUsageFundingTargetByLocator,
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
+
+const TEST_HMAC_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 describe("hosted group usage funding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_HMAC_KEY;
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
   });
@@ -115,6 +123,167 @@ describe("hosted group usage funding", () => {
       })).toBe(0);
     },
   );
+
+  it("derives a signed funding-only locator URL for a chat with no group row", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: false,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+    });
+
+    const status = await readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    });
+    const expectedLocator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    expect(status).toEqual({
+      capacityState: "exhausted",
+      fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
+      periodEnd: "2026-08-01T00:00:00.000Z",
+      remainingPercent: 0,
+    });
+    expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
+  });
+
+  it("derives the locator URL for a group row without a join code", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: null })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 900_000n,
+    });
+
+    const status = await readHostedGroupUsageStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(status?.capacityState).toBe("low");
+    expect(status?.fundingUrl).toContain("/groups/fund/gf1.member_group_runtime.");
+  });
+
+  it("never lets the signed locator pass as a join code", () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    expect(locator).not.toBeNull();
+    expect(normalizeHostedGroupUsageJoinCode(locator)).toBeNull();
+    expect(normalizeHostedGroupUsageFundingLocator(locator)).toBe(locator);
+    expect(normalizeHostedGroupUsageFundingLocator("group_join_code_1234"))
+      .toBe("group_join_code_1234");
+  });
+
+  it("rejects tampered, foreign, and malformed locators", () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const [prefix, memberId, signature] = (locator ?? "").split(".");
+
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(locator))
+      .toBe("member_group_runtime");
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(
+      `${prefix}.member_other_1.${signature}`,
+    )).toBeNull();
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(
+      `${prefix}.${memberId}.${signature.slice(0, -2)}xx`,
+    )).toBeNull();
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(`${prefix}.${memberId}`))
+      .toBeNull();
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId("group_join_code_1234"))
+      .toBeNull();
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(null)).toBeNull();
+  });
+
+  it("resolves a verified locator to its exact container without a group row", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+
+    await expect(readHostedGroupUsageFundingTargetByLocator({
+      locator: locator ?? "",
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      displayName: null,
+      fundingPath: `/groups/fund/${encodeURIComponent(locator ?? "")}`,
+      joinCode: locator,
+      kind: "custom",
+      runtimeMemberId: "member_group_runtime",
+    });
+  });
+
+  it("resolves a signed locator through the join-code entry the funding page uses", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+
+    await expect(readHostedGroupUsageFundingTargetByJoinCode({
+      joinCode: locator ?? "",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      joinCode: locator,
+      kind: "custom",
+      runtimeMemberId: "member_group_runtime",
+    });
+  });
+
+  it("fails closed on a locator for a missing or inactive container", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    await expect(readHostedGroupUsageFundingTargetByLocator({
+      locator: locator ?? "",
+      prisma: {
+        hostedGroup: { findUnique: vi.fn(async () => null) },
+        hostedThreadContainer: { findUnique: vi.fn(async () => null) },
+      } as never,
+    })).resolves.toBeNull();
+
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+    await expect(readHostedGroupUsageFundingTargetByLocator({
+      locator: locator ?? "",
+      prisma: {
+        hostedGroup: { findUnique: vi.fn(async () => null) },
+        hostedThreadContainer: {
+          findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+        },
+      } as never,
+    })).resolves.toBeNull();
+  });
 
   it("fails closed when the group runtime is not active", async () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
