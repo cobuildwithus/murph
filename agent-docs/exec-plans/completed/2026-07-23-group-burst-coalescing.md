@@ -28,10 +28,15 @@ hold's resume time into the scan result's reply wake (`replies.nextWakeAt`),
 which the run loop and hosted maintenance already project into the runtime's
 next wake. Selection is frozen per pass, so a mid-hold arrival lands in a later
 pass, re-lists old plus new messages, and recomputes the hold (extension). The
-hold fails open when a later same-source candidate is already visible, and a
-held-only pass no longer defers due cron work. No in-process sleeping, no
-persisted state, no new wake owner. System/automation mailbox items and direct
-conversations are never held.
+hold fails open when a later same-source candidate is already visible. The
+hold is hosted-only by explicit scope decision: only hosted conversation-lane
+mailbox inputs are eligible, because only the hosted runtime provides a wake
+continuation owner; local continuous, `--once`, and assistantd one-shot runs
+keep pre-change immediate replies. A zero-work pass that armed a hold wake
+returns promptly instead of running inline runtime maintenance, and cron
+due/defer ownership is untouched. No in-process sleeping, no persisted state,
+no new wake owner. System/automation mailbox items and direct conversations
+are never held.
 
 ### B. Last-wins steered finals in groups
 

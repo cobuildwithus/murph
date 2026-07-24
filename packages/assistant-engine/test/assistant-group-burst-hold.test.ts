@@ -150,6 +150,26 @@ describe('assistant group burst hold decision', () => {
     })
   })
 
+  it('never holds local inbox-capture inputs', () => {
+    const localItem = createHoldItem()
+    expect(decideAssistantGroupBurstHold({
+      items: [
+        {
+          ...localItem,
+          sourceRef: {
+            captureId: 'capture-local-1',
+            kind: 'inbox-capture',
+            source: 'telegram',
+            version: null,
+          },
+        },
+      ],
+      now: BURST_STARTED_AT,
+    })).toEqual({
+      ready: true,
+    })
+  })
+
   it('never holds system-lane items', () => {
     expect(decideAssistantGroupBurstHold({
       items: [

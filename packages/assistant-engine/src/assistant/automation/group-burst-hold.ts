@@ -77,9 +77,12 @@ function isAssistantGroupBurstHoldItem(
     return false
   }
 
-  return item.sourceRef?.kind === 'inbox-capture' ||
-    (
-      item.sourceRef?.kind === 'hosted-mailbox' &&
-      item.sourceRef.lane === 'conversation'
-    )
+  // Deferring a held group requires a wake continuation owner. Only the
+  // hosted runtime provides one (the selected-input wake projection and
+  // caller-owned cron deferral); local continuous and one-shot runs have no
+  // owner to resume a deferred reply, so local inputs never hold.
+  return (
+    item.sourceRef?.kind === 'hosted-mailbox' &&
+    item.sourceRef.lane === 'conversation'
+  )
 }

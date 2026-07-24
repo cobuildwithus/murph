@@ -699,6 +699,36 @@ function createAssistantInputSourceForCaptures(
   }
 }
 
+function createAssistantInputSourceForCandidates(
+  candidates: readonly AssistantInputCandidate[],
+): AssistantInputSource {
+  return {
+    refresh: vi.fn(async () => ({
+      progressed: false,
+      reason: 'no_new_input' as const,
+    })),
+    listInputCandidates: vi.fn(async (input) => ({
+      inputs: candidates
+        .filter((candidate) =>
+          input.sourceId ? candidate.event.source === input.sourceId : true,
+        )
+        .filter((candidate) =>
+          input.afterCursor
+            ? compareAssistantInputCursors(candidate.event.cursor, input.afterCursor) > 0
+            : true,
+        )
+        .slice(0, input.limit ?? candidates.length),
+      nextCursor: candidates.length > 0
+        ? candidates[candidates.length - 1]!.event.cursor
+        : input.afterCursor ?? null,
+    })),
+    listNewConversationInputs: vi.fn(async () => ({
+      inputs: [],
+      nextCursor: null,
+    })),
+  }
+}
+
 function assistantInputCandidateFromInboxCapture(
   capture: ReturnType<typeof createCaptureSummary>,
 ): AssistantInputCandidate {
@@ -1552,16 +1582,17 @@ describe('assistant automation scanner', () => {
     )
   })
 
-  it('defers a fresh group burst to the wake owner without advancing the cursor', async () => {
+  it('defers a fresh hosted group burst to the wake owner without advancing the cursor', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
-    const first = createCaptureSummary({
-      captureId: 'capture-group-burst-first',
-      createdAt: new Date(burstStartedAt).toISOString(),
+    const first = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-group-burst',
+      inputId: 'ain_group_burst_first_0123456789abcdef0123',
       occurredAt: new Date(burstStartedAt).toISOString(),
       receivedAt: new Date(burstStartedAt).toISOString(),
+      text: 'group burst first',
       threadIsDirect: false,
     })
-    const inputSource = createAssistantInputSourceForCaptures([first])
+    const inputSource = createAssistantInputSourceForCandidates([first])
     const actualGrouping = await vi.importActual<
       typeof import('../src/assistant/automation/grouping.ts')
     >('../src/assistant/automation/grouping.ts')
@@ -1583,7 +1614,7 @@ describe('assistant automation scanner', () => {
         })
       },
       state: createAutomationState({
-        autoReplyChannels: ['telegram'],
+        autoReplyChannels: ['linq'],
       }),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1598,21 +1629,23 @@ describe('assistant automation scanner', () => {
 
   it('admits a mid-hold arrival on the next pass and coalesces it into one turn', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
-    const first = createCaptureSummary({
-      captureId: 'capture-group-burst-first',
-      createdAt: new Date(burstStartedAt).toISOString(),
+    const first = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-group-burst',
+      inputId: 'ain_group_burst_first_0123456789abcdef0123',
       occurredAt: new Date(burstStartedAt).toISOString(),
       receivedAt: new Date(burstStartedAt).toISOString(),
+      text: 'group burst first',
       threadIsDirect: false,
     })
-    const second = createCaptureSummary({
-      captureId: 'capture-group-burst-second',
-      createdAt: new Date(burstStartedAt + 3_000).toISOString(),
+    const second = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-group-burst',
+      inputId: 'ain_group_burst_second_0123456789abcdef012',
       occurredAt: new Date(burstStartedAt + 3_000).toISOString(),
       receivedAt: new Date(burstStartedAt + 3_000).toISOString(),
+      text: 'group burst second',
       threadIsDirect: false,
     })
-    const inputSource = createAssistantInputSourceForCaptures([first, second])
+    const inputSource = createAssistantInputSourceForCandidates([first, second])
     const actualGrouping = await vi.importActual<
       typeof import('../src/assistant/automation/grouping.ts')
     >('../src/assistant/automation/grouping.ts')
@@ -1622,7 +1655,7 @@ describe('assistant automation scanner', () => {
       typeof import('../src/assistant/automation/scanner.ts')
     >('../src/assistant/automation/scanner.ts')
     const state = createAutomationState({
-      autoReplyChannels: ['telegram'],
+      autoReplyChannels: ['linq'],
     })
 
     const stillHeldResult = await scanner.scanAssistantAutomationOnce({
@@ -1653,8 +1686,8 @@ describe('assistant automation scanner', () => {
         context: expect.objectContaining({
           inputCount: 2,
           inputIds: [
-            assistantInputCandidateFromInboxCapture(first).event.inputId,
-            assistantInputCandidateFromInboxCapture(second).event.inputId,
+            first.event.inputId,
+            second.event.inputId,
           ],
         }),
       }),
@@ -1663,22 +1696,23 @@ describe('assistant automation scanner', () => {
 
   it('fails open when a later same-source candidate waits behind a held group', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
-    const heldGroupInput = createCaptureSummary({
-      captureId: 'capture-held-group',
-      threadId: 'thread-held-group',
-      createdAt: new Date(burstStartedAt).toISOString(),
+    const heldGroupInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-held-group',
+      inputId: 'ain_held_group_0123456789abcdef0123456789',
       occurredAt: new Date(burstStartedAt).toISOString(),
       receivedAt: new Date(burstStartedAt).toISOString(),
+      text: 'held group message',
       threadIsDirect: false,
     })
-    const laterSameSourceDirectInput = createCaptureSummary({
-      captureId: 'capture-later-direct',
-      threadId: 'thread-later-direct',
-      createdAt: new Date(burstStartedAt + 1_000).toISOString(),
+    const laterSameSourceDirectInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-later-direct',
+      inputId: 'ain_later_direct_0123456789abcdef01234567',
       occurredAt: new Date(burstStartedAt + 1_000).toISOString(),
       receivedAt: new Date(burstStartedAt + 1_000).toISOString(),
+      text: 'later direct message',
+      threadIsDirect: true,
     })
-    const inputSource = createAssistantInputSourceForCaptures([
+    const inputSource = createAssistantInputSourceForCandidates([
       heldGroupInput,
       laterSameSourceDirectInput,
     ])
@@ -1703,7 +1737,7 @@ describe('assistant automation scanner', () => {
         })
       },
       state: createAutomationState({
-        autoReplyChannels: ['telegram'],
+        autoReplyChannels: ['linq'],
       }),
       vault: '/tmp/assistant-automation-vault',
     })
@@ -1714,45 +1748,37 @@ describe('assistant automation scanner', () => {
         ([call]) => call.context.inputIds,
       ),
     ).toEqual([
-      [
-        assistantInputCandidateFromInboxCapture(heldGroupInput).event.inputId,
-      ],
-      [
-        assistantInputCandidateFromInboxCapture(
-          laterSameSourceDirectInput,
-        ).event.inputId,
-      ],
+      [heldGroupInput.event.inputId],
+      [laterSameSourceDirectInput.event.inputId],
     ])
     const finalState =
       stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
-    expect(readAutoReplyCursor(finalState, 'telegram')).toEqual(
-      assistantInputCandidateFromInboxCapture(
-        laterSameSourceDirectInput,
-      ).event.cursor,
+    expect(readAutoReplyCursor(finalState, 'linq')).toEqual(
+      laterSameSourceDirectInput.event.cursor,
     )
   })
 
   it('holds a group without delaying a ready group on another source', async () => {
     const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
-    const heldGroupInput = createCaptureSummary({
-      captureId: 'capture-held-linq-group',
-      source: 'linq',
-      externalId: 'linq:held-group',
-      threadId: 'thread-held-group',
-      createdAt: new Date(burstStartedAt).toISOString(),
+    const heldGroupInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-held-group',
+      inputId: 'ain_held_linq_group_0123456789abcdef01234',
       occurredAt: new Date(burstStartedAt).toISOString(),
       receivedAt: new Date(burstStartedAt).toISOString(),
+      source: 'linq',
+      text: 'held linq group message',
       threadIsDirect: false,
     })
-    const readyOtherChannelInput = createCaptureSummary({
-      captureId: 'capture-ready-telegram',
-      source: 'telegram',
-      threadId: 'thread-ready-telegram',
-      createdAt: new Date(burstStartedAt + 1_000).toISOString(),
+    const readyOtherChannelInput = createCapturelessAssistantInputCandidate({
+      conversationThreadId: 'thread-ready-telegram',
+      inputId: 'ain_ready_telegram_0123456789abcdef012345',
       occurredAt: new Date(burstStartedAt + 1_000).toISOString(),
       receivedAt: new Date(burstStartedAt - 10_000).toISOString(),
+      source: 'telegram',
+      text: 'ready telegram group message',
+      threadIsDirect: false,
     })
-    const inputSource = createAssistantInputSourceForCaptures([
+    const inputSource = createAssistantInputSourceForCandidates([
       heldGroupInput,
       readyOtherChannelInput,
     ])
@@ -1786,11 +1812,7 @@ describe('assistant automation scanner', () => {
     expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          inputIds: [
-            assistantInputCandidateFromInboxCapture(
-              readyOtherChannelInput,
-            ).event.inputId,
-          ],
+          inputIds: [readyOtherChannelInput.event.inputId],
         }),
       }),
     )
@@ -1801,9 +1823,55 @@ describe('assistant automation scanner', () => {
       stateUpdates[stateUpdates.length - 1] ?? createAutomationState()
     expect(readAutoReplyCursor(finalState, 'linq')).toBeNull()
     expect(readAutoReplyCursor(finalState, 'telegram')).toEqual(
-      assistantInputCandidateFromInboxCapture(
-        readyOtherChannelInput,
-      ).event.cursor,
+      readyOtherChannelInput.event.cursor,
+    )
+  })
+
+  it('never holds local inbox-capture group inputs', async () => {
+    const burstStartedAt = Date.parse('2026-07-23T12:00:00.000Z')
+    const freshLocalGroupCapture = createCaptureSummary({
+      captureId: 'capture-local-group-burst',
+      createdAt: new Date(burstStartedAt).toISOString(),
+      occurredAt: new Date(burstStartedAt).toISOString(),
+      receivedAt: new Date(burstStartedAt).toISOString(),
+      threadIsDirect: false,
+    })
+    const inputSource = createAssistantInputSourceForCaptures([
+      freshLocalGroupCapture,
+    ])
+    const actualGrouping = await vi.importActual<
+      typeof import('../src/assistant/automation/grouping.ts')
+    >('../src/assistant/automation/grouping.ts')
+    groupingMocks.collectAssistantAutoReplyGroup
+      .mockImplementation(actualGrouping.collectAssistantAutoReplyGroup)
+    const scanner = await vi.importActual<
+      typeof import('../src/assistant/automation/scanner.ts')
+    >('../src/assistant/automation/scanner.ts')
+
+    // Local runs have no wake continuation owner, so a fresh local group
+    // message must reply immediately instead of holding.
+    const result = await scanner.scanAssistantAutomationOnce({
+      inboxServices: createInboxServices(),
+      inputSource,
+      now: () => burstStartedAt + 1_000,
+      state: createAutomationState({
+        autoReplyChannels: ['telegram'],
+      }),
+      vault: '/tmp/assistant-automation-vault',
+    })
+
+    expect(result.replies.nextWakeAt).toBeNull()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledOnce()
+    expect(scannerReplyMocks.processAssistantAutoReplyGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          inputIds: [
+            assistantInputCandidateFromInboxCapture(
+              freshLocalGroupCapture,
+            ).event.inputId,
+          ],
+        }),
+      }),
     )
   })
 
