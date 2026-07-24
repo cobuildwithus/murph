@@ -20669,22 +20669,12 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(activeWakeAt);
       assert.deepEqual(checkpointRequests.map((request) => [
         request.reason,
+        request.nextWakeAt,
         request.nextWakeReason,
       ]), [
-        ["idle_shutdown", "assistant"],
-        ["idle_shutdown", null],
+        ["idle_shutdown", activeWakeAt, "assistant"],
+        ["idle_shutdown", null, null],
       ]);
-      // The mid-pass checkpoint arms an assistant wake no later than the
-      // active pass wake so a crash during provider work cannot leave the
-      // durable workspace dormant.
-      const midPassWakeAt = checkpointRequests[0]?.nextWakeAt ?? null;
-      const projectedWakeAt = activeWakeAt as string | null;
-      assert.ok(
-        midPassWakeAt !== null
-        && projectedWakeAt !== null
-        && midPassWakeAt <= projectedWakeAt,
-      );
-      assert.equal(checkpointRequests[1]?.nextWakeAt, null);
       assert.equal(
         checkpointRequests[0]?.redactedStatus?.activePassStatePreserved,
         true,
