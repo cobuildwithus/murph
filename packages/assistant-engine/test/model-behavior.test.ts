@@ -484,6 +484,16 @@ describe('assistant execution prompt contract', () => {
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
     )
+    // A relative request or accepted offer resolves to an exact score via
+    // show-then-set, so "loosen up"/"yes" never strands the journey on a
+    // missing number.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`show` the current score, then `set` it about three points that way',
+    )
+    // The proactive offer is rare and only on obvious dissatisfaction.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Offer a dial change rarely, and only when it is obvious',
+    )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`show`: scores/sources only',
     )
@@ -1451,9 +1461,11 @@ describe('assistant system prompt cache stability', () => {
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    // Cap bumped to 68_000 for the conversational-only Unhinged dial guidance
-    // and the style-dissatisfaction offer bullet in the stable route layer.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_000)
+    // Cap bumped to 68_500 for the conversational-only Unhinged dial guidance,
+    // the rare cross-turn style-dissatisfaction offer, and the relative-adjustment
+    // rule (show-then-set to the adjacent band) that lets "loosen up"/"yes" reach
+    // an exact score without guessing — all resident in the stable route layer.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_500)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
