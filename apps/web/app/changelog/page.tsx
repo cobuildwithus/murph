@@ -47,6 +47,355 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "group-replies-stay-short": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "how are we scoring this one?" },
+        {
+          from: "murph",
+          body: "Total minutes moved, weekly. Ties go to whoever logged more days.",
+        },
+      ]}
+    />
+  ),
+  "group-usage-always-fundable": (
+    <PreferenceCard
+      label="Add usage to this group"
+      meta="Stripe Checkout"
+      entries={[
+        { label: "$5 pack", value: "Choose" },
+        { label: "$10 pack", value: "Choose" },
+        { label: "$25 pack", value: "Choose" },
+      ]}
+    />
+  ),
+  "group-join-permissions-preselected": (
+    <ChecklistMock
+      label="Join the challenge"
+      items={[
+        { label: "Share daily steps with the group", done: true },
+        { label: "Share workout minutes with the group", done: true },
+        { label: "Share sleep with the group", done: false },
+        { label: "Share anything else", done: false },
+      ]}
+    />
+  ),
+  "updated-legal-documents-keep-chat-working": (
+    <ChecklistMock
+      label="While your review is outstanding"
+      items={[
+        { label: "Group joins by reaction keep working", done: true },
+        { label: "Meal photos keep uploading", done: true },
+        { label: "Confirmation taps keep working", done: true },
+        { label: "Devices stay connected and syncing", done: true },
+      ]}
+    />
+  ),
+  "reactions-read-in-context": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "Chest pain with shortness of breath is a call-911 situation, not a wait-and-see one.",
+          reaction: "❤️",
+        },
+        {
+          from: "murph",
+          body: "Read that as you seeing it, not as confirmation. Are you having symptoms right now?",
+        },
+      ]}
+    />
+  ),
+  "group-usage-percent-visible": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "what's our usage at?" },
+        {
+          from: "murph",
+          body: "About 18% left for this period, which resets Aug 3. I can send the link if anyone wants to top it up.",
+        },
+      ]}
+    />
+  ),
+  "group-daily-text-cap-doubled": (
+    <StatBlock
+      label="Group texts per day"
+      before="100"
+      after="200"
+      caption="Direct chats keep 100"
+    />
+  ),
+  "challenge-kickoff-asks-for-intros": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        {
+          from: "murph",
+          body: "Everyone who is in: one line about yourself and a photo, and you get drawn into the challenge comics. Both optional, we start either way.",
+        },
+      ]}
+    />
+  ),
+  "generated-images-actually-arrive": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        { from: "user", body: "send a pic of yourself" },
+        {
+          bare: true,
+          body: <ImagePreview alt="A generated picture from Murph" caption="murph.png" />,
+          from: "murph",
+        },
+      ]}
+    />
+  ),
+  "daily-activity-totals-count-every-workout": (
+    <MetricCardMock
+      label="Yesterday"
+      title="Workouts"
+      value="2"
+      caption="Lift 48m, evening walk 32m"
+      sparkline={[1, 0, 1, 2, 1, 1, 2]}
+      delta={{ direction: "up", text: "80 min total" }}
+    />
+  ),
+  "onboarding-sounds-like-a-conversation": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        {
+          from: "murph",
+          body: "What would show you this is improving? Something like stairs without stopping, sleeping through the night, or lifting what you used to.",
+        },
+        { from: "user", body: "sleeping through the night, mostly" },
+      ]}
+    />
+  ),
+  "biomarker-pages-explain-the-number": (
+    <MetricCardMock
+      label="Biomarkers"
+      title="HbA1c"
+      value="5.4%"
+      caption="Lab range under 5.7%"
+      sparkline={[5.8, 5.7, 5.7, 5.6, 5.5, 5.4]}
+      delta={{ direction: "down", text: "0.4 since March" }}
+    />
+  ),
+  "family-usage-top-ups": (
+    <PreferenceCard
+      label="Settings · Family"
+      meta="Per member"
+      entries={[
+        { label: "Add usage", note: "For this member only", value: "$5" },
+        { label: "Add usage", note: "For this member only", value: "$10" },
+        { label: "Add usage", note: "For this member only", value: "$25" },
+      ]}
+    />
+  ),
+  "garmin-historical-permission-preflight": (
+    <PhoneMock
+      channel="Connect Garmin"
+      messages={[
+        {
+          from: "murph",
+          body: "Turn on Historical Data on Garmin's next screen. It is off by default and it is what lets me see anything before today.",
+        },
+        { bare: true, body: <VoiceBubble duration="0:08" />, from: "murph" },
+      ]}
+    />
+  ),
+  "knowledge-page": (
+    <ChecklistMock
+      label="What Murph works from"
+      items={[
+        { label: "Reviewed research and evidence grades", done: true },
+        { label: "Specialist skills per health area", done: true },
+        { label: "Your labs, devices, and history", done: true },
+        { label: "Actions it can take for you", done: true },
+      ]}
+    />
+  ),
+  "two-week-experiment-baselines": (
+    <StatBlock
+      label="Baseline before an experiment"
+      before="7 days"
+      after="14 days"
+      caption="Saved runs keep their timing"
+    />
+  ),
+  "progress-updates-before-slow-work": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "here's my bloodwork from Tuesday" },
+        {
+          from: "murph",
+          body: "Got it, saving it now and reading through the panels. Back in a moment.",
+        },
+      ]}
+    />
+  ),
+  "approved-files-send-themselves": (
+    <ChecklistMock
+      label="After you approve"
+      items={[
+        { label: "Approve with your passkey", done: true },
+        { label: "Murph finishes that exact send", done: true },
+        { label: "One attachment, no caption bubble", done: true },
+        { label: "Type a confirmation first", done: false },
+      ]}
+    />
+  ),
+  "group-ask-answers-come-back-promptly": (
+    <StatBlock
+      label="Answer from a group you asked"
+      before="2m 20s"
+      after="Seconds"
+      caption="No second message needed"
+    />
+  ),
+  "hosted-work-runs-on-two-cores": (
+    <StatBlock
+      label="Hosted container"
+      before="1 vCPU"
+      after="2 vCPU"
+      caption="Memory doubled to 6 GiB"
+    />
+  ),
+  "murph-personas": (
+    <PreferenceCard
+      label="Who do you want in your corner?"
+      meta="First run"
+      entries={[
+        { label: "Persona", note: "15 to choose from", value: "Chosen" },
+        { label: "Voice", note: "5 matched to that persona", value: "Preview" },
+        { label: "Text style", note: "Standard or lowercase", value: "Set" },
+      ]}
+    />
+  ),
+  "consented-group-to-member-questions": (
+    <PhoneMock
+      channel="Group chat"
+      messages={[
+        {
+          from: "murph",
+          body: "To compare weekly step totals I need each of you to allow one question to your own Murph. Like this message to allow it.",
+          reaction: "👍",
+        },
+        { from: "murph", body: "Thanks. That permission covers steps only." },
+      ]}
+    />
+  ),
+  "group-usage-funding": (
+    <PreferenceCard
+      label="Fund this group"
+      meta="No plan required"
+      entries={[
+        { label: "$5 pack", value: "Choose" },
+        { label: "$10 pack", value: "Choose" },
+        { label: "$25 pack", value: "Choose" },
+      ]}
+    />
+  ),
+  "biomarkers-index-rebuilt": (
+    <ChecklistMock
+      label="Biomarkers"
+      items={[
+        { label: "Device readings first", done: true },
+        { label: "Lab results grouped by health area", done: true },
+        { label: "One canonical unit per history", done: true },
+        { label: "A catch-all Other pile", done: false },
+      ]}
+    />
+  ),
+  "low-usage-mentioned-in-conversation": (
+    <PhoneMock
+      channel="iMessage"
+      messages={[
+        { from: "user", body: "how did I sleep last week?" },
+        {
+          from: "murph",
+          body: "Averaged 6h41m, best on the two nights you stopped screens by 10. Heads up, we're low on usage this period and may pause soon.",
+        },
+      ]}
+    />
+  ),
+  "group-newsletter-setup": (
+    <CalendarMock
+      label="Group newsletter"
+      entries={[
+        { day: "Sun", time: "8:00 AM", what: "Weekly recap to the group chat" },
+        { day: "Sun", time: "8:00 AM", what: "Movement and sleep scopes" },
+        { day: "Sun", time: "8:00 AM", what: "Pinned to this thread only" },
+      ]}
+    />
+  ),
+  "completed-experiments-show-daily-points": (
+    <MetricCardMock
+      label="Finished experiment"
+      title="Resting heart rate"
+      value="54 bpm"
+      caption="14 baseline days, 14 intervention days"
+      sparkline={[58, 57, 58, 57, 56, 55, 54, 54]}
+      delta={{ direction: "down", text: "3 bpm vs baseline" }}
+    />
+  ),
+  "scheduled-messages-get-the-full-murph": (
+    <CalendarMock
+      label="Scheduled check-in"
+      entries={[
+        { day: "Fri", time: "7:30 AM", what: "Same prompt as a live chat" },
+        { day: "Fri", time: "7:30 AM", what: "Same skills and tools" },
+        { day: "Fri", time: "7:30 AM", what: "Same voice and style" },
+      ]}
+    />
+  ),
+  "pulse-finishes-after-payment-setup": (
+    <ChecklistMock
+      label="Start Pulse"
+      items={[
+        { label: "Confirm Start Pulse once", done: true },
+        { label: "Add a payment method at Stripe", done: true },
+        { label: "Pulse starts on the way back", done: true },
+        { label: "Click Start Pulse a second time", done: false },
+      ]}
+    />
+  ),
+  "contaminant-tests-on-product-pages": (
+    <ChecklistMock
+      label="Independent product testing"
+      items={[
+        { label: "Contaminant observations with their source", done: true },
+        { label: "Sample and lot provenance", done: true },
+        { label: "Honest ranges, not invented exact values", done: true },
+        { label: "A safe or unsafe verdict", done: false },
+      ]}
+    />
+  ),
+  "private-experiments-open-from-home": (
+    <MetricCardMock
+      label="Home"
+      title="Magnesium before bed"
+      value="Day 19"
+      caption="Opens to your saved run"
+      sparkline={[6.1, 6.4, 6.3, 6.8, 7, 6.9, 7.2]}
+      delta={{ direction: "up", text: "26 min more sleep" }}
+    />
+  ),
+  "strava-connections-paused": (
+    <ChecklistMock
+      label="Strava, while paused"
+      items={[
+        { label: "Existing connection keeps its data", done: true },
+        { label: "Status stays truthful", done: true },
+        { label: "Disconnect still works", done: true },
+        { label: "New or renewed connections", done: false },
+      ]}
+    />
+  ),
   "sleep-support-that-stays": (
     <PhoneMock
       channel="iMessage"
