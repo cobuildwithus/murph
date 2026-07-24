@@ -3,6 +3,7 @@
 import { useSearchParams, useRouter } from "next/navigation";
 import { BrandContent } from "./brand-content";
 import { ComponentsContent } from "./components-content";
+import type { GroupJoinPermissionsStudyProps } from "./group-join-permissions-study";
 import { SectionsContent } from "./sections-content";
 
 const TABS = [
@@ -13,7 +14,11 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export function DesignPage() {
+export function DesignPage({
+  groupJoinPermissionsStudy,
+}: {
+  groupJoinPermissionsStudy?: GroupJoinPermissionsStudyProps;
+}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const activeTab = (searchParams.get("tab") as TabId) || "brand";
@@ -46,7 +51,9 @@ export function DesignPage() {
       {activeTab === "brand" ? (
         <BrandContent />
       ) : activeTab === "sections" ? (
-        <SectionsContent />
+        <SectionsContent
+          groupJoinPermissionsStudy={groupJoinPermissionsStudy}
+        />
       ) : (
         <ComponentsContent />
       )}
