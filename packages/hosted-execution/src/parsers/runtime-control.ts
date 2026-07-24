@@ -2089,7 +2089,12 @@ export function parseHostedRuntimeGroupToolResponse(
       );
       assertAllowedObjectKeys(
         usage,
-        new Set(["capacityState", "fundingUrl", "periodEnd"]),
+        new Set([
+          "capacityState",
+          "fundingUrl",
+          "periodEnd",
+          "remainingPercent",
+        ]),
         "Hosted runtime group tool read_usage usage",
       );
       const capacityState = requireString(
@@ -2118,6 +2123,17 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
         );
       }
+      const remainingPercent = usage.remainingPercent === undefined
+        ? undefined
+        : requireNonNegativeInteger(
+            usage.remainingPercent,
+            "Hosted runtime group tool read_usage remainingPercent",
+          );
+      if (remainingPercent !== undefined && remainingPercent > 100) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage remainingPercent must be at most 100.",
+        );
+      }
       return {
         action,
         result: {
@@ -2129,6 +2145,7 @@ export function parseHostedRuntimeGroupToolResponse(
               "Hosted runtime group tool read_usage fundingUrl",
             ),
             periodEnd,
+            ...(remainingPercent === undefined ? {} : { remainingPercent }),
           },
         },
       };

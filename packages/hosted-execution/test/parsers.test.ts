@@ -2163,8 +2163,8 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("parses coarse group usage responses without accepting accounting fields", () => {
-    const response = {
+  it("parses quantified group usage responses without accepting accounting fields", () => {
+    const legacyResponse = {
       action: "read_usage" as const,
       result: {
         status: "ok" as const,
@@ -2175,7 +2175,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     };
+    expect(parseHostedRuntimeGroupToolResponse(legacyResponse))
+      .toEqual(legacyResponse);
+    const response = {
+      ...legacyResponse,
+      result: {
+        ...legacyResponse.result,
+        usage: {
+          ...legacyResponse.result.usage,
+          remainingPercent: 20,
+        },
+      },
+    };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    for (const invalidRemainingPercent of [-1, 20.5, 101]) {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        ...response,
+        result: {
+          ...response.result,
+          usage: {
+            ...response.result.usage,
+            remainingPercent: invalidRemainingPercent,
+          },
+        },
+      })).toThrow(/remainingPercent/u);
+    }
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {
