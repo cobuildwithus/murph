@@ -632,6 +632,54 @@ describe('buildAssistantAutoReplyPrompt', () => {
     expect(result.prompt).toContain('Message text:\nmorning crew')
   })
 
+  it('renders the group sender handle and display name for telegram group inbound', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'morning crew', threadIsDirect: false },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'telegram',
+          mediaGroupId: null,
+          replyContext: null,
+          senderHandle: '1234567890',
+          senderUsername: 'alice_example',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).toContain('Sender: 1234567890')
+    expect(result.prompt).toContain('Sender name: @alice_example')
+  })
+
+  it('renders no telegram sender line without an authoritative handle', () => {
+    const result = buildAssistantAutoReplyPrompt([
+      createPromptInput({
+        captureOverrides: { text: 'morning crew', threadIsDirect: false },
+        sourceMetadata: {
+          externalThreadRouteAuthorityPresent: true,
+          kind: 'telegram',
+          mediaGroupId: null,
+          replyContext: null,
+          senderHandle: null,
+          // A display name alone is never attribution evidence.
+          senderUsername: 'alice_example',
+        },
+      }),
+    ])
+
+    expect(result.kind).toBe('ready')
+    if (result.kind !== 'ready') {
+      throw new Error('Expected a ready prompt result.')
+    }
+    expect(result.prompt).not.toContain('Sender:')
+    expect(result.prompt).not.toContain('Sender name:')
+    expect(result.prompt).not.toContain('alice_example')
+  })
+
   it('renders no sender line when linq metadata has no sender handle', () => {
     const result = buildAssistantAutoReplyPrompt([
       createPromptInput({

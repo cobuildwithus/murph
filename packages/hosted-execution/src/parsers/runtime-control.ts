@@ -124,7 +124,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
@@ -142,6 +142,7 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
+  type HostedRuntimeGroupToolCurrentTurnSender,
   type HostedRuntimeGroupDisclosureGrantListEntry,
   type HostedRuntimeGroupDisclosureGrantSummary,
   type HostedRuntimeGroupKind,
@@ -1088,19 +1089,21 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "linqSenderHandles", "projectionScopes"]),
+      new Set([
+        "action",
+        "currentTurnSender",
+        // Legacy alias: runners predating channel-qualified sender evidence
+        // still send Linq handles under the old key. Remove once every runner
+        // has shipped `currentTurnSender`.
+        "linqSenderHandles",
+        "projectionScopes",
+      ]),
       "Hosted runtime group tool read_shared request",
     );
+    const currentTurnSender = parseHostedRuntimeGroupCurrentTurnSenderRequest(record);
     return {
       action,
-      ...(record.linqSenderHandles === undefined
-          || record.linqSenderHandles === null
-        ? {}
-        : {
-            linqSenderHandles: parseHostedRuntimeGroupLinqSenderHandles(
-              record.linqSenderHandles,
-            ),
-          }),
+      ...(currentTurnSender === null ? {} : { currentTurnSender }),
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
@@ -1402,11 +1405,51 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   };
 }
 
-function parseHostedRuntimeGroupLinqSenderHandles(value: unknown): string[] {
-  return parseHostedRuntimeGroupBoundedHandles(value, {
-    allowEmpty: false,
-    label: "Hosted runtime group tool read_shared request linqSenderHandles",
-  });
+/**
+ * Reads channel-qualified current-turn sender evidence, accepting the legacy
+ * Linq-only key while runners roll forward. Supplying both is a contradiction,
+ * so it fails closed rather than guessing which one is authoritative.
+ */
+function parseHostedRuntimeGroupCurrentTurnSenderRequest(
+  record: Record<string, unknown>,
+): HostedRuntimeGroupToolCurrentTurnSender | null {
+  const currentTurnSenderPresent = record.currentTurnSender !== undefined
+    && record.currentTurnSender !== null;
+  const legacyHandlesPresent = record.linqSenderHandles !== undefined
+    && record.linqSenderHandles !== null;
+  if (currentTurnSenderPresent && legacyHandlesPresent) {
+    throw new TypeError(
+      "Hosted runtime group tool read_shared request must not supply both currentTurnSender and linqSenderHandles.",
+    );
+  }
+  if (legacyHandlesPresent) {
+    return {
+      channel: "linq",
+      handles: parseHostedRuntimeGroupBoundedHandles(record.linqSenderHandles, {
+        allowEmpty: false,
+        label: "Hosted runtime group tool read_shared request linqSenderHandles",
+      }),
+    };
+  }
+  if (!currentTurnSenderPresent) {
+    return null;
+  }
+  const label = "Hosted runtime group tool read_shared request currentTurnSender";
+  const senderRecord = requireObject(record.currentTurnSender, label);
+  assertAllowedObjectKeys(senderRecord, new Set(["channel", "handles"]), label);
+  const channel = requireString(senderRecord.channel, `${label} channel`);
+  if (channel !== "linq" && channel !== "telegram") {
+    throw new TypeError(
+      "Hosted runtime group tool read_shared request currentTurnSender channel is not supported.",
+    );
+  }
+  return {
+    channel,
+    handles: parseHostedRuntimeGroupBoundedHandles(senderRecord.handles, {
+      allowEmpty: false,
+      label: `${label} handles`,
+    }),
+  };
 }
 
 function parseHostedRuntimeGroupCurrentTurnHandles(
@@ -1436,7 +1479,7 @@ function parseHostedRuntimeGroupBoundedHandles(
   const handles = entries.map((entry, index) =>
     parseHostedRuntimeGroupAskBoundedText({
       label: `${label}[${index}]`,
-      maxCodePoints: HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
       value: entry,
     })
   );

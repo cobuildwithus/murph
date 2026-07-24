@@ -247,19 +247,28 @@ existing accepted-input and route-binding work is unchanged. The only Web read
 occurs inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
-Interactive Linq group turns are actor-scoped. The importer derives blinded
-`actorId` from the same trimmed Linq sender value stored for the prompt;
-initial batching splits on actor change, and pre-provider plus live admission
-stop at a foreign group actor. Attribution therefore remains bound to the
-scanner-selected durable operation contexts, and active steering cannot add a
-second participant's identity authority to the turn.
+Interactive Linq and Telegram group turns are actor-scoped. The importer
+derives blinded `actorId` from the same trimmed sender value stored for the
+prompt; initial batching splits on actor change, and pre-provider plus live
+admission stop at a foreign group actor. Telegram supplies that sender only on
+route-authorized non-direct inbound whose webhook-authenticated user id already
+resolved to exactly one active linked member, so anonymous administrators,
+`sender_chat` messages, bots, and unlinked senders stay unattributed.
+Attribution therefore remains bound to the scanner-selected durable operation
+contexts, and active steering cannot add a second participant's identity
+authority to the turn.
 
 Interactive `read_shared` requests may carry only bounded, deduplicated
-route-authorized iMessage sender handles from that operation scope. Web matches
-them against current membership phone and verified-email blind indexes selected
-by the same group query. A handle is returned only in the matching member's
-bounded `currentTurnHandles` array and only when it resolves to exactly one
-current membership; that row also carries its group-scoped `participantId`.
+route-authorized sender handles from that operation scope, qualified by the
+sending channel. Web matches Linq handles against current membership phone and
+verified-email blind indexes, and Telegram handles against the current
+membership Telegram-user blind index, all selected by the same group query.
+Matching never crosses channels: a numeric Telegram user id would otherwise
+normalize into a valid phone lookup key and could resolve to an unrelated
+member. Evidence from two channels in one operation fails closed. A handle is
+returned only in the matching member's bounded `currentTurnHandles` array and
+only when it resolves to exactly one current membership; that row also carries
+its group-scoped `participantId`.
 Scheduled, notification, and detached requests carry no handles. The runtime
 drops overlong handles before transport, and the signed group-tool body limit
 covers the declared worst-case JSON expansion for all 32 bounded inputs.

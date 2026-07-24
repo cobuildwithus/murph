@@ -4159,7 +4159,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
-        linqSenderHandles: ["+15555550123"],
+        currentTurnSender: { channel: "linq", handles: ["+15555550123"] },
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(groupRequestMock).toHaveBeenCalledWith({

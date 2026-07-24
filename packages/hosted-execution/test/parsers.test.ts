@@ -5,7 +5,7 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
 
@@ -1563,43 +1563,85 @@ describe("parseHostedRuntimeGroupTool", () => {
     ];
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      linqSenderHandles: [" +15551110001 ", " member@example.test "],
+      currentTurnSender: {
+        channel: "linq",
+        handles: [" +15551110001 ", " member@example.test "],
+      },
       projectionScopes,
     })).toEqual({
       action: "read_shared",
-      linqSenderHandles: ["+15551110001", "member@example.test"],
+      currentTurnSender: {
+        channel: "linq",
+        handles: ["+15551110001", "member@example.test"],
+      },
+      projectionScopes,
+    });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      currentTurnSender: { channel: "telegram", handles: [" 1234567890 "] },
+      projectionScopes,
+    })).toEqual({
+      action: "read_shared",
+      currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
       projectionScopes,
     });
 
-    for (const linqSenderHandles of [
-      [],
-      ["+15551110001", "+15551110001"],
-      [" "],
-      ["a".repeat(513)],
-      Array.from({ length: 33 }, (_, index) => `sender-${index}`),
+    // Legacy alias: runners predating channel-qualified evidence still send
+    // Linq handles under the old key.
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      linqSenderHandles: [" +15551110001 "],
+      projectionScopes,
+    })).toEqual({
+      action: "read_shared",
+      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
+      projectionScopes,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
+      linqSenderHandles: ["+15551110001"],
+      projectionScopes,
+    })).toThrow(/must not supply both/u);
+
+    for (const currentTurnSender of [
+      { channel: "linq", handles: [] },
+      { channel: "linq", handles: ["+15551110001", "+15551110001"] },
+      { channel: "linq", handles: [" "] },
+      { channel: "linq", handles: ["a".repeat(513)] },
+      {
+        channel: "linq",
+        handles: Array.from({ length: 33 }, (_, index) => `sender-${index}`),
+      },
+      { channel: "sms", handles: ["+15551110001"] },
+      { channel: "linq", handles: ["+15551110001"], extra: "nope" },
+      { handles: ["+15551110001"] },
     ]) {
       expect(() => parseHostedRuntimeGroupToolRequest({
         action: "read_shared",
-        linqSenderHandles,
+        currentTurnSender,
         projectionScopes,
       })).toThrow();
     }
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      linqSenderHandles: ["+15551110001"],
+      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
       memberId: "member_hijack",
       projectionScopes,
     })).toThrow(/not allowed/u);
 
     const maximallyEscapedRequest = {
       action: "read_shared",
-      linqSenderHandles: Array.from(
-        { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
-        (_, index) => `${index}`.padStart(2, "0")
-          + "\0".repeat(
-            HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS - 2,
-          ),
-      ),
+      currentTurnSender: {
+        channel: "telegram",
+        handles: Array.from(
+          { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
+          (_, index) => `${index}`.padStart(2, "0")
+            + "\0".repeat(
+              HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS - 2,
+            ),
+        ),
+      },
       projectionScopes,
     };
     expect(new TextEncoder().encode(JSON.stringify(maximallyEscapedRequest)).byteLength)

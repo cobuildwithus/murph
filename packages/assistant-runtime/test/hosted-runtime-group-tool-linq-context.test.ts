@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  createHostedGroupToolWithLinqThreadContext,
+  createHostedGroupToolWithCurrentTurnContext,
 } from "../src/hosted-runtime/workspace-assistant-phase.ts";
 import type { HostedAssistantLinqDeliveryContext } from "../src/hosted-runtime/linq-delivery-context.ts";
 import type { HostedAssistantEmailDeliveryContext } from "../src/hosted-runtime/email-delivery-context.ts";
@@ -38,13 +38,13 @@ function buildEmailDeliveryContext(
   };
 }
 
-describe("createHostedGroupToolWithLinqThreadContext", () => {
+describe("createHostedGroupToolWithCurrentTurnContext", () => {
   it("injects the wake-derived linq thread into chat-scoped actions only", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "share_contact_card",
       result: { status: "sent" },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({ routeAuthority: null }),
@@ -152,12 +152,12 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      linqSenderHandles: ["forged@example.test"],
+      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      linqSenderHandles: ["+15550000001"],
+      currentTurnSender: { channel: "linq", handles: ["+15550000001"] },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 
@@ -215,7 +215,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "linq_thread_unavailable",
       },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
@@ -250,7 +250,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      linqSenderHandles: ["forged@example.test"],
+      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
@@ -264,7 +264,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "read_chat_participants",
       result: { participants: [], status: "ok" },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
@@ -305,7 +305,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "linq_thread_unavailable",
       },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [buildLinqDeliveryContext({ routeAuthority: null })],
     });
@@ -361,7 +361,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "sender_unavailable",
       },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [buildEmailDeliveryContext({})],
       groupToolPort: { request },
       linqDeliveryContexts: [],
@@ -375,7 +375,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      linqSenderHandles: ["forged@example.test"],
+      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
@@ -386,7 +386,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
   it("rejects personal membership reads and durable group mutations whenever email ingress is present", async () => {
     const request = vi.fn();
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [buildEmailDeliveryContext({})],
       groupToolPort: { request },
       linqDeliveryContexts: [
@@ -509,7 +509,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
 
   it("retains group-email mutation denial across a no-context continuation", async () => {
     const request = vi.fn();
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [],
       groupEmailIngress: true,
       groupToolPort: { request },
@@ -532,7 +532,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "revoke_own_email_share",
       result: { revokedCount: 1, status: "revoked" },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
@@ -557,7 +557,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
       action: "revoke_own_email_share",
       result: { revokedCount: 1, status: "revoked" },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
@@ -587,7 +587,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         status: "none",
       },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       groupToolPort: { request },
       linqDeliveryContexts: [
         buildLinqDeliveryContext({
@@ -630,10 +630,10 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      linqSenderHandles: [
-        "+15550000001",
-        "member@example.test",
-      ],
+      currentTurnSender: {
+        channel: "linq",
+        handles: ["+15550000001", "member@example.test"],
+      },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
   });
@@ -646,7 +646,7 @@ describe("createHostedGroupToolWithLinqThreadContext", () => {
         unavailableReason: "sender_unavailable",
       },
     });
-    const groupTool = createHostedGroupToolWithLinqThreadContext({
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
       emailDeliveryContexts: [
         buildEmailDeliveryContext({ senderHandle: "one@example.test" }),
         buildEmailDeliveryContext({ senderHandle: "two@example.test" }),

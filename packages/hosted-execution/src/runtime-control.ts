@@ -1033,13 +1033,26 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
   source: "email" | "linq";
 }
 
+/**
+ * Current-turn sender evidence for one interactive group turn.
+ *
+ * The channel is part of the evidence because each provider's handles are
+ * matched against a different member identity index. Without it a numeric
+ * Telegram user id would normalize into a phone-number lookup key and could
+ * resolve to an unrelated member.
+ */
+export interface HostedRuntimeGroupToolCurrentTurnSender {
+  channel: "linq" | "telegram";
+  handles: readonly string[];
+}
+
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
-export const HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS = 512;
+export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
 // JSON can escape one code point to six bytes. One KiB covers the fixed
 // request envelope, projection scopes, quotes, and commas.
 export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
   + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-    * HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+    * HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
     * 6;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES = 3;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS = 200;
@@ -1122,8 +1135,8 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "read_usage" }
   | ({
       action: "read_shared";
-      /** Current-turn Linq sender evidence injected by the hosted runtime. */
-      linqSenderHandles?: readonly string[];
+      /** Current-turn sender evidence injected by the hosted runtime. */
+      currentTurnSender?: HostedRuntimeGroupToolCurrentTurnSender | null;
     } & HostedRuntimeGroupSharedReadRequest)
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }

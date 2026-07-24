@@ -464,6 +464,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               threadId: "-100123",
             },
             telegramMessage: expect.objectContaining({
+              // Group inbound carries the webhook-authenticated sender so the
+              // assistant can tell participants apart.
+              from: "456",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
               threadIsDirect: false,
@@ -527,11 +530,52 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
               containerMemberId: "member_existing_group_container",
               threadId: "-100123",
             }),
+            // A second human in the same room is a distinct sender, which is
+            // what lets the assistant keep participants apart.
+            telegramMessage: expect.objectContaining({ from: "789" }),
           }),
           userId: "member_existing_group_container",
         }),
       }),
     );
+  });
+
+  it("keeps a direct Telegram thread free of group sender attribution", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_direct_sender",
+            suspendedAt: null,
+          },
+          memberId: "member_direct_sender",
+        }),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: 5150, type: "private" },
+          date: 1_774_522_602,
+          from: { first_name: "Alice", id: 456, username: "alice_example" },
+          message_id: 4,
+          text: "hey murph",
+        },
+        update_id: 324,
+      }),
+      secretToken: "telegram-secret",
+    })).resolves.toMatchObject({ ok: true });
+
+    const enqueued = mocks.enqueueHostedExecutionOutbox.mock.calls.at(-1)?.[0];
+    const telegramMessage = enqueued?.envelope?.message?.telegramMessage;
+    expect(telegramMessage).toBeDefined();
+    expect(Object.hasOwn(telegramMessage ?? {}, "from")).toBe(false);
+    expect(Object.hasOwn(telegramMessage ?? {}, "senderUsername")).toBe(false);
   });
 
   it("routes Murph Family questions to the assistant", async () => {

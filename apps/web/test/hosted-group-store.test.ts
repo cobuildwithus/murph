@@ -17,6 +17,7 @@ import {
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
@@ -1413,17 +1414,20 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     const prisma = createPrismaStub({ $transaction: transaction });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
-      linqSenderHandles: [
-        dualPhoneHandle,
-        dualPhoneHandle,
-        dualEmailHandle,
-        emailHandle,
-        unverifiedEmailHandle,
-        ambiguousMemberEmailHandle,
-        priorKeyPhoneHandle,
-        rotatedAmbiguousPhoneHandle,
-        "unknown@example.test",
-      ],
+      currentTurnSender: {
+        channel: "linq",
+        handles: [
+          dualPhoneHandle,
+          dualPhoneHandle,
+          dualEmailHandle,
+          emailHandle,
+          unverifiedEmailHandle,
+          ambiguousMemberEmailHandle,
+          priorKeyPhoneHandle,
+          rotatedAmbiguousPhoneHandle,
+          "unknown@example.test",
+        ],
+      },
       prisma,
       projectionScopes: [SLEEP_SCOPE],
       runtimeMemberId: "member_group_runtime",
@@ -1484,6 +1488,11 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
                     phoneNumberVerifiedAt: true,
                   },
                 },
+                routing: {
+                  select: {
+                    telegramUserLookupKey: true,
+                  },
+                },
               },
             },
             memberId: true,
@@ -1495,6 +1504,139 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+
+  it("matches Telegram senders only against Telegram identity, never a phone number", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    // A Telegram user id is a bare digit string that normalizes into a valid
+    // phone lookup key. Another member verified that exact number as their
+    // phone, so cross-channel matching would attribute the wrong human.
+    const telegramSenderUserId = "15551110009";
+    const collidingPhoneHandle = "+15551110009";
+    const telegramUserLookupKey = createHostedTelegramUserLookupKey(
+      telegramSenderUserId,
+    );
+    const collidingPhoneLookupKey = createHostedPhoneLookupKey(
+      collidingPhoneHandle,
+    );
+    if (!telegramUserLookupKey || !collidingPhoneLookupKey) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const members = [
+      {
+        id: "group_member_telegram",
+        member: {
+          emailAuthorization: null,
+          identity: null,
+          routing: { telegramUserLookupKey },
+        },
+        memberId: "member_telegram",
+      },
+      {
+        id: "group_member_phone_lookalike",
+        member: {
+          emailAuthorization: null,
+          identity: {
+            phoneLookupKey: collidingPhoneLookupKey,
+            phoneNumberVerifiedAt: new Date("2026-07-01T00:00:00.000Z"),
+          },
+          routing: null,
+        },
+        memberId: "member_phone_lookalike",
+      },
+    ];
+    const hostedGroupFindUnique = vi.fn(async () => ({ members }));
+    const tx = {
+      deviceConnection: { findMany: vi.fn(async () => []) },
+      hostedGroup: { findUnique: hostedGroupFindUnique },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        callback: (client: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      currentTurnSender: {
+        channel: "telegram",
+        handles: [telegramSenderUserId],
+      },
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [telegramSenderUserId],
+        memberId: "member_telegram",
+        participantId: "group_member_telegram",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_phone_lookalike",
+        participantId: "group_member_phone_lookalike",
+      }),
+    ]);
+  });
+
+  it("drops a Telegram handle that resolves to no current member", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const boundLookupKey = createHostedTelegramUserLookupKey("15551110010");
+    if (!boundLookupKey) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const members = [
+      {
+        id: "group_member_telegram",
+        member: {
+          emailAuthorization: null,
+          identity: null,
+          routing: { telegramUserLookupKey: boundLookupKey },
+        },
+        memberId: "member_telegram",
+      },
+    ];
+    const tx = {
+      deviceConnection: { findMany: vi.fn(async () => []) },
+      hostedGroup: { findUnique: vi.fn(async () => ({ members })) },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        callback: (client: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      currentTurnSender: { channel: "telegram", handles: ["15559999999"] },
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_telegram",
+        participantId: "group_member_telegram",
+      }),
+    ]);
   });
 });
 

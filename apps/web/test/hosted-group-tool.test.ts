@@ -716,7 +716,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       memberId: "member_group_runtime",
       request: {
         action: "read_shared",
-        linqSenderHandles: ["+15551110001", "member@example.test"],
+        currentTurnSender: {
+          channel: "linq",
+          handles: ["+15551110001", "member@example.test"],
+        },
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       },
     })).resolves.toEqual({
@@ -729,7 +732,10 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
 
     expect(mocks.readHostedGroupSharedDataByRuntimeMemberId).toHaveBeenCalledWith({
-      linqSenderHandles: ["+15551110001", "member@example.test"],
+      currentTurnSender: {
+        channel: "linq",
+        handles: ["+15551110001", "member@example.test"],
+      },
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
       runtimeMemberId: "member_group_runtime",
     });

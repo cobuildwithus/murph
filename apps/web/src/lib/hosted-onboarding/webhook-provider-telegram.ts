@@ -233,6 +233,20 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       runtimeMemberId = threadRoute.containerMemberId;
     }
   }
+  // Group inbound carries the sending participant so the assistant can tell
+  // participants apart and bind shared-data reads to the right membership. The
+  // sender is authoritative here: it is the webhook-authenticated Telegram user
+  // id already resolved, under row lock, to exactly one active linked member.
+  // Direct threads have a single known sender and stay attribution-free.
+  const groupTelegramMessage = summary.isDirect
+    ? telegramMessage
+    : {
+        ...telegramMessage,
+        from: summary.senderTelegramUserId,
+        ...(summary.senderTelegramUsername
+          ? { senderUsername: summary.senderTelegramUsername }
+          : {}),
+      };
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId,
@@ -246,7 +260,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
             },
           }
         : {}),
-      telegramMessage,
+      telegramMessage: groupTelegramMessage,
       userId: runtimeMemberId,
     }),
     tx: input.prisma,
