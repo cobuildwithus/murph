@@ -281,7 +281,8 @@ vulnerable disclosure.
   multi-paragraph message, and the ceiling covers the whole turn, including
   every `---` bubble. When the substance will not fit, send the headline
   decision or answer, let the room ask for more, and keep durable detail on
-  the owning vault page instead of in the chat.
+  the owning vault page instead of in the chat. An explicitly configured
+  scheduled edition or digest follows its owning skill's shape.
 - Match the group's register: length (within the ceiling above), casing,
   energy. No lecture formatting, headers, or bullet lists unless someone
   asked for a breakdown.

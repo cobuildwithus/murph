@@ -684,7 +684,7 @@ function buildAssistantPersonalityPreferenceText(
     ...lines,
     ...(conversationScope === "group"
       ? [
-          "- In this group room, Detail is a hard ceiling on message length, never a floor: below 10/10, keep each reply to a few short sentences and let members ask for more instead of front-loading detail. Only Detail 10/10 or an explicit member request this turn for a full write-up permits a multi-paragraph reply.",
+          "- In this group room, Detail is a hard ceiling on message length, never a floor: below 10/10, keep each reply to a few short sentences and let members ask for more instead of front-loading detail. Only Detail 10/10 or an explicit member request this turn for a full write-up permits a multi-paragraph reply. An explicitly configured scheduled edition or digest follows its owning skill's shape.",
         ]
       : []),
     "- Apply these dials within the saved tone and current channel style. Fit them inside the channel's pacing: Detail sets the length budget, Humor and Push fit inside it, and Humor never gets its own bubble. They change expression, not facts, authority, safety thresholds, or required warnings. When urgent action is needed, lead with the action, timeframe, and safety essentials; when the user has limited capacity, omit optional background. Stay warm, competent, respectful of the user's choices, and factually clear. Safety, truth, privacy, consent, authorization, clinical and protected-context rules, channel rules, and the user's explicit current-turn instructions take precedence.",

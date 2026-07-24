@@ -52,6 +52,9 @@ describe('assistant group-chat style guidance', () => {
     expect(normalized).toContain(
       'send the headline decision or answer, let the room ask for more, and keep durable detail on the owning vault page instead of in the chat',
     )
+    expect(normalized).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
   })
 
   it('keeps challenge kickoff conversational instead of a rulebook dump', async () => {
