@@ -1471,12 +1471,18 @@ describe('assistant user-facing wording guidance', () => {
 describe('assistant system prompt cache stability', () => {
   it('keeps the always-on kernel and non-CLI route guidance bounded', () => {
     const layers = buildAssistantSystemPromptLayers(
-      createCommonCodexPromptInput({ assistantCliContract: null }),
+      // Pin the product base URL to the production origin so this size bound is
+      // deterministic across local and CI; otherwise the env-resolved URL length
+      // shifts the total and the cap passes locally but fails in CI.
+      createCommonCodexPromptInput({
+        assistantCliContract: null,
+        murphProductBaseUrl: 'https://www.withmurph.ai',
+      }),
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    // Cap bumped to 68_500 for the conversational-only Unhinged dial guidance,
-    // the rare cross-turn style-dissatisfaction offer, and the relative-request
+    // Cap is 68_500 for the conversational-only Unhinged dial guidance, the rare
+    // cross-turn style-dissatisfaction offer, and the endpoint/relative-request
     // rule (map a direction to one absolute `set`, no cross-turn read-modify-write)
     // that lets "loosen up"/"yes" reach an exact score — all resident here.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_500)
