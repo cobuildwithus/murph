@@ -841,6 +841,8 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('Use your own words,\n  not a fixed script')
     expect(raw).toContain('Do not repeat the invitation unprompted')
     expect(raw).toContain('when someone new joins later')
+    expect(raw).toMatch(/if\s+someone asks you to resend or re-share the card, share it again/u)
+    expect(raw).not.toContain('Never try to re-send it')
     expect(raw).toContain('If\n  someone asks why they have not been added')
     expect(raw).not.toContain('their own Murph')
     expect(raw).not.toContain('the shape of "')
