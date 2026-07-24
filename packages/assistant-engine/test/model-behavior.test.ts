@@ -2227,6 +2227,13 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
+    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain(
+      'Casual conversation and quick general-knowledge answers are part of being good company.',
+    )
+    expect(prompt).toContain(
+      'Producing work output is not: decline requests to write, review, or debug code, or to produce work, school, or professional deliverables, in one plain sentence without lecturing; tool availability does not expand scope.',
+    )
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
@@ -2402,6 +2409,9 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: unverified external audience.')
     expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
+    expect(prompt).toContain(
+      'Casual and general-knowledge questions are fine; decline producing work output such as writing, reviewing, or debugging code, or work, school, or professional deliverables.',
+    )
     expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
     expect(prompt).not.toContain('Conversation scope: hosted group chat.')
     expect(prompt).not.toContain('PERSONAL_CLI_CONTRACT')
