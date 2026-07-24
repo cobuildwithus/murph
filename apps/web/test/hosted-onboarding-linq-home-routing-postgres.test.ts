@@ -504,10 +504,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const releaseTelegramUpsert = createDeferred();
         const linqRouteUpsertReached = createDeferred();
         const releaseLinqUpsert = createDeferred();
-        const telegramPlanFinished = createDeferred();
-        const releaseTelegramCommit = createDeferred();
         const activationUpdated = createDeferred();
         const releaseActivation = createDeferred();
+        const telegramPid = createDeferred<number>();
         const linqPid = createDeferred<number>();
         const telegramClient = telegramBase.$extends({
           query: {
@@ -527,10 +526,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           query: {
             hostedMemberRouting: {
               async upsert({ args, query }) {
-                if (
-                  startOrder === "linq-first"
-                  || memberState === "activation-race"
-                ) {
+                if (startOrder === "linq-first") {
                   linqRouteUpsertReached.resolve();
                   await releaseLinqUpsert.promise;
                 }
@@ -577,14 +573,11 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               // Prisma's query extension preserves the transaction client's
               // runtime surface but widens only its generated generic metadata.
               const prisma = tx as Prisma.TransactionClient;
+              telegramPid.resolve(await readBackendPid(prisma));
               const plan = await planHostedOnboardingTelegramWebhook({
                 prisma,
                 update: telegramUpdate,
               });
-              telegramPlanFinished.resolve();
-              if (startOrder === "linq-first") {
-                await releaseTelegramCommit.promise;
-              }
               return plan.response.reason;
             }, transactionOptions);
           };
@@ -617,23 +610,33 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               await releaseActivation.promise;
             }, transactionOptions);
             await activationUpdated.promise;
-            runLinq();
-            await waitForBlockedBackend({
-              observer,
-              pid: await linqPid.promise,
-            });
-            releaseActivation.resolve();
-            await activationTransaction;
-            await linqRouteUpsertReached.promise;
+            if (startOrder === "telegram-first") {
+              runTelegram();
+              await waitForBlockedBackend({
+                observer,
+                pid: await telegramPid.promise,
+              });
+              releaseActivation.resolve();
+              await activationTransaction;
+              await telegramRouteUpserted.promise;
+            } else {
+              runLinq();
+              await waitForBlockedBackend({
+                observer,
+                pid: await linqPid.promise,
+              });
+              releaseActivation.resolve();
+              await activationTransaction;
+              await linqRouteUpsertReached.promise;
+            }
           }
 
           if (startOrder === "telegram-first") {
-            runTelegram();
-            await telegramRouteUpserted.promise;
             if (memberState === "active") {
-              runLinq();
+              runTelegram();
+              await telegramRouteUpserted.promise;
             }
-            releaseLinqUpsert.resolve();
+            runLinq();
             await waitForBlockedBackend({
               observer,
               pid: await linqPid.promise,
@@ -642,16 +645,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           } else {
             if (memberState === "active") {
               runLinq();
+              await linqRouteUpsertReached.promise;
             }
-            await linqRouteUpsertReached.promise;
             runTelegram();
-            await telegramPlanFinished.promise;
-            releaseLinqUpsert.resolve();
             await waitForBlockedBackend({
               observer,
-              pid: await linqPid.promise,
+              pid: await telegramPid.promise,
             });
-            releaseTelegramCommit.resolve();
+            releaseLinqUpsert.resolve();
           }
 
           await expect(
@@ -693,7 +694,6 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         } finally {
           releaseTelegramUpsert.resolve();
           releaseLinqUpsert.resolve();
-          releaseTelegramCommit.resolve();
           releaseActivation.resolve();
           await Promise.allSettled([
             activationTransaction,

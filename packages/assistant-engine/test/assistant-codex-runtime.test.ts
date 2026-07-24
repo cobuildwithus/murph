@@ -16138,9 +16138,12 @@ describe('assistant codex event shaping', () => {
           totalTokens: 5_000,
         },
       })
-      expect(result.additionalUsages[0]?.usage.rawUsageJson).toMatchObject({
-        codexSubagentThreadId: 'thread-subagent-child-a',
-        tokenUsageEventCount: 2,
+      expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cachedInputTokens: 2_000,
+        inputTokens: 4_000,
+        outputTokens: 1_000,
+        reasoningOutputTokens: 120,
+        totalTokens: 5_000,
       })
       expect(result.additionalUsages[1]).toMatchObject({
         providerRequestOrdinal: 2,
@@ -16330,9 +16333,12 @@ describe('assistant codex event shaping', () => {
           },
         },
       ])
-      expect(failureContext?.additionalUsages[0]?.usage.rawUsageJson).toMatchObject({
-        codexSubagentThreadId: 'thread-subagent-fail-child',
-        tokenUsageEventCount: 1,
+      expect(failureContext?.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cachedInputTokens: 0,
+        inputTokens: 800,
+        outputTokens: 200,
+        reasoningOutputTokens: 0,
+        totalTokens: 1_000,
       })
     })
 
@@ -16716,7 +16722,7 @@ describe('assistant codex event shaping', () => {
       })
     })
 
-    it('caps tracked subagent usage threads and reports the dropped-thread count', async () => {
+    it('caps tracked subagent usage threads', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-cap-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-cap-home-')
       const spawnedChildren: MockChildProcess[] = []
@@ -16840,17 +16846,9 @@ describe('assistant codex event shaping', () => {
           totalTokens: trackedThreadCount * 100,
         },
       })
-      const draftThreadIds = result.additionalUsages.map(
-        (draft) =>
-          (draft.usage.rawUsageJson as { codexSubagentThreadId?: string })
-            .codexSubagentThreadId,
-      )
-      expect(draftThreadIds).not.toContain(overflowThreadId)
-      for (const draft of result.additionalUsages) {
-        expect(draft.usage.rawUsageJson).toMatchObject({
-          droppedSubagentUsageThreadCount: 1,
-        })
-      }
+      expect(
+        result.additionalUsages.map((draft) => draft.usage.totalTokens),
+      ).not.toContain(9_900)
     })
 
     it('continues subagent usage ordinals after dynamic tool usage drafts', async () => {
@@ -16998,8 +16996,12 @@ describe('assistant codex event shaping', () => {
           },
         },
       ])
-      expect(result.additionalUsages[1]?.usage.rawUsageJson).toMatchObject({
-        codexSubagentThreadId: 'thread-subagent-ordinal-child',
+      expect(result.additionalUsages[1]?.usage.rawUsageJson).toEqual({
+        cachedInputTokens: 0,
+        inputTokens: 800,
+        outputTokens: 200,
+        reasoningOutputTokens: 0,
+        totalTokens: 1_000,
       })
       expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
     })
@@ -17938,12 +17940,12 @@ describe('assistant codex event shaping', () => {
           totalTokens: 2_500,
         },
       })
-      expect(result.additionalUsages[0]?.usage.rawUsageJson).toMatchObject({
-        codexSubagentThreadId: 'thread-subagent-evict-child',
-        // One ghost was evicted to make room; the remaining 31 buffered
-        // ghosts are unattributed and never billed.
-        droppedSubagentUsageThreadCount: 1,
-        unattributedSubagentUsageThreadCount: 31,
+      expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        cachedInputTokens: 500,
+        inputTokens: 2_000,
+        outputTokens: 500,
+        reasoningOutputTokens: 0,
+        totalTokens: 2_500,
       })
     })
   })

@@ -1153,7 +1153,7 @@ describe('assistant auto-reply event-first path', () => {
         replyToMessageId: 'linq-msg-anchored',
         service: null,
       },
-      text: 'Yes.',
+      text: 'Reacted with a like reaction.',
       threadIsDirect: true,
     })
 
@@ -1228,7 +1228,7 @@ describe('assistant auto-reply event-first path', () => {
         replyToMessageId: 'linq-msg-same-session-target',
         service: 'iMessage',
       },
-      text: 'Yes.',
+      text: 'Reacted with a like reaction.',
       threadIsDirect: true,
     })
 
@@ -1251,8 +1251,14 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
     const turnContext = sendInput?.turnContext
-    expect(turnContext).toContain('Affirmative reaction target:')
-    expect(turnContext).toContain('Would you like me to continue?')
+    expect(turnContext).toBe([
+      'Reaction target:',
+      'The user reacted with a tapback (heart, like, or similar) to this exact assistant message:',
+      '',
+      'Would you like me to continue?',
+      '',
+      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. Respond only in relation to this message; a brief acknowledgment-weight reply is fine.',
+    ].join('\n'))
     expect(turnContext).not.toContain('Should I send the newer message?')
     expect(turnContext).not.toContain('another assistant run')
     expect(sendInput?.receiptMetadata).not.toHaveProperty(
@@ -1289,7 +1295,7 @@ describe('assistant auto-reply event-first path', () => {
         replyToMessageId: 'linq-msg-participant-authored',
         service: 'iMessage',
       },
-      text: 'Yes.',
+      text: 'Reacted with a like reaction.',
       threadIsDirect: true,
     })
 

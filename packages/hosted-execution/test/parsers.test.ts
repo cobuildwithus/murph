@@ -212,7 +212,7 @@ describe("parseHostedExecutionEvent", () => {
             from: "+15550001111",
             isFromMe: false,
             messageId: "reaction_event_123",
-            parts: [{ type: "text", value: "Yes." }],
+            parts: [{ type: "text", value: "Reacted with a like reaction." }],
             replyToMessageId: "msg_murph_123",
             threadIsDirect: true,
           },

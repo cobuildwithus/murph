@@ -1,4 +1,4 @@
-export const HOSTED_MESSAGE_VOLUME_FLOOR = 5_000;
+export const HOSTED_MESSAGE_VOLUME_BASE = 5_000;
 export const MESSAGE_VOLUME_ENDPOINT = "/api/message-volume";
 
 export function formatMessageVolume(total: number): string {

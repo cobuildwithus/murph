@@ -21,6 +21,51 @@ vi.mock("@privy-io/react-auth", () => ({
   usePrivy: mocks.usePrivy,
 }));
 
+vi.mock("@/src/components/ui/dialog", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const DialogContext = React.createContext<{
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+  }>({
+    onOpenChange: () => {},
+    open: false,
+  });
+
+  return {
+    Dialog: ({
+      children,
+      onOpenChange = () => {},
+      open = false,
+    }: {
+      children?: React.ReactNode;
+      onOpenChange?: (open: boolean) => void;
+      open?: boolean;
+    }) =>
+      React.createElement(
+        DialogContext.Provider,
+        { value: { onOpenChange, open } },
+        children,
+      ),
+    DialogContent: ({
+      children,
+      className,
+      showCloseButton: _showCloseButton,
+    }: React.HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }) => {
+      void _showCloseButton;
+      const context = React.useContext(DialogContext);
+      return context.open
+        ? React.createElement("div", { className, role: "dialog" }, children)
+        : null;
+    },
+    DialogDescription: (props: React.HTMLAttributes<HTMLParagraphElement>) =>
+      React.createElement("p", props),
+    DialogHeader: (props: React.HTMLAttributes<HTMLDivElement>) =>
+      React.createElement("div", props),
+    DialogTitle: (props: React.HTMLAttributes<HTMLHeadingElement>) =>
+      React.createElement("h2", props),
+  };
+});
+
 import { HostedEmailAuthButton } from "@/src/components/hosted-onboarding/hosted-email-auth-button";
 
 let cleanupRender: (() => Promise<void>) | null = null;
@@ -87,6 +132,83 @@ test("HomepageEmailAuthButton prefills an initial email address", async () => {
   ) as HTMLInputElement | null;
 
   expect(emailInput?.value).toBe("buddy@example.com");
+});
+
+test("HostedEmailAuthButton locks the invite email and sends the code to it", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedEmailAuthButton, {
+      active: true,
+      inline: true,
+      lockedEmailAddress: " buddy@icloud.com ",
+      onAuthenticated: mocks.onAuthenticated,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector('input[id="homepage-email-address"]')).toBeNull();
+
+  const lockedEmail = container.querySelector('[data-hosted-locked-email="true"]');
+  expect(lockedEmail?.textContent).toBe("buddy@icloud.com");
+  expect(container.textContent).toContain("Change email");
+
+  const emailForm = container.querySelector("form");
+
+  await act(async () => {
+    emailForm?.dispatchEvent(
+      new window.Event("submit", { bubbles: true, cancelable: true }),
+    );
+  });
+
+  expect(mocks.sendCode).toHaveBeenCalledWith({
+    email: "buddy@icloud.com",
+  });
+  expect(container.textContent).toContain("Verify email");
+  expect(container.textContent).toContain("Change email");
+  expect(container.textContent).not.toContain("Use another email");
+});
+
+test("HostedEmailAuthButton explains how to change a locked invite email", async () => {
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedEmailAuthButton, {
+      active: true,
+      inline: true,
+      lockedEmailAddress: "buddy@icloud.com",
+      onAuthenticated: mocks.onAuthenticated,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+
+  const changeEmailButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Change email"),
+  );
+  expect(changeEmailButton).toBeTruthy();
+
+  await act(async () => {
+    changeEmailButton?.dispatchEvent(
+      new window.Event("click", { bubbles: true }),
+    );
+  });
+
+  const dialog = container.querySelector('[role="dialog"]');
+  expect(dialog).toBeTruthy();
+  expect(dialog?.textContent).toContain("Want a different email?");
+  expect(dialog?.textContent).toContain("buddy@icloud.com");
+  expect(dialog?.textContent).toContain("Send & Receive");
+  expect(dialog?.textContent).toContain("Text Murph again");
+
+  const gotItButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Got it"),
+  );
+
+  await act(async () => {
+    gotItButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 
 test("HomepageEmailAuthButton expands, sends a code, verifies it, and reports the authenticated session", async () => {

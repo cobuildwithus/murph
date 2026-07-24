@@ -14,7 +14,7 @@ import {
   readHostedFamilyPlanCapacities,
   sumHostedFamilyPlanCapacities,
 } from "@/src/lib/hosted-onboarding/family-plan-capacity";
-import { HOSTED_MESSAGE_VOLUME_FLOOR } from "@/src/lib/message-volume";
+import { HOSTED_MESSAGE_VOLUME_BASE } from "@/src/lib/message-volume";
 import { getPrisma } from "@/src/lib/prisma";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -835,27 +835,56 @@ export async function captureHostedGrowthDailySnapshot(
 
 /**
  * Lifetime message total for public marketing surfaces. Snapshot message
- * counts only exist from July 2026 onward, so the floor stands in for the
- * untracked history; it is also the fallback when the read fails.
+ * counts only exist from July 2026 onward, so the base stands in for the
+ * untracked history and the snapshot sums accrue on top of it. Snapshot
+ * coverage ends at the latest snapshot date, so the live counts start
+ * there and use the cron's own filters, keeping the two ranges disjoint
+ * even when today's snapshot has not been captured yet. The base alone is
+ * the fallback when the read fails.
  */
 export async function readHostedMessageVolumeTotal(
+  now: Date,
   prisma: HostedGrowthPrisma = getPrisma(),
 ): Promise<number> {
   try {
-    const sums = await prisma.hostedGrowthDailySnapshot.aggregate({
+    const snapshots = await prisma.hostedGrowthDailySnapshot.aggregate({
+      _max: {
+        snapshotDate: true,
+      },
       _sum: {
         inboundMessagesPriorDay: true,
         outboundMessagesPriorDay: true,
       },
     });
+    const liveStart = snapshots._max.snapshotDate ?? startOfUtcDay(now);
+    const [liveInbound, liveOutbound] = await Promise.all([
+      prisma.hostedMailboxItem.count({
+        where: {
+          kind: INBOUND_MESSAGE_MAILBOX_KIND,
+          occurredAt: {
+            gte: liveStart,
+          },
+        },
+      }),
+      prisma.hostedLinqDelivery.count({
+        where: {
+          attemptedAt: {
+            gte: liveStart,
+          },
+          status: {
+            in: [...OUTBOUND_LINQ_SENT_STATUSES],
+          },
+        },
+      }),
+    ]);
 
-    return Math.max(
-      HOSTED_MESSAGE_VOLUME_FLOOR,
-      (sums._sum.inboundMessagesPriorDay ?? 0) +
-        (sums._sum.outboundMessagesPriorDay ?? 0),
-    );
+    return HOSTED_MESSAGE_VOLUME_BASE +
+      (snapshots._sum.inboundMessagesPriorDay ?? 0) +
+      (snapshots._sum.outboundMessagesPriorDay ?? 0) +
+      liveInbound +
+      liveOutbound;
   } catch {
-    return HOSTED_MESSAGE_VOLUME_FLOOR;
+    return HOSTED_MESSAGE_VOLUME_BASE;
   }
 }
 
