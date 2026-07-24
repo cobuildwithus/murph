@@ -10,6 +10,7 @@ import {
 } from "../src/runtime-control.ts";
 
 import {
+  parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
@@ -20,6 +21,23 @@ import {
   parseHostedRuntimeNewsletterToolRequest,
   parseHostedRuntimeNewsletterToolResponse,
 } from "../src/parsers.ts";
+
+describe("parseHostedExecutionDirectRoute", () => {
+  it("accepts only exact private route fields", () => {
+    expect(parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+    })).toEqual({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    expect(() => parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+      threadIsDirect: true,
+    })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
 
 describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
@@ -606,6 +624,34 @@ describe("parseHostedExecutionEvent", () => {
       occurredAt: "2026-04-26T00:00:00.000Z",
       userId: "member_123",
     });
+  });
+
+  it("parses an email direct route for automatic meal capture", () => {
+    const wake = {
+      directRoute: {
+        channel: "email",
+        deliveryTarget: "member@example.test",
+      },
+      eventId: "meal-photo:enrollment:capture",
+      kind: "meal-photo.captured",
+      mealPhoto: {
+        byteLength: 4,
+        captureId: "a".repeat(64),
+        capturedAt: "2026-04-26T00:00:00.000Z",
+        mealPhotoKey: "meal-photo-key",
+        sha256: "b".repeat(64),
+      },
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    };
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      directRoute: {
+        channel: "email",
+        threadId: "member@example.test",
+      },
+    })).toThrow("directRoute");
   });
 
   it("parses device-sync reconcile_due wakes", () => {

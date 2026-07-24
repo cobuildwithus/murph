@@ -16,6 +16,7 @@ export type {
   HostedRuntimeEnsureProcessingResponseKind,
   HostedRuntimeProcessingAcceptedAction,
   HostedRuntimeMailboxPointer,
+  HostedRuntimeProcessingMode,
   HostedRuntimeReconciliationBlockedReason,
   HostedRuntimeReconciliationFacts,
   HostedRuntimeReconciliationFactsBlocked,

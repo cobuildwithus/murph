@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   parseMealPhotoCaptureEnrollmentRequest: vi.fn(),
   parseMealPhotoCaptureRevocationRequest: vi.fn(),
   readAndValidateMealPhotoUpload: vi.fn(),
+  readCurrentHostedMemberDirectRoute: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
@@ -58,6 +59,10 @@ vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({
   requireActivePrivyMemberAuthFromBearerToken:
     mocks.requireActivePrivyMemberAuthFromBearerToken,
   requirePrivyMemberAuthFromBearerToken: mocks.requirePrivyMemberAuthFromBearerToken,
+}));
+
+vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
+  readCurrentHostedMemberDirectRoute: mocks.readCurrentHostedMemberDirectRoute,
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
@@ -127,6 +132,10 @@ describe("meal photo companion routes", () => {
       member: { id: MEMBER_ID },
     });
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
+    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValue({
+      channel: "linq",
+      threadId: "linq-thread-1",
+    });
     mocks.parseMealPhotoCaptureEnrollmentRequest.mockReturnValue(ENROLLMENT_REQUEST);
     mocks.parseMealPhotoCaptureRevocationRequest.mockReturnValue({
       appInstallationId: ENROLLMENT_REQUEST.appInstallationId,
@@ -176,6 +185,10 @@ describe("meal photo companion routes", () => {
 
   function buildMealPhotoWake(mealPhotoKey = "meal-photo-key") {
     return {
+      directRoute: {
+        channel: "linq",
+        threadId: "linq-thread-1",
+      },
       eventId: EVENT_ID,
       kind: "meal-photo.captured",
       mealPhoto: {
@@ -208,11 +221,35 @@ describe("meal photo companion routes", () => {
       memberId: MEMBER_ID,
       prisma: expect.anything(),
     });
+    expect(mocks.readCurrentHostedMemberDirectRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
     expect(mocks.issueMealPhotoCaptureEnrollment).toHaveBeenCalledWith({
       memberId: MEMBER_ID,
       prisma: expect.anything(),
       request: ENROLLMENT_REQUEST,
     });
+  });
+
+  it("requires an existing private Murph delivery route before enrollment", async () => {
+    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
+    const request = jsonRequest(
+      "https://app.example.test/enrollment",
+      ENROLLMENT_REQUEST,
+    );
+    const response = await enrollmentRoute.POST(request);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "MEAL_PHOTO_CAPTURE_DIRECT_ROUTE_REQUIRED",
+        message:
+          "Connect iMessage, Telegram, or a verified email before retrying meal capture setup.",
+        retryable: false,
+      },
+    });
+    expect(mocks.issueMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
   });
 
   it("rejects never-consented scoped uploads before validation or staging", async () => {
@@ -304,6 +341,10 @@ describe("meal photo companion routes", () => {
       byteLength: JPEG.byteLength,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
+      directRoute: {
+        channel: "linq",
+        threadId: "linq-thread-1",
+      },
       eventId: EVENT_ID,
       mealPhotoKey: "meal-photo-key",
       memberId: MEMBER_ID,
@@ -329,10 +370,27 @@ describe("meal photo companion routes", () => {
       request,
     });
     expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
+    expect(mocks.readCurrentHostedMemberDirectRoute).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_1",
     });
+  });
+
+  it("requires a current private route again before accepting an upload", async () => {
+    mocks.readCurrentHostedMemberDirectRoute.mockResolvedValueOnce(null);
+
+    const response = await photosRoute.POST(new Request(
+      "https://app.example.test/photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(mocks.stageMealPhoto).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("re-signals exact duplicates and rejects conflicting capture reuse", async () => {

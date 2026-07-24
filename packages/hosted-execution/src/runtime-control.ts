@@ -2478,6 +2478,7 @@ export interface HostedWorkspaceInvocationBudget {
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
   "inbox_media_retention",
+  "system_mailbox",
 ] as const;
 
 export type HostedWorkspaceInvocationProcessingMode =
