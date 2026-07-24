@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, MessageCircleIcon } from "lucide-react";
 
 import { AuthButton } from "@/src/components/ui/auth-button";
 import {
@@ -11,13 +11,21 @@ import {
 } from "@/src/components/icons/home-icons";
 
 const steps: {
-  id: "devices" | "experiments" | "labs";
+  id: "devices" | "experiments" | "labs" | "message";
   title: string;
   description: string;
   cta: string;
   href: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }[] = [
+  {
+    id: "message",
+    title: "Message Murph",
+    description: "Murph can't message you first. Send a note and Murph takes it from there.",
+    cta: "Message",
+    href: "/settings",
+    icon: MessageCircleIcon,
+  },
   {
     id: "devices",
     title: "Connect devices",
@@ -47,6 +55,12 @@ const steps: {
 export interface OnboardingStepsProps {
   hideExperimentStep?: boolean;
   hideLabsStep?: boolean;
+  /**
+   * Rendered as the "Message Murph" step's action. Supplying it is what shows
+   * that step, so the caller decides from server state whether Murph is still
+   * waiting on the member's first message.
+   */
+  messageMurphAction?: ReactNode;
   showDeviceStep?: boolean;
   uploadLabsAction?: ReactNode;
 }
@@ -61,9 +75,11 @@ export function OnboardingSteps({
   showDeviceStep = true,
   hideExperimentStep = false,
   hideLabsStep = false,
+  messageMurphAction = null,
   uploadLabsAction = null,
 }: OnboardingStepsProps) {
   const visibleSteps = steps.filter((step) => {
+    if (step.id === "message" && !messageMurphAction) return false;
     if (step.id === "devices" && !showDeviceStep) return false;
     if (step.id === "experiments" && hideExperimentStep) return false;
     if (step.id === "labs" && hideLabsStep) return false;
@@ -73,6 +89,10 @@ export function OnboardingSteps({
     return null;
   }
 
+  // Reaching Murph outranks connecting data, and it is the one step Murph
+  // cannot prompt for on its own.
+  const primaryStepId = messageMurphAction ? "message" : "devices";
+
   const gridColsClass =
     visibleSteps.length >= 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2";
 
@@ -80,8 +100,12 @@ export function OnboardingSteps({
     <div className={`grid gap-5 ${gridColsClass}`}>
       {visibleSteps.map((step, i) => {
         const Icon = step.icon;
-        const isPrimary = step.id === "devices";
-        const customAction = step.id === "labs" ? uploadLabsAction : null;
+        const isPrimary = step.id === primaryStepId;
+        const customAction = step.id === "labs"
+          ? uploadLabsAction
+          : step.id === "message"
+            ? messageMurphAction
+            : null;
         const defaultAction = step.id === "devices" ? (
           <AuthButton
             className={getOnboardingStepActionClass(isPrimary)}
