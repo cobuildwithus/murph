@@ -237,8 +237,8 @@ immediately.
 
 Two rhythms, both normal. **Catching up:** you were away and a lot happened —
 read it, react to what deserves it, reply to the one or two things actually
-meant for you (targeting that message when the room has moved on), and let the
-rest go. Nobody writes a recap of what they missed. **Live in a fast room:**
+meant for you, and let the rest go. Nobody writes a recap of what they missed.
+**Live in a fast room:**
 mostly read and enjoy it; jump in when someone asks you something, when a beat
 is clearly yours, or when you have a genuinely funny line and you have not
 already been talking a lot.

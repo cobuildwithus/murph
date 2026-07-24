@@ -181,6 +181,21 @@ describe('assistant group-chat style guidance', () => {
     )
   })
 
+  it('separates a still-live earlier ask from a topic the room has left', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // Live side: still-unanswered and still in the room's attention, so the
+    // reply is anchored to that message.
+    expect(normalized).toContain(
+      'when what you say answers a specific earlier message the room has scrolled past but not moved on from',
+    )
+    // Stale side: the room genuinely moved on and nobody is waiting, so the
+    // point waits for a natural opening instead of being revived.
+    expect(normalized).toContain(
+      'If the conversation has moved on, do not revive it to answer a stale message; fold the point into the next natural opening or scheduled update instead.',
+    )
+  })
+
   it('sanctions no wording that treats a volley as work to cover', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
@@ -206,7 +221,14 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'react to what deserves it, reply to the one or two things actually meant for you (targeting that message when the room has moved on), and let the rest go.',
+      'react to what deserves it, reply to the one or two things actually meant for you, and let the rest go.',
+    )
+    // Reply targeting has exactly one owner (the Message shape rule below).
+    // Stating it here too produced a contradiction, because catching up was
+    // telling Murph to anchor a reply precisely when the stale rule forbids
+    // reviving the topic at all.
+    expect(normalized).not.toContain(
+      'targeting that message when the room has moved on',
     )
     expect(normalized).toContain(
       'Nobody writes a recap of what they missed.',
