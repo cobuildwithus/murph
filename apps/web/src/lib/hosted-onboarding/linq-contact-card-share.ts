@@ -59,7 +59,7 @@ type HostedLinqContactCardShareFindManyInput = {
   };
 };
 
-const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 48 * 60 * 60 * 1000;
+const HOSTED_LINQ_CONTACT_CARD_SHARE_THROTTLE_MS = 10 * 60 * 1000;
 
 type HostedLinqContactCardShareSkipReason =
   | "missing_chat_id"
@@ -80,7 +80,9 @@ type HostedLinqContactCardShareReserveDecision =
 
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
- * checks; this only guards the attempt cadence (one per chat per 48h).
+ * checks; this only dedupes duplicate attempts within one turn/wake (one per
+ * chat per 10 minutes). Every share is an intentional assistant decision, so
+ * a requested re-share outside that window must go through.
  */
 export async function reserveHostedLinqContactCardShareAttempt(input: {
   chatId: string;
@@ -275,9 +277,9 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
  * the only provider-side contact-card share mechanism: it never calls Linq's
  * native contact-card share, so a member-chosen avatar photo can not be
  * overwritten. Callers own eligibility and thread authority; this owns line
- * resolution, the 48h per-chat reservation, the build and send, and releasing
- * the reservation when a failure provably never reached the chat. Send
- * failures are returned, not thrown.
+ * resolution, the per-chat throttle reservation, the build and send, and
+ * releasing the reservation when a failure provably never reached the chat.
+ * Send failures are returned, not thrown.
  */
 export async function shareMurphHostedLinqContactCardVcfToChat(input: {
   chatId: string;
@@ -338,16 +340,16 @@ export async function shareMurphHostedLinqContactCardVcfToChat(input: {
       chatId: input.chatId,
       contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + day: dedupes duplicate provider submissions of this share
-      // without suppressing an intentional re-share after the 48h throttle.
+      // Chat id + reservation instant: retries of this reservation dedupe at
+      // the provider while a later requested re-share stays a distinct send.
       // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `${input.idempotencyKeyPrefix}:${input.chatId}:${(input.now ?? new Date()).toISOString().slice(0, 10)}`,
+      idempotencyKey: `${input.idempotencyKeyPrefix}:${input.chatId}:${reservation.attemptedAt.getTime()}`,
       ...(input.signal ? { signal: input.signal } : {}),
     });
   } catch (error) {
     if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the 48h reservation so a later retry
-      // is not locked out. Ambiguous message-send failures keep it.
+      // Nothing reached the chat; free the throttle reservation so a later
+      // retry is not locked out. Ambiguous message-send failures keep it.
       try {
         await releaseHostedLinqContactCardShareAttempt({
           attemptedAt: reservation.attemptedAt,

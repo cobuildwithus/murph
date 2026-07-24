@@ -184,7 +184,10 @@ function readStatusContent(input: {
     );
   }
 
-  if (input.status === "checkout_open") {
+  // After a successful Stripe return the webhook may not have landed yet, so
+  // the purchase can still read checkout_open; that must present as payment
+  // confirmation, not as a resumable checkout.
+  if (input.status === "checkout_open" && !input.returnedFromSuccessfulCheckout) {
     return content(
       "Checkout already open",
       input.canResumeCheckout
@@ -234,6 +237,7 @@ function readStatusContent(input: {
         "Payment not completed",
         "The payment did not complete. No usage was added.",
       );
+    case "checkout_open":
     case "payment_pending":
       return content("Confirming payment", "Payment submitted. We’re confirming it.");
     case null:

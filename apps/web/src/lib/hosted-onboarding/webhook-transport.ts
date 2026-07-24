@@ -645,7 +645,8 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
  * After the invite-signup reply lands, share Murph's first-party `.vcf` into
  * the same thread so text-first members can save the contact without visiting
  * the web app. Direct and group threads are both eligible; the share module
- * owns the iMessage-only gate and the 48h per-chat reservation. Best effort:
+ * owns the iMessage-only gate and the per-chat throttle reservation. Best
+ * effort:
  * a share failure never fails or delays the reply delivery, and the request
  * signal is deliberately not forwarded because the share may run after the
  * response completes.
