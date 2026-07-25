@@ -3,9 +3,18 @@ import {
   BiomarkerDetailStudy,
   BiomarkerIndexStudy,
   BiomarkerPreparingStateStudy,
+  BiomarkerReferenceContextStudy,
 } from "@/src/components/biomarkers/biomarker-design-studies";
+import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { PersonasSection } from "@/src/components/homepage/personas-section";
+import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
+import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { GroupJoinStudy } from "./group-join-study";
+import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
   GroupUsageFundingStudy,
@@ -38,8 +47,32 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Homepage security and privacy">
+        <SecurityTeaserSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage experiment flow">
+        <HowItWorksSection />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage personas">
+        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Persona onboarding">
         <PersonaOnboardingStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Family plan invite acceptance">
+        <FamilyInviteJoinStudy />
       </StudySection>
 
       <Separator />
@@ -50,13 +83,31 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group usage funding">
+      <StudySection title="Account deletion exit reason">
+        <AccountExitReasonStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Home partial-load recovery">
+        <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group join actions">
+        <GroupJoinStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group usage funding and top-up follow-up">
         <GroupUsageFundingStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Personal usage credit owner">
+      <StudySection title="Personal usage credit states">
         <PersonalUsageCreditOwnerStudy />
       </StudySection>
 
@@ -74,8 +125,14 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Biomarker detail">
+      <StudySection title="Biomarker result detail">
         <BiomarkerDetailStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Biomarker reference context">
+        <BiomarkerReferenceContextStudy />
       </StudySection>
 
       <Separator />

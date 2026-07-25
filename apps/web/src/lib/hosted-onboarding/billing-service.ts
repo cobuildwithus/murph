@@ -142,6 +142,19 @@ export async function createHostedBillingCheckout(
       });
     }
 
+    // Checkout mints a new subscription, and binding it would orphan an existing
+    // one on the same customer rather than replace it. `incomplete` does not by
+    // itself mean first-time: the Stripe status mapper also writes it while an
+    // established subscription is settling. The bound subscription is the single
+    // owner of that irreversible decision, so fail closed when one already exists.
+    if (invite.member.billingRef?.stripeSubscriptionLookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+        message: "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+        httpStatus: 409,
+      });
+    }
+
     await assertHostedMemberBillingStartMessagingReady({
       identity: invite.member.identity,
       prisma,

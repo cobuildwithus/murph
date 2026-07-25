@@ -105,6 +105,31 @@ function secondsToMinutes(value: unknown): number | undefined {
   return Math.max(0, numeric / 60);
 }
 
+function resolveOuraDailyActivityMinutes(activity: PlainObject): number | undefined {
+  // Oura reports each required daily intensity bucket in seconds.
+  const lowActivitySeconds = finiteNumber(activity.low_activity_time);
+  const mediumActivitySeconds = finiteNumber(activity.medium_activity_time);
+  const highActivitySeconds = finiteNumber(activity.high_activity_time);
+
+  if (
+    lowActivitySeconds === undefined
+    || mediumActivitySeconds === undefined
+    || highActivitySeconds === undefined
+    || lowActivitySeconds < 0
+    || mediumActivitySeconds < 0
+    || highActivitySeconds < 0
+  ) {
+    return undefined;
+  }
+
+  const totalActivitySeconds =
+    lowActivitySeconds + mediumActivitySeconds + highActivitySeconds;
+
+  return totalActivitySeconds <= 24 * 60 * 60
+    ? totalActivitySeconds / 60
+    : undefined;
+}
+
 function makeExternalRef(
   resourceType: string,
   resourceId: string,
@@ -167,6 +192,13 @@ function resolveOuraSleepType(value: unknown): "main_sleep" | "nap" | undefined 
 }
 
 const OURA_DAILY_ACTIVITY_METRICS: readonly ObservationMetricDescriptor<PlainObject>[] = [
+  {
+    metric: "activity-minutes",
+    value: resolveOuraDailyActivityMinutes,
+    unit: "minutes",
+    title: "Oura daily active minutes",
+    facet: "activity-minutes",
+  },
   {
     metric: "activity-score",
     value: (activity) => activity.score,

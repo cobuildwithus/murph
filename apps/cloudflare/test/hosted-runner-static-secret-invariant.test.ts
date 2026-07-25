@@ -37,6 +37,7 @@ const HOSTED_SECRET_KEY_PATTERN =
 const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
   "ELEVENLABS_API_KEY",
   "EXA_API_KEY",
+  "XAI_API_KEY",
   "OPENAI_API_KEY",
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_LOG_FINGERPRINT_SECRET",
@@ -64,6 +65,7 @@ const TEMPORARY_REVIEWED_HOSTED_SECRET_KEYS = new Set<string>([
 const CURRENT_FORWARDED_SECRET_KEYS = [
   "ELEVENLABS_API_KEY",
   "EXA_API_KEY",
+  "XAI_API_KEY",
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
   "OPENAI_API_KEY",
@@ -228,6 +230,7 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     JUNCTION_ENV: "sandbox",
     JUNCTION_REGION: "us",
     EXA_API_KEY: "fixture-exa-token",
+    XAI_API_KEY: "fixture-xai-token",
     LINQ_API_BASE_URL: "https://linq.example.test",
     LINQ_API_TOKEN: "fixture-linq-token",
     MAPBOX_ACCESS_TOKEN: "fixture-mapbox-token",

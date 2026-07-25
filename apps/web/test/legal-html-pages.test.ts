@@ -86,8 +86,8 @@ test("HTML legal policy routes render authored policies with PDF downloads", asy
   assert.match(legalDocumentsMarkup, /\/legal\/manifest\.json/u);
 });
 
-test("SubprocessorsPage uses affirmative model and search provider wording", () => {
-  const markup = renderToStaticMarkup(SubprocessorsPage());
+test("SubprocessorsPage uses affirmative model and search provider wording", async () => {
+  const markup = renderToStaticMarkup(await SubprocessorsPage());
 
   assert.match(
     markup,

@@ -7,6 +7,7 @@ import {
   type HostedVaultShareFixedProjectionKind,
 } from "@murphai/hosted-execution/vault-share";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createPrismaClient } from "@/src/lib/prisma";
 import {
   createHostedExternalThreadIdentityLookupKey,
@@ -16,10 +17,12 @@ import {
   createHostedLinqMessageLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
+  createHostedTelegramUserLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const mocks = vi.hoisted(() => ({
   appendHostedGroupJoinConfirmationTx: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedLaunchRequiredConsentGranted: vi.fn(),
   grantHostedVaultShareTx: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
@@ -32,6 +35,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
 }));
 
 vi.mock("@/src/lib/legal/consent", () => ({
+  assertHostedHistoricalLaunchConsentGranted: mocks.assertHostedHistoricalLaunchConsentGranted,
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
 }));
 
@@ -293,6 +297,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.appendHostedGroupJoinConfirmationTx.mockResolvedValue({
       kind: "terminal-skip",
     });
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
@@ -360,6 +365,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     // Joining always shares the memory-backed preferred display name, so consent gates
     // every join, and the only automatic grant is profile-name.v0.
     expect(mocks.assertHostedLaunchRequiredConsentGranted).toHaveBeenCalledTimes(1);
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).not.toHaveBeenCalled();
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith({
       destinationMemberId: "member_group_runtime",
@@ -793,13 +799,110 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("keys a Telegram offer on chat and message so ids cannot collide across chats", async () => {
+    const tx = buildTx();
+    const postedAt = new Date("2026-07-01T00:00:00.000Z");
+
+    const inChat = await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      message: { channel: "telegram" as const, chatId: "-100777", messageId: "55" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+    const otherChat = await recordHostedGroupJoinOfferTx({
+      groupId: "group_1",
+      message: { channel: "telegram" as const, chatId: "-100888", messageId: "55" },
+      postedAt,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    expect(inChat.messageLookupKey).toMatch(/^hbidx:telegram-message:/u);
+    // Same Telegram message id, different chat: never the same offer.
+    expect(inChat.messageLookupKey).not.toBe(otherChat.messageLookupKey);
+    // And never collides with a Linq binding.
+    expect(inChat.messageLookupKey).not.toMatch(/^hbidx:linq-message:/u);
+  });
+
+  it("matches a Telegram acceptance only against a Telegram route", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerMessageLookupKey: "hbidx:telegram-message:v1:offer",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedThreadRoute.findFirst.mockResolvedValue({
+      containerMemberId: "member_group_runtime",
+    });
+
+    await acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:tg"],
+      tx,
+    });
+
+    expect(tx.hostedThreadRoute.findFirst).toHaveBeenCalledWith({
+      select: { containerMemberId: true },
+      where: {
+        channel: "telegram",
+        containerMemberId: "member_group_runtime",
+        threadIdentityLookupKey: { in: ["hbidx:external-thread-identity:v1:tg"] },
+      },
+    });
+  });
+
+  it("refuses a Telegram acceptance when no route matches the offer thread", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerMessageLookupKey: "hbidx:telegram-message:v1:offer",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedThreadRoute.findFirst.mockResolvedValue(null);
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:wrong"],
+      tx,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
+  it("refuses an acceptance whose message binding matches no offer", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      offerProjectionKinds: ["sleep-duration-days.v0"],
+    });
+    tx.hostedGroupJoinOffer.findFirst.mockResolvedValue(null);
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "telegram",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:telegram-message:v1:other-message"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:tg"],
+      tx,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND" });
+
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+  });
+
   it("records join-offer bindings as message lookup keys and projection snapshots", async () => {
     const tx = buildTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_123",
+      message: { channel: "linq" as const, messageId: "msg_offer_123" },
       postedAt,
       projectionKinds: ["sleep-times.v0", "profile-name.v0"],
       tx,
@@ -916,7 +1019,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
     const input = {
       groupId: "group_1",
-      messageId: "msg_offer_same",
+      message: { channel: "linq" as const, messageId: "msg_offer_same" },
       postedAt,
       projectionScopes: [SLEEP_SCOPE],
       tx,
@@ -975,7 +1078,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(recordHostedGroupJoinOfferTx({
       groupId: inputGroupId,
-      messageId,
+      message: { channel: "linq" as const, messageId },
       postedAt: new Date("2026-07-03T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
@@ -995,6 +1098,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1026,6 +1130,33 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       projectionScope: SLEEP_SCOPE,
     }));
     expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
+    // Reaction joins have no consent UI, so a historical launch grant is enough;
+    // the current-version gate stays on web joins only.
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledTimes(1);
+    expect(mocks.assertHostedLaunchRequiredConsentGranted).not.toHaveBeenCalled();
+  });
+
+  it("fails a join offer closed when launch consent was never granted", async () => {
+    const tx = buildTx({ activeGroupGrantCount: 0 });
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+      message: "Accept the Murph legal consent before continuing.",
+    }));
+
+    await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
+      memberId: "member_grantor",
+      messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
+      now: new Date("2026-07-01T00:00:00.000Z"),
+      threadIdentityLookupKeyReadCandidates: ["hbidx:external-thread-identity:v1:thread"],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_CONSENT_REQUIRED",
+      httpStatus: 403,
+    });
+    expect(tx.hostedGroupMember.create).not.toHaveBeenCalled();
+    expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
   });
 
   it("appends a reaction-specific private confirmation for a first offer join", async () => {
@@ -1040,6 +1171,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       confirmationPublicBaseUrl: "https://murph.example",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
@@ -1083,6 +1215,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now,
@@ -1137,6 +1270,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates,
       now,
@@ -1185,6 +1319,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: ["hbidx:linq-message:v1:offer"],
       now: new Date("2026-07-01T00:06:00.000Z"),
@@ -1206,20 +1341,21 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     const firstOffer = await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_a",
+      message: { channel: "linq" as const, messageId: "msg_offer_a" },
       postedAt: firstPostedAt,
       projectionKinds: ["sleep-times.v0"],
       tx,
     });
     await recordHostedGroupJoinOfferTx({
       groupId: "group_1",
-      messageId: "msg_offer_b",
+      message: { channel: "linq" as const, messageId: "msg_offer_b" },
       postedAt: secondPostedAt,
       projectionKinds: ["activity-days.v0"],
       tx,
     });
 
     await expect(acceptHostedGroupJoinOfferTx({
+      channel: "linq",
       memberId: "member_grantor",
       messageLookupKeyReadCandidates: [firstOffer.messageLookupKey],
       now,
@@ -1453,6 +1589,11 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
                     phoneNumberVerifiedAt: true,
                   },
                 },
+                routing: {
+                  select: {
+                    telegramUserLookupKey: true,
+                  },
+                },
               },
             },
             memberId: true,
@@ -1464,6 +1605,136 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(1);
     expect(deviceConnectionFindMany).not.toHaveBeenCalled();
+  });
+
+  it("matches Telegram senders only against Telegram identity, never a phone number", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    // A Telegram user id is a bare digit string that normalizes into a valid
+    // phone lookup key. Another member verified that exact number as their
+    // phone, so cross-channel matching would attribute the wrong human.
+    const telegramSenderUserId = "15551110009";
+    const collidingPhoneHandle = "+15551110009";
+    const telegramUserLookupKey = createHostedTelegramUserLookupKey(
+      telegramSenderUserId,
+    );
+    const collidingPhoneLookupKey = createHostedPhoneLookupKey(
+      collidingPhoneHandle,
+    );
+    if (!telegramUserLookupKey || !collidingPhoneLookupKey) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const members = [
+      {
+        id: "group_member_telegram",
+        member: {
+          emailAuthorization: null,
+          identity: null,
+          routing: { telegramUserLookupKey },
+        },
+        memberId: "member_telegram",
+      },
+      {
+        id: "group_member_phone_lookalike",
+        member: {
+          emailAuthorization: null,
+          identity: {
+            phoneLookupKey: collidingPhoneLookupKey,
+            phoneNumberVerifiedAt: new Date("2026-07-01T00:00:00.000Z"),
+          },
+          routing: null,
+        },
+        memberId: "member_phone_lookalike",
+      },
+    ];
+    const hostedGroupFindUnique = vi.fn(async () => ({ members }));
+    const tx = {
+      deviceConnection: { findMany: vi.fn(async () => []) },
+      hostedGroup: { findUnique: hostedGroupFindUnique },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        callback: (client: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      telegramSenderHandles: [telegramSenderUserId],
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [telegramSenderUserId],
+        memberId: "member_telegram",
+        participantId: "group_member_telegram",
+      }),
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_phone_lookalike",
+        participantId: "group_member_phone_lookalike",
+      }),
+    ]);
+  });
+
+  it("drops a Telegram handle that resolves to no current member", async () => {
+    restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+      currentVersion: "v2",
+      entries: { ...TEST_KEYRING_ENTRIES },
+    });
+    const boundLookupKey = createHostedTelegramUserLookupKey("15551110010");
+    if (!boundLookupKey) {
+      throw new Error("Expected contact lookup keys.");
+    }
+    const members = [
+      {
+        id: "group_member_telegram",
+        member: {
+          emailAuthorization: null,
+          identity: null,
+          routing: { telegramUserLookupKey: boundLookupKey },
+        },
+        memberId: "member_telegram",
+      },
+    ];
+    const tx = {
+      deviceConnection: { findMany: vi.fn(async () => []) },
+      hostedGroup: { findUnique: vi.fn(async () => ({ members })) },
+      hostedVaultShare: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = createPrismaStub({
+      $transaction: vi.fn(async (
+        callback: (client: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      telegramSenderHandles: ["15559999999"],
+      prisma,
+      projectionScopes: [SLEEP_SCOPE],
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") {
+      throw new Error("Expected hosted group shared data.");
+    }
+    expect(result.members).toEqual([
+      expect.objectContaining({
+        currentTurnHandles: [],
+        memberId: "member_telegram",
+        participantId: "group_member_telegram",
+      }),
+    ]);
   });
 });
 

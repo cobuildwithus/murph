@@ -27,6 +27,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Conversation Consumed-Watermark Rollout
+
+The exact conversation acknowledgement release changes the durable hosted
+pending-input file from v1 to cursor-bearing v2. Deploy the Cloudflare Worker
+and runner bundle first with `container_rollout=immediate`, require managed
+container smoke to report the exact new runner fingerprint, and only then
+deploy Web. Old Web ignores the additive checkpoint field, so producer-first
+skew is safe.
+
+The first accepted workspace snapshot containing the v2 pending-input envelope
+is a hard rollback floor for that workspace because the preceding v1-only
+runner cannot read it. Treat the new runner as the production fleet floor before
+admitting turns: after traffic begins, forward-fix the runner rather than
+rolling it back. Web may roll back independently while the v2-capable runner
+stays deployed. Restoring a v1-only runner requires a separate offline workspace
+migration that preserves unresolved input IDs and the batch cursor; Web-first
+rollback alone is not recovery proof.
+
+After both deploys, verify the managed runner fingerprint, confirm conversation
+lane consumed floors converge toward imported prefixes, and run one Telegram
+reply across a controlled reload with no duplicate reply or multi-minute stall.
+
 ## Shared Message Targeting Rollout
 
 The first release with shared exact-message reply and reaction targeting must
@@ -130,6 +152,23 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+## Phone-Call Result Deployment
+
+A completed phone call delivers its result as a proactive
+`assistant.notification.requested` message: Murph composes the result in its own
+voice and may skip a non-meaningful call. This reuses the existing notification
+wake path, so no new mailbox kind or runtime consumer is introduced and there is
+no result-path old-runner/new-web compatibility window.
+
+Apply the additive nullable `HostedPhoneCall.origin_session_id` migration; it is
+used only for phone-call request-key idempotency, not for delivery, so legacy
+rows without an origin session still deliver their result. The start schema
+still requires `originSessionId`, so `create_phone_call` fails closed during a
+runner-first window (a new runner sends the field to an old Web start endpoint
+that rejects it) — deploy Web and the runner together, or keep the window short.
+Delivery requires a resolvable member messaging route, exactly like every other
+proactive notification.
+
 ## Consented Group Disclosure Rollout
 
 The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,
@@ -176,7 +215,7 @@ The affirmative-reaction adapter transfers target authorship from a live Linq
 message read to an optional wake marker plus exact same-route sent-outbox
 attestation in the runner. Old Web with a marker-aware runner is safe; new Web
 with an old runner is unsafe because the old tolerant parser drops the marker
-and imports the synthetic `Yes.` as an ordinary message.
+and imports the synthetic reaction description as an ordinary message.
 
 Roll out the first marker-aware release in this order:
 
@@ -353,7 +392,7 @@ Core execution tuning:
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production `wrangler.jsonc` sets `1200000`) and controls runner container activity expiry for native shell cleanup. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns. The exact assistant wake projected by the current foreground phase may run once before the floor without checkpointing; inherited or committed wakes and durability barriers remain checkpoint-first. RunnerContainer activity expiry only yields to active foreground work or tears down an idle warm shell; it never records pending checkpoint intent.
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS` defaults to `300000` (production sets `1200000`) and controls the post-completion warm lease minted only by observed conversation activity. `HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS` defaults to the idle TTL when absent for rollback compatibility. Leave it unset for the additive code deploy and one legacy-TTL observation window, drain old containers, then set it to `60000` for a canary before widening the rollout. Device sync, system maintenance, replay, and generic runner activity do not extend conversation warmth. RunnerContainer derives the lease directly from the resident child process's private health watermark on every expiry, re-arms the platform timeout while the lease or active work remains, yields on uncertain cleanup state, and otherwise destroys the idle shell. An inactive old child without the watermark is cleanup-eligible; active old-child work remains protected by its independent active-work count. A replacement child starts without inheriting the old process's warmth. Dirty foreground runtime state is checkpointed by the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` path before the invocation returns; RunnerContainer never records pending checkpoint intent.
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT` defaults to `production`
 - `HOSTED_R2_PRESIGN_ENDPOINT` optionally overrides the default account-scoped
   R2 S3 endpoint for direct snapshot presign URLs. Normally leave it unset. If
@@ -632,6 +671,19 @@ preferred. After convergence, smoke one personal scheduled reminder and one
 group automation, and confirm there are no new
 `ASSISTANT_LINQ_ENGAGEMENT_ASSERT_UNAVAILABLE` or
 `ASSISTANT_LINQ_AUDIENCE_AUTHORITY_UNAVAILABLE` failures.
+
+The activity/workout semantic-marker rollout is producer-first and has no
+feature flag. Deploy its compatibility release to Web before Cloudflare so Web
+preserves the optional markers in encrypted share snapshots. Then deploy
+Cloudflare with `container_rollout=immediate`, prove the new runner fingerprint,
+and confirm a canary projection contains `broad-movement` activity and
+`canonical-workout-day` workout records. Use `/ops/runtime-maintenance` in its
+existing bounded batches to wake every current checkpointed grantor, retry
+failures, and verify with aggregate evidence that all current activity/workout
+snapshots were replaced after cutover. Readers remain legacy-compatible during
+this drain. Deploy exact-marker rejection only as a separate consumer release
+after the legacy count is zero. Do not replace this sequence with a rollout
+flag, read-triggered member fanout, polling, or another backfill owner.
 
 The first automatic meal-photo release must deploy Cloudflare Worker and runner support with `container_rollout=immediate` and pass managed-container smoke before enabling or deploying the web producer that appends `meal-photo.captured`. The first runner bundle that parses and imports that mailbox kind is the rollback floor while any meal-photo item can remain retained; do not roll below it independently. The web-to-Worker staging/deletion routes are additive, so the new Worker may safely precede web. After deployment, verify the runner-bundle fingerprint and absence of hosted mailbox parse failures before exercising the physical-device opt-in/upload smoke.
 

@@ -4,7 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { DeviceSyncConnectTarget } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
-const WHOOP_DIRECT_CONNECT_MEMBER_LIMIT = 10;
+const WHOOP_DIRECT_CONNECT_MEMBER_LIMIT = 2;
 
 export async function assertHostedWhoopConnectCapacityAvailable(input: {
   memberId: string;

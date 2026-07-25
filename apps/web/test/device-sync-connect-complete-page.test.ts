@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => ({
     throw new Error(`NEXT_REDIRECT:${href}`);
   }),
   routerRefresh: vi.fn(),
-  resolveHostedAiUsageGate: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
 
@@ -128,7 +128,7 @@ vi.mock("@/src/lib/device-sync/settings-service", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
@@ -197,7 +197,7 @@ beforeEach(() => {
     telegramUserId: "telegram-user",
     telegramUserLookupKey: "lookup",
   });
-  mocks.resolveHostedAiUsageGate.mockResolvedValue(null);
+  mocks.readHostedAiUsageGate.mockResolvedValue(null);
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(false);
 });
 

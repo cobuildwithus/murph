@@ -187,9 +187,9 @@ test("launch consent records both launch scopes from one click", async () => {
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "health-ai-safety-disclosure": "2026-04-29",
-          "privacy-policy": "2026-06-24",
-          "terms-of-service": "2026-04-29",
+          "health-ai-safety-disclosure": "2026-07-23",
+          "privacy-policy": "2026-07-23",
+          "terms-of-service": "2026-07-23",
         },
         scope: "launch.legal",
         source: "homepage-signup-dialog",
@@ -200,7 +200,7 @@ test("launch consent records both launch scopes from one click", async () => {
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "consumer-health-data-notice": "2026-04-29",
+          "consumer-health-data-notice": "2026-07-23",
         },
         scope: "launch.health-data",
         source: "homepage-signup-dialog",
@@ -261,9 +261,9 @@ test("a legal-only update uses concise legal copy and records only that scope", 
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "health-ai-safety-disclosure": "2026-04-29",
-          "privacy-policy": "2026-06-24",
-          "terms-of-service": "2026-04-29",
+          "health-ai-safety-disclosure": "2026-07-23",
+          "privacy-policy": "2026-07-23",
+          "terms-of-service": "2026-07-23",
         },
         scope: "launch.legal",
         source: "legal-version-refresh",
@@ -326,8 +326,8 @@ test("optional feature consent keeps its just-in-time checkbox gate", async () =
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "consumer-health-data-notice": "2026-04-29",
-          "privacy-policy": "2026-06-24",
+          "consumer-health-data-notice": "2026-07-23",
+          "privacy-policy": "2026-07-23",
         },
         scope: "feature.connected-health-source",
         source: "test-device-sync",
@@ -616,7 +616,7 @@ function createConsentStatus(input: {
       ),
       consentScope(
         "launch.health-data",
-        "Health data collection consent",
+        "Health data notice and processing authorization",
         false,
         healthDataDocuments,
         launchHealthDataGranted,
@@ -638,7 +638,7 @@ function consentDocument(id: string, title: string, href: string) {
     id: id as HostedConsentStatus["documents"][number]["id"],
     pdfHref: `${href}.pdf`,
     title,
-    version: id === "privacy-policy" ? "2026-06-24" : "2026-04-29",
+    version: "2026-07-23",
   };
 }
 

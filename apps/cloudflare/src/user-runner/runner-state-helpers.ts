@@ -100,5 +100,7 @@ export function readWriteFenceKind(value: string | null): RunnerWriteFenceKind |
 export function readRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return value === "inbox_media_retention" || value === "system_mailbox"
+    ? value
+    : "default";
 }

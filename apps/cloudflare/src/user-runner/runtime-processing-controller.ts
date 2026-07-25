@@ -222,7 +222,7 @@ export class RuntimeProcessingController {
     if (activeFence.processingMode !== requestedProcessingMode) {
       if (
         activeFence.processingMode === "inbox_media_retention"
-        && requestedProcessingMode === "default"
+        && requestedProcessingMode !== "inbox_media_retention"
       ) {
         return await this.preemptActiveRetentionRuntimeForForegroundProcessing({
           activeFence,
@@ -1092,5 +1092,7 @@ export class RuntimeProcessingController {
 function normalizeRuntimeProcessingMode(
   value: RuntimeProcessingInput["processingMode"],
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return value === "inbox_media_retention" || value === "system_mailbox"
+    ? value
+    : "default";
 }

@@ -6,6 +6,7 @@ import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from 
 import {
   parseHostedRunnerGeneratedImageUploadRequest,
 } from "../runner-effects-contract.ts";
+import { normalizeCloudflareWorkerFetch } from "../worker-fetch.ts";
 import {
   requireRunnerRuntimeWriteFenceWrite,
   RunnerRuntimeWriteFenceError,
@@ -87,16 +88,27 @@ export async function handleRunnerGeneratedImageUploadRequest(input: {
     throw error;
   }
 
-  const uploadResponse = await uploadCloudflareImage({
-    accountId,
-    apiToken,
-    bytes,
-    contentType: request.contentType,
-    filename: request.filename,
-    fetchImpl: input.fetchImpl ?? fetch,
-    metadata: request.metadata,
-    signal: input.request.signal,
-  });
+  // The upload runs under the caller-owned deadline via `input.request.signal`
+  // (the effects-port request lifecycle); we do not impose a second, shorter
+  // handler-local timeout. On a thrown or non-2xx upload we degrade to a clean
+  // 502 so the generate-image tool returns a text-only fallback. The failure is
+  // recorded off-path by the assistant runtime's existing dynamic-tool issue
+  // owner, not by this handler.
+  let uploadResponse: Response;
+  try {
+    uploadResponse = await uploadCloudflareImage({
+      accountId,
+      apiToken,
+      bytes,
+      contentType: request.contentType,
+      fetchImpl: input.fetchImpl,
+      filename: request.filename,
+      metadata: request.metadata,
+      signal: input.request.signal,
+    });
+  } catch {
+    return jsonError("Generated image upload failed.", 502);
+  }
   if (!uploadResponse.ok) {
     return jsonError("Generated image upload failed.", 502);
   }
@@ -127,8 +139,8 @@ async function uploadCloudflareImage(input: {
   apiToken: string;
   bytes: Uint8Array;
   contentType: "image/jpeg" | "image/png" | "image/webp";
+  fetchImpl?: typeof fetch;
   filename: string;
-  fetchImpl: typeof fetch;
   metadata: Record<string, string>;
   signal: AbortSignal;
 }): Promise<Response> {
@@ -141,7 +153,11 @@ async function uploadCloudflareImage(input: {
   form.set("metadata", JSON.stringify(input.metadata));
   form.set("requireSignedURLs", "false");
 
-  return await input.fetchImpl(
+  // Workerd's global `fetch` is receiver-sensitive; route through the normalizer
+  // so the ambient/global impl is invoked with the correct receiver instead of as
+  // a foreign-object method (which throws `TypeError: Illegal invocation`).
+  const fetchImpl = normalizeCloudflareWorkerFetch(input.fetchImpl);
+  return await fetchImpl(
     `${CLOUDFLARE_IMAGES_API_BASE_URL}/accounts/${encodeURIComponent(input.accountId)}/images/v1`,
     {
       body: form,

@@ -931,6 +931,10 @@ describe('assistant Codex turn planning', () => {
     expect(personaPlan.developerInstructions).toContain('Humor 1/10')
     expect(personaPlan.developerInstructions).toContain('Push 10/10')
     expect(personaPlan.developerInstructions).toContain('Detail 2/10')
+    // A persona never contributes an Unhinged band: the member here saved no
+    // Unhinged preference, so the sparse thread contract renders no band.
+    // (The reusable style-settings guidance still names the Unhinged dial.)
+    expect(personaPlan.developerInstructions).not.toContain('Unhinged 0/10')
     expect(personaPlan.developerInstructions).toContain(
       'Assistant tone preference:',
     )
@@ -996,6 +1000,7 @@ describe('assistant Codex turn planning', () => {
         personality: {
           detail: 0,
           humor: 9,
+          unhinged: 7,
         },
       })
       const resumedSession = createSession({
@@ -1021,6 +1026,7 @@ describe('assistant Codex turn planning', () => {
         assistantPersonality: {
           detail: 0,
           humor: 9,
+          unhinged: 7,
         },
         assistantTone: null,
         assistantVoice: null,
@@ -1040,6 +1046,10 @@ describe('assistant Codex turn planning', () => {
       )
       expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
         'Detail 0/10: lead with the shortest complete answer',
+      )
+      // An explicitly saved Unhinged score renders its exact band.
+      expect(updatedAttemptPlan.routePlan.developerInstructions).toContain(
+        'Unhinged 7/10: fully game.',
       )
       expect(updatedAttemptPlan.routePlan.dynamicTools.map((tool) => tool.name)).toContain(
         'assistant_style',
@@ -1074,6 +1084,7 @@ describe('assistant Codex turn planning', () => {
       expect(groupExecutionPlan.preferenceContext?.assistantPersonality).toEqual({
         detail: 0,
         humor: 9,
+        unhinged: 7,
       })
       expect(groupAttemptPlan.routePlan.developerInstructions).not.toContain(
         'Assistant personality preferences for this private conversation',
@@ -1454,6 +1465,46 @@ describe('assistant Codex turn planning', () => {
     expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
+  it('plans murph.ask_grok only when the turn env carries an xAI API key', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const planToolNamesFor = async (env: NodeJS.ProcessEnv) => {
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-07-23',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    expect(await planToolNamesFor({})).not.toContain('ask_grok')
+    expect(await planToolNamesFor({ XAI_API_KEY: '   ' })).not.toContain('ask_grok')
+    expect(await planToolNamesFor({ XAI_API_KEY: 'xai-sentinel-key' }))
+      .toContain('ask_grok')
+  })
+
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
@@ -1711,6 +1762,9 @@ describe('assistant Codex turn planning', () => {
       groupSharedReader,
       groupTool: null,
     }
+    const progressDelivery = {
+      send: vi.fn(async () => ({ kind: 'sent' as const, source: 'model' as const })),
+    }
 
     const resolveGroupPlan = (scheduledOccurrence = false) =>
       resolveAssistantRouteTurnPlan({
@@ -1725,6 +1779,7 @@ describe('assistant Codex turn planning', () => {
           },
         },
         hostedToolContext,
+        progressDelivery,
         input: {
           ...createMessageInput(),
           ...(scheduledOccurrence
@@ -1775,8 +1830,43 @@ describe('assistant Codex turn planning', () => {
         },
       },
     })
+    expect(groupTools[0]?.description).toContain(
+      'a handled offer action for that exact participant and scope',
+    )
+    expect(groupTools[0]?.description).toContain(
+      'A handled action for one participant never covers another.',
+    )
+    expect(groupTools[0]?.description).not.toContain(
+      'already received an offer',
+    )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    expect(attendedPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    const groupProgressTool = attendedPlan.dynamicTools.find(
+      (tool) =>
+        tool.namespace === 'murph' && tool.name === 'send_progress_update',
+    )
+    expect(groupProgressTool?.description).toContain(
+      'Use this much more sparingly than in a direct conversation.',
+    )
+    expect(groupProgressTool?.description).toContain(
+      'Skip challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences.',
+    )
+    expect(groupProgressTool?.description).not.toContain(
+      'even when each lookup is routine',
+    )
+    expect(attendedPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(attendedPlan.systemPrompt).toContain(
+      'use `murph.send_progress_update` much more sparingly than in a direct conversation',
+    )
+    expect(attendedPlan.systemPrompt).toContain(
+      'including every `---` bubble',
+    )
 
     const directPlan = await resolveAssistantRouteTurnPlan({
       executionContext: {
@@ -1790,6 +1880,7 @@ describe('assistant Codex turn planning', () => {
         },
       },
       hostedToolContext,
+      progressDelivery,
       input: {
         ...createMessageInput(),
         scheduledOccurrenceAt: '2026-07-18T13:00:00.000Z',
@@ -1810,6 +1901,29 @@ describe('assistant Codex turn planning', () => {
     })
     expect(directPlan.dynamicTools).not.toContainEqual(
       expect.objectContaining({ namespace: 'murph', name: 'group' }),
+    )
+    expect(directPlan.dynamicTools).toContainEqual(
+      expect.objectContaining({
+        namespace: 'murph',
+        name: 'send_progress_update',
+      }),
+    )
+    const directProgressTool = directPlan.dynamicTools.find(
+      (tool) =>
+        tool.namespace === 'murph' && tool.name === 'send_progress_update',
+    )
+    expect(directProgressTool?.description).toContain(
+      'even when each lookup is routine',
+    )
+    expect(directProgressTool?.description).not.toContain(
+      'Use this much more sparingly than in a direct conversation.',
+    )
+    expect(directPlan.systemPrompt).toContain('murph.send_progress_update')
+    expect(directPlan.systemPrompt).toContain(
+      'including every `---` bubble',
+    )
+    expect(directPlan.systemPrompt).not.toContain(
+      'much more sparingly than in a direct conversation',
     )
   })
 
@@ -1885,7 +1999,7 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Tone, Voice, Humor, Push, and Detail belong to this room',
+      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
@@ -2208,7 +2322,7 @@ describe('assistant Codex turn planning', () => {
       "change this room's Murph style",
     )
     expect(plan.developerInstructions).not.toContain(
-      'Tone, Voice, Humor, Push, and Detail belong to this room',
+      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
     )
     expect(plan.developerInstructions).not.toContain('PERSONAL_CLI_CONTRACT')
     expect(plan.developerInstructions).not.toContain('PERSONAL_CONTEXT_SNAPSHOT')
@@ -3714,6 +3828,7 @@ async function writeAssistantPreferencesDocument(
       detail?: number
       humor?: number
       push?: number
+      unhinged?: number
     }
     voice?: string
   },

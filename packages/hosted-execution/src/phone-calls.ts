@@ -45,6 +45,7 @@ export const hostedPhoneCallBriefSchema = z
 export const hostedPhoneCallStartRequestSchema = z
   .object({
     brief: hostedPhoneCallBriefSchema,
+    originSessionId: z.string().trim().min(1).max(200),
     requestKey: z.string().trim().min(1).max(200),
   })
   .strict();

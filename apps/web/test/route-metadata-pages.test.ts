@@ -61,11 +61,11 @@ test("SecurityPage metadata keeps the custom security preview image and copy", (
   ]);
 });
 
-test("SubprocessorsPage metadata and table expose the provider list", () => {
-  assert.equal(subprocessorsMetadata.title, "Subprocessors · Murph");
+test("SubprocessorsPage metadata and table expose the provider list", async () => {
+  assert.equal(subprocessorsMetadata.title, "Murph Subprocessors and Connected Services");
   assert.equal(
     subprocessorsMetadata.description,
-    "Subprocessors and third-party providers that may process Murph personal information or health data.",
+    "Murph subprocessors, model providers, and connected services that may process personal information or health data.",
   );
   assert.equal(subprocessorsMetadata.alternates?.canonical, "/subprocessors");
   assert.deepEqual(subprocessorsMetadata.openGraph?.images, [
@@ -78,14 +78,17 @@ test("SubprocessorsPage metadata and table expose the provider list", () => {
     },
   ]);
 
-  const markup = renderToStaticMarkup(SubprocessorsPage());
+  const markup = renderToStaticMarkup(await SubprocessorsPage());
 
-  assert.match(markup, /Subprocessors and model providers/);
-  assert.match(markup, /aria-label="Subprocessor provider table"/);
+  assert.match(markup, /Murph Subprocessors, Model Providers, and Connected Services/);
+  assert.match(markup, /aria-label="Scrollable legal document table"/);
+  assert.match(markup, /<caption class="sr-only">Legal document table\./);
   assert.match(markup, /Vercel AI Gateway/);
   assert.match(markup, /Configured AI model providers/);
-  assert.match(markup, /Trains on Murph data\?/);
-  assert.match(markup, /Oura, WHOOP, Garmin, Strava/);
+  assert.match(markup, /Murph-authorized model training or secondary use\?/);
+  for (const provider of ["Oura", "WHOOP", "Garmin", "Strava"]) {
+    assert.match(markup, new RegExp(`scope="row">${provider}</th>`, "u"));
+  }
   assert.doesNotMatch(markup, /Brave Search, Exa, Kagi, Perplexity, SerpAPI, or Tavily/);
   assert.doesNotMatch(markup, /Optional web-search features/);
   assert.doesNotMatch(markup, /Optional search, transcription/);

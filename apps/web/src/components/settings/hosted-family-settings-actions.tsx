@@ -29,6 +29,7 @@ import {
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/shared";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -229,6 +230,7 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
+  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
@@ -525,9 +527,6 @@ export function HostedFamilyManager(props: {
           <tbody className="grid gap-3 md:table-row-group md:divide-y md:divide-border">
             {props.members.map((member) => {
               const isRetry = member.pendingPlanCode !== null;
-              const usageTargetLabel = member.isOwner
-                ? "you"
-                : member.label ?? "this family member";
               const targetPlanCode = member.pendingPlanCode
                 ?? props.tiers.find((tier) => tier.planCode !== member.planCode)?.planCode;
               const targetTier = props.tiers.find(
@@ -569,30 +568,12 @@ export function HostedFamilyManager(props: {
                   </td>
                   <td className="col-span-2 block text-right align-top md:table-cell md:py-3">
                     <div className="flex w-full items-center gap-2 md:inline-flex md:w-auto md:gap-1">
-                      <HostedUsageTopUpDialog
-                        activePurchase={
-                          props.usageTopUpActiveMemberId === member.memberId
-                            ? props.usageTopUpActivePurchase
-                            : null
-                        }
-                        checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(member.memberId)}/usage-credit/checkout`}
-                        offers={props.usageTopUpActivePurchase
-                          ? []
-                          : props.usageTopUpOffers ?? []}
-                        purchaseReturn={
-                          props.usageTopUpReturnMemberId === member.memberId
-                            ? props.usageTopUpPurchaseReturn
-                            : null
-                        }
-                        scope="family"
-                        targetLabel={usageTargetLabel}
-                      />
                       {targetTier ? (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
+                          className="min-h-11 flex-1 rounded-xl border border-foreground/15 bg-background text-sm font-medium md:min-h-0 md:flex-none md:rounded-lg md:border-transparent md:bg-transparent md:text-[0.8rem]"
                           aria-label={isRetry
                             ? member.isOwner
                               ? `Retry updating your plan to ${targetTier.name}`
@@ -662,7 +643,7 @@ export function HostedFamilyManager(props: {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
+                      className="min-h-11 flex-1 rounded-xl border border-foreground/15 bg-background text-sm font-medium md:min-h-0 md:flex-none md:rounded-lg md:border-transparent md:bg-transparent md:text-[0.8rem]"
                       onClick={() => void copyInviteLink(invite)}
                     >
                       {copiedId === invite.id ? (
@@ -680,7 +661,7 @@ export function HostedFamilyManager(props: {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="min-h-10 flex-1 border border-border md:min-h-0 md:flex-none md:border-transparent"
+                    className="min-h-11 flex-1 rounded-xl border border-foreground/15 bg-background text-sm font-medium md:min-h-0 md:flex-none md:rounded-lg md:border-transparent md:bg-transparent md:text-[0.8rem]"
                     onClick={() =>
                       setPendingAction({
                         id: invite.id,
@@ -991,6 +972,29 @@ export function HostedFamilyManager(props: {
                     ? pendingAction.to === "edge" ? "Upgrade to Edge" : "Downgrade to Pulse"
                       : "Cancel invite"}
             </Button>
+            {pendingAction?.kind === "change-plan" ? (
+              <HostedUsageTopUpDialog
+                key={pendingAction.id}
+                activePurchase={
+                  props.usageTopUpActiveMemberId === pendingAction.id
+                    ? props.usageTopUpActivePurchase
+                    : null
+                }
+                checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
+                contactOptions={props.usageTopUpContactOptions}
+                offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
+                purchaseReturn={
+                  props.usageTopUpReturnMemberId === pendingAction.id
+                    ? props.usageTopUpPurchaseReturn
+                    : null
+                }
+                scope="family"
+                targetLabel={pendingAction.label}
+                triggerClassName="w-full"
+                triggerSize="xl"
+                triggerVariant="secondary"
+              />
+            ) : null}
             {pendingAction?.kind === "change-plan" && pendingAction.canRemove ? (
               <Button
                 type="button"

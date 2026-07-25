@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
+  HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_MAILBOX_LANES,
   HOSTED_RUNTIME_LOG_COMPONENTS,
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -142,6 +143,32 @@ export interface HostedRuntimeLogRecord {
   createdAt: string;
 }
 
+/** One runtime log entry as the runtime reports it, before the user is attached. */
+export interface HostedRuntimeLogEntryInput {
+  at?: Date | string | null;
+  attemptId?: string | null;
+  checkpointVersion?: bigint | number | string | null;
+  component: HostedRuntimeLogComponent | string;
+  errorCode?: string | null;
+  eventCode: HostedRuntimeLogEventCode | string;
+  id?: string | null;
+  leaseGeneration?: bigint | number | string | null;
+  level: HostedRuntimeLogLevel | string;
+  mailboxLane?: HostedMailboxLane | string | null;
+  mailboxSeqEnd?: bigint | number | string | null;
+  mailboxSeqStart?: bigint | number | string | null;
+  outboxIntentRef?: string | null;
+  phase: HostedRuntimeLogPhase | string;
+  redacted?: HostedRuntimeRedactedJson | null;
+  workspaceVersion?: bigint | number | string | null;
+}
+
+/** The identity a bulk writer returns; the full row is never read back. */
+export interface HostedRuntimeLogReference {
+  eventCode: HostedRuntimeLogEventCode;
+  id: string;
+}
+
 export async function ensureHostedWorkspace(input: {
   prisma?: HostedWorkspaceStoreClient;
   userId: string;
@@ -178,6 +205,7 @@ export async function readHostedWorkspace(input: {
 export async function checkpointHostedWorkspace(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  handledConversationMailboxItemIds?: readonly string[];
   inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -198,6 +226,7 @@ export async function checkpointHostedWorkspace(input: {
 export async function checkpointHostedWorkspaceTx(input: {
   checkpointedAt?: Date | string | null;
   expectedVersion: bigint | number | string;
+  handledConversationMailboxItemIds?: readonly string[];
   inboxMediaRetentionWakeAt?: Date | string | null;
   nextWakeAt?: Date | string | null;
   nextWakeReason?: string | null;
@@ -221,10 +250,11 @@ export async function checkpointHostedWorkspaceTx(input: {
     input.expectedVersion,
     "Hosted workspace expectedVersion",
   );
+  const checkpointedAt = input.checkpointedAt === undefined || input.checkpointedAt === null
+    ? new Date()
+    : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt");
   const updateData: Prisma.HostedWorkspaceUpdateManyMutationInput = {
-    checkpointedAt: input.checkpointedAt === undefined || input.checkpointedAt === null
-      ? new Date()
-      : requireDate(input.checkpointedAt, "Hosted workspace checkpointedAt"),
+    checkpointedAt,
     snapshotRef: toNullablePrismaJson(snapshotRef),
     version: {
       increment: 1,
@@ -264,6 +294,10 @@ export async function checkpointHostedWorkspaceTx(input: {
   let conversationInputAhead: boolean | undefined;
   let lockedWorkspace: HostedWorkspaceRow | null = null;
   const conversationImportedSeq = readCheckpointConversationImportedSeq(input.redactedStatusJson);
+  const handledConversationMailboxItemIds =
+    normalizeCheckpointHandledConversationMailboxItemIds(
+      input.handledConversationMailboxItemIds,
+    );
   const systemHandledThroughSeq = readCheckpointSystemHandledThroughSeq(input.redactedStatusJson);
   if (reason === "idle_shutdown" && conversationImportedSeq !== null) {
     await lockHostedWorkspaceForCheckpointTx({
@@ -328,6 +362,35 @@ export async function checkpointHostedWorkspaceTx(input: {
       userId,
     });
   }
+  if (
+    updated.count === 1
+    && reason === "idle_shutdown"
+    && conversationImportedSeq !== null
+  ) {
+    // Stamp only the exact terminal inputs carried by the accepted snapshot,
+    // then derive the largest contiguous prefix from same-user live rows. An
+    // old incomplete local index or missing event can never acknowledge an
+    // unstamped mailbox row.
+    await stampHostedMailboxHandledConversationInputsTx({
+      checkpointedAt,
+      importedThroughSeq: conversationImportedSeq,
+      itemIds: handledConversationMailboxItemIds,
+      tx: input.tx,
+      userId,
+    });
+    const handledThroughSeq = await readHostedMailboxContiguousHandledThroughSeqTx({
+      importedThroughSeq: conversationImportedSeq,
+      now: checkpointedAt,
+      tx: input.tx,
+      userId,
+    });
+    await advanceHostedMailboxLaneConsumedSeq({
+      consumedSeq: handledThroughSeq,
+      lane: "conversation",
+      prisma: input.tx,
+      userId,
+    });
+  }
   const row = await input.tx.hostedWorkspace.findUnique({
     where: {
       userId,
@@ -369,6 +432,120 @@ function readCheckpointConversationImportedSeq(
         value,
         "Hosted workspace checkpoint redactedStatus hostedMailboxConversationImportedSeq",
       );
+}
+
+function normalizeCheckpointHandledConversationMailboxItemIds(
+  value: readonly string[] | undefined,
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (
+    value.length
+      > HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
+  ) {
+    throw new TypeError(
+      `Hosted workspace checkpoint handled conversation mailbox item ids must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} entries.`,
+    );
+  }
+  const itemIds = value.map((itemId) => {
+    const normalized = normalizeNullableString(itemId);
+    if (!normalized || !/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(normalized)) {
+      throw new TypeError(
+        "Hosted workspace checkpoint handled conversation mailbox item id must be a bounded opaque token.",
+      );
+    }
+    return normalized;
+  });
+  if (new Set(itemIds).size !== itemIds.length) {
+    throw new TypeError(
+      "Hosted workspace checkpoint handled conversation mailbox item ids must not contain duplicates.",
+    );
+  }
+  return itemIds;
+}
+
+async function stampHostedMailboxHandledConversationInputsTx(input: {
+  checkpointedAt: Date;
+  importedThroughSeq: bigint;
+  itemIds: readonly string[];
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<void> {
+  if (input.itemIds.length === 0) {
+    return;
+  }
+  await input.tx.hostedMailboxItem.updateMany({
+    data: {
+      consumedAt: input.checkpointedAt,
+    },
+    where: {
+      consumedAt: null,
+      id: {
+        in: [...input.itemIds],
+      },
+      kind: "conversation.message",
+      lane: "conversation",
+      laneSeq: {
+        lte: input.importedThroughSeq,
+      },
+      userId: input.userId,
+    },
+  });
+}
+
+async function readHostedMailboxContiguousHandledThroughSeqTx(input: {
+  importedThroughSeq: bigint;
+  now: Date;
+  tx: HostedWorkspaceMutationTx;
+  userId: string;
+}): Promise<bigint> {
+  const counter = await input.tx.hostedMailboxLaneCounter.findUnique({
+    where: {
+      userId_lane: {
+        lane: "conversation",
+        userId: input.userId,
+      },
+    },
+  });
+  if (!counter) {
+    return 0n;
+  }
+  const appendHighWater = counter.nextSeq - 1n;
+  const upperBound = input.importedThroughSeq < appendHighWater
+    ? input.importedThroughSeq
+    : appendHighWater;
+  if (upperBound <= counter.consumedSeq) {
+    return counter.consumedSeq;
+  }
+
+  const firstUnconsumed = await input.tx.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    select: {
+      laneSeq: true,
+    },
+    where: {
+      consumedAt: null,
+      createdAt: {
+        gte: new Date(
+          input.now.getTime() - HOSTED_WORKSPACE_CHECKPOINT_MAILBOX_RETENTION_MS,
+        ),
+      },
+      lane: "conversation",
+      laneSeq: {
+        gt: counter.consumedSeq,
+        lte: upperBound,
+      },
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: input.now } },
+      ],
+      userId: input.userId,
+    },
+  });
+  return firstUnconsumed ? firstUnconsumed.laneSeq - 1n : upperBound;
 }
 
 async function lockHostedWorkspaceForCheckpointTx(input: {
@@ -713,7 +890,20 @@ export async function recordHostedRuntimeLogTx(input: {
   workspaceVersion?: bigint | number | string | null;
 }): Promise<HostedRuntimeLogRecord> {
   const row = await input.tx.hostedRuntimeLog.create({
-    data: {
+    data: buildHostedRuntimeLogCreateData(input),
+  });
+
+  return projectHostedRuntimeLog(row);
+}
+
+/**
+ * Normalizes one runtime log entry into its row shape. Shared by the single-row
+ * and bulk writers so both validate identically.
+ */
+function buildHostedRuntimeLogCreateData(
+  input: HostedRuntimeLogEntryInput & { userId: string },
+) {
+  return {
       at: input.at === undefined || input.at === null
         ? new Date()
         : requireDate(input.at, "Hosted runtime log at"),
@@ -776,10 +966,40 @@ export async function recordHostedRuntimeLogTx(input: {
         input.workspaceVersion,
         "Hosted runtime log workspaceVersion",
       ),
-    },
+  };
+}
+
+/**
+ * Writes a batch of runtime log entries as one statement. The runtime log
+ * callback accepts up to 50 entries, and one Prisma call per entry would put a
+ * single request's fanout above the whole pool's capacity, making the pool
+ * itself the request's concurrency limiter. `createMany` keeps one callback to
+ * one statement. Returns only the references the caller needs to decide whether
+ * to signal a recheck.
+ */
+export async function recordHostedRuntimeLogs(input: {
+  entries: readonly HostedRuntimeLogEntryInput[];
+  prisma?: HostedWorkspaceStoreClient;
+  userId: string;
+}): Promise<HostedRuntimeLogReference[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = input.entries.map((entry) => buildHostedRuntimeLogCreateData({
+    ...entry,
+    userId: input.userId,
+  }));
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  await prisma.hostedRuntimeLog.createMany({
+    data: rows,
   });
 
-  return projectHostedRuntimeLog(row);
+  return rows.map((row) => ({
+    eventCode: row.eventCode,
+    id: row.id,
+  }));
 }
 
 export async function listHostedRuntimeLogs(input: {

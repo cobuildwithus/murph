@@ -10,9 +10,7 @@ import { createHostedDeviceSyncPublicIngressService } from "./public-ingress-ser
 import { assertHostedWhoopConnectCapacityAvailable } from "./whoop-connect-capacity";
 import { requireActiveHostedAppSessionFromRequest } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
-import {
-  assertHostedLaunchRequiredConsentGranted,
-} from "../legal/consent";
+import { assertHostedHistoricalLaunchConsentGranted } from "../legal/consent";
 import { getPrisma } from "../prisma";
 
 export interface HostedDeviceSyncConnectResponse {
@@ -36,7 +34,7 @@ export async function startHostedDeviceSyncConnection(input: {
   assertHostedOnboardingMutationOrigin(input.request);
   const prisma = getPrisma();
   const auth = await requireActiveHostedAppSessionFromRequest(input.request);
-  await assertHostedLaunchRequiredConsentGranted({
+  await assertHostedHistoricalLaunchConsentGranted({
     memberId: auth.member.id,
     prisma,
   });

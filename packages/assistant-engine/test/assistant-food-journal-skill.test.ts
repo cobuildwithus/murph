@@ -68,7 +68,7 @@ describe('assistant food journal skill', () => {
       'store only its focus, window, and review preference in existing Context memory or confirmed automation instructions',
     )
     expect(skill).toContain(
-      'performance work where nutrition detail materially affects the question',
+      'Provide calorie and macro estimates by default when logging a meal',
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

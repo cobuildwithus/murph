@@ -76,7 +76,8 @@ An eligible paid Pulse or Edge member can:
 4. Continue to Stripe-hosted Checkout.
 5. Return to Settings with an honest pending state while webhook fulfillment
    completes.
-6. See a separately labeled usage-credit amount after the verified grant.
+6. See that remaining usage credit will carry work past included-usage
+   exhaustion without exposing an exact balance.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -133,14 +134,11 @@ Included usage remains the existing bounded percentage. Buying credit must not
 make that percentage move backward or expose the internal dollar value of a
 plan's included allowance.
 
-Purchased value appears separately, for example:
-
-- `100% of included usage used`
-- `$8.42 usage credit remaining`
-
-The value is rounded down for display to whole cents while accounting stays in
-integer USD micros. Copy must call it **usage credit**, never cash, wallet
-funds, account balance, or refundable dollars.
+Settings does not render the exact purchased-credit balance. When included
+usage is exhausted and purchased credit remains, it may say that Murph will use
+the remaining **usage credit**. It must not call that capacity cash, wallet
+funds, an account balance, or refundable dollars. Accounting stays in integer
+USD micros behind the web-owned projection.
 
 Settings may show a quiet **Add usage** action at any utilization for an
 eligible paid member. Home and assistant surfaces should surface the action
@@ -692,6 +690,17 @@ synthetic member, shows only `healthy`, `low`, or `exhausted`, and offers the
 same fixed $5, $10, and $25 packs. The browser never submits payer or
 beneficiary identity.
 
+A group chat that has only ever talked to Murph has no `HostedGroup` row or
+join code. Its funding URL uses a signed funding-only locator instead:
+`gf1.<runtimeMemberId>.<hmac>` derived from the app-session HMAC key with a
+dedicated domain separator. The locator is accepted only by the funding page
+and checkout target resolution, resolves to the exact runtime member after
+re-verifying the container and active access, and is rejected by every join
+surface because it is not a join code. It writes nothing: no `HostedGroup`
+row, membership, join code, vault-share projection, or profile-name/email
+grant is created. Owner-created join codes keep funding exactly as before,
+and enrollment stays behind the owner-minted join link.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.
@@ -831,8 +840,9 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- coarse group usage reads, trusted low-capacity next-turn context, and the
-  route-authorized exhausted-notice funding link; and
+- group usage reads with a remaining percentage but no currency accounting,
+  trusted low-capacity next-turn context, and the route-authorized
+  exhausted-notice funding link; and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser

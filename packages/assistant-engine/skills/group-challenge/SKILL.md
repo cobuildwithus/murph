@@ -4,11 +4,11 @@ description: |
   How Murph runs a group health challenge end to end. Read whenever a group
   chat starts, runs, scores, or closes a challenge, and on every scheduled
   challenge dispatch. Owns the challenge lifecycle: kickoff (metric
-  negotiation, consent, introductions and photos, baselines, stakes), the
-  durable challenge page that survives context resets, daily standings
-  dispatches in rotating formats, comic strips built from members' photos,
-  rulings, confounders, and close-out. Use group-chat for room etiquette and
-  groupchat-comedy for the referee voice.
+  negotiation, consent, optional introductions and photos, baselines, stakes),
+  the durable challenge page that survives context resets, daily standings
+  dispatches in rotating formats, comic strips built from approved member
+  photos, rulings, confounders, and close-out. Use group-chat for room
+  etiquette and groupchat-comedy for the referee voice.
 ---
 
 # Group Challenge
@@ -37,13 +37,35 @@ At kickoff, identify the exact scoring scope and include it with
 a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
 offer only after `read_shared` proves an exact required scope is `not_granted`
-and the challenge page contains neither an explicit decline for that share nor
-a prior offer for it. The device scope is diagnostic context, not scoring data:
-it shares only public
+for at least one affected participant whose challenge-page state contains
+neither an explicit decline for that exact share nor a prior handled offer
+action for that exact participant and scope. A handled action for one
+participant never suppresses an offer needed by another. The device scope is
+diagnostic context, not scoring data: it shares only public
 health-source labels, coarse status, and bounded observation/sync-job times. A
 participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
+
+Whenever a challenge turn is authorized under `group-chat`'s rules to send a
+permission request — a `create_join_link` reply, an explicitly requested
+permission flow, or the one evidence-gated standings offer — the request must
+name everything the challenge needs to score, all in that single request:
+
+- `group-email.v0` and `device-sync-status.v0`, always.
+- The exact scoring scope (or scopes) for the agreed metric — a steps
+  challenge requests `steps-days.v0`, a sleep challenge requests
+  `sleep-duration-days.v0`, and so on from the list below. Never send a
+  challenge join link or offer that omits the scoring scope.
+- When the request also creates the hosted group, or the group has no agreed
+  single metric yet, additionally the reusable core set from `group-chat`'s
+  "Creating a hosted group" rules, so a general health group starts with the
+  common permissions requested by default.
+
+The join page opens with every requested permission preselected; each stays
+an individual choice the member can uncheck before joining. Requesting
+prefills that page — it never pre-grants, so describe it as a prefilled
+request, not as something you cannot preselect and not as automatic sharing.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
@@ -67,7 +89,7 @@ grant Apple Health access.
 - Floors climbed: `floors-climbed-days.v0`
 - Active calories: `active-calories-days.v0`
 - Broad workout count/minutes: `workout-days.v0`
-- Broad active minutes: `activity-days.v0`
+- Broad movement minutes: `activity-days.v0`
 - Broad workout heart-rate zones: `heart-rate-zones-days.v0`
 - Workout strain: `workout-strain-days.v0`
 - Day strain: `day-strain-days.v0`
@@ -120,12 +142,13 @@ The page carries these sections, kept current:
   settled any dispute about it.
 - **Roster & intros** — each member's name, group-scoped `participantId` (or
   an explicit `unresolved` identity marker), participation state (`in`,
-  `pending`, `declined`, or `withdrawn`), their intro or fun fact (verbatim),
-  and the capture refs for their photos.
+  `pending`, `declined`, or `withdrawn`), any intro or fun fact they volunteered
+  (verbatim), and the capture refs for any approved photos.
 - **Sharing choices** — per participant and exact scope, explicit sharing
-  declines and any permission offer already made available. Silence is not
-  consent or refusal, but an ignored offer is not a reason to repost it.
-- **Baselines** — per-member starting values where shared data allows.
+  declines and any permission-offer action already handled. Silence is not
+  consent or refusal, but a handled offer action is not a reason to retry it.
+- **Baselines** — per-member starting values where shared data allows, or
+  `pending` until usable records arrive.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
@@ -166,6 +189,18 @@ loses a reminder; it must never lose the challenge.
 
 ## Kickoff
 
+When kickoff needs another decision, ask that next question directly in the
+group response. Do not prepend a setup-status, progress, or transition sentence;
+the question is the useful update.
+
+Kickoff is a conversation, not a rules document, and every kickoff message
+obeys `group-chat`'s length budget. Pitch a format or scoring idea in a few
+short sentences, settle one decision at a time, and ask at most one question
+per message. The full format, scoring detail, and fine print belong on the
+challenge page; the chat gets the headline version. Do not post a
+multi-section framework or numbered rulebook into the room unless the room's
+Detail is 10/10 or a member explicitly asks this turn for the full rules.
+
 1. **Negotiate the metric.** Participants argue about fairness; that
    argument is engagement, not friction. Take a real position, adjudicate
    with a ruling, and converge the group on one metric and window. Record
@@ -178,9 +213,10 @@ loses a reminder; it must never lose the challenge.
    turn zero-purchase into a rule: a modest purchase can carry a strong bit;
    generic spending, single-use junk, and separate errands usually cannot.
 3. **Get the quick roll call.** Before calling the challenge live, summarize
-   the metric, window, and stakes, then ask each intended participant to say
-   they are in or react positively. A reaction counts when you can actually
-   attribute it to that person and proposal; otherwise ask for a short reply.
+   the metric, window, and stakes, then ask each intended participant to reply
+   "in" or like this message. Count any clearly affirmative reaction you can
+   attribute to that person and proposal, but keep the member-facing
+   instruction concrete: "like this message." Otherwise ask for a short reply.
    If people already clearly opted in while shaping the challenge, count that
    instead of asking again. Keep the update natural and named: "We're ready
    once [pending name] checks in. In: [confirmed names]. Waiting on: [pending
@@ -212,7 +248,7 @@ loses a reminder; it must never lose the challenge.
    `murph.group action="read_shared"` exactly once with the exact scoring scope
    and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
    and diagnostic read; it must never become prompt preload or other pre-model
-   work. On an interactive Linq turn, record a returned row's group-scoped
+   work. On an interactive group turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection
@@ -220,12 +256,18 @@ loses a reminder; it must never lose the challenge.
    current-handle association exists, record that roster identity as
    `unresolved` and do not baseline, score, or diagnose that person until it is
    resolved. Scheduled and detached reads carry no handles and never guess.
-5. **Ask for introductions and photos.** Each participant gives a one-line
-   intro or a fun fact about themselves, plus a photo if they're willing.
-   Record every intro verbatim on the page — they are seed material for
-   jokes, comics, and song lyrics all challenge long — and the photos are
-   the raw material for every comic and generated image. Pin each photo
-   durably the day it arrives:
+5. **Always ask for introductions and photos.** At kickoff, ask each currently
+   confirmed participant by name in one group message for a one-line intro or
+   fun fact, plus a photo if they want their likeness in challenge comics. The
+   contributions are optional; the ask is required. Do not skip it because the
+   setup is short, late, or already underway. If someone confirms after kickoff,
+   include the same ask in the acknowledgement of their opt-in. Say plainly
+   that the challenge starts or continues without either. Never ask a pending,
+   declined, or withdrawn person. Use a photo sent or explicitly approved by
+   the person depicted.
+
+   Record volunteered intros verbatim as seed material for jokes, comics, and
+   song lyrics. Pin each approved photo durably the day it arrives:
 
    ```
    vault-cli capture add --media <absolute path of the inbox photo> \
@@ -241,24 +283,23 @@ loses a reminder; it must never lose the challenge.
    `referenceImageRefs` for `generate_image` on any later day; inbox
    paths expire, captures do not.
 
-   If a confirmed participant still owes an intro or photo a day later,
-   follow up once in the group, lightly: name who is missing, ask them
-   directly, and invite the room to introduce them or send a picture of them
-   if they won't do it themselves. A crowd-sourced intro is usually funnier
-   than a self-supplied one, and it is fair game. One follow-up, then let it
-   go — and if the person themselves declines, that wins: they appear by
-   name, never by likeness, and nobody overrides that with a proxy photo.
-   Never ask a pending person for challenge materials; their silence is not
-   something to follow up on.
 6. **Set baselines.** Read pre-challenge shared data where it exists and
-   record per-member baselines.
+   record per-member baselines. A missing baseline never blocks kickoff:
+   when the shared snapshot has no usable records yet for a member — or for
+   everyone — continue the rest of setup and start the challenge on
+   schedule, record that baseline as `pending` on the page, and say plainly
+   that it locks in once their data arrives. On a later read (a follow-up
+   turn or the daily loop), backfill a pending baseline from the earliest
+   usable shared records, note on the page which dates it covers, and until
+   then present that member as waiting on data, never as a zero or a
+   forfeit.
 7. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
-8. **Open with a kickoff comic.** Once the intros and photos are in, a short
-   comic introducing the cast, the premise, and the stakes is the strongest
-   opening artifact — it pays off the photos everyone just contributed and
-   sets the tone for the whole run. Build it under the Comics rules below.
+8. **Open with the strongest available kickoff.** Use a short cast-and-stakes
+   comic when approved photos are already in. Otherwise start immediately with
+   a text bit or another format that fits the material on hand; optional
+   materials never delay the challenge. Use later photos in a later comic.
 
 ## The daily loop
 
@@ -321,47 +362,49 @@ automation action rules with a `dailyLocal` schedule and
    `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
    no usable record was returned; and `dataStatus="available"` means use only the
    returned records. `available` does not make an old record current for this
-   reporting cutoff. Never infer a grant from a record or a record from a grant.
-   Never reuse remembered numbers — wrong scores turn jokes into noise. A
-   recorded zero is a real score; missing data is never a zero.
+   reporting cutoff. Apply `group-chat`'s **Shared fact limits** before scoring.
+   Never infer a grant from a record or a record from a grant. Never reuse
+   remembered numbers — wrong scores turn jokes into noise. A recorded zero is
+   a real score; missing data is never a zero.
 3. Apply this evidence order to each participant and stop at the first match:
 
    - The scoring projection is `granted` and `available`, with current
-     challenge-metric data through the reporting cutoff: rank the participant.
-     Do not override current metric evidence with a device status.
+     challenge-metric data through the reporting cutoff: rank the participant
+     from that metric evidence.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
-     record an explicit decline or prior offer for that exact scope, include the
-     scope in the one proactive permission offer described below.
+     record an explicit decline or prior handled offer action for that exact
+     scope, include the scope in the one proactive permission offer described
+     below.
    - The scoring projection is `granted` but has no current metric through the
-     reporting cutoff, while `device-sync-status.v0` is `not_granted`: say that
-     the metric share exists, but Murph cannot verify the source problem because
-     connection status was not shared. Unless their sharing choices record an
-     explicit decline or prior offer for that exact scope, include the diagnostic
-     scope in the one proactive permission offer described below.
+     reporting cutoff, while `device-sync-status.v0` is `not_granted`: unless
+     their sharing choices record an explicit decline or prior handled offer
+     action for that exact scope, include the diagnostic scope in the one
+     proactive permission offer described below.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, while a recent
-     `device-sync-status.v0` record is `available`: use its literal source label,
-     coarse status, and, only when useful, the accurately named connection-wide
-     sync-job completion time described below. Treat a projection whose `observedAt` is more
-     than two local calendar days old as stale and unverified. Only
-     `needs-reconnect` and `disconnected` support a direct reconnect action.
-     `needs-attention` is generic and must not be translated into a denied
-     Apple Health permission. `setting-up` means setup is not complete.
-     `connected` means only that the source is connected; it does not prove
-     that the challenge metric arrived. If Apple Health has the literal
-     `connected` status and Steps are absent, say this group does not currently
-     have recent Steps for the participant and Apple Health is visible as
-     connected. Suggest opening Murph; if Steps still do not arrive, suggest
-     checking Apple Health Steps access. For any other Apple Health status,
-     follow the status-specific rules above. If the recent projection has an empty `sources`
-     list, say that no connected health source is visible in the shared
-     snapshot. That is not proof that no compatible source exists; suggest a
-     private source check or connection step.
+     `device-sync-status.v0` record is `available`: you may state its literal
+     source label, coarse status, and, only when useful, the accurately named
+     connection-wide sync-job completion time described below. Treat a
+     projection whose `observedAt` is more than two local calendar days old as
+     stale and unverified. Only
+     `needs-reconnect` and `disconnected` support a direct reconnect action,
+     based on the literal status alone; do not claim reconnecting will restore
+     the metric. `needs-attention` is generic and must not be translated into a
+     denied Apple Health permission. `setting-up` means setup is not complete.
+     `connected` means only that the source is connected. If Apple Health has
+     the literal `connected` status and Steps are absent, state these as two
+     independent facts: this group currently lacks recent Steps for the
+     participant, and Apple Health is visible as connected. You may suggest
+     opening Murph and, if needed, checking Apple Health Steps access as private
+     troubleshooting options, never as the established cause. For any other
+     Apple Health status, follow the status-specific rules above. If the recent
+     projection has an empty `sources` list, say only that this diagnostic
+     result contains no visible sources and suggest a private source check.
    - The scoring projection is `granted` but has no current metric through the
      reporting cutoff, and diagnostic data is also `granted` but `missing` or
-     stale: say that the reason is unverified. Do not guess about permissions,
-     a disconnected device, source freshness, or whether the participant opened
+     stale: report that diagnostic state without guessing about permissions, a
+     disconnected device, source freshness, or whether the participant opened
      the app.
 
    Apple does not expose HealthKit read authorization, so never say that a
@@ -375,8 +418,8 @@ automation action rules with a `dailyLocal` schedule and
    and how many `in` participants have current metric data. Keep ranked
    participants and people waiting on data in separate parts of the same
    message. Name every `in` participant who is missing current data, state the
-   current evidence-backed reason, and give the smallest useful action. Never
-   present a partial table as the full standings.
+   evidence-backed status, and give the smallest useful action. Never present a
+   partial table as the full standings.
 
    When current evidence is `not_granted`, state the exact missing group share
    in ordinary language in this same standings response and address the
@@ -387,8 +430,10 @@ automation action rules with a `dailyLocal` schedule and
    use the scoring scope when that scope is `not_granted`; use
    `device-sync-status.v0` only when the scoring scope is granted but has no
    current metric and the diagnostic scope is `not_granted`. Exclude a scope
-   when every affected participant has explicitly declined it or the challenge
-   page records that an offer for it is already available. Deduplicate the list.
+   only when every affected participant has either explicitly declined that
+   exact scope or has a handled offer action recorded for that exact participant
+   and scope. A prior handled action for one participant does not cover a newly
+   affected participant. Deduplicate the list.
 
    When that list is nonempty and the narrow scheduled action is available,
    call `murph.group action="post_join_offer"` exactly once after the read with
@@ -398,18 +443,32 @@ automation action rules with a `dailyLocal` schedule and
    disclosure, recipient-safe delivery, and active-offer/all-granted dedupe.
    Never author generic permission copy or tell someone to Like the standings.
 
-   A `sent` result may mean a matching card was already active. Say only that a
-   separate permission card is available, and record those scopes as offered on
-   the challenge page so future standings do not repost or nag. If the tool is
-   absent or returns `unavailable`, do not claim a card exists. If a participant
-   explicitly says they do not want to share a scope, record that choice and do
-   not offer, repeat, or nag. A permission offer cannot connect a source, grant
-   Apple Health or operating-system Steps access, or fix missing or stale data.
+   Treat a `sent` result as an opaque handled result: Web may have posted a
+   card, reused an active one, or found that no card was needed because every
+   current member already grants the requested scopes. Do not infer, announce,
+   or append a separate assistant message claiming that a card is visible or
+   newly posted. For each participant whose same read showed `not_granted`,
+   record that the offer action was handled for that exact participant and
+   scope so future standings do not retry or nag; do not record that a card was
+   visible. If the turn also owes a substantive standings update, keep that one
+   assistant response focused on the standings. When the card is the only
+   user-facing outcome, call `murph.finish_without_reply` instead of sending a
+   companion confirmation. If the tool is absent or returns
+   `unavailable`, do not claim a card exists or record the action as handled. If
+   a participant explicitly says they do not want to share a scope, record that
+   choice and do not offer, repeat, or nag. A permission offer cannot connect a
+   source, grant Apple Health or operating-system Steps access, or fix missing
+   or stale data.
    Never offer the scoring scope merely because its grant exists but current
    data is missing. Apart from the exact diagnostic `not_granted` case above,
-   disconnected, `needs-reconnect`, and other sync/device cases get
-   ordinary-language sync or reconnect guidance and no permission card.
+   literal disconnected, `needs-reconnect`, and other device statuses may get
+   status-appropriate guidance and no permission card.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
+   The scheduled dispatch is the one group message where the required
+   completeness statement and per-person missing-data lines always count as
+   substance: never trim them for length, keep them to about one line per
+   person, keep the whole dispatch compact, and put ranking mechanics or
+   anything longer on the challenge page.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with
@@ -462,8 +521,8 @@ Construction:
   reference the photos of people in that panel; a call takes at most 16
   reference images, so split a big cast across panels. Caricature the bit,
   never the body — no exaggerating weight, body shape, or appearance. A
-  member who declined a photo appears by name and speech bubble, not
-  likeness, and never holds up the kickoff comic.
+  member without an approved photo appears by name and speech bubble, not
+  likeness. Missing optional material never delays a comic or dispatch.
 - **Text in panels:** at most one or two short speech bubbles per panel, and
   end every prompt with "Spell all visible text exactly as written." If text
   garbles, shorten the bubbles before changing anything else.
@@ -498,8 +557,8 @@ when they recover.
    snapshots.
 2. Declare the winner with a stakes callback, and settle only safe, opted-in
    stakes within the `groupchat-comedy` hard limits.
-3. Produce one closing artifact — a comic or recap built from the pinned
-   photos and the challenge's canon.
+3. Produce one closing artifact in the best format for the saved material. Use
+   pinned photos when available; never delay close-out to collect them.
 4. Flip the page to `--status archived` and forget the pointer with
    `vault-cli memory forget <memory-id>` (the id recorded at kickoff).
 5. Results belong to the members. For personal write-ups or what the data

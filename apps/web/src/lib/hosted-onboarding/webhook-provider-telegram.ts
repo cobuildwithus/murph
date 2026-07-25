@@ -28,6 +28,7 @@ import {
   resolveHostedMemberRoutingByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
+import { lockHostedMemberRow } from "./shared";
 import {
   type HostedWebhookPlan,
   type HostedWebhookWakeHandoff,
@@ -149,7 +150,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("ambiguous-telegram-binding");
   }
 
-  const existingMember = existingMemberLookup.status === "found"
+  let existingMember = existingMemberLookup.status === "found"
     ? existingMemberLookup.lookup.core
     : null;
 
@@ -157,8 +158,34 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     return buildIgnoredTelegramWebhookPlan("unlinked-telegram");
   }
 
+  await lockHostedMemberRow(input.prisma, existingMember.id);
+  const lockedMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: summary.senderTelegramUserId,
+  });
+  if (
+    lockedMemberLookup.status !== "found"
+    || lockedMemberLookup.lookup.core.id !== existingMember.id
+  ) {
+    return buildIgnoredTelegramWebhookPlan(
+      lockedMemberLookup.status === "ambiguous"
+        ? "ambiguous-telegram-binding"
+        : "telegram-binding-changed",
+    );
+  }
+  existingMember = lockedMemberLookup.lookup.core;
+
   if (isHostedMemberSuspended(existingMember.suspendedAt)) {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
+  }
+
+  if (summary.isDirect) {
+    await upsertHostedMemberTelegramRoutingBindingTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+      telegramThreadId: telegramMessage.threadId,
+      telegramUserId: summary.senderTelegramUserId,
+    });
   }
 
   if (!await readActiveHostedMemberAccess({
@@ -206,14 +233,20 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       runtimeMemberId = threadRoute.containerMemberId;
     }
   }
-  if (summary.isDirect) {
-    await upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: existingMember.id,
-      prisma: input.prisma,
-      telegramThreadId: telegramMessage.threadId,
-      telegramUserId: summary.senderTelegramUserId,
-    });
-  }
+  // Group inbound carries the sending participant so the assistant can tell
+  // participants apart and bind shared-data reads to the right membership. The
+  // sender is authoritative here: it is the webhook-authenticated Telegram user
+  // id already resolved, under row lock, to exactly one active linked member.
+  // Direct threads have a single known sender and stay attribution-free.
+  const groupTelegramMessage = summary.isDirect
+    ? telegramMessage
+    : {
+        ...telegramMessage,
+        from: summary.senderTelegramUserId,
+        ...(summary.senderTelegramDisplayUsername
+          ? { senderUsername: summary.senderTelegramDisplayUsername }
+          : {}),
+      };
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
     envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId,
@@ -227,7 +260,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
             },
           }
         : {}),
-      telegramMessage,
+      telegramMessage: groupTelegramMessage,
       userId: runtimeMemberId,
     }),
     tx: input.prisma,

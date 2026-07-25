@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { CURRENT_VAULT_FORMAT_VERSION, deviceDataOriginSchema, type DeviceDataOrigin } from "@murphai/contracts";
+import { CURRENT_VAULT_FORMAT_VERSION, type DeviceDataOrigin } from "@murphai/contracts";
 import { normalizeJunctionSnapshot } from "@murphai/importers";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
@@ -84,10 +84,13 @@ function makeObservation(input: {
 }
 
 function makeActivitySession(input: {
+  activityType?: string;
+  endAt?: string;
   entityId: string;
+  facet?: string | null;
   dayKey: string;
   durationMinutes: number;
-  occurredAt: string;
+  occurredAt?: string;
   recordedAt: string;
   provider?: string;
   dataOrigin?: DeviceDataOrigin;
@@ -99,7 +102,17 @@ function makeActivitySession(input: {
     zone?: number;
   }>;
   path?: string;
+  resourceId?: string | null;
+  resourceType?: string;
+  startAt?: string;
   title?: string;
+  workoutMetrics?: {
+    activeCalories?: number;
+    distanceKm?: number;
+    maxHeartRate?: number;
+    totalElevationGainMeters?: number;
+    workoutStrain?: number;
+  };
 }): CanonicalEntity {
   return makeEntity({
     entityId: input.entityId,
@@ -111,19 +124,26 @@ function makeActivitySession(input: {
     path: input.path ?? `ledger/events/2026/${input.entityId}.jsonl`,
     title: input.title ?? `${input.provider ?? "garmin"} activity session`,
     attributes: {
+      ...(input.activityType ? { activityType: input.activityType } : {}),
       dayKey: input.dayKey,
       durationMinutes: input.durationMinutes,
+      ...(input.endAt ? { endAt: input.endAt } : {}),
       recordedAt: input.recordedAt,
+      ...(input.startAt ? { startAt: input.startAt } : {}),
       externalRef: {
+        facet: input.facet ?? null,
         system: input.provider ?? "garmin",
-        resourceType: "activity_session",
-        resourceId: `${input.entityId}-resource`,
+        resourceType: input.resourceType ?? "activity_session",
+        resourceId: input.resourceId === undefined
+          ? `${input.entityId}-resource`
+          : input.resourceId,
       },
       ...(input.dataOrigin ? { dataOrigin: input.dataOrigin } : {}),
-      ...(input.heartRateZones
+      ...(input.heartRateZones || input.workoutMetrics
         ? {
             workout: {
-              heartRateZones: input.heartRateZones,
+              ...(input.heartRateZones ? { heartRateZones: input.heartRateZones } : {}),
+              ...(input.workoutMetrics ? { metrics: input.workoutMetrics } : {}),
             },
           }
         : {}),
@@ -349,7 +369,7 @@ test("wearable activity projection emits workout count and zone-minute metric po
   assert.equal("minHeartRate" in (zoneMinutes?.context ?? {}), false);
 });
 
-test("heart-rate-zone projection follows the selected activity aggregate identity", () => {
+test("heart-rate-zone projection combines distinct sessions without false provider attribution", () => {
   const vault = makeVault([
     makeActivitySession({
       entityId: "evt_junction_garmin_activity_01",
@@ -398,20 +418,97 @@ test("heart-rate-zone projection follows the selected activity aggregate identit
   const zoneRow = projection.wearableMetricRows.find((row) =>
     row.metricKey === "heart-rate-zone-2-minutes"
   );
-  const zoneDataOrigin = deviceDataOriginSchema.parse(zoneRow?.dataOrigin);
-
-  assert.equal(latest?.activity?.sessionMinutes.selection.value, 45);
+  assert.equal(latest?.activity?.sessionMinutes.selection.value, 75);
+  assert.equal(latest?.activity?.sessionCount.selection.value, 2);
+  assert.equal(latest?.activity?.sessionMinutes.selection.provider, "multiple");
   assert.deepEqual(latest?.activity?.heartRateZones, [{
-    durationMinutes: 23,
-    label: "Apple Zone 2",
+    durationMinutes: 34,
     zone: 2,
   }]);
   assert.ok(zoneRow);
   assert.ok(zoneRow.context);
-  assert.equal(zoneRow?.value, 23);
-  assert.deepEqual(zoneRow?.recordIds, ["evt_junction_apple_activity_01"]);
-  assert.equal(zoneDataOrigin.sourceProviderSlug, "apple-health");
-  assert.deepEqual(zoneRow.context.contributingRecordIds, ["evt_junction_apple_activity_01"]);
+  assert.equal(zoneRow?.value, 34);
+  assert.equal(zoneRow?.dataOrigin, null);
+  assert.deepEqual(
+    [...(zoneRow?.recordIds ?? [])].sort(),
+    ["evt_junction_apple_activity_01", "evt_junction_garmin_activity_01"],
+  );
+  assert.deepEqual(
+    [...(zoneRow.context.contributingRecordIds as string[])].sort(),
+    ["evt_junction_apple_activity_01", "evt_junction_garmin_activity_01"],
+  );
+});
+
+test("daily workout rollup adds distinct sessions and suppresses an imported mirror", () => {
+  const run = {
+    activityType: "Running",
+    dayKey: "2026-02-14",
+    durationMinutes: 73,
+    endAt: "2026-02-14T13:13:00.000Z",
+    occurredAt: "2026-02-14T12:00:00.000Z",
+    startAt: "2026-02-14T12:00:00.000Z",
+    workoutMetrics: {
+      activeCalories: 731,
+      distanceKm: 11.46,
+      maxHeartRate: 176,
+      totalElevationGainMeters: 241,
+      workoutStrain: 13,
+    },
+  } as const;
+  const vault = makeVault([
+    makeActivitySession({
+      ...run,
+      entityId: "evt_garmin_run",
+      provider: "garmin",
+      recordedAt: "2026-02-14T13:14:00.000Z",
+    }),
+    makeActivitySession({
+      ...run,
+      dataOrigin: {
+        aggregatorProvider: "junction",
+        originConfidence: "high",
+        sourceInstanceId: "garmin-watch",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        version: 1,
+      },
+      entityId: "evt_junction_garmin_run_mirror",
+      provider: "junction",
+      recordedAt: "2026-02-14T13:15:00.000Z",
+    }),
+    makeActivitySession({
+      activityType: "Functional strength training",
+      dayKey: "2026-02-14",
+      durationMinutes: 10,
+      endAt: "2026-02-14T18:10:00.000Z",
+      entityId: "evt_garmin_strength",
+      occurredAt: "2026-02-14T18:00:00.000Z",
+      provider: "garmin",
+      recordedAt: "2026-02-14T18:11:00.000Z",
+      startAt: "2026-02-14T18:00:00.000Z",
+      workoutMetrics: {
+        activeCalories: 80,
+        maxHeartRate: 172,
+        workoutStrain: 6,
+      },
+    }),
+  ]);
+
+  const activity = summarizeWearableLatest(vault)?.activity;
+  const points = buildMetricProjection(vault).metricPoints;
+  const point = (key: string) => points.find((candidate) => candidate.metricKey === key)?.value;
+
+  assert.equal(activity?.sessionMinutes.selection.value, 83);
+  assert.equal(activity?.sessionCount.selection.value, 2);
+  assert.deepEqual(activity?.activityTypes, ["Functional strength training", "Running"]);
+  assert.equal(activity?.activeCalories.selection.value, 811);
+  assert.equal(activity?.distanceKm.selection.value, 11.46);
+  assert.equal(activity?.totalElevationGainMeters.selection.value, 241);
+  assert.equal(activity?.maxHeartRate.selection.value, 176);
+  assert.equal(activity?.workoutStrain.selection.value, 13);
+  assert.equal(point("workout-minutes"), 83);
+  assert.equal(point("workout-count"), 2);
+  assert.equal(point("activity-minutes"), undefined);
 });
 
 test("Junction raw-only timeseries stay out of default query/search and wearable summaries", async () => {

@@ -196,4 +196,36 @@ describe("hosted onboarding auto trial enrollment route", () => {
       },
     });
   });
+
+  it("propagates retryable reservation contention from the enrollment service", async () => {
+    mocks.ensureHostedAutoPulseTrialEnrollment.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+        httpStatus: 503,
+        message: "Murph is still finishing this trial setup. Try again.",
+        retryable: true,
+      }),
+    );
+
+    const response = await autoTrialRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/trial/enroll", {
+        body: JSON.stringify({
+          inviteCode: "invite_123",
+        }),
+        headers: {
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+        message: "Murph is still finishing this trial setup. Try again.",
+        retryable: true,
+      },
+    });
+  });
 });

@@ -1,8 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Monitor } from "lucide-react";
-import { DeviceSyncCompletionDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
+import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
+import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
+import {
+  DeviceSyncCompletionDialog,
+  DeviceSyncSetupGuideDialog,
+} from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { ComputerHandoffFloatingIsland } from "@/src/components/computer-use/computer-handoff-floating-island";
 import { GroupUsageFundingCard } from "@/src/components/hosted-groups/group-usage-funding-card";
 import { MetricCard } from "@/src/components/ui/metric-card";
@@ -21,13 +26,18 @@ import {
 } from "@/src/components/settings/assistant-model-artwork";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
+import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
+import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
+import type {
+  HostedLegalConsentAcceptanceInput,
+} from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
@@ -68,6 +78,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import {
+  IN_APP_BROWSER_DESCRIPTION,
+  IN_APP_BROWSER_PRIMARY_ACTION,
   MURPH_CONTACT_AVATAR_OPTIONS,
   MurphContactAvatarArt,
   MurphContactAvatarGrid,
@@ -76,6 +88,8 @@ import {
 } from "@/src/components/murph/murph-contact-card-picker";
 import type { ExperimentStartContactOption } from "@/src/lib/experiments/start-experiment-contact";
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
+import type { HostedConsentStatus } from "@/src/lib/legal/consent";
+import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
@@ -149,6 +163,10 @@ const EXPERIMENT_START_CHANNEL_OPTIONS: ExperimentStartContactOption[] = [
   },
 ];
 
+const WHOOP_COMPLETION_SETUP_GUIDE = buildWhoopAppleHealthSetupGuide(
+  "/audio/whoop-sync-memos/grandpa.mp3",
+);
+
 const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   contactAction: {
     href: "sms:?body=I%20just%20connected%20my%20WHOOP",
@@ -160,36 +178,115 @@ const WHOOP_COMPLETION_DIALOG_MODEL: DeviceSyncCompletionDialogModel = {
   failed: false,
   kind: "device-sync",
   retryHref: null,
-  setupGuide: {
-    actionAriaLabel: "See how to sync all of your WHOOP data",
-    actionLabel: "Get full sync",
-    detail: "Two quick steps and Murph sees everything WHOOP tracks.",
-    downloadAction: {
-      ariaLabel: "Download App to sync WHOOP through Apple Health",
-      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
-      label: "Download App",
-      rel: "noopener noreferrer",
-      target: "_blank",
-    },
-    steps: [
-      {
-        detail: "Get the Murph app on your iPhone and connect Apple Health when it asks.",
-        title: "Download Murph and sign in",
-      },
-      {
-        detail:
-          "In WHOOP, go to More, App Settings, Integrations, then Apple Health. Turn on all categories and tap Allow.",
-        title: "Turn on Apple Health in WHOOP",
-      },
-    ],
-    title: "Get your full sync",
-    voiceMemoSrc: "/audio/whoop-sync-memos/grandpa.mp3",
-  },
+  setupGuide: WHOOP_COMPLETION_SETUP_GUIDE,
   title: "WHOOP is connected",
   unverified: false,
 };
 
 type SegmentedControlDemoValue = "phone" | "email" | "telegram";
+
+const DESIGN_LEGAL_DOCUMENTS: HostedConsentStatus["documents"] = [
+  {
+    href: "/legal/terms",
+    id: "terms-of-service",
+    pdfHref: "/legal/terms.pdf",
+    title: "Murph Terms of Service",
+    version: "2026-07-23",
+  },
+  {
+    href: "/legal/privacy",
+    id: "privacy-policy",
+    pdfHref: "/legal/privacy.pdf",
+    title: "Murph Privacy Policy",
+    version: "2026-07-23",
+  },
+  {
+    href: "/legal/health-ai-safety-disclosure",
+    id: "health-ai-safety-disclosure",
+    pdfHref: "/legal/health-ai-safety-disclosure.pdf",
+    title: "Murph Health AI Safety Disclosure",
+    version: "2026-07-23",
+  },
+  {
+    href: "/consumer-health-data-privacy-policy",
+    id: "consumer-health-data-notice",
+    pdfHref: "/legal/consumer-health-data-notice.pdf",
+    title: "Murph Consumer Health Data Notice",
+    version: "2026-07-23",
+  },
+];
+
+const DESIGN_LEGAL_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(0, 3);
+const DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS = DESIGN_LEGAL_DOCUMENTS.slice(3);
+const DESIGN_AVAILABLE_CONNECT_SOURCES: ConnectSource[] = [
+  {
+    connectProvider: "oura",
+    connectTarget: "oura",
+    description: "Smart ring. Sleep, readiness, temperature, and recovery.",
+    id: "oura",
+    logo: {
+      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      height: 30,
+      src: "/brand-logos/connect/oura.png",
+      width: 96,
+    },
+    name: "Oura",
+  },
+  {
+    connectProvider: "junction",
+    connectTarget: "junction:garmin",
+    description: "Workouts, sleep, stress, heart rate, and body battery.",
+    id: "garmin",
+    logo: {
+      className: "size-11 object-contain",
+      height: 44,
+      src: "/brand-logos/connect/garmin.png",
+      width: 44,
+    },
+    name: "Garmin",
+  },
+];
+const DESIGN_DASHBOARD_CONSENT_STATUS: HostedConsentStatus = {
+  documents: DESIGN_LEGAL_DOCUMENTS,
+  generatedAt: "2026-07-23T12:00:00.000Z",
+  launchGranted: false,
+  launchScopes: [
+    {
+      granted: false,
+      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      scope: "launch.legal",
+    },
+    {
+      granted: false,
+      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      scope: "launch.health-data",
+    },
+  ],
+  ok: true,
+  schema: "murph.hosted-consent-status.v1",
+  scopes: [
+    {
+      current: false,
+      documents: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      grant: null,
+      granted: false,
+      label: "Terms, privacy, and AI disclosure",
+      missingDocuments: DESIGN_LEGAL_SCOPE_DOCUMENTS,
+      revocable: false,
+      scope: "launch.legal",
+    },
+    {
+      current: false,
+      documents: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      grant: null,
+      granted: false,
+      label: "Health data notice and processing authorization",
+      missingDocuments: DESIGN_HEALTH_DATA_SCOPE_DOCUMENTS,
+      revocable: false,
+      scope: "launch.health-data",
+    },
+  ],
+};
 
 const SEGMENTED_CONTROL_OPTIONS: ReadonlyArray<
   SegmentedControlOption<SegmentedControlDemoValue>
@@ -218,6 +315,9 @@ export function ComponentsContent() {
   const [phoneInputCountryCode, setPhoneInputCountryCode] = useState("US");
   const [phoneInputValue, setPhoneInputValue] = useState("");
   const [whoopCompletionPreviewKey, setWhoopCompletionPreviewKey] = useState(0);
+  const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
+  const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
+    useState(false);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -227,6 +327,50 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Dashboard legal update">
+          <div
+            className="rounded-2xl border border-border bg-background px-5 py-4 sm:px-8"
+            data-design-dashboard-legal-composition="true"
+          >
+            <DashboardLegalConsentGate
+              acceptScope={acceptDesignDashboardConsentScope}
+              initialStatus={DESIGN_DASHBOARD_CONSENT_STATUS}
+              onAccepted={completeDesignDashboardConsentPreview}
+            />
+            <div className="border-t border-border py-8">
+              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+                Requested dashboard content remains available
+              </p>
+              <div className="mt-3 flex items-end justify-between gap-4">
+                <div>
+                  <h2 className="font-serif text-2xl font-semibold tracking-tight text-foreground">
+                    Connect devices
+                  </h2>
+                  <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                    Stale legal consent does not block configured device connections.
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                {DESIGN_AVAILABLE_CONNECT_SOURCES.map((source) => (
+                  <SourceCard
+                    authenticated
+                    errorMessage={null}
+                    key={source.id}
+                    onDisconnectTargetChange={() => {}}
+                    onStartConnection={() => Promise.resolve()}
+                    pending={false}
+                    pendingDisconnect={false}
+                    source={source}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
 
         <Separator />
 
@@ -594,12 +738,21 @@ export function ComponentsContent() {
         <div id="whoop-completion-dialog" className="scroll-mt-24">
           <Section title="WHOOP Completion Dialog">
             <p className="max-w-2xl text-sm text-muted-foreground">
-              Production completion flow for WHOOP. Open the preview, then choose
-              Get full sync to review the voice memo, setup steps, and action hierarchy.
+              Production WHOOP completion and capacity fallback. The normal flow
+              starts with confirmation; the capacity path opens the same setup guide directly.
             </p>
-            <div className="flex">
+            <div className="flex flex-wrap gap-2">
               <Button onClick={() => setWhoopCompletionPreviewKey((key) => key + 1)}>
                 Preview WHOOP completion
+              </Button>
+              <Button variant="outline" onClick={() => setWhoopCapacityPreviewOpen(true)}>
+                Preview capacity fallback
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setWhoopCapacityNoContactPreviewOpen(true)}
+              >
+                Preview capacity fallback without contact route
               </Button>
             </div>
             {whoopCompletionPreviewKey > 0 ? (
@@ -608,6 +761,18 @@ export function ComponentsContent() {
                 model={WHOOP_COMPLETION_DIALOG_MODEL}
               />
             ) : null}
+            <DeviceSyncSetupGuideDialog
+              contactAction={WHOOP_COMPLETION_DIALOG_MODEL.contactAction}
+              guide={WHOOP_COMPLETION_SETUP_GUIDE}
+              open={whoopCapacityPreviewOpen}
+              onOpenChange={setWhoopCapacityPreviewOpen}
+            />
+            <DeviceSyncSetupGuideDialog
+              contactAction={null}
+              guide={WHOOP_COMPLETION_SETUP_GUIDE}
+              open={whoopCapacityNoContactPreviewOpen}
+              onOpenChange={setWhoopCapacityNoContactPreviewOpen}
+            />
           </Section>
         </div>
 
@@ -959,6 +1124,30 @@ export function ComponentsContent() {
               value={inlineContactAvatarId}
             />
           </div>
+          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
+            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              In-app browser CTA
+            </p>
+            <p className="mb-4 text-sm leading-6 text-muted-foreground">
+              On an iOS in-app browser (X, Instagram, Facebook, TikTok, and the
+              like) the WebKit view fetches the vCard but never hands it to the
+              contact importer, so the normal add silently does nothing. There
+              the primary action becomes a Safari escape instead.
+            </p>
+            <div className="flex flex-col gap-2">
+              <a
+                className={buttonVariants({ className: "w-full", size: "xl" })}
+                href="#in-app-browser-cta-preview"
+                onClick={(event) => event.preventDefault()}
+              >
+                <ContactRound data-icon="inline-start" />
+                {IN_APP_BROWSER_PRIMARY_ACTION}
+              </a>
+              <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
+                {IN_APP_BROWSER_DESCRIPTION}
+              </p>
+            </div>
+          </div>
         </Section>
 
         <Separator />
@@ -1135,6 +1324,17 @@ export function ComponentsContent() {
           </div>
         </Section>
 
+        <Section title="Trial Billing Banner">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Shown on Home when a Pulse trial is paused with billing still attached. It is the
+            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
+            to the Subscription controls rather than here.
+          </p>
+          <TrialBillingBanner />
+        </Section>
+
+        <Separator />
+
         <Section title="Active Experiment Banner & Profile Stats">
           <div className="flex items-stretch gap-4">
             <div className="flex-1"><ActiveExperimentBanner id="demo" title="Zone 2 RHR Reset" day={14} totalDays={28} /></div>
@@ -1168,4 +1368,48 @@ export function ComponentsContent() {
       </div>
     </TooltipProvider>
   );
+}
+
+async function acceptDesignDashboardConsentScope(
+  input: HostedLegalConsentAcceptanceInput,
+): Promise<HostedConsentStatus> {
+  const scopes = input.currentStatus.scopes.map((scopeStatus) => {
+    if (scopeStatus.scope !== input.scope) {
+      return scopeStatus;
+    }
+
+    return {
+      ...scopeStatus,
+      current: true,
+      grant: {
+        documentVersions: input.acceptedDocumentVersions,
+        grantedAt: input.currentStatus.generatedAt,
+        lastEventId: null,
+        revokedAt: null,
+        scope: input.scope,
+        source: "design-preview",
+        status: "granted" as const,
+        updatedAt: input.currentStatus.generatedAt,
+      },
+      granted: true,
+      missingDocuments: [],
+    };
+  });
+  const launchScopes = input.currentStatus.launchScopes.map((scopeStatus) => (
+    scopeStatus.scope === input.scope
+      ? { ...scopeStatus, granted: true, missingDocuments: [] }
+      : scopeStatus
+  ));
+
+  return {
+    ...input.currentStatus,
+    launchGranted: launchScopes.every((scopeStatus) => scopeStatus.granted),
+    launchScopes,
+    scopes,
+  };
+}
+
+function completeDesignDashboardConsentPreview(): void {
+  // The public component catalog demonstrates the accepted handoff state
+  // without invoking navigation or production consent authority.
 }

@@ -19,6 +19,15 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
+import type {
+  VoiceMemoToolRuntime,
+} from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  createAskGrokToolRuntimeFromEnv,
+} from '../src/assistant-codex/ask-grok-tool.ts'
+import type {
+  AssistantHostedToolContext,
+} from '../src/assistant/hosted-tool-context.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -55,6 +64,7 @@ interface ScriptedStub {
 }
 
 interface ScriptedProviderRequestSummary {
+  functionCallOutputs?: string[]
   model: string | null
   serviceTier: string | null
 }
@@ -547,6 +557,103 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it.each([
+    {
+      contactCardFails: false,
+      expectedFinal: 'The card is in the chat and the song is attached.',
+      expectedGroupOutput: '"status":"sent"',
+      name: 'both owners succeed',
+    },
+    {
+      contactCardFails: true,
+      expectedFinal: 'The contact card failed, but the song is attached.',
+      expectedGroupOutput: 'group tool request failed',
+      name: 'the contact-card owner fails',
+    },
+  ])(
+    'carries an explicit contact-card and song request through the real tool loop when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ contactCardFails, expectedFinal, expectedGroupOutput }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const groupRequests: unknown[] = []
+      const songGenerations: unknown[] = []
+      const songPrompt = 'A short upbeat group intro song.'
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { action: 'share_contact_card' },
+            name: 'group',
+            namespace: 'murph',
+          },
+        },
+        {
+          functionCall: {
+            arguments: {
+              durationSeconds: 10,
+              instrumental: false,
+              prompt: songPrompt,
+            },
+            name: 'generate_song',
+            namespace: 'murph',
+          },
+        },
+        { text: expectedFinal },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: resolveMurphDynamicTools({
+          groupAvailable: true,
+          progressUpdatesAvailable: false,
+          voiceMemoGenerationAvailable: true,
+        }),
+        hostedToolContext: createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          if (contactCardFails) {
+            throw new Error('private upstream detail')
+          }
+          return {
+            action: 'share_contact_card',
+            result: { status: 'sent' },
+          }
+        }),
+        prompt: 'Share your contact card and sing a short intro song.',
+        voiceMemoRuntime: createScriptedSongRuntime(songGenerations),
+      })
+
+      expect(groupRequests).toEqual([{ action: 'share_contact_card' }])
+      expect(songGenerations).toEqual([
+        expect.objectContaining({
+          durationMs: 10_000,
+          forceInstrumental: false,
+          kind: 'elevenlabs_music',
+          prompt: songPrompt,
+        }),
+      ])
+      expect(result.responseMedia).toEqual([
+        {
+          filename: 'explicit-group-song.mp3',
+          kind: 'voice_memo',
+          transcript: null,
+          transport: {
+            attachmentId: 'attachment_explicit_group_song',
+            kind: 'linq_attachment',
+          },
+        },
+      ])
+      expect(result.finalMessage).toBe(expectedFinal)
+      expect(result.finalMessage).not.toMatch(/Apple|provider limitation/iu)
+      expect(
+        scenario.stub.requestSummariesSinceBaseline()
+          .flatMap((summary) => summary.functionCallOutputs ?? []),
+      ).toEqual(expect.arrayContaining([
+        expect.stringContaining(expectedGroupOutput),
+        expect.stringContaining('generated song attached to the final response'),
+      ]))
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    },
+  )
+
   it('captures scripted reaction tool calls from the real app-server protocol', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -596,6 +703,83 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('enforces the murph.ask_grok per-turn provider-call ceiling through the real tool loop', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let xaiProviderCalls = 0
+    const xaiFetch: typeof fetch = async () => {
+      xaiProviderCalls += 1
+      return new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              call_id: 'call_xsearch_1',
+              id: 'xsearch_1',
+              input: '{"query":"creatine"}',
+              name: 'x_keyword_search',
+              status: 'completed',
+              type: 'custom_tool_call',
+            },
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'People mostly say creatine timing does not matter much.',
+                },
+              ],
+            },
+          ],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      )
+    }
+    const askGrokCall = {
+      functionCall: {
+        arguments: { question: 'what are people saying about creatine?' },
+        name: 'ask_grok',
+        namespace: 'murph',
+      },
+    } as const
+    scenario.stub.queue(
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
+      { text: 'X_SEARCH_CEILING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: false,
+        askGrokAvailable: true,
+      }),
+      prompt: 'Search X four times, then reply exactly X_SEARCH_CEILING_OK.',
+      askGrokRuntime: createAskGrokToolRuntimeFromEnv({
+        env: { XAI_API_KEY: 'xai-sentinel-key' },
+        fetchImpl: xaiFetch,
+      }),
+    })
+
+    expect(result.finalMessage).toBe('X_SEARCH_CEILING_OK')
+    // Four tool calls flowed through the real turn executor, but the shared
+    // turn-scoped counter allowed exactly three provider requests.
+    expect(xaiProviderCalls).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+    const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(functionCallOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('untrusted third-party content'),
+      expect.stringContaining(
+        'X search limit of 3 searches reached for this turn; no search ran',
+      ),
+    ]))
+  })
+
   it('steers a live turn while the real app-server is mid-request', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -635,6 +819,41 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 })
+
+function createScriptedGroupToolContext(
+  request: NonNullable<AssistantHostedToolContext['groupTool']>['request'],
+): AssistantHostedToolContext {
+  return {
+    computerToolsAvailable: false,
+    currentHostedDeliveryContext: () => null,
+    currentHostedMailboxItemIds: () => [],
+    groupTool: { request },
+    sendVaultFile: async () => {
+      throw new Error('Vault-file sending is unavailable for this turn.')
+    },
+    vaultFileSendAvailable: false,
+  }
+}
+
+function createScriptedSongRuntime(
+  generations: unknown[],
+): VoiceMemoToolRuntime {
+  return {
+    elevenLabs: {
+      apiKeyAvailable: true,
+      modelId: 'eleven_multilingual_v2',
+      voiceId: 'voice_murph',
+    },
+    generateAndUpload: async (input) => {
+      generations.push(input.generation)
+      return {
+        attachmentId: 'attachment_explicit_group_song',
+        filename: 'explicit-group-song.mp3',
+      }
+    },
+    kind: 'linq',
+  }
+}
 
 async function prepareScriptedTurnScenario(): Promise<{
   stub: ScriptedStub
@@ -864,7 +1083,15 @@ function readScriptedProviderRequestSummary(
   requestBody: string,
 ): ScriptedProviderRequestSummary {
   const body = readRecord(JSON.parse(requestBody))
+  const functionCallOutputs = Array.isArray(body?.input)
+    ? body.input
+      .map(readRecord)
+      .filter((item) => item?.type === 'function_call_output')
+      .map((item) => readString(item?.output))
+      .filter((output): output is string => output !== null)
+    : []
   return {
+    ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     model: readString(body?.model),
     serviceTier: readString(body?.service_tier),
   }

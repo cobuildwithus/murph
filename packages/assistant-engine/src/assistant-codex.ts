@@ -70,6 +70,10 @@ import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
+  createAskGrokTurnState,
+  type AskGrokToolRuntime,
+} from './assistant-codex/ask-grok-tool.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -166,6 +170,9 @@ export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
+export type {
+  AskGrokToolRuntime,
+} from './assistant-codex/ask-grok-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -192,8 +199,7 @@ const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.transport_diagnostics'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 // Bound on distinct subagent threads whose token usage is tracked per parent
-// turn. Far above any sane spawn fan-out; threads past the cap are counted
-// and surfaced via droppedSubagentUsageThreadCount on recorded drafts.
+// turn. Far above any sane spawn fan-out; threads past the cap are ignored.
 const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
 
 type CodexAppServerProcessState =
@@ -474,6 +480,7 @@ export interface CodexAppServerTurnInput {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
 }
 
@@ -665,6 +672,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    askGrokRuntime: input.askGrokRuntime ?? null,
     workingDirectory,
   }
 
@@ -2782,9 +2790,11 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
+  // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
+  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  const askGrokTurnState = createAskGrokTurnState()
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
-  const subagentDroppedUsageThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
   // stale/unattributed foreign threads when the cap is reached.
@@ -2882,7 +2892,6 @@ async function runCodexAppServerTurnOnProcess(
   // whatever child usage was observed before the turn settled.
   const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] =>
     extractCodexSubagentUsageDrafts({
-      droppedThreadCount: subagentDroppedUsageThreadIds.size,
       modelProvider: normalizeNullableString(input.modelProvider) ?? null,
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentModel: normalizeNullableString(input.model) ?? null,
@@ -3899,12 +3908,20 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          askGrokRuntime:
+            dynamicToolRequest.kind === 'ask-grok'
+              ? input.askGrokRuntime ?? null
+              : null,
+          askGrokTurnState,
         })
         return result
       },
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
+        pushRuntimeIssueInput(runtimeIssueInput)
       }
       if (result.usageDraft) {
         additionalUsages.push(result.usageDraft)
@@ -4264,7 +4281,6 @@ async function runCodexAppServerTurnOnProcess(
 
     const sample = subagentTokenUsageByThread.get(threadId)
     if (sample) {
-      sample.eventCount += 1
       sample.lastEvent = message
       return
     }
@@ -4278,14 +4294,11 @@ async function runCodexAppServerTurnOnProcess(
         )
         : undefined
       if (evictableThreadId === undefined) {
-        subagentDroppedUsageThreadIds.add(threadId)
         return
       }
       subagentTokenUsageByThread.delete(evictableThreadId)
-      subagentDroppedUsageThreadIds.add(evictableThreadId)
     }
     subagentTokenUsageByThread.set(threadId, {
-      eventCount: 1,
       firstEvent: message,
       lastEvent: message,
     })

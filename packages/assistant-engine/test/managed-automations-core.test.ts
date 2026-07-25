@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import {
   initializeVault,
@@ -6,6 +7,7 @@ import {
   showAutomation,
   upsertAutomation,
 } from '@murphai/core'
+import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from '@murphai/hosted-execution/env'
@@ -13,6 +15,7 @@ import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -22,6 +25,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  ensureAutomaticMealCloseoutAutomation,
   type MurphManagedAutomationDiagnosticStage,
 } from '../src/assistant/managed-automations.ts'
 import { completeAssistantOnboarding } from '../src/assistant/onboarding-state.ts'
@@ -79,6 +83,38 @@ async function createVaultRoot(): Promise<string> {
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
+  it('persists one automatic meal closeout through the canonical automation registry', async () => {
+    const vaultRoot = await createVaultRoot()
+
+    await expect(showAutomation({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toBeNull()
+
+    const first = await ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T14:01:00.000Z'),
+      vaultRoot,
+    })
+    const replay = await ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T14:02:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(first).toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+      },
+      slug: 'automatic-meal-daily-closeout',
+      status: 'active',
+    })
+    expect(replay).toEqual(first)
+  })
+
   it('keeps diagnostic stage reporting best-effort', async () => {
     const vaultRoot = await createVaultRoot()
 
@@ -94,6 +130,78 @@ describe('applyMurphManagedAutomations core integration', () => {
       skipped: 0,
       updated: 0,
     })
+  })
+
+  it('still creates unrelated automations when experiment lifecycle staging fails', async () => {
+    const vaultRoot = await createVaultRoot()
+    // A stray Markdown document is the one entry the experiment scan still
+    // refuses, and it must not take the rest of the pass down with it.
+    await writeFile(
+      join(vaultRoot, 'bank/experiments/Stray Copy.md'),
+      '---\nslug: stray\n---\n',
+      'utf8',
+    )
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result.created).toBe(5)
+    expect(result.experimentLifecycleFailure).toMatchObject({
+      code: 'EXPERIMENT_STORAGE_INVALID',
+    })
+    expect(
+      await showAutomation({
+        automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+        vaultRoot,
+      }),
+    ).toMatchObject({ status: 'active' })
+  })
+
+  it('never archives live experiment automations when the experiment scan fails', async () => {
+    const vaultRoot = await createVaultRoot()
+    // An existing, active experiment support-series automation. A failed scan
+    // leaves desired experiment state unknown, so this must survive untouched:
+    // reconciling an empty desired set here would archive the user's live
+    // experiment check-ins and they cannot all be recovered afterwards.
+    const supportSeriesTag = buildAutomationSupportSeriesTag(
+      'experiment-lifecycle:sleep-reset',
+    )
+    const experimentAutomationId = 'automation_01K2WKKY3F8Q4R5S6T7V8W9XAC'
+    await upsertAutomation({
+      automationId: experimentAutomationId,
+      continuityPolicy: 'fresh',
+      instructions: 'Existing experiment check-in.',
+      route: defaultRoute,
+      schedule: { kind: 'every', everyMs: 24 * 60 * 60 * 1000 },
+      slug: 'experiment-check-in',
+      status: 'active',
+      tags: [supportSeriesTag],
+      title: 'Experiment check-in',
+      vaultRoot,
+    })
+
+    await writeFile(
+      join(vaultRoot, 'bank/experiments/Stray Copy.md'),
+      '---\nslug: stray\n---\n',
+      'utf8',
+    )
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result.experimentLifecycleFailure).toMatchObject({
+      code: 'EXPERIMENT_STORAGE_INVALID',
+    })
+    expect(result.created).toBe(5)
+    expect(
+      await showAutomation({ automationId: experimentAutomationId, vaultRoot }),
+    ).toMatchObject({ status: 'active' })
   })
 
   it('creates managed health automations through the canonical automation registry', async () => {

@@ -42,6 +42,7 @@ function createLabHistoryReplica() {
       referenceRange: { high: 150, low: 50 },
       rowSchema: "murph.browser-vault.lab-result-row.v1",
       sourceLabel: "Lab",
+      specimenKind: "serum",
       textValue: null,
       unit: "mg/dL",
       value,

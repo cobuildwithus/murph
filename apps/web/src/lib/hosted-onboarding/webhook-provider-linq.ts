@@ -9,7 +9,10 @@ import { issueHostedInviteTx } from "./invite-service";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
-import { readActiveHostedMemberAccess } from "./member-access";
+import {
+  readActiveHostedMemberAccess,
+  readHostedRuntimeAiAccessDecision,
+} from "./member-access";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -28,6 +31,7 @@ import {
   lookupHostedMemberByVerifiedEmailAddress,
 } from "./hosted-member-store";
 import {
+  acquireHostedMemberHomeLinqRouteLockTx,
   demoteHostedMemberLinqGroupChatBindingsTx,
   lookupHostedMemberRoutingByHomeLinqChatId,
   lookupHostedMemberRoutingByPendingLinqParticipantContact,
@@ -43,6 +47,7 @@ import {
 } from "./logging";
 import {
   HOSTED_LINQ_DAILY_TEXT_LIMIT,
+  HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
   incrementHostedLinqInboundDailyState,
   incrementHostedLinqOutboundDailyState,
   readHostedLinqDailyState,
@@ -66,6 +71,8 @@ import {
   buildIgnoredLinqWebhookPlan,
   buildQuotaReplyResponse,
   buildSignupLinkResponse,
+  buildInactiveMemberAccessNoticeResponse,
+  HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
   hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
   resolveHostedOnboardingLinqMessageContext,
@@ -292,7 +299,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
   const existingMemberSuspended = existingMember
     ? isHostedMemberSuspended(existingMember.suspendedAt)
     : false;
-  const existingMemberEffectiveActive = existingMember && !existingMemberSuspended
+  let existingMemberEffectiveActive = existingMember && !existingMemberSuspended
     ? await readActiveHostedMemberAccess({
         memberId: existingMember.id,
         prisma: input.prisma,
@@ -539,6 +546,70 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
+  if (existingMember && !existingMemberEffectiveActive) {
+    // The member row is also the home-route owner. Reclassify only after any
+    // activation ahead of this request commits, and keep invite or mailbox
+    // writes inside that same single-owner boundary.
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+    existingMemberEffectiveActive = await readActiveHostedMemberAccess({
+      memberId: existingMember.id,
+      prisma: input.prisma,
+    });
+  }
+
+  // A member who already owns billing can never be onboarded as a first contact
+  // on their own bound home chat: the pending-bind write would hit the home-route
+  // race guard and 503 on every retry, forever. Answer from their access decision
+  // and stop here instead. The decision carries a notice only for a member with
+  // billing to recover, so a genuine first-time subscriber falls through to the
+  // signup-link and fallback-retry paths below rather than being answered here.
+  if (
+    existingMember
+    && !existingMemberEffectiveActive
+    && incomingHomeLinqChatOwnerLookup?.routing.memberId === existingMember.id
+  ) {
+    const accessDecision = await readHostedRuntimeAiAccessDecision({
+      memberId: existingMember.id,
+      noticeSeed: input.event.event_id,
+      now: new Date(occurredAt),
+      prisma: input.prisma,
+    });
+    if (accessDecision.allowed) {
+      // The two access reads disagreed. Trust the runtime decision and let the
+      // normal active-member path own this inbound: falling through to the
+      // first-contact tail would attempt the pending bind and 503 forever.
+      existingMemberEffectiveActive = true;
+    } else {
+      const userNotice = accessDecision.userNotice;
+      if (userNotice) {
+        return logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildInactiveMemberAccessNoticeResponse({
+            chatId: summary.chatId,
+            memberId: existingMember.id,
+            message: userNotice.message,
+            messageId: summary.messageId,
+            noticeCode: userNotice.code,
+            occurredAt,
+            sourceEventId: input.event.event_id,
+          }),
+          buildHostedLinqWebhookPlannerDetails(input.event, context, {
+            accessReason: accessDecision.reason,
+            existingMemberActive: false,
+            existingMemberMatch,
+            homeRoutePresent: true,
+            noticeCode: userNotice.code,
+            reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[userNotice.code],
+            routeStage: "inactive-member-home-access-notice",
+          }),
+        );
+      }
+
+    }
+  }
+
   if (existingMember && existingMemberEffectiveActive) {
     const existingMailboxItem = await readHostedMailboxItemByDedupeKey({
       dedupeKey: input.event.event_id,
@@ -605,6 +676,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
     const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
       context,
       dailyState,
+      dailyTextLimit: HOSTED_LINQ_DAILY_TEXT_LIMIT,
       event: input.event,
       logDetails: {
         existingMemberActive: true,
@@ -1255,9 +1327,12 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
 
   // Subscription/AI usage and its limit notice are gated after mailbox append,
   // so pending user input survives upgrades and allowance resets.
+  // Group threads share one daily bucket across every participant, so they get
+  // a higher cap than a 1:1 direct chat.
   const admissionPlan = await planHostedLinqDailyQuotaAdmissionDenied({
     context: input.context,
     dailyState,
+    dailyTextLimit: HOSTED_LINQ_GROUP_DAILY_TEXT_LIMIT,
     event: input.event,
     logDetails: {
       existingMemberActive: true,
@@ -1510,6 +1585,7 @@ async function planHostedLinqGroupChatWebhook(input: {
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   dailyState: HostedLinqDailyState | null;
+  dailyTextLimit: number;
   event: HostedLinqWebhookEvent;
   logDetails: HostedOnboardingStructuredLogDetails;
   memberId: string;
@@ -1524,7 +1600,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return null;
   }
 
-  if (dailyState.inboundCount > HOSTED_LINQ_DAILY_TEXT_LIMIT) {
+  if (dailyState.inboundCount > input.dailyTextLimit) {
     if (dailyState.quotaReplySentAt) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("daily-quota-reached"),
@@ -1540,6 +1616,7 @@ async function planHostedLinqDailyQuotaAdmissionDenied(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildQuotaReplyResponse({
         chatId: input.context.summary.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         messageId: input.context.summary.messageId,
         occurredAt: input.context.occurredAt,

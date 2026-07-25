@@ -55,6 +55,7 @@ type HostedMemberPersonalityColumns = {
   assistantDetail: number | null;
   assistantHumor: number | null;
   assistantPush: number | null;
+  assistantUnhinged: number | null;
 };
 
 function maxCausalSeq(current: bigint | null, next: bigint): bigint {
@@ -84,6 +85,8 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       assistantHumorCausalSeq: true,
       assistantPush: true,
       assistantPushCausalSeq: true,
+      assistantUnhinged: true,
+      assistantUnhingedCausalSeq: true,
       assistantTone: true,
       assistantToneCausalSeq: true,
       assistantVoice: true,
@@ -121,6 +124,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
               detail: member.assistantDetailCausalSeq,
               humor: member.assistantHumorCausalSeq,
               push: member.assistantPushCausalSeq,
+              unhinged: member.assistantUnhingedCausalSeq,
             },
             tone: member.assistantToneCausalSeq,
             voice: member.assistantVoiceCausalSeq,
@@ -193,6 +197,10 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
       && preferences.personality.detail !== member.assistantDetail
     )
     || (
+      preferences.personality?.unhinged !== undefined
+      && preferences.personality.unhinged !== member.assistantUnhinged
+    )
+    || (
       preferences.tone !== undefined
       && preferences.tone !== member.assistantTone
     )
@@ -259,12 +267,22 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
               effectiveCausalSeq,
             ),
           }),
+      ...(preferences.personality?.unhinged === undefined
+        ? {}
+        : {
+            assistantUnhinged: preferences.personality.unhinged,
+            assistantUnhingedCausalSeq: maxCausalSeq(
+              member.assistantUnhingedCausalSeq,
+              effectiveCausalSeq,
+            ),
+          }),
     },
     select: {
       assistantPersona: true,
       assistantDetail: true,
       assistantHumor: true,
       assistantPush: true,
+      assistantUnhinged: true,
       assistantTone: true,
       assistantVoice: true,
     },
@@ -298,6 +316,7 @@ export async function readHostedMemberAssistantPreferences(input: {
       assistantDetail: true,
       assistantHumor: true,
       assistantPush: true,
+      assistantUnhinged: true,
       assistantTone: true,
       assistantVoice: true,
     },
@@ -458,6 +477,8 @@ function readStoredAssistantPersonalityScore(
       return value.assistantHumor;
     case "push":
       return value.assistantPush;
+    case "unhinged":
+      return value.assistantUnhinged;
   }
 }
 
@@ -474,6 +495,7 @@ function normalizeStoredAssistantPersonality(
     detail: normalizeStoredAssistantPersonalityScore(value?.assistantDetail),
     humor: normalizeStoredAssistantPersonalityScore(value?.assistantHumor),
     push: normalizeStoredAssistantPersonalityScore(value?.assistantPush),
+    unhinged: normalizeStoredAssistantPersonalityScore(value?.assistantUnhinged),
   };
 }
 

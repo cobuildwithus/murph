@@ -14,6 +14,7 @@ Current responsibilities:
   forwarded env profiles, platform-only runtime config, typed resolved config,
   typed parser toolchain validation, commit timeout, and child-env projection helpers
 - keep hosted execution local-runtime-first: normal hosted turns write mailbox and assistant input state into the warm container, may defer intermediate foreground checkpoints, may hot-service only the exact assistant wake projected by the current foreground phase before the idle floor, and otherwise keep dirty state dirty until the runtime-owned idle-floor—or last-chance shutdown—`idle_shutdown` checkpoint succeeds
+- before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
 - release foreground ownership after terminal reply delivery, abort in-flight provider cleanup when later conversation input is staged, and reserve exact automation reconciliation for canonical automation writes or maintenance wakes
@@ -35,6 +36,19 @@ spine used by local automation:
 ```text
 source adapter -> AssistantInputEvent -> AssistantInputSource -> scanner/active turn -> accepted-input journal -> Codex
 ```
+
+Conversation import and handling progress remain distinct. The imported
+watermark records local staging; terminal inputs stay in the hosted pending
+index until an accepted idle checkpoint stamps their exact Web-owned mailbox
+rows and a later fetch confirms the resulting contiguous consumed floor. The
+v2 index rotates capped exact-id checkpoint batches with a snapshot-persisted
+cursor, so an earlier unresolved sequence cannot starve later terminal rows.
+V1 migration preserves recorded pending IDs and recovers omitted events only
+when terminal evidence proves they are safe to acknowledge; ambiguous omitted
+nonterminal history stays nonreplyable instead of becoming stale work after a
+channel is enabled. Once an accepted snapshot contains the v2 envelope, its
+runner bundle is a hard rollback floor because the preceding v1-only reader
+cannot restore that state.
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.

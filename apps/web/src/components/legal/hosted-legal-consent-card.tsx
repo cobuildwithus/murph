@@ -21,11 +21,25 @@ import { cn } from "@/src/lib/utils";
 type HostedLegalConsentCardMode = "compact" | "panel";
 type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
 
+export interface HostedLegalConsentAcceptanceInput {
+  acceptedDocumentVersions: Record<string, string>;
+  currentStatus: HostedConsentStatus;
+  scope: HostedConsentScope;
+  source: string;
+}
+
+export type HostedLegalConsentAcceptScope = (
+  input: HostedLegalConsentAcceptanceInput,
+) => Promise<HostedConsentStatus>;
+
 interface HostedLegalConsentCardProps {
   acceptedPendingLabel?: string;
+  acceptScope?: HostedLegalConsentAcceptScope;
   className?: string;
   declinePending?: boolean;
   initialStatus?: HostedConsentStatus | null;
+  launchDescription?: string;
+  launchTitle?: string;
   mode?: HostedLegalConsentCardMode;
   onAccepted?: (status: HostedConsentStatus) => void | Promise<void>;
   onDecline?: () => void;
@@ -38,6 +52,7 @@ interface HostedLaunchConsentPromptProps {
   acceptedPendingLabel?: string;
   className?: string;
   declinePending?: boolean;
+  description?: string;
   documents: HostedConsentScopeStatus["documents"];
   errorMessage?: string | null;
   handoffPending?: boolean;
@@ -45,6 +60,7 @@ interface HostedLaunchConsentPromptProps {
   onContinue: () => void;
   onDecline?: () => void;
   pending?: boolean;
+  title?: string;
   variant?: HostedLaunchConsentVariant;
 }
 
@@ -59,9 +75,12 @@ export function HostedLegalConsentCard(props: HostedLegalConsentCardProps) {
 
 function HostedLegalConsentCardState({
   acceptedPendingLabel = "Continuing...",
+  acceptScope = requestHostedConsentAcceptance,
   className,
   declinePending = false,
   initialStatus = null,
+  launchDescription,
+  launchTitle,
   mode = "panel",
   onAccepted,
   onDecline,
@@ -78,7 +97,7 @@ function HostedLegalConsentCardState({
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [featureAccepted, setFeatureAccepted] = useState(false);
-  const status = statusOverride ?? initialStatus ?? loadedStatus;
+  const status = statusOverride ?? loadedStatus ?? initialStatus;
 
   const loadStatus = useCallback(async () => {
     setRetrying(true);
@@ -179,16 +198,13 @@ function HostedLegalConsentCardState({
         for (const scope of pendingScopes) {
           const scopeStatus = findConsentScope(latestStatus, scope);
           if (scopeStatus && !scopeStatus.granted) {
-            latestStatus = await requestHostedOnboardingJson<HostedConsentStatus>({
-              method: "POST",
-              payload: {
-                acceptedDocumentVersions: Object.fromEntries(
-                  scopeStatus.documents.map((document) => [document.id, document.version]),
-                ),
-                scope,
-                source,
-              },
-              url: "/api/legal/consent/accept",
+            latestStatus = await acceptScope({
+              acceptedDocumentVersions: Object.fromEntries(
+                scopeStatus.documents.map((document) => [document.id, document.version]),
+              ),
+              currentStatus: latestStatus,
+              scope,
+              source,
             });
           }
         }
@@ -280,6 +296,7 @@ function HostedLegalConsentCardState({
         acceptedPendingLabel={acceptedPendingLabel}
         className={className}
         declinePending={declinePending}
+        description={launchDescription}
         documents={launchDocuments}
         errorMessage={errorMessage}
         handoffPending={acceptedHandoffPending}
@@ -287,6 +304,7 @@ function HostedLegalConsentCardState({
         onContinue={handleAccept}
         onDecline={onDecline}
         pending={pending}
+        title={launchTitle}
         variant={resolveLaunchConsentVariant(pendingScopes)}
       />
     );
@@ -361,6 +379,7 @@ export function HostedLaunchConsentPrompt({
   acceptedPendingLabel = "Continuing...",
   className,
   declinePending = false,
+  description,
   documents,
   errorMessage = null,
   handoffPending = false,
@@ -368,9 +387,15 @@ export function HostedLaunchConsentPrompt({
   onContinue,
   onDecline,
   pending = false,
+  title,
   variant = "combined",
 }: HostedLaunchConsentPromptProps) {
-  const copy = resolveLaunchConsentCopy(variant);
+  const variantCopy = resolveLaunchConsentCopy(variant);
+  const copy = {
+    actionLabel: variantCopy.actionLabel,
+    description: description ?? variantCopy.description,
+    title: title ?? variantCopy.title,
+  };
   const accepting = pending || handoffPending;
   const actionPending = accepting || declinePending;
   const introduction = (
@@ -452,6 +477,20 @@ export function HostedLaunchConsentPrompt({
   );
 }
 
+function requestHostedConsentAcceptance(
+  input: HostedLegalConsentAcceptanceInput,
+): Promise<HostedConsentStatus> {
+  return requestHostedOnboardingJson<HostedConsentStatus>({
+    method: "POST",
+    payload: {
+      acceptedDocumentVersions: input.acceptedDocumentVersions,
+      scope: input.scope,
+      source: input.source,
+    },
+    url: "/api/legal/consent/accept",
+  });
+}
+
 function ConsentDeclineButton({
   busy,
   disabled,
@@ -487,12 +526,12 @@ function ConsentCheckbox({
 }) {
   const id = useId();
   return (
-    <div className="flex items-start gap-4 text-sm leading-relaxed text-foreground">
+    <div className="flex items-start gap-3 text-sm leading-relaxed text-foreground">
       <Checkbox
         id={id}
         checked={checked}
         onCheckedChange={onChange}
-        className="size-7 shrink-0"
+        className="mt-0.5 size-5 shrink-0"
       />
       <label htmlFor={id} className="cursor-pointer">
         {label}

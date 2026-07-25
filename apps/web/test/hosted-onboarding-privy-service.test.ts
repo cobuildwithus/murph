@@ -9,8 +9,30 @@ import {
   createHostedPrivyUserLookupKey,
   createHostedWalletAddressLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
+import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import type { HostedPrivyIdentity } from "@/src/lib/hosted-onboarding/privy";
 import { encryptHostedWebNullableString } from "@/src/lib/hosted-web/encryption";
+
+const privyManagementMocks = vi.hoisted(() => ({
+  clientConstructor: vi.fn(),
+  setCustomMetadata: vi.fn(),
+}));
+
+vi.mock("@privy-io/node", () => ({
+  APIError: class APIError extends Error {},
+  PrivyClient: class PrivyClient {
+    constructor(input: unknown) {
+      privyManagementMocks.clientConstructor(input);
+    }
+
+    users() {
+      return {
+        setCustomMetadata: privyManagementMocks.setCustomMetadata,
+      };
+    }
+  },
+  verifyIdentityToken: vi.fn(),
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   getHostedOnboardingEnvironment: () => ({
@@ -27,6 +49,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     linqApiToken: "linq-token",
     linqWebhookSecret: null,
     privyAppId: "cm_app_123",
+    privyAppSecret: "privy-app-secret",
     privyVerificationKey: "privy-verification-key",
     publicBaseUrl: "https://join.example.test",
     stripeBillingMode: "payment",
@@ -207,6 +230,7 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("binds a verified Privy identity onto an invite-bound member", async () => {
+    const transactionCachePresence: boolean[] = [];
     const inviteMember = makeMember({
       maskedPhoneNumberHint: "*** 4321",
       phoneLookupKey: SECONDARY_PHONE_LOOKUP_KEY,
@@ -240,6 +264,10 @@ describe("completeHostedPrivyVerification", () => {
           ...inviteMember,
           ...data,
         })),
+        updateMany: vi.fn().mockImplementation(async () => {
+          transactionCachePresence.push(Boolean(getHostedDomainRootUnwrapCache()));
+          return { count: 1 };
+        }),
       },
     });
 
@@ -248,10 +276,13 @@ describe("completeHostedPrivyVerification", () => {
       inviteCode: "invite-code",
       now: NOW,
       prisma,
+      timeZone: "America/New_York",
     });
 
     expect(prisma.hostedMember.update).not.toHaveBeenCalled();
     expect(prisma.hostedInvite.update).not.toHaveBeenCalled();
+    expect(transactionCachePresence).toEqual([true]);
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
     expect(result).toMatchObject({
       inviteCode: "invite-code",
       joinUrl: "https://join.example.test/join/invite-code",
@@ -618,6 +649,8 @@ describe("completeHostedPrivyVerification", () => {
     expect(result.inviteCode).toBe("public-invite-code");
     expect(result.messagingSetupRequired).toBe(false);
     expect(result.stage).toBe("checkout");
+    expect(privyManagementMocks.clientConstructor).not.toHaveBeenCalled();
+    expect(privyManagementMocks.setCustomMetadata).not.toHaveBeenCalled();
   });
 
   it("keeps public primary email binding in the member creation transaction", async () => {
@@ -635,6 +668,8 @@ describe("completeHostedPrivyVerification", () => {
     let transactionDepth = 0;
     const identityWriteTransactionDepths: number[] = [];
     const emailWriteTransactionDepths: number[] = [];
+    const identityWriteTransactionCachePresence: boolean[] = [];
+    const emailWriteTransactionCachePresence: boolean[] = [];
     const prismaHolder: {
       current: NonNullable<CompleteHostedPrivyVerificationPrisma> | null;
     } = {
@@ -667,6 +702,7 @@ describe("completeHostedPrivyVerification", () => {
       update: Record<string, unknown>;
     }) => {
       identityWriteTransactionDepths.push(transactionDepth);
+      identityWriteTransactionCachePresence.push(Boolean(getHostedDomainRootUnwrapCache()));
       return {
         ...create,
         ...update,
@@ -674,6 +710,7 @@ describe("completeHostedPrivyVerification", () => {
     });
     const emailUpsert = vi.fn(async () => {
       emailWriteTransactionDepths.push(transactionDepth);
+      emailWriteTransactionCachePresence.push(Boolean(getHostedDomainRootUnwrapCache()));
       throw new Prisma.PrismaClientKnownRequestError("duplicate verified email", {
         clientVersion: "test",
         code: "P2002",
@@ -728,6 +765,9 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(identityWriteTransactionDepths).toEqual([1]);
     expect(emailWriteTransactionDepths).toEqual([1]);
+    expect(identityWriteTransactionCachePresence).toEqual([true]);
+    expect(emailWriteTransactionCachePresence).toEqual([true]);
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
     expect(prisma.hostedInvite.create).not.toHaveBeenCalled();
   });
 
@@ -1162,7 +1202,7 @@ describe("completeHostedPrivyVerification", () => {
     expect(prisma.hostedMember.create).toHaveBeenCalledTimes(1);
   });
 
-  it("creates a hosted member and a web invite for a messaging-ready Telegram-only signup", async () => {
+  it("treats a Telegram-only signup as messaging-ready before any inbound thread exists", async () => {
     const identityUpsert = vi.fn(async ({
       create,
       update,
@@ -1246,7 +1286,7 @@ describe("completeHostedPrivyVerification", () => {
     }));
   });
 
-  it("allows invite-bound Telegram-only verification with messaging ready", async () => {
+  it("treats invite-bound Telegram-only verification as messaging-ready before inbound", async () => {
     const inviteMember = makeMember({
       maskedPhoneNumberHint: null,
       phoneLookupKey: null,
@@ -1770,6 +1810,7 @@ describe("completeHostedPrivyVerification", () => {
   });
 
   it("does not block phone auth when a linked Telegram route belongs to another member", async () => {
+    const secondaryTelegramTransactionCachePresence: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_with_secondary_telegram" });
     const activeInvite = makeInvite(phoneMember, {
       channel: "web",
@@ -1791,11 +1832,16 @@ describe("completeHostedPrivyVerification", () => {
         )),
       },
       hostedMemberRouting: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            memberId: "member_secondary_telegram_owner",
-          },
-        ]),
+        findMany: vi.fn().mockImplementation(async () => {
+          secondaryTelegramTransactionCachePresence.push(
+            Boolean(getHostedDomainRootUnwrapCache()),
+          );
+          return [
+            {
+              memberId: "member_secondary_telegram_owner",
+            },
+          ];
+        }),
         upsert: vi.fn(),
       },
     });
@@ -1830,9 +1876,12 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberRouting.upsert).not.toHaveBeenCalled();
+    expect(secondaryTelegramTransactionCachePresence).toEqual([true]);
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
   });
 
   it("does not block phone auth when a linked email belongs to another member", async () => {
+    const secondaryEmailTransactionCachePresence: boolean[] = [];
     const phoneMember = makeMember({ id: "member_phone_secondary_email" });
     const activeInvite = makeInvite(phoneMember, {
       channel: "web",
@@ -1855,16 +1904,21 @@ describe("completeHostedPrivyVerification", () => {
       },
       hostedMemberEmailAuthorization: {
         findUnique: vi.fn(),
-        upsert: vi.fn().mockRejectedValue(new Prisma.PrismaClientKnownRequestError(
-          "duplicate verified email",
-          {
-            clientVersion: "test",
-            code: "P2002",
-            meta: {
-              target: ["verifiedEmailLookupKey"],
+        upsert: vi.fn().mockImplementation(async () => {
+          secondaryEmailTransactionCachePresence.push(
+            Boolean(getHostedDomainRootUnwrapCache()),
+          );
+          throw new Prisma.PrismaClientKnownRequestError(
+            "duplicate verified email",
+            {
+              clientVersion: "test",
+              code: "P2002",
+              meta: {
+                target: ["verifiedEmailLookupKey"],
+              },
             },
-          },
-        )),
+          );
+        }),
       },
     });
 
@@ -1895,6 +1949,8 @@ describe("completeHostedPrivyVerification", () => {
 
     expect(prisma.hostedMember.create).not.toHaveBeenCalled();
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalled();
+    expect(secondaryEmailTransactionCachePresence).toEqual([true]);
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
   });
 
   it("does not swallow unexpected secondary email uniqueness failures", async () => {

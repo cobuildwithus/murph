@@ -1,6 +1,6 @@
 ---
 name: food-journal
-description: Use for low-friction meal capture and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance without assuming calorie or macro tracking.
+description: Use for low-friction meal capture and bounded pattern finding between food and digestion, symptoms, energy, appetite, or performance, providing calorie and macro estimates by default except in eating-disorder-risk, intuitive-eating, or number-sensitive contexts.
 ---
 
 # Food journal
@@ -33,12 +33,11 @@ Ask at most one question, and only when the missing detail materially changes sa
 - Use existing canonical surfaces. Save meal facts to meal records, symptoms to their typed surface, and durable unstructured context to the best-fit existing journal or memory surface. Do not duplicate the same fact across stores.
 - Keep the acknowledgement short and aligned with the user's focus. When enough recent context supports one useful observation, offer one brief non-causal association; otherwise acknowledge the log and stop. Do not turn every meal confirmation into analysis or a nutrition report.
 
-## Use numbers only when they serve the focus
+## Provide numbers by default, with safety exceptions
 
-- Do not assume calories or macros are the goal.
-- For simple records, symptom or digestion work, intuitive-eating contexts, or number-sensitive users, do not estimate or surface calories or macros unless the user asks.
-- For explicit calorie, macro, energy-balance, performance work where nutrition detail materially affects the question, or clinician work where nutrition detail is relevant, use available label facts or clearly marked estimates with provenance, confidence, and the key assumptions.
-- Structured label facts may remain available when useful, but surface only the details relevant to the user's request.
+- Provide calorie and macro estimates by default when logging a meal, using available label facts or clearly marked estimates with provenance, confidence, and the key assumptions.
+- Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
+- Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
 ## Resolve exact labels only when they matter
 

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedAppSession: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn().mockResolvedValue(false),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -13,6 +14,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -80,6 +85,19 @@ describe("hosted page auth", () => {
     mocks.getHostedAppSession.mockRejectedValue(new TypeError(
       "DATABASE_URL is required for the hosted web control plane.",
     ));
+    const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
+      authenticated: false,
+      authenticatedMember: null,
+      session: null,
+    });
+  });
+
+  it("returns an anonymous snapshot when the database pool checkout times out", async () => {
+    mocks.getHostedAppSession.mockRejectedValue(
+      new Error("timeout exceeded when trying to connect"),
+    );
     const { getHostedPageAuthSnapshot } = await import("@/src/lib/hosted-onboarding/page-auth");
 
     await expect(getHostedPageAuthSnapshot()).resolves.toEqual({
@@ -211,6 +229,82 @@ describe("hosted dashboard page auth", () => {
     expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
   });
 
+  it("builds dashboard layout auth from one strict session read without checkout redirects", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.not_started,
+    });
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).resolves.toEqual({
+      pageAuth: {
+        authenticated: true,
+        authenticatedMember: member,
+        session,
+      },
+      sidebarAuth: {
+        authenticated: true,
+        label: null,
+      },
+      status: "ready",
+    });
+    expect(mocks.getHostedAppSession).toHaveBeenCalledTimes(1);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("returns a distinct unavailable dashboard layout state for a session-store outage", async () => {
+    const error = Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).resolves.toEqual({
+      status: "unavailable",
+    });
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("rethrows unexpected dashboard layout auth failures", async () => {
+    const error = new Error("session row invariant failed");
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardLayoutAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardLayoutAuthSnapshot()).rejects.toBe(error);
+  });
+
+  it("rethrows a session-store outage instead of presenting an anonymous dashboard", async () => {
+    const error = Object.assign(
+      new Error("Connection refused while opening a database connection."),
+      {
+        code: "P1001",
+        name: "PrismaClientKnownRequestError",
+      },
+    );
+    mocks.getHostedAppSession.mockRejectedValue(error);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).rejects.toBe(error);
+    expect(mocks.redirect).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
   it.each([
     HostedBillingStatus.incomplete,
     HostedBillingStatus.not_started,
@@ -231,6 +325,49 @@ describe("hosted dashboard page auth", () => {
       memberId: "member_123",
     });
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
+  });
+
+  it("keeps an incomplete member who already owns a subscription out of the checkout redirect", async () => {
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValue(true);
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.incomplete,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    // Owning a subscription is recovery, not a first checkout, so this member
+    // reaches the dashboard instead of being bounced back into the invite flow.
+    await getHostedDashboardPageAuthSnapshot();
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("keeps paused members on the dashboard recovery surface", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.paused,
+    });
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      authenticatedMember: member,
+      session,
+    });
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
   it("does not redirect Family-sponsored dashboard reads that no longer have direct member billing", async () => {
@@ -285,6 +422,8 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,
+    assistantUnhinged: null,
+    assistantUnhingedCausalSeq: null,
     assistantTone: null,
     assistantToneCausalSeq: null,
     assistantVoice: null,

@@ -32,6 +32,7 @@ export interface HostedMemberMessagingState {
   linqContactLookupKey: string | null;
   linqThreadId: string | null;
   phoneLookupKey: string | null;
+  telegramAwaitingInbound: boolean;
   telegramTarget: string | null;
 }
 
@@ -59,12 +60,16 @@ export function resolveHostedMemberMessagingState(input: {
   const linqContactLookupKey =
     phoneLookupKey
     ?? normalizeMessagingIdentity(input.routing?.pendingLinqParticipantContact?.lookupKey);
-  const telegramTarget =
-    normalizeMessagingIdentity(input.routing?.telegramThreadId)
-    ?? normalizeMessagingIdentity(input.routing?.telegramUserId);
+  const telegramTarget = normalizeMessagingIdentity(input.routing?.telegramThreadId);
   const hasPhone = phoneLookupKey !== null;
   const hasLinq = hasPhone || (linqThreadId !== null && linqContactLookupKey !== null);
   const hasTelegram = telegramTarget !== null;
+  // Telegram bots cannot open a conversation, so the direct thread target only
+  // exists once the member messages the bot. A linked Telegram account is
+  // therefore set up but not yet deliverable, which is a distinct state from
+  // having no Telegram at all.
+  const telegramAwaitingInbound =
+    !hasTelegram && normalizeMessagingIdentity(input.routing?.telegramUserId) !== null;
 
   return {
     hasDirectMessagingChannel: hasLinq || hasTelegram,
@@ -74,6 +79,7 @@ export function resolveHostedMemberMessagingState(input: {
     linqContactLookupKey,
     linqThreadId,
     phoneLookupKey,
+    telegramAwaitingInbound,
     telegramTarget,
   };
 }
@@ -82,7 +88,12 @@ export function isHostedMemberMessagingSetupRequired(input: {
   identity: HostedMemberMessagingIdentitySlice | null;
   routing: HostedMemberMessagingRoutingSlice | null;
 }): boolean {
-  return !resolveHostedMemberMessagingState(input).hasDirectMessagingChannel;
+  const messaging = resolveHostedMemberMessagingState(input);
+
+  // A linked Telegram account completes setup: the member has told us how to
+  // reach them. Waiting on their first inbound message is a delivery concern,
+  // surfaced as telegramAwaitingInbound, not a reason to hold up signup.
+  return !messaging.hasDirectMessagingChannel && !messaging.telegramAwaitingInbound;
 }
 
 export function resolveHostedMemberChannels(input: {

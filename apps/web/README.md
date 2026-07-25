@@ -129,6 +129,20 @@ The experiment detail routes compose two narrow data sources:
 
 Private measurements and conclusions never enter the server-rendered route payload. Public protocol prose, citations, and commons revisions are never copied into private run state.
 
+## Saved biomarker reference context
+
+Saved lab-result pages keep the imported source flag and per-result laboratory
+range authoritative. A normalized latest source range may appear on the chart
+as two dashed boundary rules or an exact one-sided limit. If the latest
+comparable result has no usable numeric source range, the server may provide an exact-unit,
+sourced Health Commons range labeled `Published adult comparator`; its legend
+states that it is not the reporting lab's range. The browser requires an exact
+unit and eligible coarse specimen kind, and it does not infer ranges, convert
+units, or use a comparator to relabel the result. The initial catalog contains
+named Mayo Clinic Laboratories adult serum intervals for chloride, LDH,
+phosphate, and total protein. Missing, mismatched, and context-dependent
+specimens omit the comparator.
+
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
 ## Core responsibilities
@@ -239,11 +253,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   secure-box ciphertext; new writes never populate the nullable legacy JSON
   columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph. The web owner bounds the aggregate start path at 40 seconds. Because
+  Murph. The call row persists the exact initiating resident-session id for
+  request-key idempotency. Final analysis appends an
+  `assistant.notification.requested` system-mailbox event: Murph composes the
+  result in its own voice and proactively messages the member's resolved
+  messaging route, and may skip a non-meaningful result (allow-send-or-skip).
+  The result JSON is framed as untrusted provider/callee text. The web owner
+  bounds the aggregate start path at 40 seconds. Because
   Retell create-call has no documented idempotency contract, a connection or
   timeout ambiguity preserves the durable row as `starting`; the same request
   key never blindly creates another provider call. Exact replays resolve the
-  durable row before new-call notification, transfer, encryption, or access
+  durable row before new-call transfer, encryption, or access
   prerequisites. After the reservation commits, a pointer-only web Workflow is
   armed within the same 40-second aggregate deadline and before Retell dispatch,
   so the durable row remains blocking authority while the bounded Workflow
@@ -545,7 +565,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_INVITE_TTL_HOURS`
 - `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`
 - `HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS` for local `pnpm dev` or hosted-local runs only. Set this in local env when a development tunnel shares real Linq credentials so non-allowlisted inbound senders are accepted and ignored before mailbox append or assistant wake. Do not set it in production.
-- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`
+- `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
+  balancing target; assignments remain available when every line reaches it
 - `RETELL_API_KEY`, `RETELL_FROM_NUMBER`, `RETELL_AGENT_ID`,
   `RETELL_AGENT_DATA_STORAGE_SETTING=basic_attributes_only`, and optional
   `RETELL_AGENT_VERSION` enable hosted Retell phone calls, signed `ask_murph`
@@ -820,7 +841,8 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS` and, if needed,
-  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER`.
+  `HOSTED_ONBOARDING_LINQ_MAX_ACTIVE_MEMBERS_PER_PHONE_NUMBER` as an advisory
+  balancing target rather than a hard admission limit.
 - Set `DEVICE_SYNC_TRUSTED_USER_SIGNING_SECRET` to the same value used by the
   trusted auth edge that signs browser assertions for lower-level device-sync
   bridge routes.
@@ -915,6 +937,20 @@ per module runtime, with five seconds for connection acquisition and 30 seconds
 for idle retirement; tune those values only from measured pool and database
 pressure. Connection failure logs expose only a fixed failure category and
 numeric total, idle, and waiting counts.
+
+That module retries only the two failures that prove the database did no work,
+because replaying anything else could duplicate an effect. A `pool_checkout_timeout`
+means the statement never reached Postgres, so the operation is retried; a
+`transaction_start_timeout` is Prisma's `P2028` raised before it invokes the
+transaction callback, so the transaction is retried. Both get three attempts
+spaced 250 ms apart, and every attempt logs its category and pool counts, so an
+exhausted retry leaves one line per attempt. `P2028` also covers transactions
+that opened and later expired, and those are never replayed, so the two cases are
+separated by message rather than by code. Failures that may have reached Postgres,
+such as closed connections, TLS faults, or an unreachable host, are reported and
+rethrown untouched. Retries exist because a primary switchover or a thawed Fluid instance
+with stale pooled sockets produces exactly these two errors; they are not a
+substitute for capacity.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the

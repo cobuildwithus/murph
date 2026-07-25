@@ -1,6 +1,7 @@
 # Murph Terms of Service
 
-**Effective Date:** April 29, 2026
+**Effective Date:** July 23, 2026
+**Last Updated:** July 23, 2026
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
 These Terms of Service ("**Terms**") govern your access to and use of Murph's hosted websites, hosted applications, hosted onboarding flows, hosted settings pages, hosted APIs, hosted messaging features, hosted integrations, and related managed services that link to these Terms (collectively, the "**Hosted Service**").
@@ -75,6 +76,14 @@ Supplements, nutrition, exercise, sauna, cold exposure, breathwork, fasting, alc
 
 Murph does not sell, prescribe, dispense, recommend the clinical use of, or guarantee the safety, effectiveness, purity, dosage, legality, or suitability of any supplement, food, device, exercise, sauna, cold-exposure practice, breathwork practice, or other intervention.
 
+### Observational Results and Illustrative Examples
+
+Murph may compare periods, identify associations, summarize trends, and generate hypotheses based on the information available to it. A before-and-after change, correlation, timing relationship, score, label, or suggested explanation does not establish that an intervention caused an outcome, that the outcome will recur, or that an intervention is safe or appropriate for you.
+
+Descriptions such as "improved," "declined," "on track," "higher," "lower," or similar terms refer only to the data and comparison shown. They are not diagnoses, clinical determinations, or proof of cause and effect.
+
+Screenshots, demonstrations, sample conversations, personas, example protocols, and example results shown on Murph websites or in product materials are illustrative. They do not represent guaranteed outcomes, typical outcomes, or medical conclusions.
+
 ## 5. AI Outputs, Actions, Automations, and Human Judgment
 
 Murph may use artificial intelligence, machine learning systems, third-party model providers, rules engines, retrieval systems, search tools, analytics, and automations to generate messages, summaries, suggested actions, reminders, experiment protocols, comparisons, labels, citations, and other content (collectively, "**Output**"). Murph may also take or suggest actions based on your settings, inputs, permissions, integrations, and instructions, including sending messages, reminders, follow-ups, exports, sync requests, or other workflow steps (collectively, "**Actions**").
@@ -92,6 +101,34 @@ You understand and agree that:
 7. you are responsible for using independent judgment and, where appropriate, consulting qualified professionals before relying on Output or Actions.
 
 Output and Actions are for informational and organizational purposes only and are not professional medical, legal, tax, financial, nutritional, therapeutic, training, or other licensed professional advice.
+
+### User-Directed Actions and Limited Authority
+
+If you ask Murph to call, message, browse, book, purchase, cancel, schedule, submit information, or otherwise interact with a third party, you authorize Murph and its providers to transmit the information reasonably necessary to carry out that specific request within the instructions and limits you provide.
+
+This is limited task-specific authority only. It does not create a general agency, power of attorney, healthcare-proxy, fiduciary, professional, or other representative relationship.
+
+You remain responsible for reviewing the recipient, item or service, price, fees, subscription or renewal status, date and time, cancellation terms, information being transmitted, and other material terms before authorizing a commitment. Your original request may provide that authorization if it clearly states the material terms or express limits. A saved preference, prior transaction, connected account, or stored browser session does not by itself authorize a new purchase, booking, disclosure, or other commitment.
+
+Third parties may independently record, retain, or process communications and transaction information under their own terms and privacy notices. Murph is not responsible for a third party's products, services, professional judgment, availability, prices, cancellation decisions, or independent data practices.
+
+### Source-Specific Connected-Service Rules
+
+Connected Services may impose terms that are more restrictive than these Terms or than a permission you give Murph. Those terms may limit whether source data can be stored, cached, combined with other data, indexed, used in analytics, supplied to an artificial-intelligence system, included in embeddings or retrieval systems, displayed to other people, exported, or retained after you disconnect. Enabling a Connected Service does not make every Murph feature available for that source's data. Your instruction or consent does not authorize Murph to use data in a way the source provider prohibits.
+
+Murph may refuse, suspend, narrow, isolate, avoid storing, exclude from AI or cross-source analysis, or delete Connected Service data when necessary to comply with provider terms, permissions, or law. If a provider does not permit automated access or extraction, Murph may require you to use the provider's own export or download tools and upload a copy you lawfully obtained.
+
+You may not use Murph to scrape, crawl, bulk-extract, index, bypass access controls, or otherwise obtain content from a third-party service in violation of that service's terms or technical restrictions.
+
+### Connected-Service Provider Disclaimer
+
+Connected Services, their APIs, and data supplied through them are provided by independent third parties on an **"as is"** and **"as available"** basis. To the maximum extent permitted by law, each Connected Service provider disclaims all express, implied, and statutory warranties relating to its service, API, and data, including merchantability, fitness for a particular purpose, title, accuracy, availability, and non-infringement. No Connected Service provider will be liable through these Terms for indirect, incidental, special, consequential, exemplary, or punitive damages arising from your use of Murph or the Connected Service. This paragraph does not limit rights or liabilities that cannot lawfully be limited.
+
+### Automated Calls and Third-Party Communications
+
+Calls and messages made by Murph may use an automated or AI-generated voice or content. You may not instruct Murph to impersonate another person, conceal its automated nature where disclosure is required, record a call unlawfully, make unsolicited promotional or telemarketing calls, or misrepresent your identity, authority, insurance, prescription, clinical status, or eligibility.
+
+Murph may not use a call or communication to make a clinical decision, consent to medical treatment, modify a prescription, authorize emergency care, or act as a healthcare proxy.
 
 ## 6. Topics Murph May Decline or Redirect
 
@@ -195,6 +232,14 @@ Invite and import links may be single-use, time-limited, automatically expiring,
 
 We may refuse, revoke, expire, or invalidate invite links or import flows at any time for security, abuse, legal, policy, or operational reasons.
 
+### Groups, Family, Newsletters, and Delivered Copies
+
+Group participation, Family sponsorship, or payment for another adult's access does not provide access to that person's private Murph conversations or health data and does not authorize you to accept legal terms or privacy permissions on that person's behalf. Each adult controls their own account and independently chooses any information they share with a group, challenge, newsletter, caregiver, family member, or other recipient.
+
+Information a participant chooses to share, including selected health information, summaries, display names, or email addresses, may be visible to the recipients identified in the applicable flow. Recipients may copy, forward, download, retain, or further disclose that information outside Murph.
+
+Revoking a sharing permission stops future disclosures by Murph to the extent supported by the feature. It cannot recall or delete copies already delivered to another person, an email inbox, a messaging service, or an independent third party.
+
 **Health Commons contributions.** Murph may allow you to contribute outcome cards, protocol notes, aggregate results, or similar materials to public Health Commons surfaces. Public contribution is opt-in and separate from private experiment tracking. You are responsible for reviewing what will be contributed before submission, removing information you do not want published, and confirming that you have the right to contribute any third-party information included in the contribution. Murph may reject, moderate, de-identify, aggregate, remove, or decline to publish contributions for safety, privacy, quality, legal, product, or operational reasons. Health Commons contributions are for education and protocol learning; they are not clinical research, medical advice, professional care, or proof that a protocol caused an outcome.
 
 ## 12. Privacy, Sensitive Information, Consumer Health Data, and HIPAA
@@ -218,7 +263,7 @@ Do not submit regulated PHI to the Hosted Service on behalf of a covered entity 
 
 We do not sell, rent, license, or otherwise disclose consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, or derived health insights to data brokers, advertising networks, third-party advertising platforms, information resellers, or similar parties. We do not use such data for targeted advertising, cross-context behavioral advertising, retargeting, lookalike audience creation, ad attribution, ad measurement, insurance/employment/credit eligibility decisions, or general-purpose AI model training. We do not use consumer health data for advertising, sale, data brokerage, or general-purpose model training. Any identifiable-health-data research use requires separate opt-in consent or another lawful basis described in the applicable research notice.
 
-Hosted Murph may require you to accept the then-current Terms, Privacy Policy, Consumer Health Data Notice, and Health AI Safety Disclosure before using hosted features that process health data. Optional feature consents, such as connected health sources or Health Commons contribution, are separate and may be withdrawn for future processing where supported by the feature or required by law. Murph may record consent events with the document versions accepted, consent scope, source, and timestamps so it can prove the applicable legal boundary for hosted processing.
+Hosted Murph may require you to accept the then-current Terms, Privacy Policy, Consumer Health Data Notice, and Health AI Safety Disclosure before using hosted features that process health data. Enabling a connected health source, granting platform permissions, contributing to Health Commons, or using another optional feature may involve a separate authorization, permission, or consent where supported or required by law. Those permissions may be withdrawn for future processing as described in the product and Privacy Policy. Murph may record acceptance and permission events with the document versions, scope, source, and timestamps so it can prove the applicable legal boundary for hosted processing.
 
 ## 13. No Monitoring or Clinical Review
 

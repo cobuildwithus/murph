@@ -378,6 +378,9 @@
       "@murphai/operator-config/elevenlabs-runtime": [
         "./packages/operator-config/src/elevenlabs-runtime.ts"
       ],
+      "@murphai/operator-config/xai-runtime": [
+        "./packages/operator-config/src/xai-runtime.ts"
+      ],
       "@murphai/operator-config/inbox-cli-contracts": [
         "./packages/operator-config/src/inbox-cli-contracts.ts"
       ],

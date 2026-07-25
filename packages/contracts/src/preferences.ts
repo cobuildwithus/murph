@@ -130,10 +130,21 @@ export const assistantTonePreferenceSchema = z.enum(assistantTonePreferenceValue
 export const defaultAssistantTonePreference = "formal" satisfies
   (typeof assistantTonePreferenceValues)[number];
 
-export const assistantPersonalitySettingIds = ["humor", "push", "detail"] as const;
+export const assistantPersonalitySettingIds = ["humor", "push", "detail", "unhinged"] as const;
 export const assistantPersonalitySettingSchema = z.enum(assistantPersonalitySettingIds);
+// Dials with a personal Settings surface. `unhinged` is conversational-only:
+// it has no Settings row and the browser settings route rejects it.
+export const assistantWebPersonalitySettingIds = ["humor", "push", "detail"] as const;
 export const assistantPersonalityScoreSchema = z.number().int().min(0).max(10);
 export const assistantPersonalityPreferencesSchema = z
+  .object({
+    humor: assistantPersonalityScoreSchema.optional(),
+    push: assistantPersonalityScoreSchema.optional(),
+    detail: assistantPersonalityScoreSchema.optional(),
+    unhinged: assistantPersonalityScoreSchema.optional(),
+  })
+  .strict();
+export const assistantWebPersonalityPreferencesSchema = z
   .object({
     humor: assistantPersonalityScoreSchema.optional(),
     push: assistantPersonalityScoreSchema.optional(),
@@ -145,10 +156,13 @@ export const assistantPersonalityScoresSchema = z
     humor: assistantPersonalityScoreSchema,
     push: assistantPersonalityScoreSchema,
     detail: assistantPersonalityScoreSchema,
+    unhinged: assistantPersonalityScoreSchema,
   })
   .strict();
 
 export type AssistantPersonalitySettingId = z.infer<typeof assistantPersonalitySettingSchema>;
+export type AssistantWebPersonalitySettingId =
+  (typeof assistantWebPersonalitySettingIds)[number];
 export type AssistantPersonalityPreferences = z.infer<typeof assistantPersonalityPreferencesSchema>;
 export type AssistantPersonalityScores = z.infer<typeof assistantPersonalityScoresSchema>;
 
@@ -173,6 +187,7 @@ export const assistantPreferenceMutationStateSchema = z
         humor: assistantPreferenceCausalSeqSchema.optional(),
         push: assistantPreferenceCausalSeqSchema.optional(),
         detail: assistantPreferenceCausalSeqSchema.optional(),
+        unhinged: assistantPreferenceCausalSeqSchema.optional(),
       })
       .strict(),
   })
@@ -200,6 +215,7 @@ export const defaultAssistantPersonalityScores = Object.freeze({
   humor: 3,
   push: 3,
   detail: 5,
+  unhinged: 0,
 }) satisfies AssistantPersonalityScores;
 
 export const assistantVoiceOptionIdValues = [

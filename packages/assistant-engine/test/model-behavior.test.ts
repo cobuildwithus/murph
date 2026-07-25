@@ -104,6 +104,51 @@ describe('assistant execution prompt contract', () => {
     ).toContain('Prefer direct tool use over telling the user')
   })
 
+  it('tells group turns how later responses and finish-without-reply affect completed answers', () => {
+    const groupPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directPrompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupPrompt).toContain(
+      'It does not withdraw an answer already completed in that turn; that answer still sends.',
+    )
+    expect(groupPrompt).toContain(
+      'If a newer group message leads to another completed response in the same turn, that response replaces the earlier answer.',
+    )
+    expect(groupPrompt).toContain(
+      'Make it stand alone and carry forward anything still worth saying.',
+    )
+    expect(groupPrompt).toContain(
+      'When the room is mid-volley and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again.',
+    )
+    // Watching must not turn into a catch-all digest of the burst.
+    expect(groupPrompt).toContain(
+      'Watching usually ends in one line, a reaction, or nothing; never recap what you read or work through it point by point.',
+    )
+    expect(groupPrompt).not.toContain('everything that arrived')
+    expect(groupPrompt).toContain(
+      'Answer immediately when someone needs you or the beat is yours.',
+    )
+    expect(groupPrompt).toContain(
+      'Messages that arrive during the sleep appear as normal messages; rule 7 covers replacing an unsent answer.',
+    )
+    expect(directPrompt).not.toContain(
+      'that answer still sends',
+    )
+    expect(directPrompt).not.toContain(
+      'that response replaces the earlier answer',
+    )
+    expect(groupPrompt).toContain(
+      'use the CLI only for public reference reads, group-owned state, and a brief shell `sleep` when the room is mid-volley',
+    )
+    expect(directPrompt).not.toContain('run a short shell `sleep`')
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
@@ -277,6 +322,9 @@ describe('assistant execution prompt contract', () => {
     expect(layers.threadContextPrompt).toContain(
       'Assistant personality preferences for this private conversation:',
     )
+    expect(layers.threadContextPrompt).not.toContain(
+      'In this group room, Detail caps unrequested length',
+    )
     expect(layers.threadContextPrompt).toContain(
       'Humor 9/10: initiate when there is an opening and commit to the bit',
     )
@@ -392,6 +440,37 @@ describe('assistant execution prompt contract', () => {
       expect(prompt).toContain(expected)
     }
 
+    const unhingedCases = [
+      [0, 'keep the default register'],
+      [1, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [3, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [4, "match the room's edge"],
+      [6, "match the room's edge"],
+      [7, 'fully game'],
+      [9, 'fully game'],
+      [10, 'maximum latitude'],
+    ] as const
+    for (const [score, expected] of unhingedCases) {
+      const layers = buildAssistantSystemPromptLayers(
+        createCommonCodexPromptInput({
+          assistantPersonality: { unhinged: score },
+        }),
+      )
+      expect(layers.prompt).toContain(`Unhinged ${score}/10`)
+      expect(layers.prompt).toContain(expected)
+      // Band text is thread-context only; it must never enter the cacheable
+      // stable prefix that participates in the contract fingerprint.
+      expect(layers.staticCacheableCorePrompt).not.toContain(`Unhinged ${score}/10`)
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(`Unhinged ${score}/10`)
+      // Every nonzero score carries the fixed hard-floor sentence; zero does not.
+      const hardFloor = 'no minors, no non-consenting third parties'
+      if (score === 0) {
+        expect(layers.prompt).not.toContain(hardFloor)
+      } else {
+        expect(layers.prompt).toContain(hardFloor)
+      }
+    }
+
     const maximumPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         assistantPersonality: {
@@ -449,6 +528,33 @@ describe('assistant execution prompt contract', () => {
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`jokes`/`funny` = Humor',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
+    )
+    // A bare directional request resolves against the score `show` reports in
+    // the same turn (which merges this turn's own pending writes), then moves a
+    // bounded step. It must never jump to an endpoint the member did not ask
+    // for — "be a bit funnier" is not a request for Humor 10.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'A bare directional request',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`show` in the same turn, then `set` a bounded step from what it reports',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never jump to an endpoint the member did not ask for',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '`set` the endpoint for the direction',
+    )
+    // Accepting an offer that named a target uses that exact value.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'accepting an offer uses the level it named',
+    )
+    // The proactive offer is rare and only on obvious dissatisfaction.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Offer a dial rarely, only on obvious dissatisfaction',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`show`: scores/sources only',
@@ -635,6 +741,26 @@ describe('assistant execution prompt contract', () => {
     )
     expect(prompt).toContain(
       'Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject.',
+    )
+  })
+
+  it('tells the assistant it can read the canonical product update feeds', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Murph product updates:')
+    expect(prompt).toContain('https://www.withmurph.ai/api/changelog?days=14')
+    expect(prompt).toContain('https://www.withmurph.ai/api/feature-catalog')
+    expect(prompt).toContain(
+      'When the user asks what is new, what shipped recently, or whether Murph can already do something, read the canonical public JSON feeds over the network before answering',
+    )
+    expect(prompt).toContain(
+      "Never claim there is no way to check Murph's own updates.",
+    )
+    expect(prompt).toContain(
+      'Those feeds are the only source of shipped-product truth',
+    )
+    expect(prompt).toContain(
+      'If a feed is unavailable, invalid, or empty for the window, say that plainly instead of guessing.',
     )
   })
 
@@ -972,6 +1098,56 @@ describe('assistant execution prompt contract', () => {
       'Do not add this extra confirmation for non-Linq channels',
     )
   })
+
+  it('offers a weather check before saving outdoor reminder automations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Outdoor-conditions reminder guard')
+    expect(prompt).toContain(
+      'reuse a city or region already known from this conversation, saved context, or the plan',
+    )
+    expect(prompt).toContain(
+      'offer once, as an option, to take one; ask for city or region, never an exact address',
+    )
+    expect(prompt).toContain(
+      'let a decline save the automation unchanged without raising it again',
+    )
+    expect(prompt).toContain(
+      'read weather for it before composing the message: call `murph.connected_apps_execute` with no account selector and `toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER`',
+    )
+    expect(prompt).toContain(
+      'or `OPENWEATHER_API_GET5_DAY_FORECAST` when the activity window is still hours away',
+    )
+    expect(prompt).toContain(
+      'Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear',
+    )
+    expect(prompt).toContain(
+      'name the conditions, then offer the nearest workable time in the same window or an indoor equivalent',
+    )
+    expect(prompt).toContain(
+      "Weather changes a run's wording, never whether it happens",
+    )
+    expect(prompt).toContain(
+      'with no stored location or a failed read, send the ordinary reminder without mentioning the check',
+    )
+    expect(prompt).toContain(
+      'save that coarse location once with `vault-cli memory upsert` so later automations reuse it instead of asking again',
+    )
+  })
+
+  it('keeps outdoor reminder locations out of personal records in group rooms', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({ conversationScope: 'group' }),
+    )
+
+    expect(prompt).toContain('Outdoor-conditions reminder guard')
+    expect(prompt).toContain(
+      "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record.",
+    )
+    expect(prompt).not.toContain(
+      'save that coarse location once with `vault-cli memory upsert`',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
@@ -1226,10 +1402,10 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
     )
     expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
+      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; competition-training a named event or benchmark.',
     )
     expect(prompt).toContain(
       'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
@@ -1413,11 +1589,27 @@ describe('assistant user-facing wording guidance', () => {
 describe('assistant system prompt cache stability', () => {
   it('keeps the always-on kernel and non-CLI route guidance bounded', () => {
     const layers = buildAssistantSystemPromptLayers(
-      createCommonCodexPromptInput({ assistantCliContract: null }),
+      // Pin the product base URL to the production origin so this size bound is
+      // deterministic across local and CI; otherwise the env-resolved URL length
+      // shifts the total and the cap passes locally but fails in CI.
+      createCommonCodexPromptInput({
+        assistantCliContract: null,
+        murphProductBaseUrl: 'https://www.withmurph.ai',
+      }),
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(67_000)
+    // This layer is resident on every turn for every member, so it is a ratchet,
+    // not a budget: raise it only for guidance that has to be thread-stable.
+    // Main's own bound moved to 68_000 (baseline 67_801) while this branch was
+    // open. The conversational-only Unhinged dial, the rare style-dissatisfaction
+    // offer, and the bounded-step rule for a bare directional request add ~1_040
+    // characters on top of that baseline. The outdoor-conditions reminder guard
+    // adds ~1_340 more (baseline 68_852) because it has to be present both when
+    // an outdoor automation is created and when one of its runs fires, and it
+    // names the two OpenWeather tool slugs so a run reads conditions directly
+    // instead of spending a connected-app search on discovery.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_300)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -1979,25 +2171,6 @@ describe('assistant experiment onboarding guidance', () => {
     expect(groupPrompt).not.toContain('Deepen longitudinal understanding when')
   })
 
-  it('routes running and cardio through the compact movement overlap rules', () => {
-    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
-
-    expect(prompt).toContain(
-      'Training/movement: daily-activity, aerobic-fitness, running-cardio, strength-training, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
-    )
-    expect(prompt).toContain(
-      'Physical-therapy owns active pain, injury, rehabilitation, or return-to-activity; mobility-posture non-pain movement; strength-training resistance programming; running-cardio general aerobic programming; competition-training a named event or benchmark.',
-    )
-    expect(prompt).toContain(
-      'Before presenting any named movement, let the domain owner choose it, then always read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md`; that reference owns catalog lookup, likely-familiarity inference, and exercise-media presentation.',
-    )
-    expect(prompt).toContain(
-      'behavior-followthrough owns recurring support, reminder repair, and current plan or target questions.',
-    )
-    expect(prompt).not.toContain('- running-cardio: Use for running')
-    expect(prompt).not.toContain('File: `$MURPH_ASSISTANT_SKILLS_ROOT/running-cardio/SKILL.md`.')
-  })
-
   it('routes acute stress support through the Murph stress skill', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
@@ -2205,6 +2378,15 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: hosted group chat.')
     expect(prompt).toContain('synthetic room container, not the human speaker')
+    expect(prompt).toContain(
+      'Group messages stay phone-screen short by default, and the ceiling covers the whole reply.',
+    )
+    expect(prompt).toContain(
+      "An explicitly configured scheduled edition or digest follows its owning skill's shape.",
+    )
+    expect(prompt).toContain(
+      'Answer a direct question completely — asked-for substance is never skimped, even when its honest answer needs a few tight paragraphs — but never volunteer length',
+    )
     expect(prompt).not.toContain('Assistant style settings')
     expect(prompt).toContain('Use only accountless built-in service tools')
     expect(prompt).toContain('A group container cannot own a Family plan')
@@ -2234,10 +2416,17 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain("the user's compiled wiki")
     expect(prompt).not.toContain('vault-cli memory set-name')
     expect(prompt).toContain('The room container is not a person')
+    expect(prompt).toContain('Scope boundary:')
+    expect(prompt).toContain(
+      'Casual conversation and quick general-knowledge answers are part of being good company.',
+    )
+    expect(prompt).toContain(
+      'Producing work output is not: decline requests to write, review, or debug code, or to produce work, school, or professional deliverables, in one plain sentence without lecturing; tool availability does not expand scope.',
+    )
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
-      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` after the group asks',
+      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` on a trusted low-usage turn or after the group asks',
     )
     expect(prompt).toContain(
       'Never describe the group funding link as a personal billing or account-management page.',
@@ -2266,10 +2455,22 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain(
-      "Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime",
+      "Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",
+    )
+    // Unhinged is room-owned with no per-participant authorization, so the
+    // group prompt carries the shared-dial buy-in rule that the private
+    // conversation has no need for.
+    expect(prompt).toContain(
+      'Unhinged is one shared room dial',
+    )
+    expect(prompt).toContain(
+      "Raise it above 0 only when the room's own register already supports it",
+    )
+    expect(prompt).toContain(
+      'never on one member\'s say-so while another is visibly uncomfortable',
     )
     expect(prompt).toContain('`murph.personalization`')
     expect(prompt).toContain('`murph.assistant_style`')
@@ -2279,6 +2480,12 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Humor 9/10')
     expect(prompt).toContain('Push 8/10')
     expect(prompt).toContain('Detail 7/10')
+    expect(prompt).toContain(
+      'In this group room, Detail caps unrequested length, never asked-for substance: below 10/10, default each reply to a few short sentences and never front-load detail nobody asked for, but answer a direct question completely even when its honest answer needs a few tight paragraphs.',
+    )
+    expect(prompt).toContain(
+      'Detail 10/10 or an explicit member request this turn for a full write-up lifts the default entirely.',
+    )
     expect(prompt).toContain(
       'Casual is a persistent user-facing writing invariant',
     )
@@ -2403,6 +2610,9 @@ describe('assistant conversation scope', () => {
 
     expect(prompt).toContain('Conversation scope: unverified external audience.')
     expect(prompt).toContain('do not describe this as a private conversation or a hosted group container')
+    expect(prompt).toContain(
+      'Casual and general-knowledge questions are fine; decline producing work output such as writing, reviewing, or debugging code, or work, school, or professional deliverables.',
+    )
     expect(prompt).not.toContain('Conversation scope: private Murph conversation.')
     expect(prompt).not.toContain('Conversation scope: hosted group chat.')
     expect(prompt).not.toContain('PERSONAL_CLI_CONTRACT')

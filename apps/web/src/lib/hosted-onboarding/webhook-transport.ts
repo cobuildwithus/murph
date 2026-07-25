@@ -21,6 +21,10 @@ import {
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
+import {
+  isHostedRuntimeAiAccessNoticeCode,
+  type HostedRuntimeAiAccessNoticeCode,
+} from "./member-access";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { buildHostedInviteUrl } from "./invite-service";
 import { normalizePhoneNumber } from "./phone";
@@ -40,9 +44,6 @@ import {
 import {
   createHostedLinqChat,
 } from "./linq-client";
-import {
-  maybeShareHostedLinqContactCardAfterOutboundForRuntime,
-} from "./linq-contact-card-share";
 import {
   assertHostedThreadRouteEgressAuthority,
   readHostedThreadRouteByThreadIdentity,
@@ -72,6 +73,9 @@ export type HostedLinqConversationHomeRedirectPayload = {
 
 export type HostedLinqDailyQuotaPayload = {
   chatId: string;
+  // Optional for payloads persisted before per-thread limits existed; render
+  // falls back to the direct-chat limit.
+  dailyTextLimit?: number;
   memberId: string;
   occurredAt: string;
   replyToMessageId: string | null;
@@ -113,7 +117,7 @@ export type HostedLinqAiUsageQuotaPayload =
   })
   | (HostedLinqAiUsageQuotaBasePayload & {
     claimToken: null;
-    noticeCode: "trial_conversion_pending";
+    noticeCode: HostedRuntimeAiAccessNoticeCode;
   });
 
 export type HostedLinqInviteSignupMessagePayload = {
@@ -200,7 +204,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       claimToken?: null;
       message: string;
       memberId: string;
-      noticeCode: "trial_conversion_pending";
+      noticeCode: HostedRuntimeAiAccessNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
@@ -209,6 +213,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
     }
   | {
       chatId: string;
+      dailyTextLimit: number;
       memberId: string;
       occurredAt: string;
       replyToMessageId?: string | null;
@@ -548,16 +553,6 @@ async function sendHostedLinqSideEffect(
       replyToMessageId: effect.payload.replyToMessageId,
       signal: options.signal,
     });
-    if (deliveryEffect.payload.template === "invite_signup") {
-      queueHostedLinqContactCardSideEffectShare({
-        effect: {
-          effectId: deliveryEffect.effectId,
-          payload: deliveryEffect.payload,
-        },
-        prisma: options.prisma,
-        signal: options.signal,
-      });
-    }
     const acceptedMilestone = () => markHostedLinqDeliveryAcceptedBestEffort({
       chatId: result.chatId ?? effect.payload.chatId,
       effect: deliveryEffect,
@@ -634,31 +629,6 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
     );
   }
   return BigInt(value);
-}
-
-function queueHostedLinqContactCardSideEffectShare(share: {
-  effect: {
-    effectId: string;
-    payload: HostedLinqInviteSignupMessagePayload;
-  };
-  prisma: HostedLinqTransportPersistenceClient;
-  signal?: AbortSignal;
-}): void {
-  void maybeShareHostedLinqContactCardAfterOutboundForRuntime({
-    boundUserId: share.effect.payload.memberId,
-    chatId: share.effect.payload.chatId,
-    eligibility: {
-      service: share.effect.payload.service ?? null,
-      threadIsDirect: share.effect.payload.threadIsDirect ?? null,
-    },
-    prisma: share.prisma,
-    ...(share.signal ? { signal: share.signal } : {}),
-  }).catch((error: unknown) => {
-    console.warn(
-      "Hosted Linq contact-card side-effect share failed.",
-      buildHostedLinqContactCardSideEffectLogDetails(share.effect, error),
-    );
-  });
 }
 
 async function assertHostedLinqSideEffectRouteAuthority(
@@ -924,32 +894,6 @@ function buildHostedLinqSideEffectTraceLogDetails(
   };
 }
 
-function buildHostedLinqContactCardSideEffectLogDetails(
-  effect: HostedLinqMessageSideEffect,
-  error: unknown,
-): Record<string, boolean | number | string | null> {
-  const errorRecord = error && typeof error === "object" ? error as Record<string, unknown> : null;
-  const nestedDetails = errorRecord?.details && typeof errorRecord.details === "object"
-    ? errorRecord.details as Record<string, unknown>
-    : null;
-
-  return sanitizeHostedOnboardingStructuredLogDetails({
-    chatIdSuffix: toHostedOnboardingLogIdSuffix(readHostedLinqSideEffectChatId(effect.payload)),
-    errorCode: readHostedLinqSideEffectString(errorRecord, "code"),
-    errorMessage:
-      error instanceof Error
-        ? error.message
-        : typeof error === "string"
-          ? error
-          : null,
-    errorName: error instanceof Error ? error.name : null,
-    operation: "share_contact_card",
-    provider: "linq",
-    ...(nestedDetails ?? {}),
-    template: effect.payload.template,
-  });
-}
-
 function readHostedLinqSideEffectRetryable(error: unknown): boolean {
   return Boolean(
     error
@@ -988,6 +932,9 @@ async function buildHostedLinqSideEffectMessage(
       return effect.payload.message;
     case "daily_quota":
       return buildHostedDailyQuotaReply({
+        ...(effect.payload.dailyTextLimit === undefined
+          ? {}
+          : { dailyTextLimit: effect.payload.dailyTextLimit }),
         seed: effect.effectId,
       });
     case "family_invite_reply":
@@ -1115,6 +1062,7 @@ function buildHostedWebhookLinqMessagePayload(
     case "daily_quota":
       return {
         chatId: input.chatId,
+        dailyTextLimit: input.dailyTextLimit,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
         replyToMessageId,
@@ -1171,10 +1119,10 @@ function buildHostedLinqAiUsageQuotaPayload(
     template: input.template,
   };
 
-  if (input.noticeCode === "trial_conversion_pending") {
+  if (isHostedRuntimeAiAccessNoticeCode(input.noticeCode)) {
     if (input.claimToken) {
       throw new TypeError(
-        "Hosted Linq trial conversion notices must not include AI usage claim metadata.",
+        "Hosted Linq access notices must not include AI usage claim metadata.",
       );
     }
     return {

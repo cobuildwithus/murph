@@ -10,6 +10,7 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
+  readVaultRawTolerant,
   rebuildQueryProjection,
   summarizeWearableActivityRuntime,
   summarizeWearableSleepRuntime,
@@ -19,6 +20,62 @@ import {
   normalizeWearableProviders,
   wearableProviderRowKey,
 } from "../src/projection/provider-scope.ts";
+import { stringifyPublicWearableProjectionSummary } from "../src/projection/wearable-summary-public-json.ts";
+import { summarizeWearableActivity } from "../src/wearables.ts";
+
+test("automatic and manual projection rebuilds tolerate valid multiline activity titles", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-activity-title-"));
+  const date = "2026-06-12";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-06.jsonl");
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(
+      eventLedgerPath,
+      `${JSON.stringify({
+        schemaVersion: "murph.event.v1",
+        id: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        kind: "observation",
+        occurredAt: `${date}T08:00:00Z`,
+        recordedAt: `${date}T08:01:00Z`,
+        dayKey: date,
+        source: "device",
+        title: "Morning\nRun\tOutdoor",
+        metric: "steps",
+        value: 4_321,
+        unit: "count",
+        externalRef: {
+          system: "garmin",
+          resourceType: "daily-activity",
+          resourceId: `garmin-daily-activity-${date}`,
+        },
+      })}\n`,
+      "utf8",
+    );
+
+    const direct = summarizeWearableActivity(
+      await readVaultRawTolerant(vaultRoot),
+      { date },
+    )[0];
+    assert.ok(direct);
+    const directPublicJson = stringifyPublicWearableProjectionSummary(direct);
+
+    for (const manualRebuild of [false, true]) {
+      if (manualRebuild) {
+        assert.equal((await rebuildQueryProjection(vaultRoot)).fresh, true);
+      }
+      const runtime = (await summarizeWearableActivityRuntime(vaultRoot, { date }))[0];
+      assert.ok(runtime);
+      assert.equal(
+        stringifyPublicWearableProjectionSummary(runtime),
+        directPublicJson,
+      );
+      assert.equal(runtime.steps.selection.title, "Garmin Steps");
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
 
 test("runtime wearable provider filters do not fall back to all-provider summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-provider-scope-"));

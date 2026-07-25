@@ -4,6 +4,7 @@
 import {
   type HostedMember,
   type HostedMemberBillingRef,
+  HostedBillingStatus,
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
@@ -123,28 +124,45 @@ export async function withHostedMemberStripeMutationLockForOps<TResult>(input: {
   run: (tx: Prisma.TransactionClient) => Promise<TResult>;
   transactionTimeoutMs: number;
 }): Promise<TResult> {
-  try {
-    return await input.prisma.$transaction(async (tx) => {
+  return input.prisma.$transaction(async (tx) => {
+    try {
       await lockHostedMemberRow(tx, input.memberId, {
         timeoutMs: input.acquisitionTimeoutMs,
       });
-      return input.run(tx);
-    }, {
-      ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-      timeout: input.transactionTimeoutMs,
-    });
-  } catch (error) {
-    if (isHostedMemberStripeMutationLockTimeout(error)) {
-      throw new HostedMemberStripeMutationLockBusyError();
+    } catch (error) {
+      if (isHostedMemberStripeMutationLockTimeout(error)) {
+        throw new HostedMemberStripeMutationLockBusyError();
+      }
+      throw error;
     }
-    throw error;
-  }
+
+    await tx.$queryRaw`select set_config('lock_timeout', '0', true)`;
+    return input.run(tx);
+  }, {
+    ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    timeout: input.transactionTimeoutMs,
+  });
 }
 
 function isHostedMemberStripeMutationLockTimeout(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2010" &&
-    error.meta?.code === "55P03";
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== "P2010"
+  ) {
+    return false;
+  }
+
+  const driverAdapterError = error.meta?.driverAdapterError;
+  if (!isUnknownRecord(driverAdapterError)) {
+    return false;
+  }
+  const cause = driverAdapterError.cause;
+  return isUnknownRecord(cause) &&
+    (cause.originalCode === "55P03" || cause.code === "55P03");
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export async function lookupHostedMemberStripeBillingRefByStripeCustomerId(input: {
@@ -746,4 +764,34 @@ function buildHostedStripeBillingLookupAmbiguousError(
       "Stripe billing lookup matched multiple Murph accounts during blind-index rotation. Repair the duplicate binding before retrying.",
     retryable: true,
   });
+}
+
+/**
+ * Presence-only check on the subscription blind index. `incomplete` cannot be
+ * read from billing status alone, so surfaces that must tell recovery apart from
+ * first-time checkout ask this instead of re-deriving it.
+ */
+export async function readHostedMemberOwnsSubscription(input: {
+  billingStatus?: HostedBillingStatus;
+  memberId: string;
+  prisma?: PrismaClient;
+}): Promise<boolean> {
+  // Only `incomplete` is ambiguous between recovery and first-time checkout, so
+  // callers that pass a status skip the read for every other state.
+  if (
+    input.billingStatus !== undefined
+    && input.billingStatus !== HostedBillingStatus.incomplete
+  ) {
+    return false;
+  }
+  const prisma = input.prisma ?? getPrisma();
+  const billingRef = await prisma.hostedMemberBillingRef.findUnique({
+    select: {
+      stripeSubscriptionLookupKey: true,
+    },
+    where: {
+      memberId: input.memberId,
+    },
+  });
+  return Boolean(billingRef?.stripeSubscriptionLookupKey);
 }

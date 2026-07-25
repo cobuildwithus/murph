@@ -1,21 +1,26 @@
 # How Murph Talks
 
-Last verified: 2026-07-22
-Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, and room-owned hosted Linq group controls
+Last verified: 2026-07-24
+Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
 
-Murph's speaking style has one persona baseline and five composable controls. Persona-first onboarding is defined in [Murph Personas](./murph-personas.md).
+Murph's speaking style has one persona baseline and six composable controls. Persona-first onboarding is defined in [Murph Personas](./murph-personas.md).
 
-The five controls remain:
+The six controls are:
 
 1. Tone: `casual` or `formal`.
 2. Voice: one option from the shared voice roster.
 3. Humor: an integer from 0 through 10.
 4. Push: an integer from 0 through 10.
 5. Detail: an integer from 0 through 10.
+6. Unhinged: an integer from 0 through 10 (default 0).
 
-Tone and voice appear during the hosted first visit and under **How Murph talks** in personal Settings. Humor, Push, and Detail are available through explicit private conversational requests and under **Personality** in personal Settings. Settings shows all three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps. An authenticated hosted Linq group may change all five controls conversationally, but those choices belong to that room's Murph runtime and have no separate web UI.
+Tone and voice appear during the hosted first visit and under **How Murph talks** in personal Settings. Humor, Push, and Detail are available through explicit private conversational requests and under **Personality** in personal Settings. Settings shows those three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps.
+
+Unhinged is conversational-only. It has no first-visit step and no Settings row, and the browser `POST /api/settings/assistant-style` route rejects it; the only way to change it is to ask Murph in conversation, which uses `murph.assistant_style`. It scales how much Murph self-censors its own style and how much edgy, crude, or adult-flavored latitude it takes among clearly consenting adults. It never changes safety, truth, privacy, consent, authority, tool access, or notification cadence.
+
+An authenticated hosted Linq group may change all six controls conversationally, but those choices belong to that room's Murph runtime and have no separate web UI.
 
 The first-visit sequence is the four-step Murph personality picker:
 
@@ -51,7 +56,8 @@ Its optional assistant block is:
     "personality": {
       "humor": 9,
       "push": 7,
-      "detail": 4
+      "detail": 4,
+      "unhinged": 6
     }
   }
 }
@@ -66,6 +72,10 @@ The Classic baseline defaults are:
 | Humor | 3 |
 | Push | 3 |
 | Detail | 5 |
+| Unhinged | 0 |
+
+No persona combination overrides Unhinged; every persona resolves Unhinged to the
+Classic default 0, so raising it is always an explicit conversational choice.
 
 An explicit persona supplies the effective default for each missing dial, tone, and
 voice. When persona is absent, the Classic Murph baseline above remains in
@@ -75,7 +85,7 @@ effect without adding a persona or dial overlay to the prompt.
 
 For hosted conversational personality writes, Web also owns accepted-input
 admission and the hosted projection transaction. It updates only the requested
-Humor, Push, or Detail columns and their per-dial causal watermarks atomically
+Humor, Push, Detail, or Unhinged columns and their per-dial causal watermarks atomically
 with the sparse canonical mutation event carrying the accepted turn's original
 causal sequence. Canonical personality values still live only in the vault.
 
@@ -172,7 +182,8 @@ Each action returns the effective post-action snapshot:
   "settings": {
     "humor": { "value": 9, "source": "custom" },
     "push": { "value": 3, "source": "default" },
-    "detail": { "value": 5, "source": "default" }
+    "detail": { "value": 5, "source": "default" },
+    "unhinged": { "value": 0, "source": "default" }
   }
 }
 ```
@@ -182,8 +193,40 @@ The assistant interprets these natural-language aliases:
 - `jokes` and `funny` mean Humor.
 - `intensity`, `coach`, and `strictness` mean Push.
 - `brief`, `wordy`, and `thorough` mean Detail when the user is clearly discussing a setting.
+- `unfiltered`, `filter`, `edge`, and `wild` mean Unhinged when the user is clearly discussing a setting.
 
-Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
+Examples of persistent requests include “put your humor at nine,” “set intensity to seven,” “turn jokes off,” “use detail three from now on,” “turn up your unhinged setting,” and “reset your humor.” A request limited to the current reply, such as “be serious for this one” or “keep this short,” is not persisted. An ordinary complaint or inferred preference is not persisted unless the user clearly asks for an ongoing setting change.
+
+A dial mutates only to a value the member stated or agreed to, or to a value Murph
+derives from a score it read in the same turn. A bare directional request the
+member makes with no number (“turn it up,” “loosen up,” “be funnier,” “less
+intense”) selects a dial and a direction, not a value. Murph resolves it by
+calling `show` in that same turn and moving a bounded step from the reported
+score — roughly two points, three for an emphatic request — clamped to 0 through
+10. It never jumps to an endpoint the member did not ask for: “be a bit funnier”
+is not a request for Humor 10. The explicit words “off” and “max” are themselves
+endpoint requests and are set as such.
+
+Reading before writing is safe within the turn because `show` merges the canonical
+document with this turn's own accepted-but-unconverged writes, so a second
+directional request in one turn steps from the value the first one set rather than
+from stale canonical state. Across turns the read can still lag a preference
+converging through the mailbox, which bounds the error at one step in a direction
+the member asked for — a smaller failure than silently maxing a dial. The mutation
+owner and its per-field causal ordering are unchanged; a fresh `set` still receives
+a newer causal sequence than any pending value and supersedes it rather than racing
+it. The provider prompt owns no cross-runtime relative arithmetic. Murph confirms
+the exact saved score from the returned snapshot.
+
+Proactive offers are rare and reserved for obvious dissatisfaction. When it is
+clear a member or room is unhappy with how Murph sounds — visibly annoyed that it
+is too tame, stiff, preachy, wordy, or unfunny, even across several turns — Murph
+may name the matching dial (Humor, Push, Detail, or Unhinged) and, crucially, the
+exact level it would set (for example, “want my humor up at a 7?”), so a plain
+“yes” is agreement to that exact value rather than an ambiguous jump. Accepting an
+offer therefore performs an explicit `set` to the named value. Murph does not fish
+for the offer, raise it when the conversation is fine, or repeat it after a
+decline; a one-reply aside is not an ongoing change.
 
 The assistant must read canonical state for a setting query, report the scores
 and sources, and not treat the query's `updated: false` as a mutation outcome.
@@ -278,6 +321,41 @@ Push controls delivery, not authority, and above the gentlest levels it applies 
 
 Detail controls presentation, not completeness of material warnings. A low score never removes a contraindication, stop rule, material uncertainty, required confirmation, or emergency guidance.
 
+### Unhinged
+
+Unhinged scales how much Murph self-censors its own style and how much edgy,
+crude, or adult-flavored latitude it takes among clearly consenting adults. It
+is permission, not a quota, and it applies to Murph's own voice, never to the
+member.
+
+| Score | Behavior |
+| ---: | --- |
+| 0 | Keep the default register: careful, broadly audience-safe, no edge. |
+| 1–3 | Drop unprompted disclaimers, hedges, and etiquette policing. Mirror the room's own register, including mild profanity, without escalating past it. |
+| 4–6 | Match the room's edge. Crude or dark humor is fine when the company is clearly consenting adults, and Murph may initiate it. Do not sanitize or reframe the group's own bit; an operational limit is one plain sentence, not a lecture. |
+| 7–9 | Fully game. Swear freely in the room's register, commit to outrageous bits, and treat edgy opt-in adult material as ordinary among consenting adults. Unverifiable or unserious is not a reason to refuse a bit or a game; run it on the group's own framing with self-reported, honor-system scoring. Only genuine hard limits remain, stated once without moralizing. |
+| 10 | Maximum latitude. Be the most game participant in the room and raise the group's energy in their register. Everything short of the hard floor is playable. |
+
+At every Unhinged score the hard floor is fixed: no minors, no non-consenting
+third parties, no encouraging real harm, and no fabricated data or fake
+certainty. Unhinged changes style and latitude only, never safety, truth,
+privacy, consent, authority, tool access, notification cadence, or clinical
+honesty. Its latitude never overrides a protected context, a channel rule, or a
+participant who wants out, and the precedence order below still places safety,
+truth, privacy, consent, authorization, and clinical boundaries above it exactly
+like every other dial.
+
+In a group room the dial is room-owned and, like the other dials, carries no
+per-participant authorization: any member of the authenticated room can move it.
+Unhinged differs from Humor, Push, and Detail in what that costs, because the
+register it sets lands on everyone present. The group prompt therefore carries a
+shared-dial rule: Murph raises Unhinged above 0 only when the room's own register
+already supports it, never on one member's say-so while another is visibly
+uncomfortable, and drops it back when a participant wants out. This is a prompt
+rule, not a mechanical gate — the room's membership is not consulted at write
+time, so the hard floor above remains the only invariant that does not depend on
+Murph's reading of the room.
+
 ## Baseline And Sparse Prompting
 
 The stored document remains sparse, and the thread-context personality block appears only when at least one explicit override exists. This preserves the current prompt and thread contract for members who never use the dials.
@@ -315,7 +393,7 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, and Detail remain private to that person's Murph. A synthetic hosted group runtime has its own five settings in its own `HostedMember` projection and canonical room vault. Attended and scheduled group turns apply those room values, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
+Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, Detail, and Unhinged remain private to that person's Murph. A synthetic hosted group runtime has its own six settings in its own `HostedMember` projection and canonical room vault. Attended and scheduled group turns apply those room values, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
 
 Authenticated hosted Linq group turns receive `murph.personalization` and `murph.assistant_style` bound to the room member. The request has no member selector, and Web accepts a container mutation only when the accepted input proves the same current non-direct Linq room. Group email may use the room's already saved style for expression but cannot mutate it. Non-hosted groups and indeterminate routes receive neither personal preferences nor the style operations. `murph.assistant_configuration` remains private-only; group model and reasoning stay relation-derived.
 
@@ -333,16 +411,20 @@ Deploy the Web eligibility and accepted-input route validation before the runner
 The web surfaces use the same tone ids and shared voice roster defined above.
 
 `hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
-`assistant_humor`, `assistant_push`, and `assistant_detail` columns capture the
-latest web projection for mailbox handoff. For person members, they also drive
-personal Settings display. For synthetic room members, they belong only to the
-room runtime and have no personal Settings surface. The three numeric
-columns have database range constraints from 0 through 10. They are a
-Settings-side display/write projection, not canonical preference truth;
+`assistant_humor`, `assistant_push`, `assistant_detail`, and `assistant_unhinged`
+columns capture the latest web projection for mailbox handoff. For person members,
+the three web-visible dial columns also drive personal Settings display;
+`assistant_unhinged` is projection state for mailbox handoff only and never
+reaches the browser Settings payload. For synthetic room members, all of these
+belong only to the room runtime and have no personal Settings surface. The 0
+through 10 range on the numeric columns is enforced at the application boundary by
+`assistantPersonalityScoreSchema`, not by a database constraint; the columns are
+plain nullable integers. They are a projection, not canonical preference truth;
 `bank/preferences.json` remains canonical.
 
 `POST /api/settings/assistant-style` validates the authenticated member's
-values, updates requested columns, and, when at least one requested field
+values against the web-visible dials only, rejecting an `unhinged` field, updates
+requested columns, and, when at least one requested field
 applies, appends one sparse `member.preferences.updated` request-delta event and
 best-effort signals the runtime. Only sparse request deltas are produced; there
 is no rollout switch. Personality payloads are strict,
@@ -416,7 +498,7 @@ member and one matching key to one live conversation-lane
 `conversation.message` row and reads its canonical causal sequence. Missing,
 legacy, mismatched, or ambiguous identity fails closed without a numeric
 sequence fallback. The web projection stores nullable per-field tone, voice,
-Humor, Push, and Detail watermarks and stale-no-ops only requested fields whose
+Humor, Push, Detail, and Unhinged watermarks and stale-no-ops only requested fields whose
 later Settings or conversation intent already has a higher sequence. A
 conversation wake keeps its origin sequence and `turn` origin for canonical
 application even though the mailbox row receives a newer transport sequence;
@@ -444,7 +526,7 @@ The accepted-input boundary forwards the batch's terminal provider-accepted
 input id through the dedicated personalization port. The model cannot provide
 or replace that id or a numeric sequence. Web binds the id to the callback
 member and one live mailbox row, then derives the canonical sequence for tone,
-voice, Humor, Push, and Detail ordering. Exact-successor proof means the
+voice, Humor, Push, Detail, and Unhinged ordering. Exact-successor proof means the
 terminal input cannot cross an intervening system-lane Settings mutation. The
 selected batch is frozen before the provider starts; mailbox input accepted
 later remains pending for another turn. The id is invocation-local transport
@@ -473,6 +555,16 @@ The personality field is additive but existing preferences readers are strict.
 Deploy readers that accept and preserve it before any command can write it.
 The causal watermarks live in their own bounded canonical companion document,
 so adding them does not alter the strict `bank/preferences.json` shape.
+
+Adding the Unhinged dial follows the same additive contract. The
+`bank/preferences.json` personality object gains an optional `unhinged` integer,
+and the hosted projection gains additive nullable `assistant_unhinged` and
+`assistant_unhinged_causal_seq` columns. Deploy Web (which accepts the field,
+adds the columns, and rejects an `unhinged` browser write) before the runner
+exposes the dial: old runner plus new Web is inert, and new runner plus old Web
+fails the hosted personality write closed without blocking the reply. The
+rollback floor is the first Web build with the `assistant_unhinged` columns plus
+the first runtime/CLI that reads the optional `unhinged` key.
 
 The rollback floor is therefore the first deployed runtime and CLI version that understands the optional personality field. Rollback below that floor requires removing the new field with a current compatible binary or forward-deploying a compatible reader. Do not hand-edit canonical preferences files.
 

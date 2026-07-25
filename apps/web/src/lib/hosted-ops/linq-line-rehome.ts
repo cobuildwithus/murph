@@ -9,22 +9,16 @@ import {
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import {
   acquireHostedMemberHomeLinqRouteLockTx,
-  acquireHostedMemberHomeLinqRecipientAssignmentLockTx,
-  countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince,
   countHostedMemberHomeLinqBindingsByRecipientPhone,
   readHostedMemberRoutingState,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqRecipientPhoneTx,
 } from "../hosted-onboarding/hosted-member-routing-store";
-import {
-  readHostedLinqHomeLineAuthority,
-  startOfUtcDay,
-} from "../hosted-onboarding/linq-home-routing";
+import { readHostedLinqHomeLineAuthority } from "../hosted-onboarding/linq-home-routing";
 import {
   listHostedLinqAssignableHomeLines,
   type HostedLinqAssignableHomeLine,
 } from "../hosted-onboarding/linq-line-store";
-import { chooseHostedLinqHomeLine } from "../hosted-onboarding/linq-routing-policy";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { getPrisma } from "../prisma";
 
@@ -137,9 +131,6 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
       memberId,
       prisma: tx,
     });
-    await acquireHostedMemberHomeLinqRecipientAssignmentLockTx({
-      prisma: tx,
-    });
     await acquireHostedMemberHomeLinqRouteLockTx({
       memberId,
       prisma: tx,
@@ -170,34 +161,6 @@ export async function rehomeHostedMemberLinqHomeLine(input: {
     }
 
     const now = new Date();
-    const activeMembersByRecipientPhone =
-      await countHostedMemberHomeLinqBindingsByRecipientPhone({
-        excludedMemberId: memberId,
-        now,
-        prisma: tx,
-        recipientPhones: [target.phoneNumber],
-      });
-    const newAssignmentsByRecipientPhone =
-      await countHostedMemberHomeLinqAssignmentsByRecipientPhoneSince({
-        prisma: tx,
-        recipientPhones: [target.phoneNumber],
-        since: startOfUtcDay(now),
-      });
-    const chosen = chooseHostedLinqHomeLine({
-      activeMembersByRecipientPhone,
-      lines: [target],
-      newAssignmentsByRecipientPhone,
-      preferredRecipientPhone: target.phoneNumber,
-    });
-    if (!chosen) {
-      throw hostedOnboardingError({
-        code: "HOSTED_LINQ_REHOME_TARGET_AT_CAPACITY",
-        httpStatus: 409,
-        message: "Hosted Linq rehome target line is at assignment capacity.",
-        retryable: false,
-      });
-    }
-
     await upsertHostedMemberHomeLinqRecipientPhoneTx({
       clearPending: true,
       homeLineAssignedAt: now,

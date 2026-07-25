@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import {
   buildHostedExecutionGroupNewsletterEmailNeededWake,
+  type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX,
@@ -17,7 +18,6 @@ import {
 } from "../hosted-onboarding/hosted-member-store";
 import {
   readHostedMemberRoutingState,
-  type HostedMemberRoutingStateSnapshot,
 } from "../hosted-onboarding/hosted-member-routing-store";
 import {
   activeHostedMemberAccessWhere,
@@ -29,6 +29,9 @@ import {
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
+import {
+  resolveHostedMemberDirectRoute,
+} from "../hosted-routing/member-direct-route";
 import { getPrisma } from "../prisma";
 
 export interface HostedGroupNewsletterParticipant {
@@ -91,11 +94,6 @@ const hostedGroupNewsletterMemberAccessSelect =
 type HostedGroupNewsletterMemberAccess = Prisma.HostedMemberGetPayload<{
   select: typeof hostedGroupNewsletterMemberAccessSelect;
 }>;
-
-interface HostedGroupNewsletterDirectNudgeRoute {
-  channel: "linq" | "telegram";
-  threadId: string;
-}
 
 export async function enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort(input: {
   groupId: string;
@@ -609,31 +607,13 @@ async function appendGroupNewsletterEmailNeededWakeBestEffort(input: {
 async function readHostedMemberDirectNewsletterNudgeRoute(input: {
   memberId: string;
   prisma: ReadClient;
-}): Promise<HostedGroupNewsletterDirectNudgeRoute | null> {
+}): Promise<HostedExecutionDirectRoute | null> {
   const routing = await readHostedMemberRoutingState({
     memberId: input.memberId,
     prisma: input.prisma,
   });
 
-  return readEstablishedDirectNewsletterNudgeRoute(routing);
-}
-
-function readEstablishedDirectNewsletterNudgeRoute(
-  routing: HostedMemberRoutingStateSnapshot | null,
-): HostedGroupNewsletterDirectNudgeRoute | null {
-  const linqThreadId = normalizeHostedRouteId(routing?.linqChatId);
-  if (linqThreadId) {
-    return { channel: "linq", threadId: linqThreadId };
-  }
-  const telegramThreadId = normalizeHostedRouteId(routing?.telegramThreadId);
-  return telegramThreadId
-    ? { channel: "telegram", threadId: telegramThreadId }
-    : null;
-}
-
-function normalizeHostedRouteId(value: string | null | undefined): string | null {
-  const normalized = typeof value === "string" ? value.trim() : "";
-  return normalized.length > 0 ? normalized : null;
+  return resolveHostedMemberDirectRoute(routing);
 }
 
 function buildGroupNewsletterEmailNeededEventId(input: {

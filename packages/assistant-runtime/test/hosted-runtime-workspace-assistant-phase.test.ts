@@ -2916,6 +2916,105 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
   });
 
+  it("reports a degraded experiment lifecycle stage without failing the pass", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: new Error("Experiment storage rejected an entry."),
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // The automations that do not depend on the experiment scan still landed.
+    expect(result).toEqual(expect.objectContaining({
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+        murphManagedAutomationFailed: false,
+      }),
+    }));
+    expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
+      expect.objectContaining({
+        component: "runtime",
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: expect.objectContaining({
+          murphManagedAutomationExperimentLifecycleFailed: true,
+          murphManagedAutomationStage: "experiment_lifecycle",
+        }),
+      }),
+    );
+  });
+
+  it("keeps the bounded retry ladder for a transient experiment lifecycle failure", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const transient = Object.assign(new Error("experiment snapshot busy"), {
+      code: "EBUSY",
+    });
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: transient,
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // First rung of the existing 30s / 2m / 10m ladder, with the unrelated
+    // automations that already landed preserved in the status.
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+      progressed: true,
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+        murphManagedAutomationExperimentLifecycleFailed: true,
+        murphManagedAutomationSetupRetryAttempt: 1,
+        murphManagedAutomationSetupRetryable: true,
+      }),
+    }));
+    // It must not also report the pass as a clean success.
+    expect(result.redactedStatus).not.toEqual(expect.objectContaining({
+      murphManagedAutomationFailed: false,
+    }));
+  });
+
+  it("does not retry a deterministic experiment storage failure", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.applyMurphManagedAutomations.mockResolvedValueOnce({
+      created: 2,
+      experimentLifecycleFailure: Object.assign(
+        new Error("Experiment storage contains an entry that could hold an experiment document."),
+        { code: "EXPERIMENT_STORAGE_INVALID" },
+      ),
+      skipped: 0,
+      updated: 0,
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+
+    // Retrying an unchanged vault every 30 seconds would buy nothing.
+    expect(result).not.toEqual(expect.objectContaining({
+      nextWakeAt: "2026-04-27T00:00:30.000Z",
+    }));
+    expect(result).toEqual(expect.objectContaining({
+      redactedStatus: expect.objectContaining({
+        murphManagedAutomationCreated: 2,
+      }),
+    }));
+  });
+
   it("logs stable-key metadata failures when background setup stays idle", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     const stableKeyFailure = new Error("metadata unavailable");
@@ -3924,6 +4023,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               messageId: "telegram_message",
               threadId: "telegram_group_chat",
             },
+            sourceMetadata: {
+              externalThreadRouteAuthorityPresent: true,
+              kind: "telegram",
+              mediaGroupId: null,
+              replyContext: null,
+              senderHandle: "1234567890",
+              senderUsername: "alice_example",
+            },
           };
         }
         return {
@@ -4133,8 +4240,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [telegramInputId],
-        operation: async (executionContext) =>
-          await executionContext.hosted?.automationTool?.request(
+        operation: async (executionContext) => {
+          // Telegram group evidence must survive operation-scope
+          // reconstruction and reach Web channel-qualified.
+          await executionContext.hosted?.groupTool?.request({
+            action: "read_shared",
+            projectionScopes: [{ projectionKind: "steps-days.v0" }],
+          });
+          return await executionContext.hosted?.automationTool?.request(
             buildGroupNewsletterAutomationSaveRequest({
               configuration: {
                 delivery: "current_chat",
@@ -4147,8 +4260,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
                 kind: "cron",
               },
             }),
-          ),
+          );
+        },
         turnEnvironment: null,
+      });
+      expect(groupRequestMock).toHaveBeenCalledWith({
+        action: "read_shared",
+        telegramSenderHandles: ["1234567890"],
+        projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
         action: "save",
@@ -12011,14 +12130,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
   it("keeps assistant ask completions out of a causal-only pass without an input cutoff", async () => {
     const now = "2026-04-27T00:03:00.000Z";
+    const armedWakeAt = "2026-04-27T00:08:00.000Z";
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce(null);
 
-    await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       assistantInputIds: [],
       foregroundCausalOnly: true,
       conversationImportedCount: 0,
       importedCount: 1,
       now: () => now,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
     }));
 
     expect(mocks.prepareHostedSystemMailboxItemForCheckpoint).toHaveBeenCalledWith(
@@ -12029,6 +12152,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     );
     expect(mocks.resolveHostedOldestPendingAssistantInputAt).not.toHaveBeenCalled();
     expect(mocks.resolveHostedOldestAssistantInputOccurredAt).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      nextWakeAt: armedWakeAt,
+      progressed: false,
+    }));
   });
 
   it("keeps due cron work out of a causal-only zero-effect pass", async () => {
@@ -12079,6 +12206,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(result).toEqual(expect.objectContaining({
       checkpointReason: "system_mailbox_receipt",
       progressed: true,
+    }));
+  });
+
+  it("preserves an armed workspace wake through a causal-only system mailbox checkpoint", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const armedWakeAt = "2026-04-27T00:05:00.000Z";
+    const pendingEffectsItem = createPendingEffectsReconcileSystemMailboxItem();
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      item: pendingEffectsItem,
+      itemId: pendingEffectsItem.itemId,
+      metrics: {
+        bootstrapResult: null,
+        conversationMetrics: null,
+        mailboxLane: "runtime-control",
+        redactedLogEntries: [],
+      },
+      status: "processed",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      assistantInputIds: [],
+      foregroundCausalOnly: true,
+      conversationImportedCount: 0,
+      importedCount: 1,
+      now: () => now,
+      shouldYieldBackgroundMaintenance: () => true,
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: armedWakeAt,
+      }),
+    }));
+
+    expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      progressed: true,
+    }));
+
+    const postCheckpoint = await result.afterCheckpoint?.();
+    expect(postCheckpoint).toEqual(expect.objectContaining({
+      checkpointReason: "system_mailbox_receipt",
+      nextWakeAt: armedWakeAt,
+      nextWakeReason: "assistant",
     }));
   });
 
@@ -12192,6 +12362,71 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           wake: approvalWake,
         }),
       );
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps a due workspace wake armed through a causal-only exact delivery post-checkpoint", async () => {
+    const now = "2026-04-27T00:00:00.000Z";
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-causal-due-wake-"));
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    const effectId = "vault-file-send:effect_causal_due_wake";
+
+    try {
+      await initializeVault({ createdAt: now, vaultRoot });
+      const systemMailbox = await loadHostedSystemMailboxRealImplementation();
+      const approvalWake = buildHostedExecutionPendingEffectsReconcileRequestedWake({
+        effectId,
+        eventId: "evt_runtime_pending_effects_causal_due_wake",
+        occurredAt: now,
+        userId: "member_synthetic_phase",
+      });
+      const outcome = await systemMailbox.enqueueHostedSystemMailboxItem({
+        item: createResolvedForegroundAdmissionMailboxItem({
+          kind: approvalWake.kind,
+          occurredAt: approvalWake.occurredAt,
+        }),
+        vaultRoot,
+        wake: approvalWake,
+      });
+      expect(outcome.status).toBe("imported");
+
+      mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementation(
+        systemMailbox.prepareHostedSystemMailboxItemForCheckpoint,
+      );
+      mocks.recordHostedSystemMailboxItemAfterCheckpoint.mockImplementation(
+        systemMailbox.recordHostedSystemMailboxItemAfterCheckpoint,
+      );
+      const deliveryEffect = {
+        ...createDeliveryEffect(),
+        effectId,
+      };
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValue([deliveryEffect]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [],
+        foregroundCausalOnly: true,
+        conversationImportedCount: 0,
+        importedCount: 1,
+        now: () => now,
+        operatorHomeRoot,
+        shouldYieldBackgroundMaintenance: () => true,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace({ nextWakeAt: now }),
+      }));
+
+      expect(result).toEqual(expect.objectContaining({
+        checkpointReason: "outbox_sending",
+        progressed: true,
+      }));
+
+      const postCheckpoint = await result.afterCheckpoint?.();
+      expect(mocks.getAssistantCronStatus).not.toHaveBeenCalled();
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        nextWakeAt: now,
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -12312,7 +12547,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({
         actionApprovalPort: null,
         includeBackgroundDueIntents: false,
@@ -12348,7 +12587,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(scenario.pendingWakeReads).toEqual([]);
       expect(scenario.pendingIndexStateAfterRun).toBe(scenario.pendingIndexStateBeforeRun);
       expect(scenario.systemMailboxPreparationStatuses[0]).toBe("processed");
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith(
         expect.objectContaining({
           preferredEffectIds: [scenario.effectId],
@@ -12374,7 +12617,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -12408,7 +12655,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       expect(scenario.pendingInputIdsAfterRun).toEqual([scenario.inputId]);
       expect(scenario.pendingIndexInspectionAfterRun.indexComplete).toBe(false);
-      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).not.toHaveBeenCalled();
+      expect(mocks.hasCompleteAssistantAutoReplyTerminalEvidence).toHaveBeenCalledWith({
+        captureId: null,
+        inputId: scenario.inputId,
+        vault: scenario.vaultRoot,
+      });
       expect(mocks.collectHostedAssistantDeliverySideEffects).not.toHaveBeenCalledWith(
         expect.objectContaining({
           includeBackgroundDueIntents: true,
@@ -14842,6 +15093,7 @@ function createPhaseWorkspace(input: {
 }
 
 function createPhaseInput(input: {
+  acceptedAssistantInputCausalSeq?: string;
   assistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["assistantAutomationScheduleChanged"];
   foregroundCausalOnly?: boolean;
   clearAssistantAutomationScheduleChanged?: HostedWorkspaceRuntimeAssistantPhaseInput["clearAssistantAutomationScheduleChanged"];
@@ -14879,6 +15131,9 @@ function createPhaseInput(input: {
   >;
   runtimeForwardedEnv?: Record<string, string>;
   runtimeLatencyTraceRequests?: HostedRuntimeLatencyTraceRequest[];
+  runtimePhoneCalls?: NonNullable<
+    HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["phoneCalls"]
+  >;
   runtimeEnv?: Record<string, string>;
   operatorHomeRoot?: string;
   shouldYieldBackgroundMaintenance?: HostedWorkspaceRuntimeAssistantPhaseInput["shouldYieldBackgroundMaintenance"];
@@ -14899,6 +15154,11 @@ function createPhaseInput(input: {
   const assistantInputIds = input.assistantInputIds
     ?? (input.importedCount ? ["ain_00000000000000000000000000000001"] : []);
   return {
+    ...(
+      input.acceptedAssistantInputCausalSeq
+        ? { acceptedAssistantInputCausalSeq: input.acceptedAssistantInputCausalSeq }
+        : {}
+    ),
     assistantAutomationScheduleChanged: input.assistantAutomationScheduleChanged,
     foregroundCausalOnly: input.foregroundCausalOnly,
     clearAssistantAutomationScheduleChanged:
@@ -15036,6 +15296,7 @@ function createPhaseInput(input: {
         ...(input.runtimeLabsToolPort
           ? { labsToolPort: input.runtimeLabsToolPort }
           : {}),
+        ...(input.runtimePhoneCalls ? { phoneCalls: input.runtimePhoneCalls } : {}),
         ...(input.runtimeSubscriptionToolPort
           ? { subscriptionToolPort: input.runtimeSubscriptionToolPort }
           : {}),

@@ -53,6 +53,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   sanitizeHostedProductFeedbackSummary,
   HOSTED_WORKSPACE_CHECKPOINT_CONFLICT_REASONS,
+  HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
   HOSTED_WORKSPACE_CHECKPOINT_REASONS,
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   HOSTED_WORKSPACE_INVOCATION_STATUSES,
@@ -123,7 +124,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
@@ -1087,19 +1088,18 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "linqSenderHandles", "projectionScopes"]),
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "projectionScopes",
+        "telegramSenderHandles",
+      ]),
       "Hosted runtime group tool read_shared request",
     );
+    const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
     return {
       action,
-      ...(record.linqSenderHandles === undefined
-          || record.linqSenderHandles === null
-        ? {}
-        : {
-            linqSenderHandles: parseHostedRuntimeGroupLinqSenderHandles(
-              record.linqSenderHandles,
-            ),
-          }),
+      ...senderHandles,
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
@@ -1401,11 +1401,50 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   };
 }
 
-function parseHostedRuntimeGroupLinqSenderHandles(value: unknown): string[] {
-  return parseHostedRuntimeGroupBoundedHandles(value, {
-    allowEmpty: false,
-    label: "Hosted runtime group tool read_shared request linqSenderHandles",
-  });
+/**
+ * Reads current-turn sender evidence. Each channel owns its own field because
+ * Web matches each against a different member identity index; supplying both is
+ * a contradiction and fails closed rather than guessing which one is
+ * authoritative.
+ */
+function parseHostedRuntimeGroupSenderHandlesRequest(
+  record: Record<string, unknown>,
+): {
+  linqSenderHandles?: string[];
+  telegramSenderHandles?: string[];
+} {
+  const linqPresent = record.linqSenderHandles !== undefined
+    && record.linqSenderHandles !== null;
+  const telegramPresent = record.telegramSenderHandles !== undefined
+    && record.telegramSenderHandles !== null;
+  if (linqPresent && telegramPresent) {
+    throw new TypeError(
+      "Hosted runtime group tool read_shared request must not supply sender handles for more than one channel.",
+    );
+  }
+  if (linqPresent) {
+    return {
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request linqSenderHandles",
+        },
+      ),
+    };
+  }
+  if (telegramPresent) {
+    return {
+      telegramSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.telegramSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request telegramSenderHandles",
+        },
+      ),
+    };
+  }
+  return {};
 }
 
 function parseHostedRuntimeGroupCurrentTurnHandles(
@@ -1435,7 +1474,7 @@ function parseHostedRuntimeGroupBoundedHandles(
   const handles = entries.map((entry, index) =>
     parseHostedRuntimeGroupAskBoundedText({
       label: `${label}[${index}]`,
-      maxCodePoints: HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
       value: entry,
     })
   );
@@ -2088,7 +2127,12 @@ export function parseHostedRuntimeGroupToolResponse(
       );
       assertAllowedObjectKeys(
         usage,
-        new Set(["capacityState", "fundingUrl", "periodEnd"]),
+        new Set([
+          "capacityState",
+          "fundingUrl",
+          "periodEnd",
+          "remainingPercent",
+        ]),
         "Hosted runtime group tool read_usage usage",
       );
       const capacityState = requireString(
@@ -2117,6 +2161,17 @@ export function parseHostedRuntimeGroupToolResponse(
           "Hosted runtime group tool read_usage periodEnd must be a canonical timestamp.",
         );
       }
+      const remainingPercent = usage.remainingPercent === undefined
+        ? undefined
+        : requireNonNegativeInteger(
+            usage.remainingPercent,
+            "Hosted runtime group tool read_usage remainingPercent",
+          );
+      if (remainingPercent !== undefined && remainingPercent > 100) {
+        throw new TypeError(
+          "Hosted runtime group tool read_usage remainingPercent must be at most 100.",
+        );
+      }
       return {
         action,
         result: {
@@ -2128,6 +2183,7 @@ export function parseHostedRuntimeGroupToolResponse(
               "Hosted runtime group tool read_usage fundingUrl",
             ),
             periodEnd,
+            ...(remainingPercent === undefined ? {} : { remainingPercent }),
           },
         },
       };
@@ -2294,7 +2350,15 @@ export function parseHostedRuntimeGroupToolResponse(
     const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
     if (status === "ok") {
       assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
-      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+      return {
+        action,
+        result: {
+          status,
+          group: result.group === null
+            ? null
+            : parseHostedRuntimeGroupSummary(result.group),
+        },
+      };
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");
@@ -4785,6 +4849,14 @@ export function parseHostedWorkspaceCheckpointRequest(
       record.expectedWorkspaceVersion,
       "Hosted workspace checkpoint request expectedWorkspaceVersion",
     ),
+    ...(record.handledConversationMailboxItemIds === undefined
+      ? {}
+      : {
+          handledConversationMailboxItemIds:
+            parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
+              record.handledConversationMailboxItemIds,
+            ),
+        }),
     ...(record.idleCheckpointTrigger === undefined
       ? {}
       : {
@@ -4843,6 +4915,40 @@ export function parseHostedWorkspaceCheckpointRequest(
       "Hosted workspace checkpoint request snapshotRef",
     ),
   };
+}
+
+function parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
+  value: unknown,
+): string[] {
+  const itemIds = requireArray(
+    value,
+    "Hosted workspace checkpoint handledConversationMailboxItemIds",
+  ).map((entry, index) => {
+    const itemId = requireString(
+      entry,
+      `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}]`,
+    );
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(itemId)) {
+      throw new TypeError(
+        `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}] must be a mailbox item id.`,
+      );
+    }
+    return itemId;
+  });
+  if (
+    itemIds.length
+      > HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
+  ) {
+    throw new TypeError(
+      `Hosted workspace checkpoint handledConversationMailboxItemIds must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} ids.`,
+    );
+  }
+  if (new Set(itemIds).size !== itemIds.length) {
+    throw new TypeError(
+      "Hosted workspace checkpoint handledConversationMailboxItemIds must not contain duplicates.",
+    );
+  }
+  return itemIds;
 }
 
 export function parseHostedWorkspaceCheckpointResponse(

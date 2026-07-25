@@ -38,6 +38,7 @@ import {
   HostedRuntimeArtifactReadError,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_CODEX_AUTH_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
@@ -3528,10 +3529,40 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       LINQ_API_BASE_URL: "http://host.docker.internal:4011/",
       TELEGRAM_API_BASE_URL: "http://telegram.example.com/bot",
       TELEGRAM_FILE_BASE_URL: "https://files.telegram.example/",
+      // xAI is pinned to api.x.ai and must not join the configurable provider
+      // base-URL allowlist, even when a stale environment value is present.
+      XAI_API_BASE_URL: "http://host.docker.internal:4014/",
     })).toEqual([
       "http://host.docker.internal:4011/",
       "https://files.telegram.example/",
     ]);
+  });
+
+  it("allows hosted xAI provider fetches through the intercepted provider boundary", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch("https://api.x.ai/v1/responses", {
+      body: "{}",
+      method: "POST",
+    });
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "xai provider fetch");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
   it("allows configured hosted-local provider fetch URLs through the runner host alias", async () => {
@@ -4125,6 +4156,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
                 detail: { source: "default", value: 5 },
                 humor: { source: "custom", value: 8 },
                 push: { source: "default", value: 3 },
+                unhinged: { source: "default", value: 0 },
               },
             },
           }), {
@@ -4281,6 +4313,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           detail: { source: "default", value: 5 },
           humor: { source: "custom", value: 8 },
           push: { source: "default", value: 3 },
+          unhinged: { source: "default", value: 0 },
         },
       },
     });
@@ -4540,6 +4573,47 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(request.url).toBe(
       `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature"))
+      .toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("resolves the current verified-email recipient through direct web-control", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+      );
+      await expect(request.json()).resolves.toEqual({});
+      return new Response(JSON.stringify({
+        deliveryTarget: "current@example.test",
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+
+    await expect(
+      platform.effectsPort.resolveCurrentVerifiedEmailRecipient?.(),
+    ).resolves.toBe("current@example.test");
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "direct email recipient authority request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH}`,
     );
     expectDefaultRuntimeWriteFenceHeaders(request);
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");

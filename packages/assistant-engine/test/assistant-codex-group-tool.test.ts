@@ -159,6 +159,20 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description).toContain("permission only");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("percentage of the current period's usage remaining");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("floored and clamped to 0-100");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("means under 1 percent remains");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("share the returned remainingPercent and periodEnd");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("when remainingPercent is absent, share the state and periodEnd instead");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("Never infer or disclose internal currency accounting");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("contributor identity, purchase history, or payment status");
     expect(MURPH_GROUP_TOOL.description).toContain("use ordinary shell waits and exact replay");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("poll every accepted ask_member call until it returns completed or unavailable");
@@ -1544,6 +1558,44 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("executes a rename that renamed the chat without a hosted group record", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Weekly Health Crew",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const response = {
+      action: "update_display_name" as const,
+      result: { group: null, status: "ok" as const },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual(response);
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('status="ok" means the provider accepted that request');
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("tell the group the rename is going through rather than that it is done");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('group=null means only that no updated group summary came back');
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("never read it as proof that the group does not exist or that the label was saved");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+      .toContain("then tries to store the same hosted group label");
+  });
+
   it("rejects invalid update_display_name arguments", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",
@@ -2661,6 +2713,7 @@ describe("murph.newsletter dynamic tool", () => {
         hostedToolContext: createNewsletterHostedToolContext({
           groupSharedReader,
           newsletterRequest,
+          occurrenceAt: "2026-07-07T03:30:00.000Z",
         }),
         nextUsageOrdinal: () => 1,
         progressDelivery: null,
@@ -2677,7 +2730,10 @@ describe("murph.newsletter dynamic tool", () => {
             memberId: "member_a",
             weeklyStats: [{
               currentWeekAvg: 7_000,
+              observedDayCount: 1,
+              observedDates: ["2026-07-06"],
               stream: "steps",
+              throughDate: "2026-07-06",
               unit: "count",
             }],
           }],
@@ -2689,7 +2745,7 @@ describe("murph.newsletter dynamic tool", () => {
             { hasEmail: false, memberId: "member_opted_out" },
             { hasEmail: true, memberId: "member_stale_grant" },
           ],
-          referenceAt: "2026-07-06T03:30:00.000Z",
+          referenceAt: "2026-07-07T03:30:00.000Z",
           status: "ok",
         },
       });
@@ -3073,6 +3129,7 @@ function createNewsletterHostedToolContext(input: {
   closeNewsletterCapability?: () => void;
   groupSharedReader?: AssistantHostedGroupSharedReader;
   newsletterRequest?: NewsletterToolRequest;
+  occurrenceAt?: string;
   recordNewsletterSendResult?: (result: unknown) => void;
 } = {}): AssistantHostedToolContext {
   const context = {
@@ -3086,7 +3143,7 @@ function createNewsletterHostedToolContext(input: {
     currentUserActionScope: () => null,
     currentScheduledAutomationAuthority: () => ({
       automationId: "automation_newsletter",
-      occurrenceAt: "2026-07-06T03:30:00.000Z",
+      occurrenceAt: input.occurrenceAt ?? "2026-07-06T03:30:00.000Z",
     }),
     familyPlanTool: null,
     groupSharedReader: input.groupSharedReader ?? null,

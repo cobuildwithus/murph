@@ -27,7 +27,14 @@ const mocks = vi.hoisted(() => ({
     sessionId: string | null;
   } | null,
   readHostedConsentStatus: vi.fn(),
+  redirect: vi.fn((path: string) => {
+    throw new Error(`NEXT_REDIRECT:${path}`);
+  }),
   resourceHintOrigins: null as readonly string[] | null,
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/join-invite-page-view", () => ({
@@ -141,7 +148,6 @@ beforeEach(() => {
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       identity: {
         phone: {
@@ -241,6 +247,77 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   assert.doesNotMatch(markup, /data-hosted-privy-boundary/);
   assert.match(markup, /data-invite-code="invite code"/);
   assert.doesNotMatch(markup, /data-share-code/);
+});
+
+test("JoinInvitePage sends a matched lapsed member to the subscription recovery surface", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      createdAt: new Date("2026-07-03T08:00:00.000Z"),
+      id: "member_paused",
+      suspendedAt: null,
+      updatedAt: new Date("2026-07-13T08:00:00.000Z"),
+    },
+    session: {
+      identity: null,
+      linkedAccounts: [],
+      verifiedPrivyUser: { id: "test-privy-user" },
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "active",
+  }));
+
+  await expect(JoinInvitePage({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+    searchParams: Promise.resolve({ preview: undefined }),
+  })).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
+
+  expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
+  expect(mocks.joinInvitePageViewProps).toBeNull();
+});
+
+test("JoinInvitePage leaves a suspended paused member in the blocked flow", async () => {
+  const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "paused",
+      createdAt: new Date("2026-07-03T08:00:00.000Z"),
+      id: "member_suspended",
+      suspendedAt: new Date("2026-07-20T08:00:00.000Z"),
+      updatedAt: new Date("2026-07-20T08:00:00.000Z"),
+    },
+    session: {
+      identity: null,
+      linkedAccounts: [],
+      verifiedPrivyUser: { id: "test-privy-user" },
+    },
+  });
+  mocks.getHostedInviteStatus.mockResolvedValueOnce(createStatus({
+    session: {
+      authenticated: true,
+      expiresAt: null,
+      matchesInvite: true,
+    },
+    stage: "blocked",
+  }));
+
+  const markup = renderToStaticMarkup(await JoinInvitePage({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+    searchParams: Promise.resolve({ preview: undefined }),
+  }));
+
+  expect(mocks.redirect).not.toHaveBeenCalled();
+  expect(mocks.joinInvitePageViewProps?.model.status.stage).toBe("blocked");
+  assert.match(markup, /data-stage="blocked"/);
 });
 
 test("JoinInvitePage keeps Privy-only sessions out of invite and legal gates", async () => {
@@ -360,7 +437,6 @@ test("JoinInvitePage projects linked accounts to a minimal Telegram setup seed",
       updatedAt: new Date("2025-03-27T08:00:00.000Z"),
     },
     linkedAccounts: [],
-    memberLookup: null,
     session: {
       identity: null,
       linkedAccounts: [],
@@ -545,6 +621,7 @@ function createStatus(
       matchesInvite: false,
     },
     stage: "verify",
+    telegramStartRequired: false,
     ...overrides,
   };
 }
@@ -563,7 +640,7 @@ function createConsentStatus(input: {
   const grant = input.withGrant
     ? {
         documentVersions: {
-          "terms-of-service": "2026-04-29",
+          "terms-of-service": "2026-07-23",
         },
         grantedAt: "2026-04-30T00:00:00.000Z",
         lastEventId: "event_123",
@@ -595,7 +672,13 @@ function createConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes: [
       consentScope("launch.legal", "Terms, privacy, and AI disclosure", [legalDocument], input.launchGranted, grant),
-      consentScope("launch.health-data", "Health data collection consent", [healthDocument], input.launchGranted, grant),
+      consentScope(
+        "launch.health-data",
+        "Health data notice and processing authorization",
+        [healthDocument],
+        input.launchGranted,
+        grant,
+      ),
     ],
   };
 }
@@ -610,7 +693,7 @@ function consentDocument(
     id,
     pdfHref: `${href}.pdf`,
     title,
-    version: "2026-04-29",
+    version: "2026-07-23",
   };
 }
 

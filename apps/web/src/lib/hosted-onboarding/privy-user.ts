@@ -13,8 +13,6 @@ import {
   type PrivyLinkedAccountLike,
 } from "./privy-shared";
 
-export const HOSTED_PRIVY_MEMBER_ID_METADATA_KEY = "murph_member_id";
-
 export type HostedPrivyUser = PrivyUser & HostedPrivyLinkedAccountContainer;
 
 export interface HostedPrivyIdentity {
@@ -27,7 +25,6 @@ export interface HostedPrivyIdentity {
 export interface HostedPrivySessionState {
   identity: HostedPrivyIdentity;
   linkedAccounts: PrivyLinkedAccountLike[];
-  memberId: string | null;
   verifiedPrivyUser: HostedPrivyUser;
 }
 
@@ -35,14 +32,8 @@ export function buildHostedPrivySessionState(verifiedPrivyUser: HostedPrivyUser)
   return {
     identity: resolveHostedPrivyIdentityFromVerifiedUser(verifiedPrivyUser),
     linkedAccounts: resolveHostedPrivyLinkedAccounts(verifiedPrivyUser),
-    memberId: readHostedPrivyMemberIdFromVerifiedUser(verifiedPrivyUser),
     verifiedPrivyUser,
   };
-}
-
-export function readHostedPrivyMemberIdFromVerifiedUser(user: HostedPrivyUser): string | null {
-  const memberId = user.custom_metadata?.[HOSTED_PRIVY_MEMBER_ID_METADATA_KEY];
-  return typeof memberId === "string" ? normalizeNonEmptyString(memberId) : null;
 }
 
 export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser): HostedPrivyIdentity {
@@ -73,13 +64,4 @@ export function resolveHostedPrivyIdentityFromVerifiedUser(user: HostedPrivyUser
     telegram: telegramSelection.account,
     userId: user.id,
   };
-}
-
-function normalizeNonEmptyString(value: string | null | undefined): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const normalized = value.trim();
-  return normalized ? normalized : null;
 }

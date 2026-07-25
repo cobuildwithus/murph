@@ -16,6 +16,7 @@ import {
   buildIntegrationIngestRecord,
   initializeVault,
   runCanonicalWrite,
+  showAutomation,
 } from "@murphai/core";
 import {
   persistCanonicalInboxCapture,
@@ -27,9 +28,19 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  ensureAutomaticMealCloseoutAutomation,
+  getAssistantCronStatus,
+  listAssistantTranscriptEntries,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   readAssistantContextSnapshotState,
+  recordHostedMailboxAssistantInputItem,
+  resolveAssistantSession,
+  saveAssistantSession,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import {
+  parseAssistantSessionRecord,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantProviderUsageDraft,
 } from "@murphai/assistant-engine/assistant-ask";
@@ -48,6 +59,7 @@ import {
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
+  restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
@@ -82,6 +94,7 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
@@ -218,6 +231,10 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  createHostedWorkspaceRuntimeBridgeJobOptions,
+  type HostedWorkspaceSnapshotArchiveBuilder,
+} from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -6891,6 +6908,148 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("system mailbox mode checkpoints the imported meal automation before cleaning staging", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const imported: string[] = [];
+    const mealPhotoItem = createMailboxItem({
+      dedupeKey: "meal-photo:system-mailbox-only",
+      id: "mailbox_item_system_mailbox_only_meal",
+      kind: "meal-photo.captured",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_only",
+            processingMode: "system_mailbox",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "f".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-only.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            imported.push(`${item.item.lane}:${item.item.kind}`);
+            await ensureAutomaticMealCloseoutAutomation({
+              defaultRoute: {
+                channel: "linq",
+                deliverySource: null,
+                deliveryTarget: null,
+                identityId: null,
+                participantId: null,
+                threadId: "linq_home_thread",
+                threadIsDirect: true,
+              },
+              routeValidationProfile: "hosted",
+              vaultRoot,
+            });
+            return {
+              afterCheckpoint: async () => {
+                events.push("meal-photo.delete");
+                return {
+                  attachmentEvidenceUpdated: null,
+                  kind: "meal_photo_cleanup" as const,
+                  projectionUpdated: null,
+                  reasonCode: "meal_photo.deleted",
+                  status: "succeeded" as const,
+                };
+              },
+              reasonCode: "meal_photo.imported",
+              status: "imported",
+            };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [
+                mealPhotoItem,
+                createMailboxItem({
+                  id: "mailbox_item_system_mailbox_only_conversation",
+                  kind: "conversation.message",
+                  lane: "conversation",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState(),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("System mailbox processing must not enter assistant phase.");
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"]],
+      );
+      assert.deepEqual(imported, ["system:meal-photo.captured"]);
+      const importCheckpoint = checkpointRequests
+        .slice()
+        .reverse()
+        .find((request) =>
+          request.redactedStatus?.hostedMailboxSystemImportedSeq === "1"
+        );
+      assert.equal(
+        importCheckpoint?.redactedStatus?.hostedMailboxSystemImportedSeq,
+        "1",
+      );
+      assert.equal(
+        importCheckpoint?.redactedStatus?.hostedMailboxConversationImportedSeq,
+        "0",
+      );
+      const cronStatus = await getAssistantCronStatus(vaultRoot, {
+        turnEnvironment: {
+          currentWorkingDirectory: null,
+          env: {
+            MURPH_HOSTED_RUNTIME_PROCESS: "1",
+            VAULT: vaultRoot,
+          },
+        },
+      });
+      assert.ok(cronStatus.nextRunAt);
+      assert.ok(importCheckpoint?.nextWakeAt);
+      assert.equal(importCheckpoint?.nextWakeReason, "assistant");
+      assert.equal(result.nextWakeAt, importCheckpoint?.nextWakeAt);
+      assert.equal(result.nextWakeReason, "assistant");
+      assert.equal(result.status, "scheduled");
+      assert.ok(
+        events.lastIndexOf("workspace.checkpoint") < events.indexOf("meal-photo.delete"),
+      );
+      await expect(showAutomation({
+        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+        vaultRoot,
+      })).resolves.toMatchObject({
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+        },
+        status: "active",
+      });
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("does not import initial conversation messages while cold bootstrap is deferred", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -11231,6 +11390,10 @@ describe("hosted workspace runtime entrypoint", () => {
         checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationImportedSeq,
         "251",
       );
+      assert.equal(
+        checkpointRequests[0]?.redactedStatus?.hostedMailboxConversationHandledThroughSeq,
+        undefined,
+      );
       assert.equal((await readHostedMailboxImportState({ vaultRoot })).watermarks.conversation, "251");
     } finally {
       await removeTempRoot(vaultRoot);
@@ -11936,12 +12099,7 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            const hashPrefix =
-              snapshotInput.reason === "assistant_runtime_commit"
-                ? "a"
-                : snapshotInput.reason === "outbox_receipt"
-                  ? "b"
-                  : "c";
+            const hashPrefix = snapshotInput.reason === "outbox_receipt" ? "b" : "c";
             return {
               snapshotRef: createBundleRef({
                 hash: hashPrefix.repeat(64),
@@ -16148,7 +16306,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(assistantPhaseCalls, 1);
       assert.deepEqual(
         await inspectHostedPendingAssistantInputWakeCandidate({ vaultRoot }),
-        { hasCandidate: true, indexComplete: false },
+        { hasCandidate: false, indexComplete: false },
       );
       assert.equal(events.includes("snapshot:idle_shutdown"), false);
 
@@ -24096,8 +24254,9 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("binds a gap-free provider batch to its terminal stored input id", async () => {
+  test("binds provider batches to stored input ids and conversation activity", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const conversationActivity: string[] = [];
 
     try {
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput(), {
@@ -24115,6 +24274,9 @@ describe("hosted workspace runtime entrypoint", () => {
             workspace: createWorkspaceState(),
           }),
         }),
+        onConversationActivityObserved(observation) {
+          conversationActivity.push(observation);
+        },
         async runAssistantPhase(input) {
           assert.equal(typeof input.beforeProviderAcceptedInputs, "function");
           assert.equal(input.currentAssistantInputId?.(), null);
@@ -24146,6 +24308,7 @@ describe("hosted workspace runtime entrypoint", () => {
             ],
           });
           assert.equal(input.currentAssistantInputId?.(), null);
+          assert.deepEqual(conversationActivity, ["uncertain"]);
           await invalidRelease?.();
           const release = await input.beforeProviderAcceptedInputs?.({
             acceptedInputs: [
@@ -24160,6 +24323,32 @@ describe("hosted workspace runtime entrypoint", () => {
           assert.equal(typeof release, "function");
           await release?.();
           assert.equal(input.currentAssistantInputId?.(), null);
+          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
+
+          const systemInputId = await stageAssistantInputEventForMailboxItem({
+            causalSeq: "43",
+            item: createMailboxItem({
+              id: "mailbox_item_preference_batch_system",
+              lane: "system",
+              laneSeq: "43",
+              occurredAt: "2026-04-26T00:00:03.000Z",
+            }),
+            lane: "system",
+            vaultRoot,
+          });
+          const systemRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: systemInputId, source: "assistant-input" },
+            ],
+          });
+          await systemRelease?.();
+          const genericRelease = await input.beforeProviderAcceptedInputs?.({
+            acceptedInputs: [
+              { id: "system_runtime_input", source: "system" },
+            ],
+          });
+          await genericRelease?.();
+          assert.deepEqual(conversationActivity, ["uncertain", "observed"]);
           return { progressed: false };
         },
         vaultRoot,
@@ -24828,6 +25017,11 @@ describe("hosted workspace runtime entrypoint", () => {
               item: item.item,
               vaultRoot,
             });
+            await recordHostedMailboxAssistantInputItem({
+              inputId: pendingInputId,
+              mailboxItemId: item.item.id,
+              vault: vaultRoot,
+            });
             assert.ok(await resolveHostedPendingAssistantInputWakeAt({ vaultRoot }));
             foregroundImported.resolve();
             return {
@@ -24896,6 +25090,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, yieldedRetryWakeAt);
       assert.equal(checkpoint.nextWakeAt, yieldedRetryWakeAt);
       assert.equal(checkpoint.nextWakeReason, "device-sync.reconcile");
+      assert.deepEqual(checkpoint.handledConversationMailboxItemIds, [
+        "mailbox_item_entrypoint_device_sync_pending_retry",
+      ]);
 
       vi.useRealTimers();
       vi.useFakeTimers({ toFake: ["Date"] });
@@ -25664,6 +25861,7 @@ function createPlatform(input: {
   logRequests?: HostedRuntimeLogRequest[];
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
+  phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
@@ -25748,6 +25946,7 @@ function createPlatform(input: {
       : {}),
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
+    ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),
@@ -26073,6 +26272,7 @@ function createMailboxItem(overrides: Partial<HostedMailboxItem> = {}): HostedMa
 async function stageAssistantInputEventForMailboxItem(input: {
   causalSeq?: string;
   item: HostedMailboxItem;
+  lane?: "conversation" | "system";
   threadId?: string;
   threadIsDirect?: boolean;
   vaultRoot: string;
@@ -26112,7 +26312,7 @@ async function stageAssistantInputEventForMailboxItem(input: {
         eventId: input.item.dedupeKey,
         itemId: input.item.id,
         kind: "hosted-mailbox" as const,
-        lane: "conversation" as const,
+        lane: input.lane ?? "conversation",
         laneSeq: input.item.laneSeq,
         payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
         payloadSource: input.item.payloadInlineCiphertext ? "inline" as const : "sidecar" as const,
