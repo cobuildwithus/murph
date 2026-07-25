@@ -50,10 +50,26 @@ export function describeVaultCliFailure(error: unknown): string | null {
   if (elapsedMs !== null) {
     details.push(`${Math.round(elapsedMs)}ms`)
   }
+  // Provider-reported detail. The code names the condition the status alone
+  // cannot ("http 404" does not distinguish a missing voice from a bad route),
+  // and the request id is what the provider's support asks for. Runtimes are
+  // responsible for bounding these before attaching them.
+  const providerErrorCode = readNonEmptyString(context.providerErrorCode)
+  if (providerErrorCode !== null) {
+    details.push(providerErrorCode)
+  }
+  const providerRequestId = readNonEmptyString(context.providerRequestId)
+  if (providerRequestId !== null) {
+    details.push(`request ${providerRequestId}`)
+  }
 
-  return details.length > 0
+  const summary = details.length > 0
     ? `${error.code} (${details.join(', ')})`
     : error.code
+  const providerErrorMessage = readNonEmptyString(context.providerErrorMessage)
+  return providerErrorMessage === null
+    ? summary
+    : `${summary}: ${providerErrorMessage}`
 }
 
 function readFiniteNumber(value: unknown): number | null {

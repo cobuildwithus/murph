@@ -110,6 +110,38 @@ test('elevenlabs runtime resolves env defaults and keeps HTTP failures secret-sa
   )
 })
 
+test('elevenlabs runtime forwards echoed provider text but never the credential', async () => {
+  // Deliberate narrowing of the secret-safe rule above: the provider's own
+  // message is forwarded so the assistant can debug a rejection, which means
+  // text the provider echoes back from the request can reach the error context
+  // and the runtime log. The credential must still never appear, and the
+  // forwarded message stays length-capped.
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation: async () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: 'invalid_content',
+              message: 'Text rejected: Private memo text.',
+            },
+          }),
+          { status: 400 },
+        ),
+      modelId: 'eleven_v3',
+      text: 'Private memo text.',
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.providerErrorCode === 'invalid_content' &&
+    error.context?.providerErrorMessage ===
+      'Text rejected: Private memo text.' &&
+    !JSON.stringify(error.context).includes('elevenlabs-key')
+  )
+})
+
 test('elevenlabs runtime keeps timeout active while consuming the response body', async () => {
   vi.useFakeTimers()
   const fetchImplementation = vi.fn(async (_url: string, init) => ({
@@ -173,4 +205,90 @@ test('elevenlabs runtime rejects speech text it cannot synthesize before the tim
     error.code === 'ELEVENLABS_INVALID_INPUT'
   )
   assert.equal(fetchImplementation.mock.calls.length, 0)
+})
+
+test('elevenlabs runtime keeps the provider error code, request id, and message', async () => {
+  const fetchImplementation = vi.fn(async () => ({
+    arrayBuffer: async () => new ArrayBuffer(0),
+    ok: false,
+    status: 404,
+    text: async () =>
+      JSON.stringify({
+        detail: {
+          code: 'voice_not_found',
+          message: "A voice with voice_id 'voice_probe' was not found.",
+          request_id: 'c080176137ecfe',
+          status: 'voice_not_found',
+          type: 'not_found',
+        },
+      }),
+  }))
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation,
+      modelId: 'eleven_v3',
+      text: 'Short memo.',
+      voiceId: 'voice_probe',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.providerErrorCode === 'voice_not_found' &&
+    error.context?.providerRequestId === 'c080176137ecfe' &&
+    error.context?.providerErrorMessage ===
+      "A voice with voice_id 'voice_probe' was not found."
+  )
+})
+
+test('elevenlabs runtime caps an oversized provider error message', async () => {
+  const fetchImplementation = vi.fn(async () => ({
+    arrayBuffer: async () => new ArrayBuffer(0),
+    ok: false,
+    status: 400,
+    text: async () =>
+      JSON.stringify({ detail: { message: 'x'.repeat(5_000) } }),
+  }))
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation,
+      modelId: 'eleven_v3',
+      text: 'Short memo.',
+      voiceId: 'voice_probe',
+    }),
+  ).rejects.toSatisfy((error: unknown) => {
+    if (!(error instanceof VaultCliError)) {
+      return false
+    }
+    const message = error.context?.providerErrorMessage
+    // Echoed provider text must never reach an assistant context unbounded.
+    return typeof message === 'string' && message.length === 301 &&
+      message.endsWith('…')
+  })
+})
+
+test('elevenlabs runtime tolerates a non-JSON error body', async () => {
+  const fetchImplementation = vi.fn(async () => ({
+    arrayBuffer: async () => new ArrayBuffer(0),
+    ok: false,
+    status: 502,
+    text: async () => '<html>bad gateway</html>',
+  }))
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation,
+      modelId: 'eleven_v3',
+      text: 'Short memo.',
+      voiceId: 'voice_probe',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.context?.providerErrorCode === null &&
+    error.context?.providerErrorMessage === null &&
+    error.context?.responseBodyTextLength === 24
+  )
 })
