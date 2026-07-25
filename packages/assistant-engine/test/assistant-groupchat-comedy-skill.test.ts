@@ -110,7 +110,7 @@ describe('assistant group-chat comedy skill', () => {
       'text bit → comic → voice memo → song → sportsbook odds → ruling',
     )
     expect(normalized).toContain(
-      'short voice memos; a sung apology nobody asked for; the group photo drop below.',
+      'short voice memos; a sung apology nobody asked for.',
     )
   })
 
@@ -139,7 +139,7 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
   })
 
-  it('makes the group photo an unprompted offer rather than a silent overwrite', async () => {
+  it('makes the group photo an unprompted offer whose visible text carries the whole scope', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
@@ -152,20 +152,60 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalized).toContain(
       'Having the idea unprompted is your half of this; the yes is theirs.',
     )
+
+    // The user-visible offer must carry every material effect, as one
+    // contiguous sentence the room actually reads. A yes to a vaguer offer
+    // cannot stand in for consent to AI processing, durable retention, public
+    // hosting, or an irreversible shared-icon replacement.
     expect(normalized).toContain(
-      'Offer it yourself. Nobody has to ask',
+      'want me to put myself in that photo and make it the group icon? it goes through an image generator, the result gets saved and lives at a public link, and I can\'t put your current icon back.',
+    )
+    expect(normalized).toContain(
+      'a yes to a vague offer is not a yes to any of it',
+    )
+    expect(normalized).toContain(
+      'their photo goes through an image generator, the result is saved, it is hosted at a public link, and you cannot put the current icon back',
+    )
+    expect(normalized).toContain(
+      'A yes to an older, vaguer offer does not count.',
     )
     expect(normalized).toContain('Silence is a no.')
     expect(normalized).toContain(
-      'nothing restores the one it replaces',
+      'Everyone identifiable in the photo has to say yes to that, not just whoever sent it',
     )
     expect(normalized).toContain(
-      'The room laughing at the photo is not that agreement, and neither is having sent it.',
-    )
-    expect(normalized).toContain(
-      'Everyone identifiable has to be covered, not just whoever sent it.',
+      'the room has to be fine with its icon changing',
     )
     expect(normalized).toContain('The surprise survives the ask.')
+
+    // Ordinary-turn-only: a scheduled occurrence cannot mutate an avatar, so
+    // the section must not read as a dispatch format.
+    expect(normalized).toContain(
+      'Offer it yourself, on an ordinary group turn.',
+    )
+    expect(normalized).toContain(
+      'This is never a scheduled or automated move: a cron occurrence cannot change an avatar at all, and it is not one of the day\'s dispatch formats.',
+    )
+    expect(normalized).not.toContain('the group photo drop below')
+
+    // Do not offer a capability the surface cannot perform, and never leave an
+    // accepted offer unanswered.
+    expect(normalized).toContain(
+      'Do not offer where you cannot deliver.',
+    )
+    expect(normalized).toContain(
+      'a Telegram group has no way to set a chat photo, so the bit never starts there',
+    )
+    expect(normalized).toContain(
+      'Once they have said yes, they are owed an outcome.',
+    )
+    expect(normalized).toContain(
+      'say so in one plain line ("I couldn\'t update this chat\'s icon") and stop',
+    )
+    expect(normalized).toContain(
+      'never claim the icon changed when it did not',
+    )
+
     expect(normalized).toContain(
       'One call: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the photo plus your character sheet.',
     )
@@ -173,9 +213,6 @@ describe('assistant group-chat comedy skill', () => {
       'Edit yourself INTO their photo; do not redraw their photo.',
     )
     expect(normalized).toContain('It has to read as a thumbnail.')
-    expect(normalized).toContain(
-      'Whatever the human did in that photo stays the joke. You are the second beat, never the replacement punchline.',
-    )
     expect(normalized).toContain(
       "The moment is fair game; the person's body is not.",
     )
