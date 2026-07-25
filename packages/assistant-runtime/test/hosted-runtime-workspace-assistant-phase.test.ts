@@ -4167,7 +4167,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
-        currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
+        telegramSenderHandles: ["1234567890"],
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
@@ -4179,7 +4179,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
-        currentTurnSender: { channel: "linq", handles: ["+15555550123"] },
+        linqSenderHandles: ["+15555550123"],
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(groupRequestMock).toHaveBeenCalledWith({

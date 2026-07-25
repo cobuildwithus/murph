@@ -142,7 +142,6 @@ import {
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
   type HostedRuntimeGroupChatParticipant,
   type HostedRuntimeGroupCreateJoinLinkRequest,
-  type HostedRuntimeGroupToolCurrentTurnSender,
   type HostedRuntimeGroupDisclosureGrantListEntry,
   type HostedRuntimeGroupDisclosureGrantSummary,
   type HostedRuntimeGroupKind,
@@ -1091,19 +1090,16 @@ export function parseHostedRuntimeGroupToolRequest(
       record,
       new Set([
         "action",
-        "currentTurnSender",
-        // Legacy alias: runners predating channel-qualified sender evidence
-        // still send Linq handles under the old key. Remove once every runner
-        // has shipped `currentTurnSender`.
         "linqSenderHandles",
         "projectionScopes",
+        "telegramSenderHandles",
       ]),
       "Hosted runtime group tool read_shared request",
     );
-    const currentTurnSender = parseHostedRuntimeGroupCurrentTurnSenderRequest(record);
+    const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
     return {
       action,
-      ...(currentTurnSender === null ? {} : { currentTurnSender }),
+      ...senderHandles,
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
@@ -1406,50 +1402,49 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
 }
 
 /**
- * Reads channel-qualified current-turn sender evidence, accepting the legacy
- * Linq-only key while runners roll forward. Supplying both is a contradiction,
- * so it fails closed rather than guessing which one is authoritative.
+ * Reads current-turn sender evidence. Each channel owns its own field because
+ * Web matches each against a different member identity index; supplying both is
+ * a contradiction and fails closed rather than guessing which one is
+ * authoritative.
  */
-function parseHostedRuntimeGroupCurrentTurnSenderRequest(
+function parseHostedRuntimeGroupSenderHandlesRequest(
   record: Record<string, unknown>,
-): HostedRuntimeGroupToolCurrentTurnSender | null {
-  const currentTurnSenderPresent = record.currentTurnSender !== undefined
-    && record.currentTurnSender !== null;
-  const legacyHandlesPresent = record.linqSenderHandles !== undefined
+): {
+  linqSenderHandles?: string[];
+  telegramSenderHandles?: string[];
+} {
+  const linqPresent = record.linqSenderHandles !== undefined
     && record.linqSenderHandles !== null;
-  if (currentTurnSenderPresent && legacyHandlesPresent) {
+  const telegramPresent = record.telegramSenderHandles !== undefined
+    && record.telegramSenderHandles !== null;
+  if (linqPresent && telegramPresent) {
     throw new TypeError(
-      "Hosted runtime group tool read_shared request must not supply both currentTurnSender and linqSenderHandles.",
+      "Hosted runtime group tool read_shared request must not supply sender handles for more than one channel.",
     );
   }
-  if (legacyHandlesPresent) {
+  if (linqPresent) {
     return {
-      channel: "linq",
-      handles: parseHostedRuntimeGroupBoundedHandles(record.linqSenderHandles, {
-        allowEmpty: false,
-        label: "Hosted runtime group tool read_shared request linqSenderHandles",
-      }),
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request linqSenderHandles",
+        },
+      ),
     };
   }
-  if (!currentTurnSenderPresent) {
-    return null;
+  if (telegramPresent) {
+    return {
+      telegramSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.telegramSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request telegramSenderHandles",
+        },
+      ),
+    };
   }
-  const label = "Hosted runtime group tool read_shared request currentTurnSender";
-  const senderRecord = requireObject(record.currentTurnSender, label);
-  assertAllowedObjectKeys(senderRecord, new Set(["channel", "handles"]), label);
-  const channel = requireString(senderRecord.channel, `${label} channel`);
-  if (channel !== "linq" && channel !== "telegram") {
-    throw new TypeError(
-      "Hosted runtime group tool read_shared request currentTurnSender channel is not supported.",
-    );
-  }
-  return {
-    channel,
-    handles: parseHostedRuntimeGroupBoundedHandles(senderRecord.handles, {
-      allowEmpty: false,
-      label: `${label} handles`,
-    }),
-  };
+  return {};
 }
 
 function parseHostedRuntimeGroupCurrentTurnHandles(

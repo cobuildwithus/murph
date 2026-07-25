@@ -1414,20 +1414,17 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     const prisma = createPrismaStub({ $transaction: transaction });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
-      currentTurnSender: {
-        channel: "linq",
-        handles: [
-          dualPhoneHandle,
-          dualPhoneHandle,
-          dualEmailHandle,
-          emailHandle,
-          unverifiedEmailHandle,
-          ambiguousMemberEmailHandle,
-          priorKeyPhoneHandle,
-          rotatedAmbiguousPhoneHandle,
-          "unknown@example.test",
-        ],
-      },
+      linqSenderHandles: [
+        dualPhoneHandle,
+        dualPhoneHandle,
+        dualEmailHandle,
+        emailHandle,
+        unverifiedEmailHandle,
+        ambiguousMemberEmailHandle,
+        priorKeyPhoneHandle,
+        rotatedAmbiguousPhoneHandle,
+        "unknown@example.test",
+      ],
       prisma,
       projectionScopes: [SLEEP_SCOPE],
       runtimeMemberId: "member_group_runtime",
@@ -1561,10 +1558,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
-      currentTurnSender: {
-        channel: "telegram",
-        handles: [telegramSenderUserId],
-      },
+      telegramSenderHandles: [telegramSenderUserId],
       prisma,
       projectionScopes: [SLEEP_SCOPE],
       runtimeMemberId: "member_group_runtime",
@@ -1620,7 +1614,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId current-turn attribution", 
     });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
-      currentTurnSender: { channel: "telegram", handles: ["15559999999"] },
+      telegramSenderHandles: ["15559999999"],
       prisma,
       projectionScopes: [SLEEP_SCOPE],
       runtimeMemberId: "member_group_runtime",

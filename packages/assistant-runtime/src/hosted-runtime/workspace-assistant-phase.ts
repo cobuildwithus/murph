@@ -13,7 +13,6 @@ import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
-  type HostedRuntimeGroupToolCurrentTurnSender,
   type HostedRuntimeGroupToolLinqThreadContext,
   type HostedRuntimeGroupToolRequest,
   type HostedRuntimeGroupToolResponse,
@@ -346,17 +345,16 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         };
         // Hosted email reply aliases authenticate a route, not the human From
         // header, so email ingress never carries sender evidence.
-        const currentTurnSender = emailIngressPresent
-          ? null
-          : resolveHostedGroupToolCurrentTurnSender({
+        const senderHandles = emailIngressPresent
+          ? {}
+          : resolveHostedGroupToolSenderHandles({
               linqDeliveryContexts: input.linqDeliveryContexts,
               telegramSenderHandles: input.telegramSenderHandles ?? [],
             });
-        return await input.groupToolPort.request(
-          currentTurnSender
-            ? { ...sharedReadRequest, currentTurnSender }
-            : sharedReadRequest,
-        );
+        return await input.groupToolPort.request({
+          ...sharedReadRequest,
+          ...senderHandles,
+        });
       }
       if (
         request.action !== "read_chat_participants"
@@ -458,10 +456,10 @@ function resolveHostedGroupToolSelfOptOutContext(input: {
  * contradiction and fails closed rather than letting Web guess which index to
  * match against.
  */
-function resolveHostedGroupToolCurrentTurnSender(input: {
+function resolveHostedGroupToolSenderHandles(input: {
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
   telegramSenderHandles: readonly string[];
-}): HostedRuntimeGroupToolCurrentTurnSender | null {
+}): { linqSenderHandles?: string[]; telegramSenderHandles?: string[] } {
   const linqHandles = resolveHostedGroupToolLinqSenderHandles(
     input.linqDeliveryContexts,
   );
@@ -471,14 +469,14 @@ function resolveHostedGroupToolCurrentTurnSender(input: {
     )
     .slice(0, HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX);
   if (linqHandles.length > 0 && telegramHandles.length > 0) {
-    return null;
+    return {};
   }
   if (linqHandles.length > 0) {
-    return { channel: "linq", handles: linqHandles };
+    return { linqSenderHandles: linqHandles };
   }
   return telegramHandles.length > 0
-    ? { channel: "telegram", handles: telegramHandles }
-    : null;
+    ? { telegramSenderHandles: telegramHandles }
+    : {};
 }
 
 function resolveHostedGroupToolLinqSenderHandles(

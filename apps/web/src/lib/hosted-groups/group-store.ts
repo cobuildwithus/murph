@@ -7,7 +7,6 @@ import {
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
   type HostedRuntimeGroupSharedReadResult,
   type HostedRuntimeGroupSharedRecord,
-  type HostedRuntimeGroupToolCurrentTurnSender,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -410,8 +409,9 @@ type HostedGroupSharedReadCapture =
  * access cannot extend the database authority window.
  */
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
-  currentTurnSender?: HostedRuntimeGroupToolCurrentTurnSender | null;
+  linqSenderHandles?: readonly string[];
   prisma?: PrismaClient;
+  telegramSenderHandles?: readonly string[];
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   runtimeMemberId: string;
 }): Promise<HostedRuntimeGroupSharedReadResult> {
@@ -478,10 +478,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         };
       }
       const currentTurnHandlesByParticipantId =
-        matchHostedGroupCurrentTurnSenderHandles(
-          group.members,
-          input.currentTurnSender ?? null,
-        );
+        matchHostedGroupCurrentTurnSenderHandles(group.members, {
+          linqSenderHandles: input.linqSenderHandles ?? [],
+          telegramSenderHandles: input.telegramSenderHandles ?? [],
+        });
       const members = group.members.map((member) => ({
         currentTurnHandles:
           currentTurnHandlesByParticipantId.get(member.id) ?? [],
@@ -2174,14 +2174,22 @@ async function readHostedGroupMemberRoster(
  */
 function matchHostedGroupCurrentTurnSenderHandles(
   members: readonly HostedGroupSharedMemberSource[],
-  currentTurnSender: HostedRuntimeGroupToolCurrentTurnSender | null,
+  senderHandles: {
+    linqSenderHandles: readonly string[];
+    telegramSenderHandles: readonly string[];
+  },
 ): Map<string, string[]> {
   const matchedHandlesByParticipantId = new Map<string, string[]>();
-  if (!currentTurnSender) {
+  const linqPresent = senderHandles.linqSenderHandles.length > 0;
+  const telegramPresent = senderHandles.telegramSenderHandles.length > 0;
+  if (linqPresent && telegramPresent) {
     return matchedHandlesByParticipantId;
   }
-  for (const senderHandle of new Set(currentTurnSender.handles)) {
-    const matchedMembers = currentTurnSender.channel === "telegram"
+  const channelHandles = telegramPresent
+    ? senderHandles.telegramSenderHandles
+    : senderHandles.linqSenderHandles;
+  for (const senderHandle of new Set(channelHandles)) {
+    const matchedMembers = telegramPresent
       ? matchHostedGroupTelegramSenderHandle(members, senderHandle)
       : matchHostedGroupLinqSenderHandle(members, senderHandle);
     if (matchedMembers.length !== 1) {

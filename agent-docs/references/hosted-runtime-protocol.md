@@ -258,21 +258,32 @@ Attribution therefore remains bound to the scanner-selected durable operation
 contexts, and active steering cannot add a second participant's identity
 authority to the turn.
 
-Deploy Web before Cloudflare and the runner for the channel-qualified sender
-change. Web accepts the legacy Linq-only `linqSenderHandles` key so an older
-runner keeps working, but an older Web rejects the unknown `currentTurnSender`
-key and fails every `read_shared` carrying sender evidence, including existing
-iMessage groups. Remove the legacy alias only after every runner emits
-`currentTurnSender`.
+Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
+existing meaning and `telegramSenderHandles` is a separate optional field, so a
+new runner against an older Web degrades only the not-yet-supported Telegram
+field and never disturbs established iMessage attribution.
+
+Persisted Telegram sender metadata is a runner rollback floor. The strict
+Telegram input-source schema in a preceding runner does not recognize
+`senderHandle` or `senderUsername`, so the first checkpointed workspace snapshot
+containing an attributed Telegram group input cannot be read back by that older
+runner for replay, projection update, or pending-input recovery. Those keys are
+therefore written only when an authoritative route-authorized group sender
+exists, leaving direct threads and unattributable group inbound byte-identical
+to the previous shape. Below that floor the recovery posture is a forward fix or
+an explicit offline migration, not a dual reader. The raw Telegram id and
+optional username follow the existing encrypted assistant-input residue
+retention and snapshot policy.
 
 Interactive `read_shared` requests may carry only bounded, deduplicated
-route-authorized sender handles from that operation scope, qualified by the
-sending channel. Web matches Linq handles against current membership phone and
-verified-email blind indexes, and Telegram handles against the current
-membership Telegram-user blind index, all selected by the same group query.
-Matching never crosses channels: a numeric Telegram user id would otherwise
-normalize into a valid phone lookup key and could resolve to an unrelated
-member. Evidence from two channels in one operation fails closed. A handle is
+route-authorized sender handles from that operation scope, in the one field that
+names the sending channel. Web matches `linqSenderHandles` against current
+membership phone and verified-email blind indexes, and `telegramSenderHandles`
+against the current membership Telegram-user blind index, all selected by the
+same group query. Matching never crosses channels: a numeric Telegram user id
+would otherwise normalize into a valid phone lookup key and could resolve to an
+unrelated member. Populating both fields in one request fails closed at the
+runtime, the parser, and the store. A handle is
 returned only in the matching member's bounded `currentTurnHandles` array and
 only when it resolves to exactly one current membership; that row also carries
 its group-scoped `participantId`.

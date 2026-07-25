@@ -65,13 +65,10 @@ describe("hosted group tool route", () => {
   it("accepts a valid read_shared callback larger than the former 8 KiB limit", async () => {
     const body = {
       action: "read_shared",
-      currentTurnSender: {
-        channel: "linq",
-        handles: Array.from(
-          { length: 32 },
-          (_, index) => `${index}`.padStart(2, "0") + "\0".repeat(64),
-        ),
-      },
+      linqSenderHandles: Array.from(
+        { length: 32 },
+        (_, index) => `${index}`.padStart(2, "0") + "\0".repeat(64),
+      ),
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     };
     const payloadText = JSON.stringify(body);

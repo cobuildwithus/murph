@@ -1600,85 +1600,69 @@ describe("parseHostedRuntimeGroupTool", () => {
     ];
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      currentTurnSender: {
-        channel: "linq",
-        handles: [" +15551110001 ", " member@example.test "],
-      },
+      linqSenderHandles: [" +15551110001 ", " member@example.test "],
       projectionScopes,
     })).toEqual({
       action: "read_shared",
-      currentTurnSender: {
-        channel: "linq",
-        handles: ["+15551110001", "member@example.test"],
-      },
+      linqSenderHandles: ["+15551110001", "member@example.test"],
       projectionScopes,
     });
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      currentTurnSender: { channel: "telegram", handles: [" 1234567890 "] },
       projectionScopes,
+      telegramSenderHandles: [" 1234567890 "],
     })).toEqual({
       action: "read_shared",
-      currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
       projectionScopes,
+      telegramSenderHandles: ["1234567890"],
     });
 
-    // Legacy alias: runners predating channel-qualified evidence still send
-    // Linq handles under the old key.
-    expect(parseHostedRuntimeGroupToolRequest({
-      action: "read_shared",
-      linqSenderHandles: [" +15551110001 "],
-      projectionScopes,
-    })).toEqual({
-      action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
-      projectionScopes,
-    });
+    // One group runtime is bound to a single provider thread, so evidence for
+    // two channels is a contradiction Web must never resolve by guessing.
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
       linqSenderHandles: ["+15551110001"],
       projectionScopes,
-    })).toThrow(/must not supply both/u);
+      telegramSenderHandles: ["1234567890"],
+    })).toThrow(/more than one channel/u);
 
-    for (const currentTurnSender of [
-      { channel: "linq", handles: [] },
-      { channel: "linq", handles: ["+15551110001", "+15551110001"] },
-      { channel: "linq", handles: [" "] },
-      { channel: "linq", handles: ["a".repeat(513)] },
+    for (const senderHandles of [
+      { linqSenderHandles: [] },
+      { linqSenderHandles: ["+15551110001", "+15551110001"] },
+      { linqSenderHandles: [" "] },
+      { linqSenderHandles: ["a".repeat(513)] },
       {
-        channel: "linq",
-        handles: Array.from({ length: 33 }, (_, index) => `sender-${index}`),
+        linqSenderHandles: Array.from(
+          { length: 33 },
+          (_, index) => `sender-${index}`,
+        ),
       },
-      { channel: "sms", handles: ["+15551110001"] },
-      { channel: "linq", handles: ["+15551110001"], extra: "nope" },
-      { handles: ["+15551110001"] },
+      { telegramSenderHandles: [] },
+      { telegramSenderHandles: ["1234567890", "1234567890"] },
+      { telegramSenderHandles: ["a".repeat(513)] },
     ]) {
       expect(() => parseHostedRuntimeGroupToolRequest({
         action: "read_shared",
-        currentTurnSender,
+        ...senderHandles,
         projectionScopes,
       })).toThrow();
     }
     expect(() => parseHostedRuntimeGroupToolRequest({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["+15551110001"] },
+      linqSenderHandles: ["+15551110001"],
       memberId: "member_hijack",
       projectionScopes,
     })).toThrow(/not allowed/u);
 
     const maximallyEscapedRequest = {
       action: "read_shared",
-      currentTurnSender: {
-        channel: "telegram",
-        handles: Array.from(
-          { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
-          (_, index) => `${index}`.padStart(2, "0")
-            + "\0".repeat(
-              HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS - 2,
-            ),
-        ),
-      },
+      telegramSenderHandles: Array.from(
+        { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
+        (_, index) => `${index}`.padStart(2, "0")
+          + "\0".repeat(
+            HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS - 2,
+          ),
+      ),
       projectionScopes,
     };
     expect(new TextEncoder().encode(JSON.stringify(maximallyEscapedRequest)).byteLength)

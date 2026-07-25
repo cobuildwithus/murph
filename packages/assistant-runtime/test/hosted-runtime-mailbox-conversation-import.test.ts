@@ -1887,10 +1887,12 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(event.conversation?.actorId, null);
     assert.equal(event.conversation?.threadIsDirect, true);
     assert.equal(
-      event.sourceMetadata?.kind === "telegram"
-        ? event.sourceMetadata.senderHandle
-        : "unset",
-      null,
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderUsername"),
+      false,
     );
   });
 
@@ -2988,8 +2990,6 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.deepEqual(event.sourceMetadata, {
       externalThreadRouteAuthorityPresent: true,
       kind: "telegram",
-      senderHandle: null,
-      senderUsername: null,
       mediaGroupId: event.sourceMetadata?.kind === "telegram"
         ? event.sourceMetadata.mediaGroupId
         : null,

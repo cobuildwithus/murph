@@ -57,10 +57,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      currentTurnSender: {
-        channel: "telegram",
-        handles: ["1234567890", "9876543210"],
-      },
+      telegramSenderHandles: ["1234567890", "9876543210"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
   });
@@ -78,13 +75,13 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      currentTurnSender: { channel: "telegram", handles: ["999999999"] },
+      telegramSenderHandles: ["999999999"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      currentTurnSender: { channel: "telegram", handles: ["1234567890"] },
+      telegramSenderHandles: ["1234567890"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
   });
@@ -109,7 +106,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      currentTurnSender: { channel: "telegram", handles: ["forged"] },
+      telegramSenderHandles: ["forged"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 
@@ -254,12 +251,12 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
+      linqSenderHandles: ["forged@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["+15550000001"] },
+      linqSenderHandles: ["+15550000001"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
 
@@ -352,7 +349,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
+      linqSenderHandles: ["forged@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
@@ -477,7 +474,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
 
     await groupTool.request({
       action: "read_shared",
-      currentTurnSender: { channel: "linq", handles: ["forged@example.test"] },
+      linqSenderHandles: ["forged@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
     expect(request).toHaveBeenLastCalledWith({
@@ -732,10 +729,7 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
     expect(request).toHaveBeenLastCalledWith({
       action: "read_shared",
-      currentTurnSender: {
-        channel: "linq",
-        handles: ["+15550000001", "member@example.test"],
-      },
+      linqSenderHandles: ["+15550000001", "member@example.test"],
       projectionScopes: [{ projectionKind: "steps-days.v0" }],
     });
   });

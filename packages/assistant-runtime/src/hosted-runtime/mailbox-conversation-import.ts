@@ -1604,7 +1604,11 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (!mediaGroupId && !replyContext && !externalThreadRouteAuthorityPresent) {
     return null;
   }
-  const senderUsername = readHostedTelegramGroupSenderUsername(wake);
+  // Thread-container (group) inbound carries the sending participant so the
+  // assistant can attribute messages. Omit both keys entirely when there is no
+  // authoritative sender so direct threads and unattributable group inbound
+  // keep the exact record shape an older runner can still read.
+  const senderHandle = readHostedTelegramGroupSenderHandle(wake);
 
   return {
     ...(externalThreadRouteAuthorityPresent
@@ -1613,10 +1617,12 @@ function createHostedConversationAssistantInputSourceMetadata(
     kind: "telegram",
     mediaGroupId,
     replyContext,
-    // Thread-container (group) inbound carries the sending participant so the
-    // assistant can attribute messages; 1:1 home threads stay handle-free.
-    senderHandle: readHostedTelegramGroupSenderHandle(wake),
-    senderUsername,
+    ...(senderHandle
+      ? {
+          senderHandle,
+          senderUsername: readHostedTelegramGroupSenderUsername(wake),
+        }
+      : {}),
   };
 }
 
