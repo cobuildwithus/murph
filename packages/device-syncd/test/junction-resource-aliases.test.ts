@@ -122,6 +122,7 @@ function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
       lastErrorMessage: null,
       firstSeenAt: "2026-04-03T00:00:00.000Z",
       lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
       createdAt: "2026-04-03T00:00:00.000Z",
       updatedAt: "2026-04-03T00:00:00.000Z",
     }),

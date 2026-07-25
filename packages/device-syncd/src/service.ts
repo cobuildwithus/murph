@@ -319,6 +319,8 @@ class DeviceSyncServiceController {
         releaseWebhookTrace: (provider, traceId, claimToken) =>
           this.store.releaseWebhookTrace(provider, traceId, claimToken),
         markWebhookReceived: (accountId, now) => this.store.markWebhookReceived(accountId, now),
+        markConnectionSourceDataReceived: (input) =>
+          this.store.markConnectionSourceDataReceived(input),
       },
       hooks: {
         runConnectionMutation: ({ provider }, operation) =>

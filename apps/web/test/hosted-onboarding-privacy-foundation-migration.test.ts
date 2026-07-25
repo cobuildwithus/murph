@@ -893,6 +893,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260722190000_hosted_phone_call_origin_session",
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
+      "20260724180000_device_connection_source_last_data_at",
       "20260725210000_hosted_pulse_trial_payment_intent",
       "migration_lock.toml",
     ]);

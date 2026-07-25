@@ -16,6 +16,7 @@ import {
 import {
   requireHostedStripeApi,
 } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
@@ -427,7 +428,10 @@ async function readHostedStripeActivationMailboxItemsForCompletedEvent(input: {
 }
 
 async function resolveHostedStripeActivationSourceEventIds(eventId: string): Promise<string[]> {
-  const stripeEvent = await requireHostedStripeApi().events.retrieve(eventId);
+  const stripeEvent = await withHostedStripeFailureLog(
+    "events.retrieve.activation-sources",
+    () => requireHostedStripeApi().events.retrieve(eventId),
+  );
   const sourceEventIds = [eventId];
   const subscriptionId = readHostedStripeEventPayloadSubscriptionId(stripeEvent);
 
