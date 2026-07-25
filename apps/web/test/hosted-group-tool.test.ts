@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedPublicBaseUrl: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  transaction: vi.fn(),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
@@ -177,7 +178,10 @@ const fakePrisma = {
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     ...fakePrisma,
-    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
+    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => {
+      mocks.transaction();
+      return run(fakeTx);
+    },
   }),
 }));
 
@@ -853,7 +857,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("renames the chat with a null group when the runtime has no hosted group record", async () => {
-    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValueOnce(null);
+    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -874,6 +878,8 @@ describe("handleHostedRuntimeGroupTool", () => {
       chatId: "chat_group_runtime",
       displayName: "Unattached group",
     });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
   it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
