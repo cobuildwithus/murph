@@ -136,11 +136,17 @@ function signInTokenRequest(body?: unknown, bearerToken: string | null = "privy-
     : createJsonPostRequest(url, body, init);
 }
 
-function statusRequest(bearerToken: string | null = "privy-identity-token") {
-  const url = "https://app.example.test/api/device-sync/companion/status";
+function statusRequest(
+  bearerToken: string | null = "privy-identity-token",
+  sourceProviderSlug?: string,
+) {
+  const url = new URL("https://app.example.test/api/device-sync/companion/status");
+  if (sourceProviderSlug) {
+    url.searchParams.set("sourceProviderSlug", sourceProviderSlug);
+  }
   return bearerToken === null
-    ? new Request(url)
-    : createBearerRequest(url, bearerToken);
+    ? new Request(url.toString())
+    : createBearerRequest(url.toString(), bearerToken);
 }
 
 function healthMetadataRequest(body: unknown, bearerToken: string | null = "privy-identity-token") {
@@ -312,6 +318,40 @@ describe("device sync companion routes", () => {
           retryable: false,
         }),
       );
+    });
+
+    it("records Android auth diagnostics with an explicit platform", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_network_error",
+        errorKind: "network",
+        method: "sms",
+        platform: "android",
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "Companion auth diagnostic.",
+        expect.objectContaining({
+          platform: "android",
+        }),
+      );
+    });
+
+    it("rejects unsupported auth diagnostic platforms", async () => {
+      const response = await authDiagnosticsRoute.POST(authDiagnosticsRequest({
+        diagnosticCode: "privy_network_error",
+        errorKind: "network",
+        method: "sms",
+        platform: "web",
+        retryable: true,
+        stage: "send_code",
+      }));
+
+      expect(response.status).toBe(400);
     });
 
     it("accepts the checked-in iOS OTP failure contract", async () => {
@@ -738,15 +778,28 @@ describe("device sync companion routes", () => {
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
-    it("rejects non-iOS companion platform metadata without reaching Junction", async () => {
+    it("accepts Android companion platform metadata", async () => {
       mockVerifiedPrivyUser();
 
-      const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "android" }));
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        connectionIntent: "connect",
+        platform: "android",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
+        "member_1",
+        "junction",
+        "connect",
+      );
+    });
+
+    it("rejects unsupported companion platform metadata without reaching Junction", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({ platform: "web" }));
 
       expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({
-        error: { code: "COMPANION_REQUEST_INVALID" },
-      });
       expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
     });
 
@@ -1202,6 +1255,50 @@ describe("device sync companion routes", () => {
       });
       expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledWith({
         connectionIds: ["dsc_1"],
+        userId: "member_1",
+      });
+    });
+
+    it("scopes availability and receipt reads to Health Connect", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      mocks.listConnectionSources.mockResolvedValue([
+        {
+          resourceAvailabilitySummary: { sleep: true },
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+        },
+        {
+          resourceAvailabilitySummary: { workouts: true },
+          sourceProviderSlug: "health_connect",
+          status: "connected",
+        },
+      ]);
+      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        createdAt: "2026-07-25T18:00:00.000Z",
+        eventType: "daily.data.workouts.updated",
+        sourceProviderSlug: "health_connect",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "health_connect",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: "2026-07-25T18:00:00.000Z",
+        resources: {
+          workouts: { lastReceivedAt: "2026-07-25T18:00:00.000Z" },
+        },
+      });
+      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledWith({
+        connectionIds: ["dsc_1"],
+        sourceProviderSlug: "health_connect",
         userId: "member_1",
       });
     });

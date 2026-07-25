@@ -25,6 +25,7 @@ export class PrismaHostedSignalStore {
         traceId: normalizeNullableString(input.traceId),
         eventType: normalizeNullableString(input.eventType),
         resourceCategory: normalizeNullableString(input.resourceCategory),
+        sourceProviderSlug: normalizeNullableString(input.sourceProviderSlug),
         reason: normalizeNullableString(input.reason),
         nextReconcileAt: input.nextReconcileAt ? new Date(input.nextReconcileAt) : null,
         revokeWarningCode: normalizeNullableString(input.revokeWarning?.code),
@@ -45,6 +46,7 @@ export class PrismaHostedSignalStore {
   async listRecentConnectionWebhookSignals(input: {
     userId: string;
     connectionIds: readonly string[];
+    sourceProviderSlug?: string | null;
     limit?: number;
   }): Promise<HostedSignalRecord[]> {
     if (input.connectionIds.length === 0) {
@@ -62,6 +64,9 @@ export class PrismaHostedSignalStore {
         userId: input.userId,
         connectionId: { in: [...input.connectionIds] },
         kind: "webhook_hint",
+        ...(input.sourceProviderSlug
+          ? { sourceProviderSlug: input.sourceProviderSlug }
+          : {}),
       },
       orderBy: { id: "desc" },
       take: limit,
@@ -85,6 +90,7 @@ function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRe
     traceId: record.traceId,
     eventType: record.eventType,
     resourceCategory: record.resourceCategory,
+    sourceProviderSlug: record.sourceProviderSlug,
     reason: record.reason,
     nextReconcileAt: record.nextReconcileAt?.toISOString() ?? null,
     revokeWarning: record.revokeWarningCode ? { code: record.revokeWarningCode } : null,

@@ -33,6 +33,7 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
 const COMPANION_SDK_VERSION_MAX_ENTRIES = 10;
+export type CompanionPlatform = "ios" | "android";
 const COMPANION_HEALTH_METADATA_JUNCTION_SOURCE_PROVIDER =
   normalizeJunctionProviderSlug(JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_PROVIDER);
 
@@ -96,6 +97,7 @@ const COMPANION_AUTH_DIAGNOSTIC_ALLOWED_KEYS = new Set([
   "errorKind",
   "httpStatus",
   "method",
+  "platform",
   "providerErrorCode",
   "retryable",
   "stage",
@@ -148,7 +150,7 @@ interface CompanionAuthDiagnosticLog {
   errorKind: string;
   httpStatus: number | null;
   method: string;
-  platform: "ios";
+  platform: CompanionPlatform;
   provider: "privy";
   providerErrorCode: string | null;
   retryable: boolean;
@@ -178,10 +180,7 @@ export function validateCompanionSignInRequestBody(
     throw companionRequestInvalid("connectionIntent must be connect or resume when provided.");
   }
 
-  const platform = readOptionalBoundedString(body, "platform");
-  if (platform !== null && platform !== "ios") {
-    throw companionRequestInvalid("platform must be ios when provided.");
-  }
+  readOptionalCompanionPlatform(body);
   readOptionalBoundedString(body, "appInstallationId");
   readOptionalBoundedString(body, "appVersion");
 
@@ -206,6 +205,23 @@ export function validateCompanionSignInRequestBody(
   }
 
   return connectionIntent ?? null;
+}
+
+export function readCompanionStatusSourceProviderSlug(requestUrl: string): string | null {
+  const value = new URL(requestUrl).searchParams.get("sourceProviderSlug");
+  if (value === null) {
+    return null;
+  }
+  if (value.length > COMPANION_METADATA_STRING_MAX_LENGTH) {
+    throw companionRequestInvalid("sourceProviderSlug must be a short provider slug.");
+  }
+
+  const normalized = normalizeJunctionProviderSlug(value);
+  if (!normalized) {
+    throw companionRequestInvalid("sourceProviderSlug must be a valid provider slug.");
+  }
+
+  return normalized;
 }
 
 export function parseCompanionHrvRmssdObservationRequestBody(
@@ -402,7 +418,7 @@ export function validateCompanionAuthDiagnosticRequestBody(
     errorKind,
     httpStatus,
     method,
-    platform: "ios",
+    platform: readOptionalCompanionPlatform(body) ?? "ios",
     provider: "privy",
     providerErrorCode: readOptionalProviderErrorCode(body),
     retryable: readRequiredBoolean(body, "retryable"),
@@ -466,8 +482,12 @@ export interface CompanionDeviceSyncStatusResponse {
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;
+  sourceProviderSlug?: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<CompanionDeviceSyncStatusResponse> {
+  const sourceProviderSlug = input.sourceProviderSlug
+    ? normalizeJunctionProviderSlug(input.sourceProviderSlug)
+    : null;
   const connections = (await input.store.listConnectionsForUser(input.memberId)).filter(
     (connection) =>
       connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
@@ -484,6 +504,12 @@ export async function readCompanionDeviceSyncStatus(input: {
       // resource keys; stale availability on disconnected/errored sources
       // would otherwise advertise resources that cannot arrive.
       if (source.status !== "connected") {
+        continue;
+      }
+      if (
+        sourceProviderSlug !== null
+        && normalizeJunctionProviderSlug(source.sourceProviderSlug) !== sourceProviderSlug
+      ) {
         continue;
       }
 
@@ -511,6 +537,7 @@ export async function readCompanionDeviceSyncStatus(input: {
     const signals = await input.store.listRecentConnectionWebhookSignals({
       userId: input.memberId,
       connectionIds: connections.map((connection) => connection.id),
+      ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     });
 
     for (const signal of signals) {
@@ -563,6 +590,23 @@ function readOptionalBoundedString(
   }
 
   return value;
+}
+
+function readOptionalCompanionPlatform(
+  body: Record<string, unknown>,
+): CompanionPlatform | null {
+  const platform = readOptionalBoundedString(body, "platform");
+  if (platform === null) {
+    return null;
+  }
+  if (!isCompanionPlatform(platform)) {
+    throw companionRequestInvalid("platform must be ios or android when provided.");
+  }
+  return platform;
+}
+
+function isCompanionPlatform(value: string): value is CompanionPlatform {
+  return value === "ios" || value === "android";
 }
 
 function readRequiredEnum(

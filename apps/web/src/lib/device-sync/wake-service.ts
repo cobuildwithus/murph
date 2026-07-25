@@ -552,18 +552,20 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   }
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
+  const dirtyResources = buildHostedWebhookDirtyResources({
+    jobs: input.webhook.jobs ?? [],
+    provider: input.account.provider,
+  });
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
-    dirtyResources: buildHostedWebhookDirtyResources({
-      jobs: input.webhook.jobs ?? [],
-      provider: input.account.provider,
-    }),
+    dirtyResources,
     eventType: input.webhook.eventType,
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
+    sourceProviderSlug: readSingleSourceProviderSlug(dirtyResources),
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1002,6 +1004,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   occurredAt: string;
   provider: string;
   resourceCategory?: string | null;
+  sourceProviderSlug: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   claimToken: string;
   traceId: string | null;
@@ -1084,6 +1087,7 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         traceId: input.traceId,
         eventType: input.eventType,
         resourceCategory: input.resourceCategory ?? null,
+        sourceProviderSlug: input.sourceProviderSlug,
         createdAt: input.acceptedAt,
         tx,
       });
@@ -1255,6 +1259,25 @@ function buildHostedWebhookDirtyResources(input: {
   }
 
   return resources;
+}
+
+function readSingleSourceProviderSlug(
+  resources: readonly HostedDeviceSyncDirtyResource[],
+): string | null {
+  let sourceProviderSlug: string | null = null;
+
+  for (const resource of resources) {
+    const candidate = normalizeJunctionProviderSlug(resource.sourceProviderSlug);
+    if (!candidate) {
+      continue;
+    }
+    if (sourceProviderSlug !== null && sourceProviderSlug !== candidate) {
+      return null;
+    }
+    sourceProviderSlug = candidate;
+  }
+
+  return sourceProviderSlug;
 }
 
 function readHostedDirtyResourceString(value: unknown): string | null {

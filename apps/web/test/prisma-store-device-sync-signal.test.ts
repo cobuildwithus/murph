@@ -13,6 +13,7 @@ type MutableSignal = {
   traceId: string | null;
   eventType: string | null;
   resourceCategory: string | null;
+  sourceProviderSlug: string | null;
   reason: string | null;
   nextReconcileAt: Date | null;
   revokeWarningCode: string | null;
@@ -47,6 +48,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
         traceId: signal.traceId,
         eventType: signal.eventType,
         resourceCategory: signal.resourceCategory,
+        sourceProviderSlug: signal.sourceProviderSlug,
         reason: signal.reason,
         nextReconcileAt: cloneDate(signal.nextReconcileAt),
         revokeWarningCode: signal.revokeWarningCode,
@@ -56,6 +58,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
     ]),
   );
   const createCalls: Record<string, unknown>[] = [];
+  const findManyCalls: Record<string, unknown>[] = [];
   let nextId = seed.reduce((max, signal) => Math.max(max, signal.id), 0) + 1;
 
   const deviceSyncSignal = {
@@ -65,6 +68,32 @@ function createSignalStore(seed: MutableSignal[] = []) {
       signals.set(signal.id, signal);
       nextId += 1;
       return cloneSignal(signal);
+    },
+    findMany: async (input: {
+      orderBy: { id: "desc" };
+      take: number;
+      where: {
+        connectionId: { in: string[] };
+        kind: string;
+        sourceProviderSlug?: string;
+        userId: string;
+      };
+    }) => {
+      findManyCalls.push(input);
+      return [...signals.values()]
+        .filter((signal) =>
+          signal.userId === input.where.userId
+          && signal.kind === input.where.kind
+          && signal.connectionId !== null
+          && input.where.connectionId.in.includes(signal.connectionId)
+          && (
+            input.where.sourceProviderSlug === undefined
+            || signal.sourceProviderSlug === input.where.sourceProviderSlug
+          )
+        )
+        .sort((left, right) => right.id - left.id)
+        .slice(0, input.take)
+        .map(cloneSignal);
     },
   };
 
@@ -82,6 +111,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
 
   return {
     createCalls,
+    findManyCalls,
     store,
   };
 }
@@ -208,6 +238,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       traceId: "trace_123",
       occurredAt: "2026-03-26T11:59:00.000Z",
       resourceCategory: "daily_sleep",
+      sourceProviderSlug: "health_connect",
       createdAt: "2026-03-26T12:00:00.000Z",
     });
 
@@ -221,6 +252,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       traceId: "trace_123",
       occurredAt: new Date("2026-03-26T11:59:00.000Z"),
       resourceCategory: "daily_sleep",
+      sourceProviderSlug: "health_connect",
       reason: null,
       nextReconcileAt: null,
       revokeWarningCode: null,
@@ -237,6 +269,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       traceId: "trace_123",
       eventType: "sleep.updated",
       resourceCategory: "daily_sleep",
+      sourceProviderSlug: "health_connect",
       reason: null,
       nextReconcileAt: null,
       revokeWarning: null,
@@ -268,6 +301,57 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
     expect(created.revokeWarning).toEqual({
       code: "WHOOP_REFRESH_TOKEN_MISSING",
     });
+  });
+
+  it("filters webhook receipt evidence by Junction source when requested", async () => {
+    const baseSignal: MutableSignal = {
+      connectionId: "dsc_123",
+      createdAt: new Date("2026-03-26T12:00:00.000Z"),
+      eventType: "daily.data.sleep.updated",
+      id: 1,
+      kind: "webhook_hint",
+      nextReconcileAt: null,
+      occurredAt: new Date("2026-03-26T11:59:00.000Z"),
+      provider: "junction",
+      reason: null,
+      resourceCategory: "summary",
+      revokeWarningCode: null,
+      revokeWarningMessage: null,
+      sourceProviderSlug: "apple_health_kit",
+      traceId: "trace_apple",
+      userId: "user-123",
+    };
+    const { findManyCalls, store } = createSignalStore([
+      baseSignal,
+      {
+        ...baseSignal,
+        id: 2,
+        sourceProviderSlug: "health_connect",
+        traceId: "trace_android",
+      },
+    ]);
+
+    const signals = await store.listRecentConnectionWebhookSignals({
+      connectionIds: ["dsc_123"],
+      sourceProviderSlug: "health_connect",
+      userId: "user-123",
+    });
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toMatchObject({
+      sourceProviderSlug: "health_connect",
+      traceId: "trace_android",
+    });
+    expect(findManyCalls).toEqual([
+      expect.objectContaining({
+        where: {
+          connectionId: { in: ["dsc_123"] },
+          kind: "webhook_hint",
+          sourceProviderSlug: "health_connect",
+          userId: "user-123",
+        },
+      }),
+    ]);
   });
 });
 
@@ -419,6 +503,7 @@ function normalizeSignalRecord(id: number, data: Record<string, unknown>): Mutab
     traceId: typeof data.traceId === "string" ? data.traceId : null,
     eventType: typeof data.eventType === "string" ? data.eventType : null,
     resourceCategory: typeof data.resourceCategory === "string" ? data.resourceCategory : null,
+    sourceProviderSlug: typeof data.sourceProviderSlug === "string" ? data.sourceProviderSlug : null,
     reason: typeof data.reason === "string" ? data.reason : null,
     nextReconcileAt: data.nextReconcileAt instanceof Date ? new Date(data.nextReconcileAt) : null,
     revokeWarningCode: typeof data.revokeWarningCode === "string" ? data.revokeWarningCode : null,

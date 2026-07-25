@@ -766,6 +766,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const deviceSyncSignalSourceProviderMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725193000_device_sync_signal_source_provider/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -888,8 +895,15 @@ describe("hosted Prisma baseline migration", () => {
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
+      "20260725193000_device_sync_signal_source_provider",
       "migration_lock.toml",
     ]);
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'ADD COLUMN "source_provider_slug" TEXT',
+    );
+    expect(deviceSyncSignalSourceProviderMigrationSql).toContain(
+      'CREATE INDEX "device_sync_signal_user_source_idx"',
+    );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
     );
