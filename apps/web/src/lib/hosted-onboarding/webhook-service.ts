@@ -920,6 +920,9 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     const callbackResult = await handleHostedTelegramGroupOfferCallback({
       callbackQuery: update.callback_query,
       prisma,
+      ...(input.scheduleAfterResponse
+        ? { scheduleAfterResponse: input.scheduleAfterResponse }
+        : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     });
     return {

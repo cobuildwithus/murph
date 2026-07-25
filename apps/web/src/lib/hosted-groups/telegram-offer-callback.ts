@@ -8,6 +8,8 @@ import {
 
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { isHostedMemberSuspended } from "../hosted-onboarding/entitlement";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { resolveHostedMemberRoutingByTelegramUserId } from "../hosted-onboarding/hosted-member-routing-store";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import {
@@ -37,6 +39,8 @@ export type HostedTelegramGroupOfferCallbackResult = {
 export async function handleHostedTelegramGroupOfferCallback(input: {
   callbackQuery: TelegramCallbackQueryLike;
   prisma: PrismaClient;
+  /** Runs work after the webhook response; the tap is acknowledged first. */
+  scheduleAfterResponse?: (task: () => Promise<void>) => void;
   signal?: AbortSignal;
 }): Promise<HostedTelegramGroupOfferCallbackResult> {
   const { callbackQuery } = input;
@@ -91,9 +95,31 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
     return { handled: false, reason: "inactive-member" };
   }
 
+  const deferred: (() => Promise<void>)[] = [];
   const result = await acceptHostedGroupOfferAffirmation({
     affirmationEventId: buildHostedTelegramGroupOfferAffirmationEventId(callbackQuery.id),
+    // The binding resolved above is mutable. Re-resolve it under the member-row
+    // lock so a concurrent relink cannot make this tap grant for an account the
+    // tapper no longer controls.
+    assertActorStillBound: async (tx) => {
+      await lockHostedMemberRow(tx, member.id);
+      const locked = await resolveHostedMemberRoutingByTelegramUserId({
+        prisma: tx,
+        telegramUserId,
+      });
+      if (locked.status !== "found" || locked.lookup.core.id !== member.id) {
+        throw hostedOnboardingError({
+          code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED",
+          httpStatus: 409,
+          message: "This Telegram account is no longer linked to that Murph member.",
+          retryable: false,
+        });
+      }
+    },
     channel: "telegram",
+    ...(input.scheduleAfterResponse
+      ? { deferPostCommit: (run: () => Promise<void>) => { deferred.push(run); } }
+      : {}),
     kinds,
     memberId: member.id,
     messageLookupKeyReadCandidates: createHostedGroupOfferMessageLookupKeyReadCandidates({
@@ -112,11 +138,15 @@ export async function handleHostedTelegramGroupOfferCallback(input: {
   });
 
   if (result.status === "accepted") {
+    // Acknowledge first, then let the optional tail run after the response.
     await answer(
       result.kind === "join"
         ? HOSTED_TELEGRAM_GROUP_OFFER_JOINED_TEXT
         : HOSTED_TELEGRAM_GROUP_OFFER_ALLOWED_TEXT,
     );
+    for (const run of deferred) {
+      input.scheduleAfterResponse?.(run);
+    }
     return { handled: true, reason: `accepted-telegram-group-${result.kind}` };
   }
   await answer(readHostedTelegramGroupOfferSkipText(result.reason));
@@ -156,14 +186,15 @@ function buildHostedTelegramGroupOfferAffirmationEventId(callbackQueryId: string
 const HOSTED_TELEGRAM_GROUP_OFFER_JOINED_TEXT = "You're in.";
 const HOSTED_TELEGRAM_GROUP_OFFER_ALLOWED_TEXT = "Done, that's shared.";
 const HOSTED_TELEGRAM_GROUP_OFFER_UNLINKED_TEXT =
-  "Message Murph directly first, then tap again.";
+  "Link Telegram in Murph Settings, then tap again.";
 
 function readHostedTelegramGroupOfferSkipText(reason: string): string | null {
   if (reason === "launch_consent_missing") {
     return "Open Murph on the web once to accept the terms, then tap again.";
   }
   if (reason === "disclosure_grant_limit_reached") {
-    return "That's already shared.";
+    // The transaction declined to write a grant, so this must not read as success.
+    return "This group can't add another sharing permission right now. Nothing new was shared.";
   }
   if (reason === "not_a_member") {
     return "Join the group first.";

@@ -15,15 +15,6 @@ const HOSTED_TELEGRAM_REQUEST_TIMEOUT_MS = 10_000;
 export const HOSTED_TELEGRAM_GROUP_JOIN_CALLBACK_DATA = "murph:group:join";
 export const HOSTED_TELEGRAM_GROUP_DISCLOSURE_CALLBACK_DATA = "murph:group:allow";
 
-export type HostedTelegramInlineKeyboardButton = {
-  callbackData: string;
-  text: string;
-};
-
-export type HostedTelegramSendResult = {
-  messageId: string | null;
-};
-
 function requireHostedTelegramBotToken(): string {
   const token = normalizeNullableString(getHostedOnboardingEnvironment().telegramBotToken);
 
@@ -31,18 +22,23 @@ function requireHostedTelegramBotToken(): string {
     throw hostedOnboardingError({
       code: "HOSTED_TELEGRAM_BOT_TOKEN_NOT_CONFIGURED",
       httpStatus: 500,
-      message: "TELEGRAM_BOT_TOKEN must be configured to send Telegram messages.",
+      message: "TELEGRAM_BOT_TOKEN must be configured to call the Telegram Bot API.",
       retryable: false,
     });
   }
   return token;
 }
 
+/**
+ * Issues one bounded Bot API request. No caller consumes the Bot API result
+ * today, so nothing here parses one; a future outbound sender can add exactly
+ * the parsing its own delivery proof requires.
+ */
 async function callHostedTelegramApi(input: {
   body: unknown;
   method: string;
   signal?: AbortSignal;
-}): Promise<{ ok: boolean; result?: unknown; status: number }> {
+}): Promise<void> {
   const token = requireHostedTelegramBotToken();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), HOSTED_TELEGRAM_REQUEST_TIMEOUT_MS);
@@ -50,74 +46,16 @@ async function callHostedTelegramApi(input: {
   input.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const response = await fetch(
-      `${HOSTED_TELEGRAM_API_BASE_URL}/bot${token}/${input.method}`,
-      {
-        body: JSON.stringify(input.body),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-        signal: controller.signal,
-      },
-    );
-    if (!response.ok) {
-      return { ok: false, status: response.status };
-    }
-    const payload = await response.json().catch(() => null) as
-      | { ok?: boolean; result?: unknown }
-      | null;
-    return {
-      ok: payload?.ok === true,
-      ...(payload?.result === undefined ? {} : { result: payload.result }),
-      status: response.status,
-    };
+    await fetch(`${HOSTED_TELEGRAM_API_BASE_URL}/bot${token}/${input.method}`, {
+      body: JSON.stringify(input.body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
     input.signal?.removeEventListener("abort", onAbort);
   }
-}
-
-/**
- * Sends exactly one Telegram message. A consent-bearing card must stay atomic:
- * the offered scopes and the button that accepts them cannot land in separate
- * messages, so this never splits long text.
- */
-export async function sendHostedTelegramChatMessage(input: {
-  buttons?: readonly HostedTelegramInlineKeyboardButton[] | null;
-  chatId: string;
-  signal?: AbortSignal;
-  text: string;
-}): Promise<HostedTelegramSendResult> {
-  const buttons = input.buttons ?? [];
-  const response = await callHostedTelegramApi({
-    body: {
-      chat_id: input.chatId,
-      disable_web_page_preview: true,
-      text: input.text,
-      ...(buttons.length > 0
-        ? {
-            reply_markup: {
-              inline_keyboard: buttons.map((button) => [
-                { callback_data: button.callbackData, text: button.text },
-              ]),
-            },
-          }
-        : {}),
-    },
-    method: "sendMessage",
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-
-  if (!response.ok) {
-    throw hostedOnboardingError({
-      code: "HOSTED_TELEGRAM_SEND_FAILED",
-      httpStatus: 502,
-      message: "Could not send this Telegram message.",
-      retryable: response.status >= 500 || response.status === 429,
-    });
-  }
-
-  const result = response.result as { message_id?: number | string } | undefined;
-  return { messageId: normalizeNullableString(result?.message_id) };
 }
 
 /**

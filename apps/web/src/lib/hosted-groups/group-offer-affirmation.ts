@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -49,6 +49,21 @@ export type HostedGroupOfferAffirmationKind = "disclosure" | "join";
  */
 export async function acceptHostedGroupOfferAffirmation(input: {
   affirmationEventId: string;
+  /**
+   * Runs the optional post-commit tail (join confirmation, maintenance wake,
+   * newsletter nudge) after the caller has already acknowledged the member.
+   * Telegram passes this so a tapped button is never held behind work that does
+   * not decide whether the grant committed.
+   */
+  deferPostCommit?: (run: () => Promise<void>) => void;
+  /**
+   * Revalidates, inside the grant transaction, that the provider identity that
+   * tapped still maps to the member being granted. Resolving the binding before
+   * the transaction is not enough: a concurrent relink can move that identity to
+   * another member while this callback waits on the member-row lock, exactly the
+   * race the inbound Telegram message path already guards.
+   */
+  assertActorStillBound?: (tx: Prisma.TransactionClient) => Promise<void>;
   channel: HostedGroupOfferChannel;
   kinds: readonly HostedGroupOfferAffirmationKind[];
   memberId: string;
@@ -60,6 +75,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
 }): Promise<HostedGroupOfferAffirmationResult> {
   if (input.kinds.includes("disclosure")) {
     const disclosureResult = await input.prisma.$transaction(async (tx) =>
+      (await input.assertActorStillBound?.(tx),
       acceptHostedGroupDisclosurePermissionReactionTx({
         channel: input.channel,
         memberId: input.memberId,
@@ -68,7 +84,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
         reactionEventId: input.affirmationEventId,
         threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
         tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      })), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
     if (disclosureResult.kind === "accepted") {
       return { status: "accepted", kind: "disclosure" };
     }
@@ -92,6 +108,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
   try {
     result = await input.prisma.$transaction(async (tx) =>
+      (await input.assertActorStillBound?.(tx),
       acceptHostedGroupJoinOfferTx({
         channel: input.channel,
         confirmationPublicBaseUrl: resolveHostedPublicBaseUrl(),
@@ -100,7 +117,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
         now: input.now,
         threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
         tx,
-      }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      })), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
     const reason = readHostedGroupOfferAffirmationSkipReason(error);
     if (!reason) {
@@ -109,6 +126,7 @@ export async function acceptHostedGroupOfferAffirmation(input: {
     return { status: "ignored", reason };
   }
 
+  const runPostCommitTail = async (): Promise<void> => {
   const postCommitDeadlineMs = createHostedPostCommitDeadline(undefined);
   if (result.joinConfirmationSignal) {
     await signalHostedGroupJoinConfirmationRuntimeBestEffort({
@@ -147,6 +165,13 @@ export async function acceptHostedGroupOfferAffirmation(input: {
       }),
       signal: input.signal,
     });
+  }
+  };
+
+  if (input.deferPostCommit) {
+    input.deferPostCommit(runPostCommitTail);
+  } else {
+    await runPostCommitTail();
   }
   return { status: "accepted", kind: "join" };
 }

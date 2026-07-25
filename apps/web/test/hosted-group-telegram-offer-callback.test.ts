@@ -243,6 +243,55 @@ describe("hosted telegram group offer callback", () => {
     });
     expect(mocks.answerHostedTelegramCallbackQueryBestEffort).toHaveBeenCalledTimes(1);
   });
+
+  it("revalidates the telegram binding inside the grant transaction", async () => {
+    const tx = { $queryRaw: async () => [] } as never;
+    mocks.acceptHostedGroupOfferAffirmation.mockImplementation(async (args: {
+      assertActorStillBound?: (tx: unknown) => Promise<void>;
+    }) => {
+      await args.assertActorStillBound?.(tx);
+      return { kind: "join", status: "accepted" };
+    });
+
+    // Binding still intact under the lock.
+    await expect(handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery(),
+      prisma,
+    })).resolves.toMatchObject({ handled: true });
+
+    // A concurrent relink moves the telegram identity to another member.
+    mocks.resolveHostedMemberRoutingByTelegramUserId
+      .mockResolvedValueOnce({ lookup: { core: { id: "usr_1", suspendedAt: null } }, status: "found" })
+      .mockResolvedValueOnce({ lookup: { core: { id: "usr_other", suspendedAt: null } }, status: "found" });
+
+    await expect(handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery(),
+      prisma,
+    })).rejects.toMatchObject({ code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED" });
+  });
+
+  it("answers the tap before running the optional post-commit tail", async () => {
+    const order: string[] = [];
+    mocks.answerHostedTelegramCallbackQueryBestEffort.mockImplementation(async () => {
+      order.push("answer");
+    });
+    mocks.acceptHostedGroupOfferAffirmation.mockImplementation(async (args: {
+      deferPostCommit?: (run: () => Promise<void>) => void;
+    }) => {
+      args.deferPostCommit?.(async () => { order.push("tail"); });
+      return { kind: "join", status: "accepted" };
+    });
+
+    const scheduled: (() => Promise<void>)[] = [];
+    await handleHostedTelegramGroupOfferCallback({
+      callbackQuery: buildCallbackQuery(),
+      prisma,
+      scheduleAfterResponse: (task) => { scheduled.push(task); },
+    });
+    for (const task of scheduled) { await task(); }
+
+    expect(order).toEqual(["answer", "tail"]);
+  });
 });
 
 describe("hosted telegram message lookup key", () => {
