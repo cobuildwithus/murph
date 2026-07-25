@@ -72,20 +72,37 @@ copies of the source and the pair marker. Confirm both facts before starting:
 the bucket name must not appear in any of the three production variables, and
 the migration key must still be the pair-scoped one.
 
-The migration command has no delete operation and is not used here. The
-operator empties the destination directly with the pair-scoped key, then
-deletes the bucket and creates a fresh one:
+**Mint a destination-only credential first. Do not use the pair-scoped
+migration key for this.** A recursive delete is the one command in this runbook
+that can destroy the authoritative dataset, and the pair-scoped key is
+authorized for the source as well, so a stale, unset, or transposed bucket
+variable would be enough to erase OC. Shell-variable discipline is not an
+adequate guard for that outcome; the credential must make it impossible.
+
+Issue a temporary Object Read & Write key scoped to `$DESTINATION_BUCKET`
+alone, export it in place of the pair-scoped key, and prove it cannot reach the
+source before deleting anything:
 
 ```bash
+# Must fail with AccessDenied. If it succeeds, the credential is wrong: stop.
+aws s3api list-objects-v2 --bucket "$SOURCE_BUCKET" --max-items 1 \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+  --region auto
+```
+
+Only once that read is denied, empty the destination and delete the bucket:
+
+```bash
+test "$DESTINATION_BUCKET" != "$SOURCE_BUCKET"
 aws s3 rm "s3://$DESTINATION_BUCKET" --recursive \
   --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
   --region auto
 pnpm --dir apps/cloudflare exec wrangler r2 bucket delete "$DESTINATION_BUCKET"
 ```
 
-Never point either command at an OC source. Prove the destination bucket name
-in the command matches `$DESTINATION_BUCKET` and not `$SOURCE_BUCKET` before
-running it, and prove the bucket is gone afterwards.
+Prove the bucket is gone afterwards, then revoke the destination-only key. Read
+the source inventory once more with the ordinary migration key and confirm its
+object count is unchanged from the count recorded in section 1.
 
 Then release the deletion window before reopening anything. Once the
 destination is gone, OC is the sole authoritative bucket again and deletion is
@@ -357,8 +374,28 @@ pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --
 
 Now open the deletion window, as the last step before any object is copied:
 set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` in the Vercel production
-environment, deploy, and prove the three checks from the deferral section. Only
-after those pass does anything get copied.
+environment, deploy, and prove the three checks from the deferral section.
+
+**Then drain the deletions the guard could not stop.** Both guards run once, at
+request entry. A deletion accepted by the previous deployment keeps running
+through its whole workflow -- vendor revocation, database deletion, and
+Cloudflare object deletion -- and nothing re-checks the flag partway through. If
+one is still in flight when copying starts, it can remove a member's objects
+from only one side of the pair, which is the exact outcome this window exists to
+prevent, and it would also make the section 7 rollback unsafe.
+
+Prove the drain before copying:
+
+1. Record the time the maintenance deployment reached 100 percent.
+2. Query production logs for `POST /api/settings/privacy/delete` requests that
+   started before that time, and confirm each one has logged its completion.
+3. Wait ten minutes past the last such completion with no new admitted request.
+   Ten minutes is the same bound section 4 uses for issued PUT URLs and is far
+   above the observed runtime of a single deletion; if any request has not
+   completed by then, do not start the copy. Treat it as an incident and
+   establish what state that member's data is in first.
+
+Only after both the three checks and this drain pass does anything get copied.
 
 Run the copy, then the read-only proof immediately before editing variables:
 

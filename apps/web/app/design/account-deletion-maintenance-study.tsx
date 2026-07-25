@@ -8,11 +8,19 @@ import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-pr
 
 /**
  * The confirmation step of the delete-account dialog while the OC-to-ENAM
- * bundles migration window is open. The sentence is imported from the same
- * constant the route returns, so this surface cannot drift from production
- * copy. The arrival path -- declined at the sensitive-action challenge, before
- * any passkey approval or browser-vault teardown -- is proven by the route and
- * component tests, not by this static frame.
+ * bundles migration window is open.
+ *
+ * What this frame proves: the exact sentence a member reads, and that it fits
+ * its container at desktop and mobile widths. The sentence is imported from the
+ * same constant the route returns, so the copy cannot drift.
+ *
+ * What it does not prove: this reproduces the dialog's markup rather than
+ * mounting the shipped one, so it is not evidence about focus order, the close
+ * affordance, or constrained-height scrolling. Those behaviours come from the
+ * Dialog primitives around the real component and can only be verified against
+ * a running /settings. The arrival path -- declined at the sensitive-action
+ * challenge before any passkey approval or browser-vault teardown -- is proven
+ * by the route and component tests.
  *
  * Delete this study with the migration runbook once the OC buckets are retired.
  */
@@ -28,7 +36,10 @@ export function AccountDeletionMaintenanceStudy() {
         account during the storage-migration maintenance window. Nothing has been
         started: no passkey prompt, no browser-vault teardown, and their
         sensitive-action authorization is unspent. The message names no return
-        time, because the window can outlast any duration we could promise.
+        time, because the window can outlast any duration we could promise. These
+        frames reproduce the dialog to show the copy and its containment; focus,
+        close, and scroll behaviour belong to the real dialog in{" "}
+        <code>/settings</code>.
       </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
