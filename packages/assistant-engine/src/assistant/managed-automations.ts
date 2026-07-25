@@ -623,9 +623,13 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(experimentLifecycle?.seeds ?? []),
     ])
-  const desiredExperimentSupportSeries = input.seeds === undefined
-    ? buildDesiredExperimentSupportSeries(rawSeeds)
-    : null
+  // A failed experiment scan leaves the desired experiment state *unknown*, not
+  // empty. Reconciling an empty desired set against live records archives every
+  // active experiment automation, so skip that namespace entirely instead.
+  const desiredExperimentSupportSeries =
+    input.seeds === undefined && experimentLifecycleFailure === null
+      ? buildDesiredExperimentSupportSeries(rawSeeds)
+      : null
   const seeds = rawSeeds.filter((seed) =>
     murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
   )
