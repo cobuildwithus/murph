@@ -800,7 +800,7 @@ describe("murph.group dynamic tool", () => {
       .toHaveLength(1);
   });
 
-  it("keeps per-record distinctions when a data marker varies across records", async () => {
+  it("leaves an existing daily scope's model shape unchanged", async () => {
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
         currentTurnHandles: [],
@@ -864,16 +864,25 @@ describe("murph.group dynamic tool", () => {
     });
 
     const payload = readGroupToolPayload(result);
-    const serialized = JSON.stringify(payload);
-    // Only one record carries the marker, so hoisting it to the projection would
-    // wrongly claim the unmarked record shares it. It must stay per record.
-    expect(serialized).toContain("broad-movement");
     const projection = readFirstProjection(payload);
+    // Only workouts.v0 carries the hoisted constant. An existing daily scope must
+    // keep metricSemantics exactly where its producer put it: on the record.
+    expect(projection).not.toHaveProperty("timeSemantics");
     expect(projection).not.toHaveProperty("metricSemantics");
     expect(projection.records[0]).toMatchObject({
-      data: { date: "2026-07-18", metricSemantics: "broad-movement" },
+      data: {
+        date: "2026-07-18",
+        metricKey: "activity-minutes",
+        metricSemantics: "broad-movement",
+        unit: "minutes",
+        value: 30,
+      },
     });
+    // The unmarked sibling keeps its own shape; nothing is inferred onto it.
     expect(projection.records[1]?.data).not.toHaveProperty("metricSemantics");
+    expect(projection.records[1]).toMatchObject({
+      data: { date: "2026-07-17", metricKey: "activity-minutes", value: 45 },
+    });
   });
 
   it("strips global member ids from every group-summary mutation result", async () => {

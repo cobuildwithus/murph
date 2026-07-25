@@ -3303,17 +3303,10 @@ function groupSharedUnavailableToolResult(
 /**
  * One read returns every member crossed with every requested scope, so the model
  * result grows with members x days x records and is rejected whole once it passes
- * ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS. These two projections
- * are lossless: a day-keyed record repeats its own date in `recordKey` and
- * `occurredAt`, and per-record semantics markers are constant for the projection.
- * Serializing either per record spends the shared budget on repetition instead of
- * member data.
+ * ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS. Two lossless omissions
+ * keep that budget on member data instead of repetition. Both preserve every value
+ * the model can act on; storage and the delivery wire format are unchanged.
  */
-const GROUP_SHARED_RECORD_CONSTANT_DATA_KEYS = [
-  'metricSemantics',
-  'timeSemantics',
-] as const
-
 function groupSharedRecordDataValue(
   record: AssistantHostedGroupSharedRecord,
   key: string,
@@ -3323,16 +3316,15 @@ function groupSharedRecordDataValue(
 
 function groupSharedModelRecord(
   record: AssistantHostedGroupSharedRecord,
-  hoistedDataKeys: readonly string[],
+  hoistTimeSemantics: boolean,
 ) {
   const dateValue = groupSharedRecordDataValue(record, 'date')
   const date = typeof dateValue === 'string' ? dateValue : null
-  const compactData = hoistedDataKeys.length === 0
-    ? record.data
-    : Object.fromEntries(
-      Object.entries(record.data)
-        .filter(([key]) => !hoistedDataKeys.includes(key)),
+  const compactData = hoistTimeSemantics
+    ? Object.fromEntries(
+      Object.entries(record.data).filter(([key]) => key !== 'timeSemantics'),
     )
+    : record.data
   return {
     data: compactData,
     // Both are recoverable from `data.date`; omit them only when they add nothing.
@@ -3348,29 +3340,23 @@ function groupSharedModelRecord(
 function groupSharedModelProjection(
   projection: AssistantHostedGroupSharedProjection,
 ) {
-  const hoisted: Record<string, unknown> = {}
-  for (const key of GROUP_SHARED_RECORD_CONSTANT_DATA_KEYS) {
-    const values = new Set(
-      projection.records.map((record) => groupSharedRecordDataValue(record, key)),
-    )
-    // Hoist only when every record agrees, so a per-record distinction survives.
-    if (values.size === 1 && projection.records.length > 0) {
-      const [value] = [...values]
-      if (value !== undefined) {
-        hoisted[key] = value
-      }
-    }
-  }
-  const hoistedKeys = Object.keys(hoisted)
+  // `workouts.v0` is the only kind carrying `timeSemantics`, and its parser
+  // requires the one literal on every record, so the value is a projection
+  // constant rather than a per-record fact. Other kinds keep their markers,
+  // including per-record `metricSemantics`, exactly where they are.
+  const timeSemantics = projection.records
+    .map((record) => groupSharedRecordDataValue(record, 'timeSemantics'))
+    .find((value) => typeof value === 'string')
+  const hoistTimeSemantics = typeof timeSemantics === 'string'
   return {
     dataStatus: projection.dataStatus,
     grantStatus: projection.grantStatus,
     projectionScope: projection.projectionScope,
     projectionScopeKey: projection.projectionScopeKey,
     records: projection.records.map((record) =>
-      groupSharedModelRecord(record, hoistedKeys)
+      groupSharedModelRecord(record, hoistTimeSemantics)
     ),
-    ...hoisted,
+    ...(hoistTimeSemantics ? { timeSemantics } : {}),
   }
 }
 
