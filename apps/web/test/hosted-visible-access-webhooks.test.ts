@@ -192,4 +192,88 @@ describe("visible access webhook recovery", () => {
       target: "456",
     });
   });
+
+  it("replies generically to a recognized suspended Telegram member", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
+      ignored: true,
+      ok: true,
+      reason: "suspended-member",
+    });
+    const update = { update_id: 322 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: true,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "8",
+      threadId: "456",
+    });
+    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
+      lookup: {
+        core: {
+          id: "member_suspended",
+          suspendedAt: new Date("2026-07-25T11:00:00.000Z"),
+        },
+      },
+      status: "found",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Check account settings or contact support.",
+      noticeCode: "billing_inactive",
+      responseReason: "sent-account-unavailable-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toEqual({
+      ignored: false,
+      ok: true,
+      reason: "sent-account-unavailable-notice",
+    });
+
+    expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorizedTelegramUserId: "456",
+        memberId: "member_suspended",
+        message: "Check account settings or contact support.",
+        target: "456",
+      }),
+    );
+  });
+
+  it("keeps inactive Telegram group conversations silent", async () => {
+    const original = {
+      ignored: true,
+      ok: true,
+      reason: "inactive-member" as const,
+    };
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue(original);
+    const update = { update_id: 323 };
+    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
+    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
+      isDirect: false,
+      occurredAt: "2026-07-25T12:00:00.000Z",
+      senderTelegramUserId: "456",
+    });
+    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
+      messageId: "9",
+      threadId: "group:456",
+    });
+
+    await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
+      prisma,
+      rawBody: "{}",
+      secretToken: null,
+    })).resolves.toBe(original);
+
+    expect(mocks.resolveHostedMemberRoutingByTelegramUserId).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
+  });
 });

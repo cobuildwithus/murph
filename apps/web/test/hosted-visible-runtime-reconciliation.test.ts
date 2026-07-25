@@ -129,6 +129,36 @@ describe("visible runtime access reconciliation", () => {
     });
   });
 
+  it("leaves Linq AI-usage notices to the canonical reconciliation owner", async () => {
+    const facts = blockedFacts("ai_usage_denied");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "linq",
+      eventId: "linq:event:usage-denied",
+      kind: "conversation.message",
+      message: {
+        linqMessage: {
+          chatId: "chat_home",
+          messageId: "message_usage_denied",
+          service: "iMessage",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(hostedMemberFindUnique).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+    expect(mocks.buildInactiveMemberAccessNoticeResponse).not.toHaveBeenCalled();
+    expect(mocks.buildSignupLinkResponse).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
+  });
+
   it("turns post-admission Linq access loss into a signup handoff", async () => {
     const facts = blockedFacts("user_not_active");
     mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
@@ -212,6 +242,37 @@ describe("visible runtime access reconciliation", () => {
       userId: "member_123",
     })).resolves.toBe(runnable);
     expect(mocks.readHostedRuntimeReconciliationFacts).toHaveBeenCalledTimes(2);
+    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
+  });
+
+  it("does not disclose account state for a synthetic thread-container member", async () => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:container",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "9",
+          threadId: "group:456",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-07-25T12:00:00.000Z",
+    });
+    hostedMemberFindUnique.mockResolvedValue({
+      id: "member_123",
+      suspendedAt: null,
+      threadContainer: { memberId: "member_owner" },
+    });
+
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    })).resolves.toBe(facts);
+
+    expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
     expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
   });
 

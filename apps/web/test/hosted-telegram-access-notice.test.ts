@@ -169,6 +169,45 @@ describe("Telegram access notice delivery", () => {
     expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledOnce();
   });
 
+  it("rejects a stale Telegram target under the routing lock before provider dispatch", async () => {
+    const providerRequests: string[] = [];
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      telegramThreadId: "789",
+      telegramUserId: "789",
+    });
+    mocks.sendTelegramUsageLimitNotice.mockImplementation(async (input: {
+      onRequestAttempted?: () => Promise<void>;
+    }) => {
+      await input.onRequestAttempted?.();
+      providerRequests.push("provider-request");
+      return { status: "sent" };
+    });
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Billing needs attention.",
+      noticeCode: "billing_inactive",
+      prisma: prisma as never,
+      replyToMessageId: "7",
+      sourceEventId: "telegram:update:321",
+      target: "456",
+    })).resolves.toEqual({ status: "not_applicable" });
+
+    expect(mocks.lockHostedMemberRoutingStateTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.readHostedMemberRoutingState).toHaveBeenCalledWith({
+      memberId: "member_123",
+      prisma: tx,
+    });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
+    expect(providerRequests).toEqual([]);
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).not.toHaveBeenCalled();
+    expect(mocks.markHostedLinqDeliverySendFailedTx).not.toHaveBeenCalled();
+  });
+
   it("does not claim a new attempt when another delivery already owns the event", async () => {
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: false,
