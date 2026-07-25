@@ -42,6 +42,7 @@ const HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX = "group-join-outreach:";
 const HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS = 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS = 30_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP = 10;
+const HOSTED_GROUP_JOIN_OUTREACH_SWEEP_BUDGET_MS = 20_000;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
@@ -165,9 +166,19 @@ export async function drainHostedGroupJoinOutreachSweep(input: {
 }): Promise<HostedGroupJoinOutreachSweepResult> {
   const max = Math.max(1, input.max ?? HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP);
   const results: HostedGroupJoinOutreachDrainResult[] = [];
+  // This sweep shares a billing-critical cron, and each attempt makes a provider
+  // call, so it yields on elapsed time as well as count. Rows it does not reach
+  // stay due and the next minute picks them up.
+  const startedAtMs = Date.now();
 
   for (let attempt = 0; attempt < max; attempt += 1) {
     if (input.signal?.aborted) {
+      break;
+    }
+    if (
+      attempt > 0
+      && Date.now() - startedAtMs >= HOSTED_GROUP_JOIN_OUTREACH_SWEEP_BUDGET_MS
+    ) {
       break;
     }
     const result = await drainOneHostedGroupJoinOutreach({

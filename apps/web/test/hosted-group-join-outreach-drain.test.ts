@@ -389,6 +389,29 @@ describe("hosted group join outreach drain", () => {
     expect(mocks.createChat).toHaveBeenCalledTimes(10);
   });
 
+  it("yields the sweep on elapsed time so it cannot starve the shared cron", async () => {
+    // Each attempt makes a provider call and this shares a billing-critical cron,
+    // so the budget must stop the sweep even while rows remain due.
+    let clock = Date.parse("2026-07-24T16:00:00.000Z");
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+    mocks.createChat.mockImplementation(async () => {
+      clock += 9_000;
+      return { chatId: "chat_direct_opaque", messageId: "message_opaque" };
+    });
+    const { prisma } = createPrismaStub();
+
+    const sweep = await drainHostedGroupJoinOutreachSweep({
+      max: 10,
+      now: NOW,
+      prisma,
+    });
+
+    nowSpy.mockRestore();
+    // Three attempts crosses the 20s budget, so it stops well short of ten.
+    expect(sweep.attempted).toBeLessThan(10);
+    expect(sweep.attempted).toBeGreaterThan(1);
+  });
+
   it("stops the sweep as soon as an attempt does not send", async () => {
     mocks.claimLineCapacity.mockResolvedValue(false);
     const { prisma } = createPrismaStub();
