@@ -23,11 +23,17 @@ import {
 import type {
   BufferedNamedChildProcess,
 } from "./types.ts";
-import { HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE } from "./minio-image-contract.ts";
+import {
+  HOSTED_LOCAL_MINIO_MIRROR_IMAGE,
+  HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE,
+} from "./minio-image-contract.ts";
 
-// Still the upstream ref: the GHCR mirror only becomes the default once the
-// mirror workflow has published it from main.
-const DEFAULT_HOSTED_LOCAL_MINIO_IMAGE = HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE;
+// GHCR first: Actions pulls from it with the workflow token and are not
+// rate-limited, unlike Docker Hub. The upstream ref stays as a fallback because
+// pinning to one registry relocates the single point of failure rather than
+// removing it, and the failure this guards against is a transient registry
+// outage that either registry can have.
+const DEFAULT_HOSTED_LOCAL_MINIO_IMAGE = HOSTED_LOCAL_MINIO_MIRROR_IMAGE;
 const DEFAULT_HOSTED_LOCAL_MINIO_DATA_DIR = path.join(".tmp", "hosted-local-minio-r2");
 const HOSTED_LOCAL_MINIO_DATA_DIR_ENV = "MURPH_DEV_MINIO_DATA_DIR";
 const HOSTED_LOCAL_MINIO_PORT_ENV = "MURPH_DEV_MINIO_PORT";
@@ -44,6 +50,63 @@ const HOSTED_LOCAL_MINIO_E2E_LABEL = "murph.hosted-local.e2e=1";
 const HOSTED_LOCAL_MINIO_CONTAINER_NAME_PREFIX = "murph-hosted-local-r2-";
 const HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST_ENV = "MURPH_HOSTED_LOCAL_R2_DOCKER_BRIDGE_HOST";
 const HOSTED_LOCAL_MINIO_DOCKER_CLEANUP_TIMEOUT_MS = 10_000;
+
+/**
+ * The image to try first. An explicit override always wins so local development
+ * and one-off debugging can pin any build.
+ */
+export function resolveHostedLocalMinioImage(env: Record<string, string | undefined>): string {
+  return env[HOSTED_LOCAL_MINIO_IMAGE_ENV]?.trim() || DEFAULT_HOSTED_LOCAL_MINIO_IMAGE;
+}
+
+/**
+ * Resolves which image to run, falling back to the upstream ref only when the
+ * mirror cannot be *pulled*.
+ *
+ * The fallback is deliberately scoped to pull failures. A registry outage is
+ * transient and unrelated to the change under test, so it should not fail a
+ * run; but a container that pulls fine and then never becomes healthy is a real
+ * failure, and retrying that against a second registry would only double the
+ * time it takes to report the same problem.
+ *
+ * An explicit override disables the fallback entirely: if someone pinned a
+ * specific build, silently running a different one is worse than failing.
+ */
+export async function resolveHostedLocalMinioRunnableImage(
+  env: NodeJS.ProcessEnv,
+  pullImage: (image: string) => Promise<boolean> = (image) =>
+    pullHostedLocalMinioImage(env, image),
+): Promise<string> {
+  const requestedImage = resolveHostedLocalMinioImage(env);
+
+  if (requestedImage !== HOSTED_LOCAL_MINIO_MIRROR_IMAGE) {
+    return requestedImage;
+  }
+
+  if (await pullImage(requestedImage)) {
+    return requestedImage;
+  }
+
+  console.warn(
+    `[minio] could not pull ${HOSTED_LOCAL_MINIO_MIRROR_IMAGE}; falling back to ${HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE}.`,
+  );
+  return HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE;
+}
+
+/** True when the image is present locally after the pull attempt. */
+async function pullHostedLocalMinioImage(
+  env: NodeJS.ProcessEnv,
+  image: string,
+): Promise<boolean> {
+  await runDockerBestEffort(env, ["pull", image]);
+  return (await runDockerCaptureBestEffort(env, [
+    "image",
+    "inspect",
+    "--format",
+    "{{.Id}}",
+    image,
+  ])).trim().length > 0;
+}
 
 interface HostedLocalMinioPublishTarget {
   controlHost: string;
@@ -69,6 +132,8 @@ export async function maybeStartHostedLocalMinio(input: {
   containerHost: string;
   env: NodeJS.ProcessEnv;
   pipeOutput?: boolean;
+  /** Test seam: probe whether an image can be pulled. Defaults to real docker. */
+  pullImage?: (image: string) => Promise<boolean>;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
   tempDir: string;
@@ -102,7 +167,9 @@ export async function maybeStartHostedLocalMinio(input: {
   });
   const credentials = resolveHostedLocalMinioCredentials(input.env);
 
-  const startContainer = async (): Promise<BufferedNamedChildProcess> => {
+  const startContainer = async (
+    image: string = resolveHostedLocalMinioImage(input.env),
+  ): Promise<BufferedNamedChildProcess> => {
     await cleanupHostedLocalMinioContainerBestEffort(input.env, containerName, {
       buildId: buildIdLabelValue,
     });
@@ -129,7 +196,7 @@ export async function maybeStartHostedLocalMinio(input: {
       "MINIO_ROOT_PASSWORD",
       "-e",
       "MINIO_REGION_NAME",
-      input.env[HOSTED_LOCAL_MINIO_IMAGE_ENV]?.trim() || DEFAULT_HOSTED_LOCAL_MINIO_IMAGE,
+      image,
       "server",
       "/data",
       "--address",
@@ -166,7 +233,9 @@ export async function maybeStartHostedLocalMinio(input: {
     return childProcess;
   };
 
-  let childProcess = await startContainer();
+  let childProcess = await startContainer(
+    await resolveHostedLocalMinioRunnableImage(input.env, input.pullImage),
+  );
   const processes: BufferedNamedChildProcess[] = [childProcess];
   let restartPromise: Promise<BufferedNamedChildProcess | null> | null = null;
 
