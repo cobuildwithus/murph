@@ -45,7 +45,7 @@ describe.skipIf(!runPostgresRetryProof)(
         }
 
         expect(callbackRuns).toBe(0);
-        expect(loggedCategories(warn)).toContain("transaction_start_timeout");
+        expect(loggedCategories(warn)).toEqual(["transaction_start_timeout"]);
       } finally {
         await prisma.$disconnect();
         warn.mockRestore();
@@ -80,7 +80,7 @@ describe.skipIf(!runPostgresRetryProof)(
           `select id from "${table}"`,
         );
         expect(rows).toEqual([]);
-        expect(loggedCategories(warn)).toContain("pool_checkout_timeout");
+        expect(loggedCategories(warn)).toEqual(["pool_checkout_timeout"]);
       } finally {
         await prisma.$disconnect();
         await setup.$executeRawUnsafe(`drop table if exists "${table}"`);
