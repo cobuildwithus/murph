@@ -286,6 +286,30 @@ describe('executeAskGrokTool', () => {
     expect(realStatus).toBeGreaterThanOrEqual(0)
     expect(realStatus).toBeLessThan(boundaryIndex)
     expect(result.rpcText.indexOf("Grok's own answer")).toBeLessThan(boundaryIndex)
+
+    // The boundary is only one-way while the answer stays last: any runtime
+    // text appended after it would fall inside the span the provenance
+    // declares untrusted and would lose the authority it was written to have.
+    expect(result.rpcText.endsWith(forged)).toBe(true)
+  })
+
+  it('strips unsafe characters before measuring the answer against the bound', async () => {
+    const safe = 'y'.repeat(8000)
+    // Raw length is over the bound only because of characters that get
+    // stripped; slicing before stripping would drop real answer text and
+    // wrongly report the result as partial.
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload(`${'‮'.repeat(50)}${safe}`),
+    )
+
+    const result = await executeAskGrokTool({
+      args: { question: 'anything' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText.endsWith(safe)).toBe(true)
+    expect(result.rpcText).not.toContain('Murph status')
   })
 
   it('reports every failure explicitly and never as success', async () => {
