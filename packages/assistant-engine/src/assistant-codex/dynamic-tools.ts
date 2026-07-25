@@ -218,8 +218,6 @@ const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
   `Optional ordered JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated image. Describe in the prompt how image 1, image 2, etc. should be used.`
-const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
 
 const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
@@ -273,10 +271,10 @@ export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
               enum: ['image'],
               description: 'Only image response media is supported.',
             },
-            url: {
-              type: 'string',
-              description:
-                'Public HTTPS image-file URL. URLs with credentials, query strings, fragments, localhost hosts, IP literals, or non-image extensions are rejected.',
+              url: {
+                type: 'string',
+                description:
+                  'Deliberately public HTTPS image-file URL for static catalog assets only. Never use this for user-sent, vault-backed, generated, health, or otherwise private media. URLs with credentials, query strings, fragments, localhost hosts, IP literals, or non-image extensions are rejected.',
             },
             alt: {
               anyOf: [
@@ -749,7 +747,6 @@ export const MURPH_GROUP_TOOL = {
           'create_join_link',
           'post_join_offer',
           'read_chat_participants',
-          'set_chat_avatar',
           'share_contact_card',
           'revoke_own_email_share',
         ],
@@ -795,61 +792,7 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
       },
-      avatarSource: {
-        type: 'string',
-        enum: ['generate', 'image_ref'],
-        description:
-          'Required for action="set_chat_avatar". Use "generate" to create a new square avatar from prompt, or "image_ref" to reuse one user-sent JPG, PNG, or WebP image ref.',
-      },
-      prompt: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 4000,
-        description:
-          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar image.',
-      },
-      imageRef: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1024,
-        description:
-          'Required for action="set_chat_avatar" with avatarSource="image_ref". A user-sent JPG, PNG, or WebP ref under raw/inbox/** or raw/captures/**.',
-      },
-      size: {
-        type: 'string',
-        enum: ['1024x1024'],
-        default: '1024x1024',
-        description: 'For generated group avatars. Group avatars are square.',
-      },
-      quality: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        default: 'medium',
-      },
-      outputFormat: {
-        type: 'string',
-        enum: ['webp', 'png', 'jpeg'],
-        default: 'webp',
-      },
-      alt: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 500 },
-          { type: 'null' },
-        ],
-        default: null,
-        description: 'Optional alt text for the generated or reused avatar image.',
-      },
-      referenceImageRefs: {
-        type: 'array',
-        maxItems: 16,
-        default: [],
-        description: GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION,
-        items: {
-          type: 'string',
-          minLength: 1,
-          maxLength: 1024,
-        },
-      },
+
       kind: {
         type: 'string',
         enum: [...HOSTED_RUNTIME_GROUP_KINDS],
@@ -1484,7 +1427,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       referenceImageRefs: z
         .array(z.string().trim().min(1).max(1024))
         .max(16)
-        .describe(GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION)
         .default([]),
       size: z.literal('1024x1024').default('1024x1024'),
     })
@@ -2993,7 +2935,7 @@ export async function executeMurphDynamicToolRequest(input: {
         hostedGeneratedImageUploader: input.hostedGeneratedImageUploader ?? null,
         materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
         providerRequestOrdinal: input.nextUsageOrdinal(),
-        requireHostedGeneratedImageUploader:
+        requireHostedPrivateImageDelivery:
           input.requireHostedGeneratedImageUploader ?? false,
         vaultRoot: input.vaultRoot ?? null,
       })
@@ -3482,6 +3424,11 @@ async function executeGroupTool(input: {
   toolCallId: string | null
   vaultRoot: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  if (input.request.action === 'set_chat_avatar') {
+    // Linq currently accepts only a fetchable URL for chat avatars. Keep this
+    // action fail-closed until the provider exposes private attachment ingestion.
+    return groupAvatarUnavailableToolResult('private_group_avatar_delivery_unavailable')
+  }
   if (input.request.action === 'read_shared') {
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,

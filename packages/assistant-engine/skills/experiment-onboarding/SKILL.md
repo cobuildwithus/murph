@@ -157,7 +157,7 @@ If sending, ask whether the planned session happened and collect only the missin
 - Log confounders with typed flags: `vault-cli experiment context log <id> ...`
 - Check-ins: `vault-cli experiment followup due <id> --kind <missed-log|weekly-digest> --format json` - skip when `decision.action` is `skip`; send only when `decision.action` is `notify`.
 - Progress: `vault-cli experiment progress <id> --format json`; inspect `progress.setupReadiness`, `progress.analysisReadiness`, and `progress.dataCoverage` separately before saying wearable data is missing.
-- Progress cards: `vault-cli experiment progress-card <id> --format json`; attach the returned `url` with `murph.attach_response_media` when showing the run visually.
+- Experiment progress cards are temporarily unavailable while private attachment rendering replaces URL-encoded health snapshots. Use `vault-cli experiment progress <id> --format json` and summarize the same evidence in concise text; never construct or attach a progress-card URL.
 - Outcomes: `vault-cli experiment outcome analyze <id> --format json`, persist with `vault-cli experiment outcome write <id> --format json`.
 - Follow the developer prompt's shared automation action rules for creation, changes, and status updates. This skill owns only the experiment-specific fields below. Missed-log checks are neutral, at most once per planned session, easy to decline.
 - Automation instructions carry purpose and skip conditions, not the message: do not embed routine content, walkthrough text, or report-back fields that live in the experiment or protocol records — the scheduled assistant composes the message fresh from current state. Embed exact wording only when the user dictated it.

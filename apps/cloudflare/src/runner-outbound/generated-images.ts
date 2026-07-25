@@ -19,6 +19,7 @@ const CLOUDFLARE_IMAGES_API_BASE_URL = "https://api.cloudflare.com/client/v4";
 const GENERATED_IMAGE_UPLOAD_BODY_LIMIT_BYTES = 14 * 1024 * 1024;
 const GENERATED_IMAGE_FILE_LIMIT_BYTES = 10 * 1024 * 1024;
 const GENERATED_IMAGE_METADATA_LIMIT_BYTES = 1024;
+const PUBLIC_GENERATED_IMAGE_UPLOAD_DISABLED: boolean = true;
 
 export async function handleRunnerGeneratedImageUploadRequest(input: {
   env: RunnerOutboundEnvironmentSource;
@@ -41,6 +42,16 @@ export async function handleRunnerGeneratedImageUploadRequest(input: {
       return unauthorized();
     }
     throw error;
+  }
+
+  // Compatibility tombstone for warm runners from the public-URL generation
+  // era. New runners never call this route. Returning 410 makes old runners
+  // degrade to text without creating another publicly retrievable object.
+  if (PUBLIC_GENERATED_IMAGE_UPLOAD_DISABLED) {
+    return jsonError(
+      "Generated-image URL upload is disabled; use private provider attachments.",
+      410,
+    );
   }
 
   let request;
@@ -151,7 +162,9 @@ async function uploadCloudflareImage(input: {
     normalizeGeneratedImageFilename(input.filename, input.contentType),
   );
   form.set("metadata", JSON.stringify(input.metadata));
-  form.set("requireSignedURLs", "false");
+  // Defense in depth for the unreachable legacy implementation retained only
+  // until all warm pre-hardening runners have drained.
+  form.set("requireSignedURLs", "true");
 
   // Workerd's global `fetch` is receiver-sensitive; route through the normalizer
   // so the ambient/global impl is invoked with the correct receiver instead of as

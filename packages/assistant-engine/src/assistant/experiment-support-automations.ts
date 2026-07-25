@@ -39,11 +39,10 @@ const LIFECYCLE_FIRE_HOUR_LOCAL = 9
 // A required final review may arrive late after device downtime or hosted
 // retries, but the support moment is finite rather than an evergreen nudge.
 const FINAL_RESULTS_ACTIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
-const PROGRESS_MILESTONE_TAGS = ['experiment', 'progress-card', 'milestone'] as const
+const PROGRESS_MILESTONE_TAGS = ['experiment', 'milestone'] as const
 const FINAL_RESULTS_TAGS = [
   'experiment',
   'final-results',
-  'progress-card',
   ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG,
 ] as const
 const AUTOMATION_ID_PREFIX = 'automation_'
@@ -366,7 +365,7 @@ function buildProgressMilestoneSeed(
     automationId: experimentProgressAutomationId(experiment.experimentId),
     slug: `experiment-progress-${experiment.slug}-day-${FIRST_PROGRESS_DAY}`,
     title: `First progress · ${experiment.title}`,
-    summary: 'A visual progress check after the first three scheduled intervention days.',
+    summary: 'A grounded progress check after the first three scheduled intervention days.',
     schedule: { kind: 'at', at: lifecycleFireTimestamp(milestoneDate, timeZone) },
     continuityPolicy: 'fresh',
     tags: [
@@ -389,9 +388,8 @@ function buildProgressMilestoneInstructions(
     // calendar day for eastern time zones.
     `Read \`vault-cli experiment show ${slug} --format json\` and \`vault-cli experiment progress ${slug} --as-of ${milestoneDate} --format json\` first.`,
     'Skip when the run is no longer active, intervention day four has not arrived, the current intervention window no longer spans four days, this milestone was already shared, or scheduled summaries are not still explicitly enabled in saved assistant support.',
-    `Otherwise build \`vault-cli experiment progress-card ${slug} --as-of ${milestoneDate} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
-    'Acknowledge the day-four progress point. Congratulate only specific sessions or follow-through proven by current progress; when adherence is zero or unknown, stay neutral rather than claiming completion. Mention at most two metric changes as early signals, with plain uncertainty.',
-    'Sparse or unchanged metric data is not a reason to skip: show the adherence card and say the trend needs more time.',
+    'Acknowledge the day-four progress point in text. Congratulate only specific sessions or follow-through proven by current progress; when adherence is zero or unknown, stay neutral rather than claiming completion. Mention at most two metric changes as early signals, with plain uncertainty.',
+    'Sparse or unchanged metric data is not a reason to skip: summarize adherence briefly and say the trend needs more time.',
     'Keep it warm, brief, and grounded. Avoid causal claims, score worship, or compliance language.',
   ].join('\n')
 }
@@ -444,12 +442,11 @@ function buildFinalResultsInstructions(
     // Pin --as-of to the run's intervention end so the card matches the
     // outcome the precondition just persisted (and stays stable across cron
     // retries that may cross a UTC midnight boundary).
-    `Build \`vault-cli experiment progress-card ${slug} --as-of ${interventionEndDate} --format json\` and attach its returned \`url\` with \`murph.attach_response_media\`.`,
-    'Open by acknowledging that the planned review point or intervention window has arrived. Congratulate only specific completed sessions or follow-through proven by the saved canonical outcome; when adherence is zero or unknown, neutrally recognize reaching the review instead of claiming completion.',
+    'Open in text by acknowledging that the planned review point or intervention window has arrived. Congratulate only specific completed sessions or follow-through proven by the saved canonical outcome; when adherence is zero or unknown, neutrally recognize reaching the review instead of claiming completion.',
     'Summarize adherence, the primary result, confidence and confounders in plain language, then ask one lightweight next-decision question: repeat it, adapt it, or leave it alone?',
     'An inconclusive or sparse result is still a result. Do not suppress the completion moment; explain what was learned and what remains uncertain.',
     'Use associated-with or early-signal language rather than causal certainty.',
-    'The card plus warm text is the primary experience. If the card cannot be attached, a short celebratory voice memo may replace it when that tool is available; do not try to combine both media types.',
+    'Warm, concise text is the primary experience. A short celebratory voice memo may replace the text when that tool is available and the result is genuinely worth celebrating.',
   ].join('\n')
 }
 

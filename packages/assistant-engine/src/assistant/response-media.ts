@@ -40,6 +40,10 @@ function assistantResponseMediaDedupeKey(media: AssistantResponseMedia): string 
     return `image:${media.url}`
   }
 
+  if (media.kind === 'vault_image') {
+    return `vault_image:${media.ref}:${media.sha256}`
+  }
+
   if (media.kind === 'vault_file') {
     return `vault_file:${media.ref}:${media.sha256}:${media.approvalId ?? ''}:${media.approvalGeneration ?? ''}`
   }

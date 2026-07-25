@@ -1,9 +1,8 @@
 /**
- * Shared encoding for the experiment results share card.
+ * Validation and normalization for the experiment results share card.
  *
- * Run results live only in the browser vault, so the OG card route cannot read
- * them server-side. The share UI encodes a compact snapshot of the run into the
- * card URL; the route decodes that snapshot and renders the image.
+ * Run results live only in the browser vault. Private card data is sent in the
+ * body of a no-store render request and must never be serialized into a URL.
  */
 
 export type ExperimentCardDirection = "up" | "down" | "neutral";
@@ -38,14 +37,11 @@ export interface ExperimentCardData {
   chart?: ExperimentCardChart;
 }
 
-/** Query parameter that carries the encoded card snapshot. */
-export const EXPERIMENT_CARD_PARAM = "d";
-
 /**
- * Bump whenever the card layout or rendering changes. The share URL includes
- * this as `?v=`, so a new version busts the immutable browser cache that would
- * otherwise keep serving an old render for unchanged experiment data.
+ * Legacy URL codec constants retained for decoding already-open local clients.
+ * New code must use `parseExperimentCardData` and POST the payload in the body.
  */
+export const EXPERIMENT_CARD_PARAM = "d";
 export const EXPERIMENT_CARD_VERSION = 7;
 
 /** The card layout only has room for three metric tiles. */
@@ -128,6 +124,10 @@ function normalizeCardChart(
         ? roundTo1(chart.baselineAvg)
         : undefined,
   };
+}
+
+export function parseExperimentCardData(input: unknown): ExperimentCardData | null {
+  return parseCardData(input);
 }
 
 function parseCardData(input: unknown): ExperimentCardData | null {

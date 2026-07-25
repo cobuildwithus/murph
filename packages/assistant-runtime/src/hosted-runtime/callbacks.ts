@@ -46,6 +46,7 @@ import {
   readAssistantOutboxIntent,
   readAssistantVaultFileMedia,
   readVerifiedAssistantVaultFileBytes,
+  readVerifiedAssistantVaultImageBytes,
   sendTelegramMessage,
   readAssistantOutboxIntentMirrorState,
   resetAssistantOutboxPreparedDispatchById,
@@ -3418,6 +3419,10 @@ function createHostedAssistantLinqSendDependency(input: {
       media: request.media ?? [],
       vaultRoot: input.vaultRoot ?? null,
     });
+    const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+      media: request.media ?? [],
+      vaultRoot: input.vaultRoot ?? null,
+    });
     let attemptedAt: Date | null = null;
     const dependencies = requireHostedProviderFetchDependencies({
       env: input.linqEnv,
@@ -3512,6 +3517,22 @@ function createHostedAssistantLinqSendDependency(input: {
                   throw new VaultCliError(
                     "ASSISTANT_VAULT_FILE_IDENTITY_CONFLICT",
                     "The prepared vault file no longer matches the approved action.",
+                  );
+                }
+                return bytes;
+              },
+            }
+          : {}),
+        ...(verifiedVaultImages.size > 0
+          ? {
+              loadVaultImage: async (media) => {
+                const bytes = verifiedVaultImages.get(
+                  buildHostedVaultImageMediaIdentity(media),
+                );
+                if (!bytes) {
+                  throw new VaultCliError(
+                    "ASSISTANT_VAULT_IMAGE_IDENTITY_CONFLICT",
+                    "The prepared private image no longer matches the outbox media.",
                   );
                 }
                 return bytes;
@@ -3646,6 +3667,36 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
   return expiresAt;
 }
 
+async function preloadHostedAssistantVaultImages(input: {
+  media: readonly AssistantResponseMedia[];
+  vaultRoot: string | null;
+}): Promise<Map<string, Uint8Array>> {
+  const vaultImages = input.media.filter(
+    (media): media is Extract<AssistantResponseMedia, { kind: "vault_image" }> =>
+      media.kind === "vault_image",
+  );
+  if (vaultImages.length === 0) {
+    return new Map();
+  }
+  if (!input.vaultRoot) {
+    throw createAssistantDeliveryTerminalError(
+      "ASSISTANT_VAULT_IMAGE_ROOT_UNAVAILABLE",
+      "Private image delivery requires the owning vault.",
+    );
+  }
+  const verified = new Map<string, Uint8Array>();
+  for (const image of vaultImages) {
+    verified.set(
+      buildHostedVaultImageMediaIdentity(image),
+      await readVerifiedAssistantVaultImageBytes({
+        image,
+        vaultRoot: input.vaultRoot,
+      }),
+    );
+  }
+  return verified;
+}
+
 async function preloadApprovedHostedAssistantVaultFiles(input: {
   actionApprovalPort: HostedRuntimeActionApprovalPort | null;
   expectedDedupeKey: string | null;
@@ -3740,6 +3791,22 @@ async function preloadApprovedHostedAssistantVaultFiles(input: {
   });
   return new Map([
     [buildHostedVaultFileMediaIdentity(persistedFile), bytes],
+  ]);
+}
+
+function buildHostedVaultImageMediaIdentity(input: {
+  contentType: string;
+  filename: string;
+  ref: string;
+  sha256: string;
+  sizeBytes: number;
+}): string {
+  return JSON.stringify([
+    input.ref,
+    input.sha256,
+    input.filename,
+    input.contentType,
+    input.sizeBytes,
   ]);
 }
 

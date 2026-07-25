@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { Download, Share2 } from "lucide-react";
 
@@ -11,12 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/src/components/ui/dialog";
-import {
-  encodeExperimentCardData,
-  EXPERIMENT_CARD_PARAM,
-  EXPERIMENT_CARD_VERSION,
-  type ExperimentCardData,
-} from "@/src/lib/experiments/share-card";
+import type { ExperimentCardData } from "@/src/lib/experiments/share-card";
 
 interface ShareResultsCardProps {
   cardData: ExperimentCardData;
@@ -31,39 +26,84 @@ function useNativeShareSupport(): boolean {
   );
 }
 
+async function requestExperimentCardFile(input: {
+  endpoint: string;
+  filename: string;
+  payload: string;
+  signal?: AbortSignal;
+}): Promise<File> {
+  const response = await fetch(input.endpoint, {
+    body: input.payload,
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    throw new Error("Card image is unavailable.");
+  }
+  const blob = await response.blob();
+  return new File([blob], input.filename, { type: "image/png" });
+}
+
+function downloadCardFile(file: File): void {
+  const objectUrl = URL.createObjectURL(file);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = file.name;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
 export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
   const pathname = usePathname();
   const [busy, setBusy] = useState<"download" | "share" | null>(null);
+  const [cardFile, setCardFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const canNativeShare = useNativeShareSupport();
-
-  const cardPath = useMemo(() => {
-    const encoded = encodeExperimentCardData(cardData);
-    return `${pathname}/card?${EXPERIMENT_CARD_PARAM}=${encoded}&v=${EXPERIMENT_CARD_VERSION}`;
-  }, [cardData, pathname]);
-
+  const cardEndpoint = `${pathname}/card`;
+  const cardPayload = useMemo(() => JSON.stringify(cardData), [cardData]);
   const slug = pathname.split("/").filter(Boolean).pop() ?? "experiment";
+  const filename = `${slug}-results.png`;
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    setCardFile(null);
+    setPreviewUrl(null);
+    void requestExperimentCardFile({
+      endpoint: cardEndpoint,
+      filename,
+      payload: cardPayload,
+      signal: controller.signal,
+    }).then((file) => {
+      if (controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(file);
+      setCardFile(file);
+      setPreviewUrl(objectUrl);
+    }).catch(() => {
+      // The buttons remain available and can retry the private render request.
+    });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [cardEndpoint, cardPayload, filename]);
 
   async function fetchCardFile(): Promise<File> {
-    const response = await fetch(cardPath);
-    if (!response.ok) {
-      throw new Error("Card image is unavailable.");
-    }
-    const blob = await response.blob();
-    return new File([blob], `${slug}-results.png`, { type: "image/png" });
+    return cardFile ?? requestExperimentCardFile({
+      endpoint: cardEndpoint,
+      filename,
+      payload: cardPayload,
+    });
   }
 
   async function handleDownload() {
     setBusy("download");
     try {
-      const file = await fetchCardFile();
-      const objectUrl = URL.createObjectURL(file);
-      const anchor = document.createElement("a");
-      anchor.href = objectUrl;
-      anchor.download = file.name;
-      document.body.append(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(objectUrl);
+      downloadCardFile(await fetchCardFile());
     } catch {
       // Surface nothing — the button simply re-enables.
     } finally {
@@ -75,13 +115,11 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
     setBusy("share");
     try {
       const file = await fetchCardFile();
-      const shareData: ShareData = navigator.canShare?.({ files: [file] })
-        ? { files: [file], title: cardData.title }
-        : {
-            title: cardData.title,
-            url: new URL(cardPath, window.location.origin).toString(),
-          };
-      await navigator.share(shareData);
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: cardData.title });
+      } else {
+        downloadCardFile(file);
+      }
     } catch {
       // The user dismissed the share sheet, or sharing is unavailable.
     } finally {
@@ -100,12 +138,18 @@ export function ShareResultsCard({ cardData }: ShareResultsCardProps) {
         <DialogTitle className="sr-only">Share your results</DialogTitle>
 
         <div className="overflow-hidden rounded-xl bg-muted/50 shadow-sm outline outline-1 -outline-offset-1 outline-black/10 dark:outline-white/10">
-          {/* eslint-disable-next-line @next/next/no-img-element -- OG route output, not a static asset */}
-          <img
-            src={cardPath}
-            alt={`${cardData.title} results card`}
-            className="block aspect-[1200/780] w-full object-cover"
-          />
+          {previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- private object URL preview
+            <img
+              src={previewUrl}
+              alt={`${cardData.title} results card`}
+              className="block aspect-[1200/780] w-full object-cover"
+            />
+          ) : (
+            <div className="flex aspect-[1200/780] items-center justify-center text-sm text-muted-foreground">
+              Preparing preview…
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">

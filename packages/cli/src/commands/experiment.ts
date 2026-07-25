@@ -1285,6 +1285,8 @@ const experimentProgressResultSchema = z.object({
   progress: experimentProgressSnapshotSchema,
 })
 
+const LEGACY_EXPERIMENT_PROGRESS_CARD_URLS_DISABLED: boolean = true
+
 const experimentProgressCardResultSchema = z.object({
   experimentId: z.string().min(1),
   slug: slugSchema,
@@ -2148,6 +2150,15 @@ export function registerExperimentCommands(
     }),
     output: experimentProgressCardResultSchema,
     async run({ args, options }) {
+      // Keep the command name as a compatibility tombstone, but never emit a
+      // URL containing reversible experiment or biomarker data.
+      if (LEGACY_EXPERIMENT_PROGRESS_CARD_URLS_DISABLED) {
+        throw new VaultCliError(
+          'EXPERIMENT_PROGRESS_CARD_PRIVATE_DELIVERY_REQUIRED',
+          'Experiment progress cards require private attachment delivery and are temporarily unavailable.',
+        )
+      }
+
       const confounders = parseExperimentProgressCardConfounderOptions(options.confounder)
       const result = await services.query.showExperimentProgressCard({
         vault: options.vault,

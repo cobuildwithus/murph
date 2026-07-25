@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -117,28 +118,9 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
-  it('uploads hosted images and returns normalized response media', async () => {
+  it('emits hash-bound private vault media for hosted image delivery', async () => {
     const vaultRoot = await createTempDir('assistant-image-tool-vault-')
     await initializeVault({ vaultRoot })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (input) => {
-        expect(input.alt).toBe('A product photo')
-        expect(input.bytes).toEqual(webpBytes)
-        expect(input.contentType).toBe('image/webp')
-        expect(input.filename).toMatch(/^generated-[^.]+\.webp$/u)
-        expect(input.metadata).toMatchObject({
-          model: 'gpt-image-2',
-          schema: 'murph.generated-image.v1',
-        })
-        expect(input.metadata.promptHash).toMatch(/^[A-Za-z0-9_-]{32}$/u)
-        return {
-          alt: input.alt,
-          kind: 'image' as const,
-          source: input.source,
-          url: 'https://imagedelivery.net/account/image/public',
-        }
-      }),
-    }
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
@@ -161,30 +143,30 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       providerRequestOrdinal: 4,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
 
     expect(fetchImpl).toHaveBeenCalledOnce()
-    expect(uploader.uploadGeneratedImage).toHaveBeenCalledOnce()
-    expect(result).toMatchObject({
-      responseMedia: [
-        {
-          alt: 'A product photo',
-          kind: 'image',
-          source: 'gpt-image-2',
-          url: 'https://imagedelivery.net/account/image/public',
-        },
-      ],
-      rpcSuccess: true,
-    })
+    expect(result.rpcSuccess).toBe(true)
     expect(result.rpcText).toMatch(
-      /^generated image attached to the final response and saved to the vault as raw\/captures\/.+\.webp$/u,
+      /^generated image attached privately and saved to the vault as raw\/captures\/.+\.webp$/u,
     )
     expect(result.savedCaptureId).toMatch(/^evt_[A-Za-z0-9_-]+$/u)
     expect(result.savedImageRef).toMatch(/^raw\/captures\/.+\.webp$/u)
+    expect(result.responseMedia).toEqual([
+      {
+        alt: 'A product photo',
+        contentType: 'image/webp',
+        filename: path.posix.basename(result.savedImageRef!),
+        kind: 'vault_image',
+        ref: result.savedImageRef,
+        sha256: createHash('sha256').update(webpBytes).digest('hex'),
+        sizeBytes: webpBytes.byteLength,
+        source: 'gpt-image-2',
+      },
+    ])
     await expect(readFile(path.join(vaultRoot, result.savedImageRef!)))
       .resolves.toEqual(Buffer.from(webpBytes))
     expect(result.usageDraft?.providerRequestOrdinal).toBe(4)
@@ -201,20 +183,9 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
-  it('reuses the saved capture when a hosted upload retry uses the same operation key', async () => {
+  it('reuses the saved capture and private descriptor for the same operation key', async () => {
     const vaultRoot = await createTempDir('assistant-image-tool-retry-vault-')
     await initializeVault({ vaultRoot })
-    const uploadGeneratedImage = vi.fn()
-      .mockRejectedValueOnce(new Error('upload failed'))
-      .mockImplementationOnce(async (input) => {
-        expect(input.bytes).toEqual(webpBytes)
-        return {
-          alt: input.alt,
-          kind: 'image' as const,
-          source: input.source,
-          url: 'https://imagedelivery.net/account/retry/public',
-        }
-      })
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
@@ -235,63 +206,36 @@ describe('executeGenerateImageTool', () => {
     const first = await executeGenerateImageTool({
       args,
       captureIdempotencyKey: 'turn-1:tool-2',
-      env: {
-        OPENAI_API_KEY: 'openai-test-key',
-      },
+      env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: { uploadGeneratedImage },
       providerRequestOrdinal: 4,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
-
-    expect(first.rpcSuccess).toBe(false)
-    expect(first.rpcText).toBe('image generated but upload failed')
-    expect(first.usageDraft?.providerRequestOutcome).toBe('succeeded')
-    expect(fetchImpl).toHaveBeenCalledOnce()
-
     const second = await executeGenerateImageTool({
       args,
       captureIdempotencyKey: 'turn-1:tool-2',
-      env: {
-        OPENAI_API_KEY: 'openai-test-key',
-      },
+      env: { OPENAI_API_KEY: 'openai-test-key' },
       fetchImpl,
-      hostedGeneratedImageUploader: { uploadGeneratedImage },
       providerRequestOrdinal: 5,
-      requireHostedGeneratedImageUploader: true,
+      requireHostedPrivateImageDelivery: true,
       vaultRoot,
     })
 
     expect(fetchImpl).toHaveBeenCalledOnce()
-    expect(uploadGeneratedImage).toHaveBeenCalledTimes(2)
+    expect(first.rpcSuccess).toBe(true)
     expect(second.rpcSuccess).toBe(true)
-    expect(second.savedCaptureId).toMatch(/^evt_[A-Za-z0-9_-]+$/u)
-    expect(second.savedImageRef).toMatch(/^raw\/captures\/.+\.webp$/u)
+    expect(second.savedImageRef).toBe(first.savedImageRef)
+    expect(second.responseMedia).toEqual(first.responseMedia)
+    expect(second.usageDraft).toBeNull()
     await expect(readFile(path.join(vaultRoot, second.savedImageRef!)))
       .resolves.toEqual(Buffer.from(webpBytes))
-    expect(second.responseMedia).toEqual([
-      {
-        alt: 'A retryable product photo',
-        kind: 'image',
-        source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/retry/public',
-      },
-    ])
-    expect(second.usageDraft).toBeNull()
   })
 
   it('keys dynamic generated-image retries by stable tool call id, not RPC request id', async () => {
     const vaultRoot = await createTempDir('assistant-image-tool-call-id-vault-')
     await initializeVault({ vaultRoot })
-    const uploadGeneratedImage = vi.fn()
-      .mockRejectedValueOnce(new Error('upload failed'))
-      .mockImplementationOnce(async (input) => ({
-        alt: input.alt,
-        kind: 'image' as const,
-        source: input.source,
-        url: 'https://imagedelivery.net/account/retry-call/public',
-      }))
+
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
@@ -343,7 +287,6 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: { uploadGeneratedImage },
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: firstRequest,
@@ -351,11 +294,11 @@ describe('executeGenerateImageTool', () => {
       vaultRoot,
     })
     expect(first.rpcResult).toMatchObject({
-      success: false,
+      success: true,
       contentItems: [
         {
           type: 'inputText',
-          text: 'image generated but upload failed',
+          text: expect.stringMatching(/^generated image attached privately/u),
         },
       ],
     })
@@ -366,7 +309,6 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: { uploadGeneratedImage },
       nextUsageOrdinal: () => usageOrdinal++,
       progressDelivery: null,
       request: secondRequest,
@@ -375,28 +317,21 @@ describe('executeGenerateImageTool', () => {
     })
 
     expect(fetchImpl).toHaveBeenCalledOnce()
-    expect(uploadGeneratedImage).toHaveBeenCalledTimes(2)
     expect(second.rpcResult.success).toBe(true)
+    expect(second.responseMediaPatch?.media).toEqual(first.responseMediaPatch?.media)
     expect(second.responseMediaPatch?.media).toEqual([
-      {
+      expect.objectContaining({
         alt: 'A retryable dynamic product photo',
-        kind: 'image',
+        contentType: 'image/webp',
+        kind: 'vault_image',
         source: 'gpt-image-2',
-        url: 'https://imagedelivery.net/account/retry-call/public',
-      },
+      }),
     ])
     expect(second.usageDraft).toBeNull()
   })
 
   it('emits a succeeded usage draft when a successful image response omits usage', async () => {
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (input) => ({
-        alt: input.alt,
-        kind: 'image' as const,
-        source: input.source,
-        url: 'https://imagedelivery.net/account/image/public',
-      })),
-    }
+    const codexHome = await createTempDir('assistant-image-tool-no-usage-')
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
@@ -414,13 +349,12 @@ describe('executeGenerateImageTool', () => {
         quality: 'high',
         size: '1536x1024',
       },
+      codexHome,
       env: {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       providerRequestOrdinal: 5,
-      requireHostedGeneratedImageUploader: true,
     })
 
     expect(result.rpcSuccess).toBe(true)
@@ -523,9 +457,8 @@ describe('executeGenerateImageTool', () => {
   })
 
   it('reports invalid image bytes with usage instead of an upload failure', async () => {
-    const uploader = {
-      uploadGeneratedImage: vi.fn(),
-    }
+    const vaultRoot = await createTempDir('assistant-image-tool-invalid-vault-')
+    await initializeVault({ vaultRoot })
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from([0x00, 0x01, 0x02]).toString('base64') }],
@@ -548,12 +481,11 @@ describe('executeGenerateImageTool', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       providerRequestOrdinal: 6,
       requireHostedGeneratedImageUploader: true,
+      vaultRoot,
     })
 
-    expect(uploader.uploadGeneratedImage).not.toHaveBeenCalled()
     expect(result.rpcSuccess).toBe(false)
     expect(result.rpcText).toBe('image generation returned invalid image data')
     expect(result.usageDraft?.providerRequestOrdinal).toBe(6)
@@ -602,7 +534,7 @@ describe('executeGenerateImageTool', () => {
     })
   })
 
-  it('fails before OpenAI when hosted upload is required but unavailable', async () => {
+  it('fails before OpenAI when private hosted delivery has no owning vault', async () => {
     const fetchImpl = vi.fn()
 
     const result = await executeGenerateImageTool({
@@ -624,7 +556,7 @@ describe('executeGenerateImageTool', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
     expect(result).toEqual({
       rpcSuccess: false,
-      rpcText: 'hosted image upload is not available for this turn',
+      rpcText: 'hosted private image delivery requires the owning vault',
     })
   })
 })
@@ -956,14 +888,6 @@ describe('murph.generate_image dynamic tool execution', () => {
   it('parses a Codex dynamic tool call and appends hosted media with image usage', async () => {
     const vaultRoot = await createTempDir('assistant-image-tool-dynamic-vault-')
     await initializeVault({ vaultRoot })
-    const uploader = {
-      uploadGeneratedImage: vi.fn(async (input) => ({
-        alt: input.alt,
-        kind: 'image' as const,
-        source: input.source,
-        url: 'https://imagedelivery.net/account/image/public',
-      })),
-    }
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         data: [{ b64_json: Buffer.from(webpBytes).toString('base64') }],
@@ -1008,7 +932,6 @@ describe('murph.generate_image dynamic tool execution', () => {
         OPENAI_API_KEY: 'openai-test-key',
       },
       fetchImpl,
-      hostedGeneratedImageUploader: uploader,
       nextUsageOrdinal,
       progressDelivery: null,
       request: request!,
@@ -1023,7 +946,7 @@ describe('murph.generate_image dynamic tool execution', () => {
         {
           type: 'inputText',
           text: expect.stringMatching(
-            /^generated image attached to the final response and saved to the vault as raw\/captures\/.+\.webp$/u,
+            /^generated image attached privately and saved to the vault as raw\/captures\/.+\.webp$/u,
           ),
         },
       ],
@@ -1038,9 +961,13 @@ describe('murph.generate_image dynamic tool execution', () => {
       media: [
         {
           alt: 'Generated bottle image',
-          kind: 'image',
+          contentType: 'image/webp',
+          filename: path.posix.basename(savedImageRef!),
+          kind: 'vault_image',
+          ref: savedImageRef,
+          sha256: createHash('sha256').update(webpBytes).digest('hex'),
+          sizeBytes: webpBytes.byteLength,
           source: 'gpt-image-2',
-          url: 'https://imagedelivery.net/account/image/public',
         },
       ],
       op: 'append',

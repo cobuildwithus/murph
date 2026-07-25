@@ -8,9 +8,8 @@ import {
   fraunces600FontPath,
 } from "../../../../font-files";
 import {
-  decodeExperimentCardData,
   EXPERIMENT_CARD_MAX_SIGNALS,
-  EXPERIMENT_CARD_PARAM,
+  parseExperimentCardData,
   type ExperimentCardChart,
   type ExperimentCardData,
   type ExperimentCardSignal,
@@ -19,6 +18,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const SIZE = { width: 1200, height: 780 };
+const MAX_CARD_REQUEST_BYTES = 64 * 1024;
 const CONTENT_WIDTH = SIZE.width - 128;
 const LOGO_HEIGHT = 52;
 const LOGO_WIDTH = Math.round((LOGO_HEIGHT * 197) / 44); // logo.svg viewBox is 197×44
@@ -41,12 +41,33 @@ const SENTIMENT_STYLE: Record<string, { text: string; chip: string }> = {
   neutral: { text: "#827C6C", chip: "rgba(130,124,108,0.14)" },
 };
 
-export async function GET(request: Request): Promise<Response> {
-  const { searchParams } = new URL(request.url);
-  const data = decodeExperimentCardData(searchParams.get(EXPERIMENT_CARD_PARAM));
+export async function GET(): Promise<Response> {
+  return new Response("URL-encoded experiment cards are no longer available.", {
+    headers: { "Cache-Control": "private, no-store" },
+    status: 410,
+  });
+}
 
+export async function POST(request: Request): Promise<Response> {
+  const declaredLength = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_CARD_REQUEST_BYTES) {
+    return invalidCardResponse(413);
+  }
+
+  const body = await request.text();
+  if (new TextEncoder().encode(body).byteLength > MAX_CARD_REQUEST_BYTES) {
+    return invalidCardResponse(413);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return invalidCardResponse(400);
+  }
+  const data = parseExperimentCardData(parsed);
   if (!data) {
-    return new Response("Invalid or missing card data.", { status: 400 });
+    return invalidCardResponse(400);
   }
 
   const [fraunces400, fraunces600, dmSans400, logoSrc] = await Promise.all([
@@ -66,10 +87,19 @@ export async function GET(request: Request): Promise<Response> {
       { name: "DM Sans", data: dmSans400, weight: 400 },
     ],
     headers: {
-      // The snapshot is baked into the URL, so each URL renders deterministically.
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, no-store",
     },
   });
+}
+
+function invalidCardResponse(status: 400 | 413): Response {
+  return new Response(
+    status === 413 ? "Card data is too large." : "Invalid or missing card data.",
+    {
+      headers: { "Cache-Control": "private, no-store" },
+      status,
+    },
+  );
 }
 
 function Card({ data, logoSrc }: { data: ExperimentCardData; logoSrc: string }) {

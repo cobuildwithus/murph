@@ -18,6 +18,7 @@ import {
   type AssistantOutboxIntent,
   type AssistantTurnTrigger,
   type AssistantVaultFileResponseMedia,
+  type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -294,6 +295,29 @@ export async function readVerifiedAssistantVaultFileBytes(input: {
     throw new VaultCliError(
       'ASSISTANT_VAULT_FILE_CHANGED_AFTER_APPROVAL',
       'The vault file changed after approval and was not sent.',
+    )
+  }
+  return snapshot.bytes
+}
+
+export async function readVerifiedAssistantVaultImageBytes(input: {
+  image: AssistantVaultImageResponseMedia
+  vaultRoot: string
+}): Promise<Uint8Array> {
+  const snapshot = await readAssistantVaultFileSnapshot({
+    displayFilename: input.image.filename,
+    ref: input.image.ref,
+    vaultRoot: input.vaultRoot,
+  })
+  if (
+    snapshot.file.sha256 !== input.image.sha256
+    || snapshot.file.sizeBytes !== input.image.sizeBytes
+    || snapshot.file.filename !== input.image.filename
+    || snapshot.file.contentType !== input.image.contentType
+  ) {
+    throw new VaultCliError(
+      'ASSISTANT_VAULT_IMAGE_CHANGED_AFTER_CAPTURE',
+      'The private image changed after capture and was not sent.',
     )
   }
   return snapshot.bytes

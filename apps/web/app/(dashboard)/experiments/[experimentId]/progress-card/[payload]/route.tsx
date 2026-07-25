@@ -18,6 +18,7 @@ import {
 export const dynamic = "force-dynamic";
 
 const SIZE = { width: 1200, height: 630 };
+const LEGACY_PROGRESS_CARD_URLS_DISABLED: boolean = true;
 const LOGO_HEIGHT = 26;
 const LOGO_WIDTH = Math.round((LOGO_HEIGHT * 197) / 44); // logo.svg viewBox is 197×44
 
@@ -64,6 +65,15 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ payload: string }> },
 ): Promise<Response> {
+  // Legacy URLs contain a reversible health snapshot in the path. Never decode
+  // or render them after the private-media hard cut.
+  if (LEGACY_PROGRESS_CARD_URLS_DISABLED) {
+    return new Response("URL-encoded experiment progress cards are no longer available.", {
+      headers: { "Cache-Control": "private, no-store" },
+      status: 410,
+    });
+  }
+
   const { payload } = await context.params;
   const data = payload.endsWith(".png")
     ? decodeExperimentProgressCard(payload.slice(0, -".png".length))
@@ -90,8 +100,7 @@ export async function GET(
       { name: "DM Sans", data: dmSans400, weight: 400 },
     ],
     headers: {
-      // The snapshot is baked into the URL, so each URL renders deterministically.
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, no-store",
     },
   });
 
@@ -103,7 +112,7 @@ async function toStaticLikePngResponse(image: Response): Promise<Response> {
   // streamed ImageResponse shape, so expose the generated card like a file.
   const body = await image.arrayBuffer();
   const headers = new Headers(image.headers);
-  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  headers.set("Cache-Control", "private, no-store");
   headers.set("Content-Disposition", 'inline; filename="experiment-progress-card.png"');
   headers.set("Content-Length", String(body.byteLength));
   headers.set("Content-Type", "image/png");

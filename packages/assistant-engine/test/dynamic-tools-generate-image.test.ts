@@ -125,11 +125,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('describes the canonical Murph character sheet skill asset reference', () => {
+  it('describes the canonical Murph character sheet only for generated messages', () => {
     const generateImageReferenceDescription =
       MURPH_GENERATE_IMAGE_TOOL.inputSchema.properties.referenceImageRefs.description
-    const groupReferenceDescription =
-      MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description
 
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'skill-assets/murph-character-sheet-v1.png',
@@ -143,11 +141,11 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(groupReferenceDescription).toContain(
-      'skill-assets/murph-character-sheet-v1.png',
+    expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty(
+      'referenceImageRefs',
     )
-    expect(groupReferenceDescription).toContain(
-      'generated avatar',
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).not.toContain(
+      'set_chat_avatar',
     )
   })
 })

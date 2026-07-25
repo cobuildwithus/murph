@@ -101,7 +101,6 @@ describe("murph.group dynamic tool", () => {
       "create_join_link",
       "post_join_offer",
       "read_chat_participants",
-      "set_chat_avatar",
       "share_contact_card",
       "revoke_own_email_share",
     ]);
@@ -1959,30 +1958,14 @@ describe("murph.group dynamic tool", () => {
       expect(result.rpcResult.success).toBe(true);
       expect(readGroupToolPayload(result)).toEqual({
         action: "set_chat_avatar",
-        result: { status: "requested" },
+        result: {
+          status: "unavailable",
+          unavailableReason: "private_group_avatar_delivery_unavailable",
+        },
       });
       expect(result.responseMediaPatch).toBeUndefined();
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
-      });
-      expect(uploadGeneratedImage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          alt: "Our group avatar",
-          contentType: "image/png",
-          filename: "group-avatar.png",
-          metadata: expect.objectContaining({
-            imageSha256: expect.any(String),
-            schema: "murph.group-avatar.v1",
-            sourceRefSha256: expect.any(String),
-          }),
-          source: "murph.group-avatar",
-        }),
-      );
-      expect(uploadGeneratedImage.mock.calls[0]?.[0].metadata).not.toHaveProperty("sourceRef");
+      expect(groupRequest).not.toHaveBeenCalled();
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2048,51 +2031,19 @@ describe("murph.group dynamic tool", () => {
         vaultRoot,
       });
 
-      expect(nextUsageOrdinal).toHaveBeenCalledOnce();
-      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(nextUsageOrdinal).not.toHaveBeenCalled();
+      expect(fetchImpl).not.toHaveBeenCalled();
       expect(result.rpcResult.success).toBe(true);
-      const payload = readGroupToolPayload(result);
-      expect(payload).toMatchObject({
+      expect(readGroupToolPayload(result)).toEqual({
         action: "set_chat_avatar",
-        generatedImage: {
-          savedCaptureId: expect.stringMatching(/^evt_[A-Za-z0-9_-]+$/u),
-          savedImageRef: expect.stringMatching(/^raw\/captures\/.+\.webp$/u),
-        },
-        result: { status: "requested" },
-      });
-      const savedImageRef = generatedImageRefFromPayload(payload);
-      await expect(readFile(join(vaultRoot, savedImageRef)))
-        .resolves.toEqual(Buffer.from(webpBytes));
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/generated-avatar/public",
-      });
-      expect(uploadGeneratedImage).toHaveBeenCalledWith(
-        expect.objectContaining({
-          alt: "Our generated avatar",
-          contentType: "image/webp",
-          metadata: expect.objectContaining({
-            model: "gpt-image-2",
-            promptHash: expect.stringMatching(/^[A-Za-z0-9_-]{32}$/u),
-            schema: "murph.generated-image.v1",
-          }),
-          source: "gpt-image-2",
-        }),
-      );
-      expect(result.usageDraft).toMatchObject({
-        provider: "openai-images",
-        providerRequestOrdinal: 7,
-        providerRequestOutcome: "succeeded",
-        usage: {
-          inputTokens: 4,
-          outputTokens: 6,
-          providerRequestId: "req_group_avatar_image",
-          totalTokens: 10,
+        result: {
+          status: "unavailable",
+          unavailableReason: "private_group_avatar_delivery_unavailable",
         },
       });
+      expect(groupRequest).not.toHaveBeenCalled();
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
+      expect(result.usageDraft).toBeUndefined();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -2174,15 +2125,21 @@ describe("murph.group dynamic tool", () => {
       });
 
       expect(first.rpcResult).toEqual({
-        success: false,
+        success: true,
         contentItems: [
           {
             type: "inputText",
-            text: "image generated but upload failed",
+            text: JSON.stringify({
+              action: "set_chat_avatar",
+              result: {
+                status: "unavailable",
+                unavailableReason: "private_group_avatar_delivery_unavailable",
+              },
+            }),
           },
         ],
       });
-      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(fetchImpl).not.toHaveBeenCalled();
 
       const second = await executeMurphDynamicToolRequest({
         env: {
@@ -2197,27 +2154,17 @@ describe("murph.group dynamic tool", () => {
         vaultRoot,
       });
 
-      expect(fetchImpl).toHaveBeenCalledOnce();
-      expect(uploadGeneratedImage).toHaveBeenCalledTimes(2);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
       expect(second.rpcResult.success).toBe(true);
-      expect(readGroupToolPayload(second)).toMatchObject({
+      expect(readGroupToolPayload(second)).toEqual({
         action: "set_chat_avatar",
-        generatedImage: {
-          savedCaptureId: expect.stringMatching(/^evt_[A-Za-z0-9_-]+$/u),
-          savedImageRef: expect.stringMatching(/^raw\/captures\/.+\.webp$/u),
+        result: {
+          status: "unavailable",
+          unavailableReason: "private_group_avatar_delivery_unavailable",
         },
-        result: { status: "requested" },
       });
-      expect(groupRequest).toHaveBeenNthCalledWith(1, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(2, {
-        action: "preflight_set_chat_avatar",
-      });
-      expect(groupRequest).toHaveBeenNthCalledWith(3, {
-        action: "set_chat_avatar",
-        groupChatIconUrl: "https://imagedelivery.net/account/generated-avatar-retry/public",
-      });
+      expect(groupRequest).not.toHaveBeenCalled();
       expect(second).not.toHaveProperty("usageDraft");
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -2276,11 +2223,10 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         result: {
           status: "unavailable",
-          unavailableReason: "linq_thread_unavailable",
+          unavailableReason: "private_group_avatar_delivery_unavailable",
         },
       });
-      expect(groupRequest).toHaveBeenCalledOnce();
-      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(groupRequest).not.toHaveBeenCalled();
       expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
@@ -2335,11 +2281,10 @@ describe("murph.group dynamic tool", () => {
         action: "set_chat_avatar",
         result: {
           status: "unavailable",
-          unavailableReason: "group_avatar_preflight_unavailable",
+          unavailableReason: "private_group_avatar_delivery_unavailable",
         },
       });
-      expect(groupRequest).toHaveBeenCalledOnce();
-      expect(groupRequest).toHaveBeenCalledWith({ action: "preflight_set_chat_avatar" });
+      expect(groupRequest).not.toHaveBeenCalled();
       expect(uploadGeneratedImage).not.toHaveBeenCalled();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
