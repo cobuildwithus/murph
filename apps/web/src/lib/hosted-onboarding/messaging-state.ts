@@ -90,10 +90,10 @@ export function isHostedMemberMessagingSetupRequired(input: {
 }): boolean {
   const messaging = resolveHostedMemberMessagingState(input);
 
-  // A linked Telegram account completes setup: the member has told us how to
-  // reach them. Waiting on their first inbound message is a delivery concern,
-  // surfaced as telegramAwaitingInbound, not a reason to hold up signup.
-  return !messaging.hasDirectMessagingChannel && !messaging.telegramAwaitingInbound;
+  // Billing and trial clocks start only once Murph has a replyable channel.
+  // A linked Telegram identity is not enough because the bot cannot initiate
+  // the first conversation; the inbound thread becomes the delivery authority.
+  return !messaging.hasDirectMessagingChannel;
 }
 
 export function resolveHostedMemberChannels(input: {
