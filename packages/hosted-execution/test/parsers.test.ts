@@ -1354,15 +1354,29 @@ describe("parseHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: null,
+        status: "ok",
+      },
+    })).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "update_display_name",
+      result: {
+        group: null,
         status: "unavailable",
-        unavailableReason: "group_not_found",
+        unavailableReason: "provider_unavailable",
       },
     })).toEqual({
       action: "update_display_name",
       result: {
         group: null,
         status: "unavailable",
-        unavailableReason: "group_not_found",
+        unavailableReason: "provider_unavailable",
       },
     });
 

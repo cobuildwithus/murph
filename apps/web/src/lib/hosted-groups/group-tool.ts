@@ -560,13 +560,6 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("display_name_unavailable");
   }
 
-  const existingGroupId = await readHostedGroupIdByRuntimeMemberId({
-    runtimeMemberId: input.memberId,
-  });
-  if (!existingGroupId) {
-    return unavailable("group_not_found");
-  }
-
   try {
     await updateHostedLinqChatDisplayName({
       chatId: access.chatId,
@@ -576,6 +569,11 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
+  // Renaming the chat is a provider mutation authorized by the route and the
+  // owner, exactly like set_chat_avatar. The hosted group label is a durable
+  // copy that only exists once the group has a hosted record, so a chat that
+  // has not created its group yet is still renamed and simply has no label to
+  // store; the null group says so.
   const updated = await getPrisma().$transaction(
     async (tx) => {
       return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
@@ -589,12 +587,7 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
 
   return {
     action: "update_display_name",
-    result: updated
-      ? {
-          group: updated,
-          status: "ok",
-        }
-      : { group: null, status: "unavailable", unavailableReason: "group_not_found" },
+    result: { group: updated, status: "ok" },
   };
 }
 

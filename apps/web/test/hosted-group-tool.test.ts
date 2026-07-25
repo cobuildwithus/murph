@@ -806,9 +806,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
       memberId: "member_owner",
     }));
-    expect(mocks.readHostedGroupIdByRuntimeMemberId).toHaveBeenCalledWith({
-      runtimeMemberId: "member_group_runtime",
-    });
     expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
     expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
@@ -855,8 +852,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
-  it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
+  it("renames the chat with a null group when the runtime has no hosted group record", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValueOnce(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -869,13 +866,14 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: null,
-        status: "unavailable",
-        unavailableReason: "group_not_found",
+        status: "ok",
       },
     });
 
-    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
-    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Unattached group",
+    });
   });
 
   it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
