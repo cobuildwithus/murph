@@ -37,7 +37,10 @@ export function withHostedPrivyCompletionRepairs(
     // verified Privy identity. The base service syncs that identity best effort;
     // repeat the idempotent write here so a real cross-account conflict reaches
     // the user as the existing explicit 409 instead of becoming future silence.
-    if (telegramUserId && input.authMethod !== "telegram") {
+    if (
+      telegramUserId
+      && (input.authMethod === "phone" || input.authMethod === "email")
+    ) {
       await dependencies.syncHostedMemberTelegramRoutingBinding({
         memberId: result.memberId,
         ...(input.prisma ? { prisma: input.prisma } : {}),
