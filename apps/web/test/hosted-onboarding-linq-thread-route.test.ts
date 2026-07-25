@@ -1264,6 +1264,77 @@ describe("Linq explicit external-thread routing", () => {
     })).resolves.toEqual(refreshed.deliveryRoute);
   });
 
+  it("repairs non-empty corrupt delivery material on owning-line Linq ingress", async () => {
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected current Linq thread route lookup keys.");
+    }
+    const prisma = createPrisma({
+      pendingGroupReactionContextEncrypted: "same-authority-reaction-context",
+      routeAccountPhone: "+15550000000",
+      routeContainerMemberId: "member_thread_container_123",
+      routeDeliveryRouteEncrypted: "corrupt-delivery-route",
+    });
+    vi.mocked(usageAllowance.checkHostedAiUsageGate).mockResolvedValueOnce({
+      allowed: true,
+      allowanceSource: "thread_container",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 4_500_000n,
+      memberId: "member_thread_container_123",
+      periodEnd: new Date("2026-07-01T00:00:00.000Z"),
+      periodStart: new Date("2026-06-01T00:00:00.000Z"),
+      remainingUsdMicros: 4_500_000n,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 0n,
+    });
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(prisma.hostedThreadRoute.update).toHaveBeenCalledWith({
+      data: {
+        deliveryRouteEncrypted: expect.stringMatching(/^hsb-test:/u),
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      where: {
+        channel_threadIdentityLookupKey: {
+          channel: "linq",
+          threadIdentityLookupKey,
+        },
+      },
+    });
+    const encrypted = prisma.readDeliveryRouteEncrypted();
+    await expect(openHostedThreadDeliveryRoute({
+      channel: "linq",
+      containerMemberId: "member_thread_container_123",
+      encrypted,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      accountLookupKey,
+      channel: "linq",
+      schema: "murph.hosted-thread-delivery-route.v1",
+      threadId: "chat_group_123",
+    });
+  });
+
   it("repairs legacy delivery material without clearing same-authority reaction context", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     const accountLookupKey = requireTestPhoneLookupKey("+15550000000");

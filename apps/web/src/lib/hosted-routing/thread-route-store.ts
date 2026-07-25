@@ -13,9 +13,7 @@ import {
 } from "@murphai/hosted-execution/contracts";
 
 import {
-  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
-  createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
@@ -189,29 +187,11 @@ export function requiresHostedThreadDeliveryRouteRefresh(input: {
   route: HostedThreadRouteSnapshot;
   threadId: string | number | null | undefined;
 }): boolean {
-  const state = input.route.deliveryRouteState;
-  if (!state) {
-    // Production snapshots read above always carry this projection. Reduced
-    // snapshots owned by other tests/callers cannot authorize a route rewrite.
-    return false;
-  }
-
-  const currentThreadIdentityLookupKey =
-    createHostedExternalThreadIdentityLookupKey({
-      channel: input.route.channel,
-      threadId: input.threadId,
-    });
-  const currentThreadLookupKey = createHostedExternalThreadLookupKey({
-    accountLookupKey: input.accountLookupKey,
-    channel: input.route.channel,
-    threadId: input.threadId,
-  });
-
-  return !state.deliveryRouteEncryptedPresent
-    || !currentThreadIdentityLookupKey
-    || !currentThreadLookupKey
-    || state.threadIdentityLookupKey !== currentThreadIdentityLookupKey
-    || state.threadLookupKey !== currentThreadLookupKey;
+  // Ciphertext presence and matching blinded lookup keys cannot prove that the
+  // encrypted material opens or still describes this route. Every canonical
+  // snapshot must reach the owner-aware refresh boundary, which validates
+  // before deciding to write.
+  return input.route.deliveryRouteState !== undefined;
 }
 
 export async function lockHostedThreadRouteByThreadIdentityTx(input: {

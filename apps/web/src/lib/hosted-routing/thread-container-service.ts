@@ -69,10 +69,11 @@ export interface HostedThreadContainerDeliveryRouteRefreshResult {
 
 /**
  * Repairs delivery material only when the current provider account proves it
- * owns the existing account-scoped route. A different delivering Linq line may
- * still use the account-independent thread identity, but it must never rewrite
- * the route's canonical account identity. When ciphertext already exists, this
- * also recovers that canonical identity for cross-line inbound session binding.
+ * owns the existing account-scoped route. Owning ingress opens and validates
+ * non-empty material before deciding that no write is needed. A different
+ * delivering Linq line may still use the account-independent thread identity,
+ * but it must never rewrite the route's canonical account identity. Valid
+ * ciphertext also recovers that identity for cross-line session binding.
  */
 export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
   accountLookupKey: string | null | undefined;
@@ -209,7 +210,18 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
   const authorityChanged =
     row.threadIdentityLookupKey !== threadIdentityLookupKey
     || row.threadLookupKey !== threadLookupKey;
-  if (authorityChanged || !row.deliveryRouteEncrypted) {
+  const existingDeliveryRoute = authorityChanged
+    ? null
+    : await tryOpenHostedThreadContainerDeliveryRoute({
+        channel: input.route.channel,
+        containerMemberId: input.route.containerMemberId,
+        deliveryRouteEncrypted: row.deliveryRouteEncrypted,
+        prisma: input.prisma,
+        threadId,
+        threadIdentityLookupKey: row.threadIdentityLookupKey,
+        threadLookupKey: row.threadLookupKey,
+      });
+  if (authorityChanged || !existingDeliveryRoute) {
     const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
       containerMemberId: input.route.containerMemberId,
       prisma: input.prisma,
