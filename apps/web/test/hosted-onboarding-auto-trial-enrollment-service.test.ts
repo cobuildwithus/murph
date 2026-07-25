@@ -2277,8 +2277,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
   it("cancels the created trial after the transaction commits when the locked re-read sees paid billing", async () => {
     const prisma = makePrisma();
+    let cancellationTransactionClient: unknown = null;
     mocks.stripe.subscriptions.cancel.mockImplementationOnce(async () => {
       expect(prisma.isTransactionActive()).toBe(true);
+      cancellationTransactionClient = prisma.getActiveTransactionClient();
       return {
         id: "sub_auto_trial_123",
         object: "subscription",
@@ -2340,13 +2342,20 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 30_000,
       },
     );
+    const cleanupTransactionClient = prisma.transactionClients[2];
+    if (!cleanupTransactionClient) {
+      throw new Error("Expected a third transaction client for cleanup.");
+    }
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
+    expect(mocks.lockHostedMemberRow.mock.calls[2]?.[0])
+      .toBe(cleanupTransactionClient);
     expect(
       mocks.readHostedMemberPulseTrialCleanupOwnershipState,
     ).toHaveBeenCalledWith({
       memberId: "member_123",
-      prisma: prisma.transactionClient,
+      prisma: cleanupTransactionClient,
     });
+    expect(cancellationTransactionClient).toBe(cleanupTransactionClient);
     expect(
       mocks.lockHostedMemberRow.mock.invocationCallOrder[2],
     ).toBeLessThan(
@@ -2962,23 +2971,29 @@ function makeTrialSubscriptionMetadata(
 
 function makePrisma() {
   let transactionActive = false;
-  const tx = { tx: true };
-  Object.defineProperty(tx, "$queryRaw", {
-    enumerable: false,
-    value: vi.fn().mockResolvedValue([]),
-  });
+  let activeTransactionClient: { tx: boolean } | null = null;
+  const transactionClients: Array<{ tx: boolean }> = [];
 
   return {
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
+      const tx = { tx: true };
+      Object.defineProperty(tx, "$queryRaw", {
+        enumerable: false,
+        value: vi.fn().mockResolvedValue([]),
+      });
+      transactionClients.push(tx);
       transactionActive = true;
+      activeTransactionClient = tx;
       try {
         return await callback(tx);
       } finally {
+        activeTransactionClient = null;
         transactionActive = false;
       }
     }),
+    getActiveTransactionClient: () => activeTransactionClient,
     isTransactionActive: () => transactionActive,
-    transactionClient: tx,
+    transactionClients,
   };
 }
 
