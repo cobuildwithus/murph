@@ -1,9 +1,7 @@
 name: Debug PR957 Web Build
 
 on:
-  push:
-    branches:
-      - fix/visible-secondary-messaging-outcomes
+  pull_request:
 
 permissions:
   contents: read
