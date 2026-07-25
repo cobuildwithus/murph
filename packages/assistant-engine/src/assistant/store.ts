@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises'
+import { readdir } from 'node:fs/promises'
 import {
   assistantAutomationStateSchema,
   parseAssistantSessionRecord,
@@ -41,7 +41,6 @@ import {
   retireLegacyAssistantConversationKey,
   writeAutomationState,
   replaceTranscriptEntries,
-  resolveAssistantSessionPath,
   synchronizeAssistantIndexes,
   writeAssistantSession,
 } from './store/persistence.js'

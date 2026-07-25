@@ -195,7 +195,6 @@ export interface HostedWorkspaceCheckpointRequestBuilder {
 
 interface HostedWorkspaceCheckpointRequestSession
   extends HostedWorkspaceCheckpointRequestBuilder {
-  adoptCheckpointWorkspace(workspace: HostedWorkspaceState): void;
   assistantInputBatchFull(): boolean;
   assistantInputBatchRemaining(): number;
   conversationConsumedSeq(): string | null;
@@ -2779,10 +2778,6 @@ function createHostedWorkspaceCheckpointRequestSession(
     Math.max(0, assistantInputBatchLimit - initialAssistantInputCount);
 
   return {
-    adoptCheckpointWorkspace(workspace) {
-      expectedWorkspaceVersion = workspace.version;
-      latestWorkspace = workspace;
-    },
     assistantInputBatchFull() {
       return assistantInputBatchOccupancy() >= assistantInputBatchLimit;
     },

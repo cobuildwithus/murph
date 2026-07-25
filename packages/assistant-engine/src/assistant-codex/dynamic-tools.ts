@@ -2770,7 +2770,7 @@ export async function executeMurphDynamicToolRequest(input: {
           signal: input.abortSignal ?? null,
         })
         const resultContextGuidance =
-          'The completed result becomes context when the user next talks to Murph; do not promise a proactive update.'
+          'When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.'
         if (result.status === "calling") {
           return toolTextResult(
             true,
