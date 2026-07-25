@@ -886,7 +886,7 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
       async (tx) => {
         return recordHostedGroupDisclosurePermissionTx({
           groupId: authority.groupId,
-          messageId: sent.messageId,
+          message: { channel: "linq", messageId: sent.messageId },
           originAssistantInputId: input.originAssistantInputId,
           permissionText,
           postedAt,
@@ -1034,7 +1034,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
-        messageId: sent.messageId,
+        message: { channel: "linq", messageId: sent.messageId },
         postedAt: now,
         projectionScopes,
         tx,

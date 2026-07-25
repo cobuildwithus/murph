@@ -55,6 +55,7 @@ function createHostedOnboardingEnvironment(
     stripeSecretKey: "sk_test_123",
     stripeWebhookSecret: null,
     telegramBotUsername: null,
+    telegramBotToken: null,
     telegramWebhookSecret: null,
     ...overrides,
   };
