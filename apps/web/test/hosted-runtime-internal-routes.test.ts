@@ -36,7 +36,7 @@ const mocks = vi.hoisted(() => ({
   recordHostedIngressAssistantMilestone: vi.fn(),
   recordHostedIngressProviderStarted: vi.fn(),
   recordHostedIngressRuntimeMilestone: vi.fn(),
-  recordHostedRuntimeLog: vi.fn(),
+  recordHostedRuntimeLogs: vi.fn(),
   requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
   resolveHostedRuntimeAiUsageGate: vi.fn(),
@@ -84,7 +84,7 @@ vi.mock("@/src/lib/hosted-workspace/store", () => ({
   readAcceptedRuntimeAttemptFailureSignalOwnerLogId:
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId,
   readHostedWorkspace: mocks.readHostedWorkspace,
-  recordHostedRuntimeLog: mocks.recordHostedRuntimeLog,
+  recordHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -2131,30 +2131,39 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
-  it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
-    mocks.recordHostedRuntimeLog.mockResolvedValue({
+  it("writes the maximum runtime log batch with a single database call", async () => {
+    // The callback accepts 50 entries and the pool defaults to 15 clients, so
+    // one Prisma call per entry would make the pool the request's concurrency
+    // limiter. One callback must cost one statement.
+    mocks.recordHostedRuntimeLogs.mockResolvedValue([]);
+
+    const entries = Array.from({ length: 50 }, (_, index) => ({
       at: FIXED_NOW,
-      attemptId: "attempt_1",
-      checkpointVersion: null,
       component: "mailbox",
-      createdAt: FIXED_NOW,
-      errorCode: null,
+      eventCode: "mailbox.imported",
+      level: "info",
+      mailboxSeqStart: String(index),
+      phase: "import",
+    }));
+
+    const response = await runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      { entries },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
+      loggedCount: 50,
+    });
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledOnce();
+    expect(mocks.recordHostedRuntimeLogs.mock.calls[0]?.[0]?.entries).toHaveLength(50);
+  });
+
+  it("records bounded runtime logs and rejects forbidden log payload fields", async () => {
+    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
       eventCode: "mailbox.imported",
       id: "runtime_log_1",
-      leaseGeneration: "2",
-      level: "info",
-      mailboxLane: "conversation",
-      mailboxSeqEnd: "12",
-      mailboxSeqStart: "12",
-      outboxIntentRef: null,
-      phase: "import",
-      redactedJson: {
-        count: 1,
-        lane: "conversation",
-      },
-      userId: "member_routes_1",
-      workspaceVersion: "5",
-    });
+    }]);
 
     const response = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -2186,12 +2195,14 @@ describe("hosted runtime internal web routes", () => {
     expect(parseHostedRuntimeLogResponse(await response.json())).toEqual({
       loggedCount: 1,
     });
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledWith(expect.objectContaining({
-      redacted: {
-        count: 1,
-        lane: "conversation",
-        safeErrorMessage: "Codex app-server failed before producing a reply.",
-      },
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(expect.objectContaining({
+      entries: [expect.objectContaining({
+        redacted: {
+          count: 1,
+          lane: "conversation",
+          safeErrorMessage: "Codex app-server failed before producing a reply.",
+        },
+      })],
       userId: "member_routes_1",
     }));
     expect(mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId).not.toHaveBeenCalled();
@@ -2216,7 +2227,7 @@ describe("hosted runtime internal web routes", () => {
 
     expect(rejectedResponse.status).toBe(400);
     expect(rejectedText).not.toContain(UNSAFE_SENTINEL);
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledTimes(1);
 
     const unsafeCodeResponse = await runtimeLogRoute.POST(jsonRequest(
       "/api/internal/hosted-runtime/log",
@@ -2269,7 +2280,7 @@ describe("hosted runtime internal web routes", () => {
       },
     ));
     expect(oversizedResponse.status).toBe(400);
-    expect(mocks.recordHostedRuntimeLog).toHaveBeenCalledTimes(1);
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledTimes(1);
   });
 
   it("records hosted runtime latency callbacks under the signed user", async () => {
@@ -2500,26 +2511,10 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("signals a stateless runtime recheck after an accepted runtime attempt failure log", async () => {
-    mocks.recordHostedRuntimeLog.mockResolvedValue({
-      at: FIXED_NOW,
-      attemptId: null,
-      checkpointVersion: null,
-      component: "runner",
-      createdAt: FIXED_NOW,
-      errorCode: "runner_child_failed",
+    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
       eventCode: "runner.accepted_attempt_failed",
       id: "runtime_log_failure_1",
-      leaseGeneration: null,
-      level: "warn",
-      mailboxLane: null,
-      mailboxSeqEnd: null,
-      mailboxSeqStart: null,
-      outboxIntentRef: null,
-      phase: "error",
-      redactedJson: null,
-      userId: "member_routes_1",
-      workspaceVersion: "5",
-    });
+    }]);
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
       "runtime_log_failure_1",
     );
@@ -2558,26 +2553,10 @@ describe("hosted runtime internal web routes", () => {
   });
 
   it("cooldowns accepted runtime attempt failure recheck signals behind the owner log", async () => {
-    mocks.recordHostedRuntimeLog.mockResolvedValue({
-      at: FIXED_NOW,
-      attemptId: null,
-      checkpointVersion: null,
-      component: "runner",
-      createdAt: FIXED_NOW,
-      errorCode: "runner_child_failed",
+    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
       eventCode: "runner.accepted_attempt_failed",
       id: "runtime_log_failure_2",
-      leaseGeneration: null,
-      level: "warn",
-      mailboxLane: null,
-      mailboxSeqEnd: null,
-      mailboxSeqStart: null,
-      outboxIntentRef: null,
-      phase: "error",
-      redactedJson: null,
-      userId: "member_routes_1",
-      workspaceVersion: "5",
-    });
+    }]);
     mocks.readAcceptedRuntimeAttemptFailureSignalOwnerLogId.mockResolvedValue(
       "runtime_log_prior_failure",
     );
@@ -2608,26 +2587,10 @@ describe("hosted runtime internal web routes", () => {
 
   it("does not fail runtime log writes when the recheck signal is unavailable", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.recordHostedRuntimeLog.mockResolvedValue({
-      at: FIXED_NOW,
-      attemptId: null,
-      checkpointVersion: null,
-      component: "runner",
-      createdAt: FIXED_NOW,
-      errorCode: "runner_child_failed",
+    mocks.recordHostedRuntimeLogs.mockResolvedValue([{
       eventCode: "runner.accepted_attempt_failed",
       id: "runtime_log_failure_3",
-      leaseGeneration: null,
-      level: "warn",
-      mailboxLane: null,
-      mailboxSeqEnd: null,
-      mailboxSeqStart: null,
-      outboxIntentRef: null,
-      phase: "error",
-      redactedJson: null,
-      userId: "member_routes_1",
-      workspaceVersion: "5",
-    });
+    }]);
     mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
       new Error("Temporal unavailable"),
     );
