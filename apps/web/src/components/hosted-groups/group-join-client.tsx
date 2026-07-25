@@ -13,6 +13,7 @@ import { HostedLegalConsentCard } from "@/src/components/legal/hosted-legal-cons
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { navigateHostedAuthRedirect } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
+import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { toErrorMessage } from "@/src/components/settings/hosted-settings-sync-helpers";
 import { Button } from "@/src/components/ui/button";
 import {
@@ -119,13 +120,21 @@ export function GroupJoinAcceptForm(props: {
     [props.permissions, selected],
   );
 
-  function togglePermission(projectionScopeKey: string) {
+  const permissionGroups = useMemo(
+    () => groupJoinPermissionsForDisplay(props.permissions),
+    [props.permissions],
+  );
+
+  function togglePermissionGroup(scopeKeys: readonly string[]) {
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(projectionScopeKey)) {
-        next.delete(projectionScopeKey);
-      } else {
-        next.add(projectionScopeKey);
+      const allSelected = scopeKeys.every((scopeKey) => next.has(scopeKey));
+      for (const scopeKey of scopeKeys) {
+        if (allSelected) {
+          next.delete(scopeKey);
+        } else {
+          next.add(scopeKey);
+        }
       }
       return next;
     });
@@ -184,11 +193,11 @@ export function GroupJoinAcceptForm(props: {
             </p>
           </div>
           <div className="flex flex-col gap-2.5">
-            {props.permissions.map((permission) => {
-              const checked = selected.has(permission.projectionScopeKey);
+            {permissionGroups.map((group) => {
+              const checked = group.scopeKeys.every((scopeKey) => selected.has(scopeKey));
               return (
                 <label
-                  key={permission.projectionScopeKey}
+                  key={group.key}
                   className={cn(
                     "flex cursor-pointer gap-3 rounded-xl border p-3.5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
                     checked
@@ -200,7 +209,7 @@ export function GroupJoinAcceptForm(props: {
                     type="checkbox"
                     className="sr-only"
                     checked={checked}
-                    onChange={() => togglePermission(permission.projectionScopeKey)}
+                    onChange={() => togglePermissionGroup(group.scopeKeys)}
                   />
                   <span
                     aria-hidden
@@ -214,9 +223,9 @@ export function GroupJoinAcceptForm(props: {
                     {checked ? <Check className="size-3.5" strokeWidth={3} /> : null}
                   </span>
                   <span className="flex flex-col gap-0.5">
-                    <span className="text-sm font-semibold text-foreground">{permission.label}</span>
+                    <span className="text-sm font-semibold text-foreground">{group.label}</span>
                     <span className="text-[13px] leading-5 text-muted-foreground">
-                      {permission.description}
+                      {group.description}
                     </span>
                   </span>
                 </label>

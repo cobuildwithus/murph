@@ -26,14 +26,8 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
     projectionScope: DESIGN_ACTIVITY_SCOPE,
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey(DESIGN_ACTIVITY_SCOPE),
   },
-  {
-    description: "Shares your last 7 days of active calories.",
-    label: "Active calories",
-    projectionScope: { projectionKind: "active-calories-days.v0" },
-    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
-      projectionKind: "active-calories-days.v0",
-    }),
-  },
+  // The four gram-macro scopes render as a single "Daily macros" card; dietary
+  // calories stay a separate "Daily calories" card.
   {
     description:
       "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
@@ -54,11 +48,29 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   },
   {
     description:
+      "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+    label: "Daily fat",
+    projectionScope: { projectionKind: "fat-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "fat-days.v0",
+    }),
+  },
+  {
+    description:
       "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
     label: "Daily fiber",
     projectionScope: { projectionKind: "fiber-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "fiber-days.v0",
+    }),
+  },
+  {
+    description:
+      "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+    label: "Daily calories",
+    projectionScope: { projectionKind: "calories-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "calories-days.v0",
     }),
   },
 ];

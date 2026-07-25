@@ -2,6 +2,7 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { HostedVaultShareFixedProjectionKind } from "@murphai/hosted-execution/vault-share";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
@@ -117,6 +118,137 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
   );
   expect(markup).toContain("has-[:focus-visible]:ring-2");
   expect(markup).toContain('type="checkbox"');
+});
+
+test("groups the four macro nutrients into one Daily macros card, calories separate", async () => {
+  const { groupJoinPermissionsForDisplay } = await import(
+    "@/src/components/hosted-groups/group-join-permission-groups"
+  );
+  const nutrientPermission = (
+    projectionKind: HostedVaultShareFixedProjectionKind,
+    label: string,
+  ) => ({
+    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    label: `Daily ${label}`,
+    projectionScope: { projectionKind },
+    projectionScopeKey: projectionKind,
+  });
+
+  const groups = groupJoinPermissionsForDisplay([
+    {
+      description: "Shares your last 7 days of steps.",
+      label: "Steps",
+      projectionScope: { projectionKind: "steps-days.v0" },
+      projectionScopeKey: "steps-days.v0",
+    },
+    nutrientPermission("protein-days.v0", "protein"),
+    nutrientPermission("carbs-days.v0", "carbohydrate"),
+    nutrientPermission("fat-days.v0", "fat"),
+    nutrientPermission("fiber-days.v0", "fiber"),
+    {
+      description:
+        "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+      label: "Daily calories",
+      projectionScope: { projectionKind: "calories-days.v0" },
+      projectionScopeKey: "calories-days.v0",
+    },
+  ]);
+
+  expect(groups).toEqual([
+    {
+      description: "Shares your last 7 days of steps.",
+      key: "steps-days.v0",
+      label: "Steps",
+      scopeKeys: ["steps-days.v0"],
+    },
+    {
+      description:
+        "Shares your last 7 days of daily protein, carbs, fat, and fiber totals from meals in Murph, including meals imported from connected apps.",
+      key: "group:daily-macros",
+      label: "Daily macros",
+      scopeKeys: [
+        "protein-days.v0",
+        "carbs-days.v0",
+        "fat-days.v0",
+        "fiber-days.v0",
+      ],
+    },
+    {
+      description:
+        "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+      key: "calories-days.v0",
+      label: "Daily calories",
+      scopeKeys: ["calories-days.v0"],
+    },
+  ]);
+});
+
+test("renders one Daily macros card that toggles every macro scope together", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const macroPermission = (
+    projectionKind: HostedVaultShareFixedProjectionKind,
+    label: string,
+  ) => ({
+    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    label: `Daily ${label}`,
+    projectionScope: { projectionKind },
+    projectionScopeKey: projectionKind,
+  });
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [
+        macroPermission("protein-days.v0", "protein"),
+        macroPermission("carbs-days.v0", "carbohydrate"),
+        macroPermission("fat-days.v0", "fat"),
+        macroPermission("fiber-days.v0", "fiber"),
+        {
+          description:
+            "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+          label: "Daily calories",
+          projectionScope: { projectionKind: "calories-days.v0" as const },
+          projectionScopeKey: "calories-days.v0",
+        },
+      ],
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const checkboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+  expect(checkboxes).toHaveLength(2);
+  expect(container.textContent).toContain("Daily macros");
+  expect(container.textContent).toContain("Daily calories");
+  expect(container.textContent).not.toContain("Daily protein");
+
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  // All four macro scopes plus calories start selected (preselected requested scopes),
+  // proving one grouped card carries four separate underlying grants.
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [
+        { projectionKind: "protein-days.v0" },
+        { projectionKind: "carbs-days.v0" },
+        { projectionKind: "fat-days.v0" },
+        { projectionKind: "fiber-days.v0" },
+        { projectionKind: "calories-days.v0" },
+      ],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
 });
 
 test("automatically opens the intent-first auth prompt on a valid group join page", async () => {
