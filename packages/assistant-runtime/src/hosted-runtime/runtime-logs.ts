@@ -40,11 +40,17 @@ export function buildHostedRuntimeLogContextFields(
 // sends far fewer round trips without any entry waiting on a timer.
 // warn/error entries still write directly and block only on their own write:
 // the crash-diagnostic tail must be durable before the runtime proceeds, and
-// must not wait behind buffered info. `at` is stamped at enqueue, so persisted
+// must not wait behind queued info. `at` is stamped at enqueue, so persisted
 // ordering still reflects logical time even when a direct warn write lands
-// before older buffered info entries. A single module-level buffer is enough:
-// hosted runner processes hold one live log port per invocation. The chain
-// never rejects (each write swallows its own failure).
+// before older queued info entries. The chain never rejects (each write
+// swallows its own failure).
+//
+// One process-global FIFO carries each entry with the port it was logged
+// through. A warm runner process outlives an invocation — the invocation-end
+// drain is deliberately bounded, so the next invocation's fresh log port can
+// appear while an older request is still in flight — and a queue of
+// (entry, port) pairs keeps enqueue order and the process-wide bound correct
+// across that rotation without a second owner.
 const HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES;
 // A conservative proxy for the callback's 256 KiB body limit, measured in
 // serialized JSON length rather than encoded bytes. An oversized batch would
@@ -52,19 +58,19 @@ const HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTR
 // limit even for multi-byte diagnostics.
 const HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH = 64 * 1024;
 // A stalled log endpoint must not retain unbounded diagnostics in a warm
-// runner process. Only info entries are ever dropped here.
-export const HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES = 500;
+// runner process. This bounds the whole queue, across invocations and ports.
+// Only info entries are ever dropped here.
+export const HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES = 500;
 
 type HostedRuntimeLogPort = NonNullable<HostedRuntimePlatform["logPort"]>;
 
-interface BufferedHostedRuntimeLogEntries {
-  entries: HostedRuntimeLogEntry[];
+interface QueuedHostedRuntimeLogEntry {
+  entry: HostedRuntimeLogEntry;
   logPort: HostedRuntimeLogPort;
 }
 
-let bufferedHostedRuntimeLogEntries: BufferedHostedRuntimeLogEntries | null = null;
-let hostedRuntimeLogWriterRunning = false;
-let pendingHostedRuntimeLogWriteTail: Promise<void> = Promise.resolve();
+const queuedHostedRuntimeLogEntries: QueuedHostedRuntimeLogEntry[] = [];
+let hostedRuntimeLogWriter: Promise<void> | null = null;
 
 export async function writeHostedRuntimeLogBestEffort(input: {
   entry: Omit<HostedRuntimeLogEntry, "at"> & { at?: string };
@@ -86,97 +92,75 @@ export async function writeHostedRuntimeLogBestEffort(input: {
     return;
   }
 
-  bufferHostedRuntimeInfoLog(logPort, entry);
-  startHostedRuntimeLogWriter();
-}
-
-function bufferHostedRuntimeInfoLog(
-  logPort: HostedRuntimeLogPort,
-  entry: HostedRuntimeLogEntry,
-): void {
-  if (bufferedHostedRuntimeLogEntries?.logPort !== logPort) {
-    // A port swap is not expected within one invocation, but hand the previous
-    // buffer to the writer rather than dropping diagnostics if it happens.
-    handOffBufferedHostedRuntimeLogEntries();
-    bufferedHostedRuntimeLogEntries = { entries: [], logPort };
-  }
-
-  const { entries } = bufferedHostedRuntimeLogEntries;
-  entries.push(entry);
-  if (entries.length > HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES) {
-    const dropped = entries.splice(
+  queuedHostedRuntimeLogEntries.push({ entry, logPort });
+  if (queuedHostedRuntimeLogEntries.length > HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES) {
+    const dropped = queuedHostedRuntimeLogEntries.splice(
       0,
-      entries.length - HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES,
+      queuedHostedRuntimeLogEntries.length - HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
     );
-    console.warn("Hosted runtime log buffer is full; dropping info diagnostics.", {
+    console.warn("Hosted runtime log queue is full; dropping info diagnostics.", {
       droppedEntryCount: dropped.length,
-      maxBufferedEntries: HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES,
+      maxQueuedEntries: HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
     });
   }
-}
-
-function handOffBufferedHostedRuntimeLogEntries(): void {
-  const stale = bufferedHostedRuntimeLogEntries;
-  if (!stale) {
-    return;
-  }
-
-  bufferedHostedRuntimeLogEntries = null;
-  pendingHostedRuntimeLogWriteTail = pendingHostedRuntimeLogWriteTail.then(async () => {
-    while (stale.entries.length > 0) {
-      await writeHostedRuntimeLogEntries(
-        stale.logPort,
-        takeHostedRuntimeLogBatch(stale.entries),
-      );
-    }
-  });
+  startHostedRuntimeLogWriter();
 }
 
 // One writer at a time keeps requests in enqueue order and lets everything
 // logged during an in-flight request coalesce into the next one.
 function startHostedRuntimeLogWriter(): void {
-  if (hostedRuntimeLogWriterRunning) {
+  if (hostedRuntimeLogWriter) {
     return;
   }
 
-  hostedRuntimeLogWriterRunning = true;
-  pendingHostedRuntimeLogWriteTail = pendingHostedRuntimeLogWriteTail.then(async () => {
+  hostedRuntimeLogWriter = (async () => {
     try {
-      while (bufferedHostedRuntimeLogEntries) {
-        const { entries, logPort } = bufferedHostedRuntimeLogEntries;
-        const batch = takeHostedRuntimeLogBatch(entries);
-        if (entries.length === 0) {
-          bufferedHostedRuntimeLogEntries = null;
-        }
-        await writeHostedRuntimeLogEntries(logPort, batch);
+      let batch = takeHostedRuntimeLogBatch();
+      while (batch) {
+        await writeHostedRuntimeLogEntries(batch.logPort, batch.entries);
+        batch = takeHostedRuntimeLogBatch();
       }
     } finally {
-      hostedRuntimeLogWriterRunning = false;
+      hostedRuntimeLogWriter = null;
     }
-  });
+  })();
 }
 
-// Drains the front of the buffer up to the request's entry and body bounds.
-// The first entry always goes, so an oversized single entry still gets its own
-// request instead of wedging the buffer.
-function takeHostedRuntimeLogBatch(
-  entries: HostedRuntimeLogEntry[],
-): HostedRuntimeLogEntry[] {
-  const batch: HostedRuntimeLogEntry[] = [];
+// Drains the queue's leading same-port run up to the request's entry and body
+// bounds. Stopping at a port change keeps every entry on the port it was
+// logged through; the first entry always goes, so an oversized single entry
+// gets its own request instead of wedging the queue.
+function takeHostedRuntimeLogBatch(): {
+  entries: HostedRuntimeLogEntry[];
+  logPort: HostedRuntimeLogPort;
+} | null {
+  const head = queuedHostedRuntimeLogEntries[0];
+  if (!head) {
+    return null;
+  }
+
+  const { logPort } = head;
+  const entries: HostedRuntimeLogEntry[] = [];
   let jsonLength = 0;
-  while (entries.length > 0 && batch.length < HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES) {
-    const entryJsonLength = JSON.stringify(entries[0]).length;
+  while (
+    queuedHostedRuntimeLogEntries.length > 0
+    && queuedHostedRuntimeLogEntries[0]!.logPort === logPort
+    && entries.length < HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES
+  ) {
+    const entryJsonLength = JSON.stringify(
+      queuedHostedRuntimeLogEntries[0]!.entry,
+    ).length;
     if (
-      batch.length > 0
+      entries.length > 0
       && jsonLength + entryJsonLength > HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH
     ) {
       break;
     }
     jsonLength += entryJsonLength;
-    batch.push(entries.shift()!);
+    entries.push(queuedHostedRuntimeLogEntries.shift()!.entry);
   }
 
-  return batch;
+  return { entries, logPort };
 }
 
 async function writeHostedRuntimeLogEntries(
@@ -202,9 +186,9 @@ async function writeHostedRuntimeLogEntries(
   }
 }
 
-// Awaited at invocation end so a normal shutdown never drops buffered entries.
-// Queued writes swallow their own failures, so this never rejects. Re-reads
-// the tail after each await in case settled writes buffered more entries.
+// Awaited at invocation end so a normal shutdown never drops queued entries.
+// Queued writes swallow their own failures, so this never rejects. Re-reads the
+// writer after each await in case settled writes queued more entries.
 // The optional bound keeps a degraded log endpoint from delaying invocation
 // completion (result commit / checkpoint / next-wake handoff): on timeout the
 // drain returns while remaining writes keep flushing in the background.
@@ -225,17 +209,17 @@ export async function drainHostedRuntimeLogWritesBestEffort(
       });
 
   try {
-    let observed: Promise<void>;
-    do {
-      observed = pendingHostedRuntimeLogWriteTail;
-      await (timeout ? Promise.race([observed, timeout]) : observed);
+    while (hostedRuntimeLogWriter) {
+      await (timeout
+        ? Promise.race([hostedRuntimeLogWriter, timeout])
+        : hostedRuntimeLogWriter);
       if (timedOut) {
         console.warn("Hosted runtime log drain timed out; queued writes continue in the background.", {
           timeoutMs,
         });
         return;
       }
-    } while (observed !== pendingHostedRuntimeLogWriteTail);
+    }
   } finally {
     if (timer !== null) {
       clearTimeout(timer);

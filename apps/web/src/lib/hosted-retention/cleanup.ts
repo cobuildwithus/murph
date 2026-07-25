@@ -14,7 +14,6 @@ export const HOSTED_RUN_LOG_VERBOSE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
-export const HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // Every diagnostic category is deleted in ordered batches with an explicit
@@ -34,7 +33,6 @@ export interface HostedRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredComputerRunsCleanedUp: number;
-  expiredDeviceSyncSignalsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxItemsDeleted: number;
@@ -69,10 +67,6 @@ export async function runHostedRetentionCleanup(input: {
     now,
     prisma,
   });
-  const expiredDeviceSyncSignalsDeleted = await deleteExpiredDeviceSyncSignals({
-    now,
-    prisma,
-  });
   const expiredDeviceWebhookTracesDeleted = await deleteExpiredDeviceWebhookTraces({
     now,
     prisma,
@@ -99,7 +93,6 @@ export async function runHostedRetentionCleanup(input: {
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredComputerRunsCleanedUp,
-    expiredDeviceSyncSignalsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxItemsDeleted,
@@ -303,27 +296,10 @@ async function deleteExpiredAssistantRuntimeIssues(input: {
   `);
 }
 
-async function deleteExpiredDeviceSyncSignals(input: {
-  now: Date;
-  prisma: PrismaClient;
-}): Promise<number> {
-  const cutoff = new Date(
-    input.now.getTime() - HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS,
-  );
-  return await runRetentionBatches(() => input.prisma.$executeRaw`
-    WITH doomed AS (
-      SELECT "id"
-      FROM "device_sync_signal"
-      WHERE "created_at" < ${cutoff}
-      ORDER BY "created_at" ASC, "id" ASC
-      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
-    )
-    DELETE FROM "device_sync_signal" AS device_signal
-    USING doomed
-    WHERE device_signal."id" = doomed."id"
-  `);
-}
-
+// `device_sync_signal` is deliberately absent: its `webhook_hint` rows are the
+// companion status read model for per-resource `lastReceivedAt`, so deleting
+// old rows would report an established device as "waiting for first data".
+//
 // Only processed traces expire; an in-flight claim is still the duplicate gate.
 async function deleteExpiredDeviceWebhookTraces(input: {
   now: Date;

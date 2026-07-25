@@ -168,7 +168,6 @@ model DeviceSyncSignal {
 
   @@index([userId, id])
   @@index([connectionId])
-  @@index([createdAt, id])
   @@map("device_sync_signal")
 }
 

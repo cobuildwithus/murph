@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
@@ -62,7 +61,6 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_runtime_log"', 8],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
-      ['DELETE FROM "device_sync_signal"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
     ]);
@@ -91,7 +89,6 @@ describe("hosted retention cleanup", () => {
       compactedLinqProviderEventDiagnostics: 5,
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredComputerRunsCleanedUp: 0,
-      expiredDeviceSyncSignalsDeleted: 3,
       expiredDeviceWebhookTracesDeleted: 4,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxItemsDeleted: 7,
@@ -132,12 +129,13 @@ describe("hosted retention cleanup", () => {
     expect(
       findRetentionCall(executeRaw, 'DELETE FROM "hosted_assistant_runtime_issue"').slice(1),
     ).toEqual([now, HOSTED_RETENTION_BATCH_SIZE]);
+    // `device_sync_signal` rows are the companion status read model, not
+    // diagnostics, so retention must never touch them.
     expect(
-      findRetentionCall(executeRaw, 'DELETE FROM "device_sync_signal"').slice(1),
-    ).toEqual([
-      new Date(now.getTime() - HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS),
-      HOSTED_RETENTION_BATCH_SIZE,
-    ]);
+      executeRaw.mock.calls.some((call) =>
+        sqlOf(call).includes('device_sync_signal')
+      ),
+    ).toBe(false);
 
     // Only processed traces expire; an in-flight claim is still the duplicate gate.
     const webhookTraceCall = findRetentionCall(executeRaw, 'DELETE FROM "device_webhook_trace"');
@@ -238,12 +236,12 @@ describe("hosted retention cleanup", () => {
   it("stops each category at its per-run batch ceiling", async () => {
     // A backlog that keeps returning full batches must not turn one hourly run
     // into an unbounded delete loop.
-    let deviceSignalBatches = 0;
+    let traceBatches = 0;
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
-      if (!strings.join("?").includes('DELETE FROM "device_sync_signal"')) {
+      if (!strings.join("?").includes('DELETE FROM "hosted_ingress_latency_trace"')) {
         return 0;
       }
-      deviceSignalBatches += 1;
+      traceBatches += 1;
       return HOSTED_RETENTION_BATCH_SIZE;
     });
     const prisma = createRetentionPrisma({ executeRaw });
@@ -252,10 +250,10 @@ describe("hosted retention cleanup", () => {
       now: "2026-04-25T12:00:00.000Z",
       prisma: prisma as never,
     })).resolves.toMatchObject({
-      expiredDeviceSyncSignalsDeleted:
+      expiredIngressLatencyTracesDeleted:
         HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
     });
-    expect(deviceSignalBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+    expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
   it("runs retention categories one at a time", async () => {
@@ -338,7 +336,6 @@ describe("hosted retention cleanup", () => {
         compactedLinqProviderEventDiagnostics: 1,
         expiredAssistantRuntimeIssuesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
-        expiredDeviceSyncSignalsDeleted: 1,
         expiredDeviceWebhookTracesDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxItemsDeleted: 1,

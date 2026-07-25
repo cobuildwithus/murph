@@ -10,9 +10,6 @@ ADD COLUMN "accepted_attempt_failure_recheck_claimed_at" TIMESTAMP(3);
 CREATE INDEX "hosted_runtime_log_at_id_idx"
 ON "hosted_runtime_log"("at", "id");
 
-CREATE INDEX "device_sync_signal_created_at_id_idx"
-ON "device_sync_signal"("created_at", "id");
-
 CREATE INDEX "hosted_ingress_latency_trace_accepted_at_id_idx"
 ON "hosted_ingress_latency_trace"("accepted_at", "id");
 
