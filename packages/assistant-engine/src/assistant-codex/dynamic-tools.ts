@@ -3301,62 +3301,49 @@ function groupSharedUnavailableToolResult(
 }
 
 /**
- * One read returns every member crossed with every requested scope, so the model
- * result grows with members x days x records and is rejected whole once it passes
- * ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS. Two lossless omissions
- * keep that budget on member data instead of repetition. Both preserve every value
- * the model can act on; storage and the delivery wire format are unchanged.
+ * One read returns every member crossed with every requested scope, and the whole
+ * result is rejected once it passes ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
+ * so a per-workout list is the one projection dense enough to need a compact model
+ * view. `workouts.v0` day records restate their own date in `data.date`, `recordKey`
+ * and `occurredAt`, and repeat one required `timeSemantics` literal on every record;
+ * keyed by ISO date — that projection's real day identity — each day costs its date
+ * once. Every other projection is passed through byte-identically, and storage and
+ * the delivery wire format are unchanged for all of them.
  */
-function groupSharedRecordDataValue(
-  record: AssistantHostedGroupSharedRecord,
-  key: string,
-): unknown {
-  return Object.entries(record.data).find(([entryKey]) => entryKey === key)?.[1]
-}
-
-function groupSharedModelRecord(
-  record: AssistantHostedGroupSharedRecord,
-  hoistTimeSemantics: boolean,
-) {
-  const dateValue = groupSharedRecordDataValue(record, 'date')
-  const date = typeof dateValue === 'string' ? dateValue : null
-  const compactData = hoistTimeSemantics
-    ? Object.fromEntries(
-      Object.entries(record.data).filter(([key]) => key !== 'timeSemantics'),
-    )
-    : record.data
-  return {
-    data: compactData,
-    // Both are recoverable from `data.date`; omit them only when they add nothing.
-    ...(date !== null && record.occurredAt === `${date}T00:00:00.000Z`
-      ? {}
-      : { occurredAt: record.occurredAt }),
-    ...(date !== null && record.recordKey === date
-      ? {}
-      : { recordKey: record.recordKey }),
-  }
-}
-
-function groupSharedModelProjection(
+function groupSharedWorkoutsModelProjection(
   projection: AssistantHostedGroupSharedProjection,
-) {
-  // `workouts.v0` is the only kind carrying `timeSemantics`, and its parser
-  // requires the one literal on every record, so the value is a projection
-  // constant rather than a per-record fact. Other kinds keep their markers,
-  // including per-record `metricSemantics`, exactly where they are.
-  const timeSemantics = projection.records
-    .map((record) => groupSharedRecordDataValue(record, 'timeSemantics'))
-    .find((value) => typeof value === 'string')
-  const hoistTimeSemantics = typeof timeSemantics === 'string'
+): Record<string, unknown> | null {
+  if (projection.projectionScope.projectionKind !== 'workouts.v0') {
+    return null
+  }
+  const days: Record<string, unknown> = {}
+  let timeSemantics: string | undefined
+  for (const record of projection.records) {
+    const entries = Object.entries(record.data)
+    const date = entries.find(([key]) => key === 'date')?.[1]
+    const workouts = entries.find(([key]) => key === 'workouts')?.[1]
+    if (typeof date !== 'string' || workouts === undefined) {
+      // An unexpected record shape must not be silently dropped from standings.
+      return null
+    }
+    const marker = entries.find(([key]) => key === 'timeSemantics')?.[1]
+    if (typeof marker === 'string') {
+      timeSemantics = marker
+    }
+    const rest = entries.filter(([key]) =>
+      key !== 'date' && key !== 'workouts' && key !== 'timeSemantics'
+    )
+    days[date] = rest.length === 0
+      ? workouts
+      : { workouts, ...Object.fromEntries(rest) }
+  }
   return {
     dataStatus: projection.dataStatus,
+    days,
     grantStatus: projection.grantStatus,
     projectionScope: projection.projectionScope,
     projectionScopeKey: projection.projectionScopeKey,
-    records: projection.records.map((record) =>
-      groupSharedModelRecord(record, hoistTimeSemantics)
-    ),
-    ...(hoistTimeSemantics ? { timeSemantics } : {}),
+    ...(timeSemantics === undefined ? {} : { timeSemantics }),
   }
 }
 
@@ -3381,7 +3368,10 @@ function groupSharedModelResult(
       currentTurnHandles: member.currentTurnHandles,
       displayName: member.displayName,
       participantId: member.participantId,
-      projections: member.projections.map(groupSharedModelProjection),
+      projections: member.projections.map((projection) =>
+        // Only workouts.v0 gets a derived view; every other scope passes through.
+        groupSharedWorkoutsModelProjection(projection) ?? projection
+      ),
     })),
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
     status: result.status,

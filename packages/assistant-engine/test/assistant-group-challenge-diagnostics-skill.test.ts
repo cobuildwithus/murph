@@ -26,16 +26,16 @@ describe('assistant group challenge diagnostics guidance', () => {
     )
     expect(challenge).toContain('6:00 PM is `64,800,000`')
     expect(challenge).toContain(
-      '`workouts.some(w => w.startLocalMs > thresholdLocalMs)`',
+      '`days[date].some(w => w.startLocalMs > thresholdLocalMs)`',
     )
     expect(challenge).toContain(
       'a workout starting exactly at the threshold does not count as after it',
     )
     expect(challenge).toContain(
-      'A settled date record with `workouts: []` is a real observed zero and is scoreable as no qualifying workout',
+      'A settled date present with an empty list is a real observed zero and is scoreable as no qualifying workout',
     )
     expect(challenge).toContain(
-      'A missing date record is unobserved: it is not `false`, zero, or evidence that no workout happened',
+      'A date absent from `days` is unobserved: it is not `false`, zero, or evidence that no workout happened',
     )
     expect(challenge).toContain(
       '`canonical-event-zone-or-vault-zone.v0`',

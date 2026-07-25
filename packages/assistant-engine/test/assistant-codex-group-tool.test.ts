@@ -770,19 +770,16 @@ describe("murph.group dynamic tool", () => {
         members: [{
           participantId: "participant_timing",
           projections: [{
-            // The constant semantics marker is stated once per projection rather
-            // than repeated on every day record.
+            // Days are keyed by their ISO date, and the one required semantics
+            // literal is stated once for the projection instead of per record.
+            days: {
+              "2026-07-18": [{
+                kind: "running",
+                minutes: 45,
+                startLocalMs: 64_800_001,
+              }],
+            },
             timeSemantics: "canonical-event-zone-or-vault-zone.v0",
-            records: [{
-              data: {
-                date: "2026-07-18",
-                workouts: [{
-                  kind: "running",
-                  minutes: 45,
-                  startLocalMs: 64_800_001,
-                }],
-              },
-            }],
           }],
         }],
       },
@@ -792,10 +789,12 @@ describe("murph.group dynamic tool", () => {
     );
 
     // One read returns members x scopes x days, so the shared budget must not be
-    // spent restating each record's own date or a projection-level constant.
+    // spent restating each day's own date or a projection-level constant.
     const serialized = JSON.stringify(payload);
     expect(serialized).not.toContain("2026-07-18T00:00:00.000Z");
     expect(serialized).not.toContain('"recordKey"');
+    expect(serialized).not.toContain('"records"');
+    expect(serialized.match(/2026-07-18/gu)).toHaveLength(1);
     expect(serialized.match(/canonical-event-zone-or-vault-zone\.v0/gu))
       .toHaveLength(1);
   });
@@ -865,23 +864,37 @@ describe("murph.group dynamic tool", () => {
 
     const payload = readGroupToolPayload(result);
     const projection = readFirstProjection(payload);
-    // Only workouts.v0 carries the hoisted constant. An existing daily scope must
-    // keep metricSemantics exactly where its producer put it: on the record.
-    expect(projection).not.toHaveProperty("timeSemantics");
-    expect(projection).not.toHaveProperty("metricSemantics");
-    expect(projection.records[0]).toMatchObject({
-      data: {
-        date: "2026-07-18",
-        metricKey: "activity-minutes",
-        metricSemantics: "broad-movement",
-        unit: "minutes",
-        value: 30,
-      },
-    });
-    // The unmarked sibling keeps its own shape; nothing is inferred onto it.
-    expect(projection.records[1]?.data).not.toHaveProperty("metricSemantics");
-    expect(projection.records[1]).toMatchObject({
-      data: { date: "2026-07-17", metricKey: "activity-minutes", value: 45 },
+    // Assert the whole projection is byte-identical to what the reader produced.
+    // A partial toMatchObject here would pass while recordKey or occurredAt were
+    // being stripped, which is exactly how an earlier version of this test lied.
+    expect(projection).toEqual({
+      dataStatus: "available",
+      grantStatus: "granted",
+      projectionScope: { projectionKind: "activity-days.v0" },
+      projectionScopeKey: "activity-days.v0",
+      records: [
+        {
+          data: {
+            date: "2026-07-18",
+            metricKey: "activity-minutes",
+            metricSemantics: "broad-movement",
+            unit: "minutes",
+            value: 30,
+          },
+          occurredAt: "2026-07-18T00:00:00.000Z",
+          recordKey: "2026-07-18",
+        },
+        {
+          data: {
+            date: "2026-07-17",
+            metricKey: "activity-minutes",
+            unit: "minutes",
+            value: 45,
+          },
+          occurredAt: "2026-07-17T00:00:00.000Z",
+          recordKey: "2026-07-17",
+        },
+      ],
     });
   });
 

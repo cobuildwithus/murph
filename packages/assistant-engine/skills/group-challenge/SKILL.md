@@ -114,22 +114,22 @@ For a challenge such as "any workout starting after 6 PM," normalize the
 configured threshold once at kickoff to an integer number of milliseconds
 after local midnight and persist both the original wording and
 `thresholdLocalMs` in **Rules & metric**. For example, 6:00 PM is
-`64,800,000`. Match records to the exact challenge date and score a date as
-qualifying only when
-`workouts.some(w => w.startLocalMs > thresholdLocalMs)`;
+`64,800,000`. Look up the exact challenge date in that member's `days` and
+score it as qualifying only when
+`days[date].some(w => w.startLocalMs > thresholdLocalMs)`;
 this comparison is deliberately strict, so a workout starting exactly at the
 threshold does not count as after it.
 
-`workouts.v0` is a bounded day-keyed list. Each array element discloses only
-`startLocalMs`, `minutes`, and `kind`. Its required `timeSemantics` value is
-`canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
+`workouts.v0` reads as `days`, an object keyed by ISO date whose value is that
+day's list of workouts. Each element discloses only `startLocalMs`, `minutes`,
+and `kind`. The projection states `timeSemantics` once, and its required value
+is `canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
 event timezone when available and otherwise the member vault timezone; it does
-not prove physical workout location. A settled date record with
-`workouts: []` is a real observed zero and is scoreable as no qualifying
-workout. A missing date record is unobserved: it is not `false`, zero, or
-evidence that no workout happened, so leave the participant unscored and
-report missing data. That same undisclosed zone dates the record and
-determines provisional state.
+not prove physical workout location. A settled date present with an empty list
+is a real observed zero and is scoreable as no qualifying workout. A date
+absent from `days` is unobserved: it is not `false`, zero, or evidence that no
+workout happened, so leave the participant unscored and report missing data.
+That same undisclosed zone dates the day and determines provisional state.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
