@@ -10,6 +10,7 @@ import {
 import {
   buildMurphHostedLinqContactCardVcf,
   fetchMurphHostedLinqContactCardVcfPhoto,
+  getHostedLinqContactCard,
   MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
   MURPH_CONTACT_CARD_VCF_FILE_NAME,
   resolveMurphHostedLinqContactCardBackupPhoneNumber,
@@ -281,14 +282,22 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
 export type MurphHostedLinqNativeContactCardShareOutcome =
   | { status: "already_shared" }
   | { status: "sent" }
-  | { status: "skipped"; reason: "missing_chat_id" }
+  | {
+      status: "skipped";
+      reason:
+        | "line_card_has_image"
+        | "line_card_unverified"
+        | "missing_chat_id";
+    }
   | { status: "failed"; reason: "send_failed"; error: unknown };
 
 /**
  * Share the sending line's provider contact card into a Linq chat. Callers own
- * eligibility and thread authority; this owns the shared per-chat reservation
- * and the single native provider POST. Any provider failure is ambiguous, so
- * the reservation stays in place to avoid a blind duplicate.
+ * eligibility and thread authority; this first verifies that the chat's own
+ * sending-line card is image-free, then owns the shared per-chat reservation
+ * and the single native provider POST. Unverifiable cards skip fail-soft. Any
+ * native provider failure is ambiguous, so the reservation stays in place to
+ * avoid a blind duplicate.
  */
 export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   chatId: string;
@@ -297,6 +306,32 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   prisma: HostedLinqContactCardSharePersistenceClient;
   signal?: AbortSignal;
 }): Promise<MurphHostedLinqNativeContactCardShareOutcome> {
+  try {
+    const handles = await getHostedLinqChatHandles({
+      chatId: input.chatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    const linePhoneNumber = normalizePhoneNumber(
+      handles.find((handle) => handle.isMe)?.handle ?? null,
+    );
+    if (!linePhoneNumber) {
+      return { status: "skipped", reason: "line_card_unverified" };
+    }
+
+    const lineCard = await getHostedLinqContactCard({
+      phoneNumber: linePhoneNumber,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    if (!lineCard) {
+      return { status: "skipped", reason: "line_card_unverified" };
+    }
+    if (lineCard.imageUrl !== null) {
+      return { status: "skipped", reason: "line_card_has_image" };
+    }
+  } catch {
+    return { status: "skipped", reason: "line_card_unverified" };
+  }
+
   const reservation = await reserveHostedLinqContactCardShareAttempt({
     chatId: input.chatId,
     memberId: input.memberId,
