@@ -84,11 +84,12 @@ leave it alone.
 
 `packages/device-syncd/src/source-staleness.ts` owns which sources are
 push-primary and how long each may stay silent, and the hosted device-sync
-maintenance pass reports breaches as `device-sync.source_stalled`. Nothing
-downstream deduplicates hosted log writes, so the evaluator also owns the report
-cadence: it marks the first evaluation past the threshold and one per
-`repeatReportHours` after that, derived from elapsed silence and the pass
-interval rather than stored per-source state. Evaluation is observation only: it never changes source status, gates ingestion, or triggers
+maintenance pass reports breaches as `device-sync.source_stalled` on every pass.
+Suppressing repeats is the alerting layer's job: the pass runs from both an
+explicit device-sync wake and scheduled idle maintenance, so nothing at that
+seam knows how much time one evaluation represents, and a synthetic interval
+would either double-report or skip the first crossing. Evaluation is observation
+only: it never changes source status, gates ingestion, or triggers
 recovery, and a failure to evaluate or report must not fail the sync pass. A
 source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.

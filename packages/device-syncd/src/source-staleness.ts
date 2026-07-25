@@ -9,6 +9,13 @@
  * module owns the policy for reading it. Evaluation is pure and observational:
  * it never changes source status, gates ingestion, or implies recovery.
  *
+ * It reports a stale source on every evaluation. Deliberately so: the callers
+ * run on different cadences (an explicit device-sync wake and scheduled idle
+ * maintenance), so nothing here can know how much time a single evaluation
+ * represents, and a synthetic interval assumption would either double-report or
+ * skip the first crossing entirely. Suppressing a still-stale source is
+ * therefore the alerting layer's job, where the read cadence is known.
+ *
  * See `docs/device-provider-compatibility-matrix.md` § Push-primary cells for
  * which providers belong here and why.
  */
@@ -30,12 +37,6 @@ export interface PushPrimarySourcePolicy {
    * threshold: a connect that never streams is a total outage for that member.
    */
   neverDeliveredHours: number;
-  /**
-   * How often a still-stalled source is worth re-reporting. Nothing in the
-   * hosted log layer deduplicates writes, so without this the hourly pass would
-   * record a fresh warning every hour for as long as the stall lasts.
-   */
-  repeatReportHours: number;
 }
 
 const HOUR_MS = 60 * 60_000;
@@ -46,7 +47,7 @@ const HOUR_MS = 60 * 60_000;
  * send it, and that service silently stops for individual users.
  */
 const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy> = new Map([
-  ["garmin", { silentHours: 36, neverDeliveredHours: 6, repeatReportHours: 24 }],
+  ["garmin", { silentHours: 36, neverDeliveredHours: 6 }],
 ]);
 
 export type PushPrimarySourceStalenessReason = "never_delivered" | "stopped_delivering";
@@ -64,12 +65,6 @@ export interface PushPrimarySourceStalenessCandidate {
 
 export interface PushPrimarySourceStaleness {
   sourceProviderSlug: string;
-  /**
-   * True on the first evaluation after the source crosses its threshold and
-   * once per `repeatReportHours` after that. Derived from elapsed silence and
-   * the caller's evaluation cadence, so it needs no stored per-source state.
-   */
-  shouldReport: boolean;
   reason: PushPrimarySourceStalenessReason;
   /** Last delivery, or null when the source has never delivered. */
   lastDataAt: string | null;
@@ -94,32 +89,6 @@ function parseTimestamp(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/**
- * True when this evaluation is the first one past a report boundary: the
- * threshold itself, then each `repeatReportHours` multiple after it. Comparing
- * the current elapsed silence against one interval earlier makes that decision
- * without remembering anything between passes.
- */
-function crossesReportBoundary(input: {
-  evaluationIntervalHours: number;
-  repeatReportHours: number;
-  silentHours: number;
-  thresholdHours: number;
-}): boolean {
-  const sinceThreshold = input.silentHours - input.thresholdHours;
-  if (sinceThreshold < 0) {
-    return false;
-  }
-
-  const previousSinceThreshold = sinceThreshold - Math.max(input.evaluationIntervalHours, 0);
-  if (previousSinceThreshold < 0) {
-    return true;
-  }
-
-  const repeat = Math.max(input.repeatReportHours, 1);
-  return Math.floor(sinceThreshold / repeat) !== Math.floor(previousSinceThreshold / repeat);
-}
-
 function roundHours(milliseconds: number): number {
   return Math.round((milliseconds / HOUR_MS) * 10) / 10;
 }
@@ -132,11 +101,8 @@ function roundHours(milliseconds: number): number {
  */
 export function evaluatePushPrimarySourceStaleness(input: {
   now: string;
-  /** How often this evaluation runs; defaults to the hourly maintenance pass. */
-  evaluationIntervalHours?: number;
   sources: readonly PushPrimarySourceStalenessCandidate[];
 }): PushPrimarySourceStaleness[] {
-  const evaluationIntervalHours = input.evaluationIntervalHours ?? 1;
   const now = parseTimestamp(input.now);
   if (now === null) {
     return [];
@@ -173,12 +139,6 @@ export function evaluatePushPrimarySourceStaleness(input: {
 
     stale.push({
       sourceProviderSlug: source.sourceProviderSlug,
-      shouldReport: crossesReportBoundary({
-        evaluationIntervalHours,
-        repeatReportHours: policy.repeatReportHours,
-        silentHours: silentMs / HOUR_MS,
-        thresholdHours,
-      }),
       reason,
       lastDataAt: source.lastDataAt,
       silentSinceAt,

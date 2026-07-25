@@ -4227,6 +4227,25 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     assert.equal(parsed.dataSourceProviderSlug, sourceProviderSlug);
   }
 
+  // A historical-pull completion is a data-less notification. Accepting its
+  // follow-up fetch job proves nothing arrived, and treating it as delivery
+  // would refresh the arrival signal and mask a genuinely dead carrier.
+  const completionOnly = await parseWebhook({
+    body: {
+      event_type: "historical.data.sleep.created",
+      user_id: "junction-user-1",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-04-01",
+        end_date: "2026-04-02",
+        source_provider_slug: "garmin",
+      },
+    },
+    messageId: "msg_arrival_historical_completion",
+  });
+
+  assert.equal(completionOnly.dataSourceProviderSlug, null);
+
   // A connection lifecycle event proves nothing about the data carrier.
   const lifecycle = await parseWebhook({
     body: {

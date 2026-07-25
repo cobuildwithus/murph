@@ -26,26 +26,6 @@ function garminSource(overrides: {
   };
 }
 
-test("push-primary staleness re-reports a long stall on a bounded cadence", () => {
-  // Nothing downstream deduplicates hosted log writes, so an hourly pass would
-  // otherwise record a fresh warning every hour for a days-long stall.
-  const reportedAtHours: number[] = [];
-  for (let hoursSinceLastData = 0; hoursSinceLastData <= 120; hoursSinceLastData += 1) {
-    const [entry] = evaluatePushPrimarySourceStaleness({
-      now: new Date(Date.parse("2026-07-18T00:00:00.000Z") + hoursSinceLastData * 3_600_000)
-        .toISOString(),
-      sources: [garminSource({ lastDataAt: "2026-07-18T00:00:00.000Z" })],
-    });
-
-    if (entry?.shouldReport) {
-      reportedAtHours.push(hoursSinceLastData);
-    }
-  }
-
-  // First pass past the 36h threshold, then once per day.
-  assert.deepEqual(reportedAtHours, [36, 60, 84, 108]);
-});
-
 test("push-primary staleness flags a source that stopped delivering", () => {
   const stale = evaluatePushPrimarySourceStaleness({
     now: "2026-07-24T00:00:00.000Z",

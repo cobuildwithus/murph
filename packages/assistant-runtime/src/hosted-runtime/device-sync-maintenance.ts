@@ -499,10 +499,10 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
  * A push-primary source that has gone quiet is invisible everywhere else: the
  * provider still reports the connection healthy, and the pull floor cannot
  * distinguish "no data upstream" from "carrier dead". This is the only place
- * that silence becomes observable, so it is emitted on the same hourly pass
- * that already runs for the connection. Nothing downstream deduplicates hosted
- * log writes, so the evaluator decides when a still-stalled source is worth
- * re-reporting and this only writes the entries it marks.
+ * that silence becomes observable, so it is emitted on the pass that already
+ * runs for the connection. A still-stale source is reported on every pass;
+ * suppressing repeats belongs to the alerting layer, which knows its own read
+ * cadence, rather than to this pass, which does not.
  */
 async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
@@ -532,7 +532,7 @@ async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
         })),
       });
 
-      for (const entry of stale.filter((candidate) => candidate.shouldReport)) {
+      for (const entry of stale) {
         await writeHostedRuntimeLogBestEffort({
           entry: {
             component: "device-sync",
