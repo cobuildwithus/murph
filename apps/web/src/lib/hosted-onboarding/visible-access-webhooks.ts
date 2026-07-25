@@ -214,7 +214,9 @@ async function recoverHostedLinqPermanentHomeRouteInbound(input: {
 
   await drainHostedLinqSideEffectsDirect({
     prisma: input.prisma,
-    scheduleAfterResponse: input.input.scheduleAfterResponse,
+    ...(input.input.scheduleAfterResponse
+      ? { scheduleAfterResponse: input.input.scheduleAfterResponse }
+      : {}),
     sideEffects: plan.desiredSideEffects,
     ...(input.input.signal ? { signal: input.input.signal } : {}),
   });
