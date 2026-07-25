@@ -113,6 +113,14 @@ import type {
   StoredDeviceSyncAccount,
 } from "../types.ts";
 import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
+import { evaluatePushPrimarySourceStaleness } from "../source-staleness.ts";
+import {
+  JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
+  buildJunctionPushSourceRecoveryMetadataPatch,
+  readJunctionPushSourceRecoveryState,
+  resolveJunctionPushSourceRecoveryStatus,
+  selectDueJunctionPushSourceRecovery,
+} from "../junction-push-source-recovery.ts";
 
 export type { JunctionDeviceSyncProviderConfig } from "../config/provider-types.ts";
 export { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR };
@@ -494,9 +502,57 @@ export function createJunctionDeviceSyncProvider(
           priority: JUNCTION_SCHEDULED_RECONCILE_PRIORITY,
         }),
         ...scheduledHistoricalBackfillJobs,
+        ...buildPushSourceRecoveryJobs(account, now),
       ],
       nextReconcileAt,
     };
+  }
+
+  /**
+   * A dead push carrier cannot recover on its own and no pull can rediscover
+   * its data, so the scheduler turns a detected stall into a bounded recovery
+   * attempt. Like the historical-backfill ladder above, the retry state lives in
+   * connection metadata and the job queue holds no second retry identity.
+   */
+  function buildPushSourceRecoveryJobs(
+    account: StoredDeviceSyncAccount,
+    now: string,
+  ): DeviceSyncJobInput[] {
+    const stale = evaluatePushPrimarySourceStaleness({
+      now,
+      sources: (account.sources ?? []).map((source) => ({
+        firstSeenAt: source.firstSeenAt,
+        lastDataAt: source.lastDataAt,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: source.status,
+      })),
+    });
+    const due = selectDueJunctionPushSourceRecovery({
+      metadata: account.metadata,
+      now,
+      stale,
+    });
+
+    if (!due) {
+      return [];
+    }
+
+    return [{
+      kind: JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
+      payload: {
+        silentSinceAt: due.silentSinceAt,
+        sourceProviderSlug: due.sourceProviderSlug,
+      },
+      priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
+      availableAt: now,
+      // One attempt per episode may be queued at a time.
+      dedupeKey: sha256Text(JSON.stringify([
+        "junction-push-source-recovery",
+        due.sourceProviderSlug,
+        due.silentSinceAt,
+        readJunctionPushSourceRecoveryState(account.metadata).attempts,
+      ])),
+    }];
   }
 
   // Connect-time retry state is owned by metadata. The scheduler materializes
@@ -628,6 +684,47 @@ export function createJunctionDeviceSyncProvider(
     }
   }
 
+  /**
+   * Asks Junction to re-run the provider's historical pull for one stalled
+   * source. Junction gates this endpoint per team, so a gated answer records a
+   * terminal `unavailable` rather than burning the ladder on retries that
+   * cannot succeed.
+   */
+  async function executePushSourceRecoveryJob(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+  ): Promise<ProviderJobResult> {
+    const sourceProviderSlug = normalizeProviderSlug(job.payload.sourceProviderSlug);
+    const silentSinceAt = normalizeString(job.payload.silentSinceAt);
+
+    if (!sourceProviderSlug || !silentSinceAt) {
+      return {};
+    }
+
+    const state = readJunctionPushSourceRecoveryState(context.account.metadata);
+    const isRecordedEpisode = state.silentSinceAt === silentSinceAt
+      && state.sourceProviderSlug === sourceProviderSlug;
+    const attempts = (isRecordedEpisode ? state.attempts : 0) + 1;
+    const result = await client.bulkTriggerHistoricalPull({
+      signal: context.signal ?? null,
+      sourceProviderSlug,
+      userIds: [context.account.externalAccountId],
+    });
+
+    return {
+      metadataPatch: buildJunctionPushSourceRecoveryMetadataPatch({
+        attempts,
+        now: context.now,
+        silentSinceAt,
+        sourceProviderSlug,
+        status: resolveJunctionPushSourceRecoveryStatus({
+          attempts,
+          endpointUnavailable: result.endpointUnavailable,
+        }),
+      }),
+    };
+  }
+
   async function executeJob(
     context: ProviderJobContext,
     job: DeviceSyncJobRecord,
@@ -636,6 +733,10 @@ export function createJunctionDeviceSyncProvider(
 
     if (job.kind === "resource") {
       return executeResourceJob(context, job, skippedOptionalResources);
+    }
+
+    if (job.kind === JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND) {
+      return executePushSourceRecoveryJob(context, job);
     }
 
     const window = resolveJobWindow(job, context.now, job.kind === "backfill" ? summaryBackfillDays : reconcileDays);

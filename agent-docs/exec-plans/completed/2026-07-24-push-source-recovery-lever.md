@@ -28,14 +28,20 @@ by default, so it must be enabled by Junction support before it can do anything.
 - `POST /api/ops/device-sync/junction-recovery`, reusing the existing hosted-ops
   access check, diagnostic connection resolution, and response redaction.
 
-## Deliberately not included
+## Automatic recovery
 
-An automatic retry ladder. The trigger has never been observed restarting a real
-stalled carrier, because the endpoint is not enabled yet. Putting an unproven
-lever on a timer would produce silent churn against a member's connection and a
-bounded ladder whose terminal state we cannot calibrate. The ops action makes the
-lever usable now and gives us the one observation the ladder needs; automation
-follows that evidence.
+The scheduled pass that detects a stall derives a bounded recovery attempt from
+connection metadata, so a member never has to notice or act. The ladder is
+episode-scoped on `silentSinceAt`: attempts at detection, +6h, and +24h, then
+stop. A gated endpoint records `unavailable` and stops immediately, because
+nothing local can enable it and retrying is pure noise. A source that recovers
+and later stalls again starts a fresh ladder with no reset step. At most one
+source per connection is triggered per pass.
+
+The ops route remains for operator-driven one-off triggers and for exercising
+`refresh`, which is also how we will confirm the lever works the first time.
+
+## Deliberately not included
 
 A source-scoped disconnect is also out of scope. `revokeAccess` deregisters every
 provider slug on the Junction user, which is correct for its only caller (whole

@@ -100,11 +100,18 @@ lever short of member re-authorization is asking the aggregator to re-run its
 historical pull for that one source (`bulkTriggerHistoricalPull`). Junction ships
 that behind Link Migration, which is disabled per team by default, so a gated
 403/404 is reported as `endpointUnavailable` — an "ask support to enable it"
-answer, not a transport failure to retry. Recovery is operator-triggered through
-the hosted ops Junction recovery route rather than automatic: until the trigger
-has been observed restarting a real stalled carrier, there is nothing proven
-enough to put on a timer, and a retry ladder against an unproven lever would
-just be silent churn.
+answer, not a transport failure to retry.
+
+Recovery is automatic. The scheduled pass that detects the stall also derives a
+bounded recovery attempt from connection metadata, the same way the
+historical-backfill ladder works, so a member never has to notice or act. The
+ladder is episode-scoped on `silentSinceAt`: attempts fire at detection, +6h,
+and +24h, then stop; a gated endpoint records `unavailable` and stops
+immediately because nothing local can enable it; and a source that recovers and
+later stalls again starts a fresh ladder with no reset step. At most one source
+per connection is triggered per pass. `packages/device-syncd/src/junction-push-source-recovery.ts`
+owns that policy. The hosted ops recovery route remains for operator-driven
+one-off triggers and for exercising `refresh`.
 
 Junction historical progress is evaluated per advertised high-signal daily
 source/resource pair: activity, sleep, and `sleep_cycle`. Data in another
