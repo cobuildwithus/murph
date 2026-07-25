@@ -154,17 +154,28 @@ describe('assistant group-chat comedy skill', () => {
       'You have been in the room long enough to know its register and its canon.',
     )
     expect(normalized).toContain(
-      'You have not set one before. The first drop is the free hit',
+      'You have not set one before, and the day\'s dispatch slot is still unused.',
     )
     expect(normalized).toContain(
-      'Run `preflight_set_chat_avatar` before generating anything.',
+      'treat any sign that the members picked one — they discussed it, named it, joked about it — as a stop',
     )
     expect(normalized).toContain(
-      'No join link, membership, or challenge has to exist first — the preflight is the whole check, so never propose group setup as a step toward a photo.',
+      'never read your own silent notes as proof the slot is empty',
     )
     expect(normalized).toContain(
-      '`avatarSource="generate"`, and `referenceImageRefs` carrying the captured photo plus your character sheet',
+      'One call does it: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the captured photo plus your character sheet.',
     )
+    expect(normalized).toContain(
+      'The runtime checks its own authority before it generates anything',
+    )
+    expect(normalized).toContain(
+      'A scheduled automation may only read the group or ask a consented member, so never plan the drop into a cron dispatch.',
+    )
+
+    // `preflight_set_chat_avatar` is issued by the runtime, not the model: it
+    // is absent from the murph.group action enum, so naming it as a step would
+    // send Murph after an action it cannot call.
+    expect(comedy).not.toContain('preflight_set_chat_avatar')
     expect(normalized).toContain(
       'Edit yourself INTO their photo; do not redraw their photo.',
     )
@@ -176,7 +187,7 @@ describe('assistant group-chat comedy skill', () => {
       'Let the change be the whole delivery. At most one deadpan line',
     )
     expect(normalized).toContain(
-      'The person in the photo has to be in on it: they sent it themselves, or they played along in the room.',
+      'sent by the person depicted, or explicitly approved by them — and it does not drop because the room laughed',
     )
     expect(normalized).toContain(
       "The moment is fair game; the person's body is not.",
