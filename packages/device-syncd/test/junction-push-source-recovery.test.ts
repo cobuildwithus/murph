@@ -107,9 +107,28 @@ test("recovery attempts follow a bounded ladder and then stop", () => {
     }),
   );
 
-  // The third attempt exhausts the ladder; a still-silent source stops here
-  // rather than triggering provider work forever.
+  // Third attempt lands; a fourth is still owed 24 more hours.
   metadata = metadataAfter({ attempts: 3, now: "2026-07-20T16:00:00.000Z" });
+  assert.equal(readJunctionPushSourceRecoveryState(metadata).status, "triggered");
+  assert.equal(
+    selectDueJunctionPushSourceRecovery({
+      metadata,
+      now: "2026-07-21T10:00:00.000Z",
+      stale: [staleGarmin()],
+    }),
+    null,
+  );
+  assert.ok(
+    selectDueJunctionPushSourceRecovery({
+      metadata,
+      now: "2026-07-21T16:00:00.000Z",
+      stale: [staleGarmin()],
+    }),
+  );
+
+  // The fourth attempt exhausts the ladder; a still-silent source stops here
+  // rather than triggering provider work forever.
+  metadata = metadataAfter({ attempts: 4, now: "2026-07-21T16:00:00.000Z" });
   assert.equal(readJunctionPushSourceRecoveryState(metadata).status, "exhausted");
   assert.equal(
     selectDueJunctionPushSourceRecovery({
@@ -141,7 +160,7 @@ test("a gated trigger endpoint stops the ladder immediately", () => {
 });
 
 test("a later stall starts a fresh ladder after an exhausted one", () => {
-  const exhausted = metadataAfter({ attempts: 3, now: "2026-07-20T16:00:00.000Z" });
+  const exhausted = metadataAfter({ attempts: 4, now: "2026-07-21T16:00:00.000Z" });
   const laterStall = "2026-08-01T00:00:00.000Z";
 
   // Data resumed and the source stalled again, so the episode key changed. That

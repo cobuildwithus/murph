@@ -106,7 +106,7 @@ Recovery is automatic. The scheduled pass that detects the stall also derives a
 bounded recovery attempt from connection metadata, the same way the
 historical-backfill ladder works, so a member never has to notice or act. The
 ladder is episode-scoped on `silentSinceAt`: attempts fire at detection, +6h,
-and +24h, then stop; a gated endpoint records `unavailable` and stops
++24h, and +48h, then stop; a gated endpoint records `unavailable` and stops
 immediately because nothing local can enable it; and a source that recovers and
 later stalls again starts a fresh ladder with no reset step. At most one source
 per connection is triggered per pass. `packages/device-syncd/src/junction-push-source-recovery.ts`

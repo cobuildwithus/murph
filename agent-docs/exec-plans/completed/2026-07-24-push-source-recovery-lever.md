@@ -32,8 +32,7 @@ by default, so it must be enabled by Junction support before it can do anything.
 
 The scheduled pass that detects a stall derives a bounded recovery attempt from
 connection metadata, so a member never has to notice or act. The ladder is
-episode-scoped on `silentSinceAt`: attempts at detection, +6h, and +24h, then
-stop. A gated endpoint records `unavailable` and stops immediately, because
+episode-scoped on `silentSinceAt`: attempts at detection, +6h, +24h, and +48h, then stop. A gated endpoint records `unavailable` and stops immediately, because
 nothing local can enable it and retrying is pure noise. A source that recovers
 and later stalls again starts a fresh ladder with no reset step. At most one
 source per connection is triggered per pass.

@@ -39,7 +39,7 @@ export type JunctionPushSourceRecoveryStatus =
  * while to answer it, so attempts are spaced far enough apart to let one
  * actually land before the next.
  */
-const RECOVERY_ATTEMPT_DELAY_HOURS = Object.freeze([0, 6, 24]);
+const RECOVERY_ATTEMPT_DELAY_HOURS = Object.freeze([0, 6, 24, 48]);
 
 const HOUR_MS = 60 * 60_000;
 
