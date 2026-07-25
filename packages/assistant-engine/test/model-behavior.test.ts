@@ -1098,6 +1098,56 @@ describe('assistant execution prompt contract', () => {
       'Do not add this extra confirmation for non-Linq channels',
     )
   })
+
+  it('offers a weather check before saving outdoor reminder automations', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+
+    expect(prompt).toContain('Outdoor-conditions reminder guard')
+    expect(prompt).toContain(
+      'reuse a city or region already known from this conversation, saved context, or the plan',
+    )
+    expect(prompt).toContain(
+      'offer once, as an option, to take one; ask for city or region, never an exact address',
+    )
+    expect(prompt).toContain(
+      'let a decline save the automation unchanged without raising it again',
+    )
+    expect(prompt).toContain(
+      'read weather for it before composing the message: call `murph.connected_apps_execute` with no account selector and `toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER`',
+    )
+    expect(prompt).toContain(
+      'or `OPENWEATHER_API_GET5_DAY_FORECAST` when the activity window is still hours away',
+    )
+    expect(prompt).toContain(
+      'Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear',
+    )
+    expect(prompt).toContain(
+      'name the conditions, then offer the nearest workable time in the same window or an indoor equivalent',
+    )
+    expect(prompt).toContain(
+      "Weather changes a run's wording, never whether it happens",
+    )
+    expect(prompt).toContain(
+      'with no stored location or a failed read, send the ordinary reminder without mentioning the check',
+    )
+    expect(prompt).toContain(
+      'save that coarse location once with `vault-cli memory upsert` so later automations reuse it instead of asking again',
+    )
+  })
+
+  it('keeps outdoor reminder locations out of personal records in group rooms', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createCommonCodexPromptInput({ conversationScope: 'group' }),
+    )
+
+    expect(prompt).toContain('Outdoor-conditions reminder guard')
+    expect(prompt).toContain(
+      "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record.",
+    )
+    expect(prompt).not.toContain(
+      'save that coarse location once with `vault-cli memory upsert`',
+    )
+  })
 })
 
 describe('assistant local PDF evidence guidance', () => {
@@ -1554,8 +1604,12 @@ describe('assistant system prompt cache stability', () => {
     // Main's own bound moved to 68_000 (baseline 67_801) while this branch was
     // open. The conversational-only Unhinged dial, the rare style-dissatisfaction
     // offer, and the bounded-step rule for a bare directional request add ~1_040
-    // characters on top of that baseline.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(69_000)
+    // characters on top of that baseline. The outdoor-conditions reminder guard
+    // adds ~1_340 more (baseline 68_852) because it has to be present both when
+    // an outdoor automation is created and when one of its runs fires, and it
+    // names the two OpenWeather tool slugs so a run reads conditions directly
+    // instead of spending a connected-app search on discovery.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(70_300)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {

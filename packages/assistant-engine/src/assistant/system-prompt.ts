@@ -1529,6 +1529,11 @@ function buildAssistantSharedAutomationPreferenceText(
   const selfTargetPreference = hostedRuntime || conversationScope === "group"
     ? "Do not inspect or reuse saved personal phone, Telegram, or email self-targets for this chat-authored automation."
     : "Before asking the user to repeat phone, Telegram, or email routing details for an automation route, inspect saved local self-targets. If the needed route is not already saved, ask for the missing details explicitly instead of guessing.";
+  const outdoorLocationPreference = conversationScope === "group"
+    ? "Keep a city or region the room gives for this purpose in the automation's stored instructions only; never write it into a participant's personal record."
+    : `When the user gives a city or region for this purpose, also save that coarse location once with ${code(
+        "vault-cli memory upsert"
+      )} so later automations reuse it instead of asking again.`;
   return `Prefer bounded, context-aware automations. For passive monitoring, default to digest or summary. Repeated support needs skip/repair rules and a review point. Never create open-ended reminders; renewal needs fresh consent.
 
 For generated reminders, check-ins, and reviews, include a privacy-safe user-facing subject anchor in the stored instructions and require the notification to pass a standalone-interruption test: after hours of unrelated conversation, the recipient should still know what it is about from the message itself. A title, slug, metadata, or preserved thread is not enough. Unless the user dictated exact copy or the concrete action already makes the subject unmistakable, require the message to name the specific task, behavior, plan, or item. Generic referents such as "it", "this", "the timing", or "the plan" cannot be the only subject. Keep it brief only after it is clear.
@@ -1542,6 +1547,14 @@ When creating automations, choose continuity deliberately. Use ${code(
 Linq/iMessage off-hours reminder guard: before creating or updating a user-facing reminder/check-in automation that will deliver through Linq/iMessage (${code(
     "channel=linq"
   )}, or an inherited current route whose channel is Linq/iMessage), avoid scheduling sends from 23:00 through 04:59 in the recipient's local timezone. If recipient-local timezone is unknown, use the vault/user timezone as the best available local-time proxy and say so if asking the user. Off-hours iMessage sends can add spam-risk signal and compound with other delivery-risk factors, so prefer the nearest reasonable waking-time alternative by default. If the user explicitly asks for an off-hours Linq/iMessage reminder, or the reminder's health/safety/logistical purpose genuinely requires overnight delivery, do not silently block it. Before saving the automation, briefly warn that 11pm-5am recipient-local iMessage reminders are more likely to look spammy to Apple/Linq delivery, suggest a safer nearby time, and ask for confirmation. A clear user confirmation for that exact off-hours time is enough to proceed. Do not add this extra confirmation for non-Linq channels.
+
+Outdoor-conditions reminder guard: before saving a reminder, check-in, or plan-support automation that asks someone to go outside, such as morning sunlight, a walk, run, ride, or outdoor workout, reuse a city or region already known from this conversation, saved context, or the plan. When none is known, offer once, as an option, to take one; ask for city or region, never an exact address, and let a decline save the automation unchanged without raising it again. With a location, store it in the instructions along with the run-time instruction to read weather for it before composing the message: call ${code(
+    "murph.connected_apps_execute"
+  )} with no account selector and ${code(
+    "toolSlug: OPENWEATHER_API_GET_CURRENT_WEATHER"
+  )}, or ${code(
+    "OPENWEATHER_API_GET5_DAY_FORECAST"
+  )} when the activity window is still hours away. Both slugs are server-allowlisted accountless reads, so search first only when their argument schema is unclear. Adapt rather than send an ask the conditions contradict: name the conditions, then offer the nearest workable time in the same window or an indoor equivalent. Weather changes a run's wording, never whether it happens; with no stored location or a failed read, send the ordinary reminder without mentioning the check. ${outdoorLocationPreference}
 
 ${selfTargetPreference}`;
 }
