@@ -253,6 +253,45 @@ test("runInboxTextRetention leaves legacy envelope captures alone and counts the
   assert.equal(legacy.textRetiredAt, undefined);
 });
 
+test("expired capture text stops being searchable without a projection rebuild", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-search");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+
+  await persistTextCapture({
+    captureId: "cap_text_old",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W1",
+    recordedAt: OLD_AT,
+    text: "kumquat marmalade experiment",
+    vaultRoot,
+  });
+
+  // Prime the projection the way ordinary ingest does.
+  const before = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime: before });
+    assert.ok(
+      before.searchCaptures({ text: "kumquat" }).length > 0,
+      "the phrase must be searchable before retention runs",
+    );
+  } finally {
+    before.close();
+  }
+
+  await runInboxTextRetention({ now: NOW, vaultRoot });
+
+  // No rebuild here on purpose: production idle maintenance does not run one,
+  // and hosted snapshots carry this database, so retention has to clear it.
+  const after = await openInboxRuntime({ vaultRoot });
+  try {
+    assert.equal(after.searchCaptures({ text: "kumquat" }).length, 0);
+    const capture = after.getCapture("cap_text_old");
+    assert.ok(capture, "the capture row itself must survive");
+    assert.equal(capture.text, null);
+  } finally {
+    after.close();
+  }
+});
+
 test("expired capture text disappears from the rebuilt projection", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-projection");
   await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });

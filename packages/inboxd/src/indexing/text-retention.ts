@@ -12,6 +12,7 @@ import {
   walkVaultFiles,
   withCanonicalWriteLockScope,
 } from "@murphai/core";
+import { openInboxRuntime } from "../kernel/sqlite.js";
 
 export const INBOX_TEXT_RETENTION_DAYS = 14;
 export const INBOX_TEXT_RETENTION_WINDOW_MS =
@@ -47,6 +48,7 @@ export interface InboxTextRetentionResult {
 interface ShardRedaction {
   expiredCaptures: number;
   records: InboxCaptureRecord[];
+  redactedCaptureIds: string[];
   relativePath: string;
   storedPathsToDelete: string[];
 }
@@ -162,6 +164,15 @@ export async function runInboxTextRetention(
         },
       });
 
+      // The ledger is now redacted, but the SQLite projection still holds the
+      // text and hosted snapshots carry that database, so a redacted message
+      // would stay searchable until something forced a full rebuild. Clearing
+      // it here keeps both copies expiring together.
+      await redactCaptureProjections({
+        captureIds: redactions.flatMap((shard) => shard.redactedCaptureIds),
+        vaultRoot: input.vaultRoot,
+      });
+
       return {
         expiredCaptures,
         hasMoreEligibleCaptures,
@@ -172,6 +183,33 @@ export async function runInboxTextRetention(
       await lock.release();
     }
   });
+}
+
+async function redactCaptureProjections(input: {
+  captureIds: readonly string[];
+  vaultRoot: string;
+}): Promise<void> {
+  if (input.captureIds.length === 0) {
+    return;
+  }
+
+  let runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
+  try {
+    runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
+  } catch {
+    // The projection is a rebuildable cache. If it cannot be opened the ledger
+    // redaction still stands and a later rebuild drops the text, so this must
+    // not fail the pass and leave the canonical write unacknowledged.
+    return;
+  }
+
+  try {
+    for (const captureId of input.captureIds) {
+      runtime.redactCaptureText(captureId);
+    }
+  } finally {
+    runtime.close();
+  }
 }
 
 async function planShardRedaction(input: {
@@ -194,6 +232,7 @@ async function planShardRedaction(input: {
   });
 
   const records: InboxCaptureRecord[] = [];
+  const redactedCaptureIds: string[] = [];
   const storedPathsToDelete: string[] = [];
   let expiredCaptures = 0;
   let hasMore = false;
@@ -256,6 +295,7 @@ async function planShardRedaction(input: {
 
     const redacted = redactCaptureRecord(record, input.now);
     records.push(redacted.record);
+    redactedCaptureIds.push(record.captureId);
     storedPathsToDelete.push(...redacted.storedPathsToDelete);
     expiredCaptures += 1;
   }
@@ -271,6 +311,7 @@ async function planShardRedaction(input: {
     shard: {
       expiredCaptures,
       records,
+      redactedCaptureIds,
       relativePath: input.relativePath,
       storedPathsToDelete,
     },

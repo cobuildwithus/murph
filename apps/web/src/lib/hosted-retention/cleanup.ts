@@ -27,6 +27,11 @@ type HostedRuntimeRecheckSignal = (input: {
 export interface HostedRetentionCleanupResult {
   expiredComputerRunsCleanedUp: number;
   expiredMailboxItemsDeleted: number;
+  /**
+   * Expired rows that the runtime never consumed. Non-zero means a member's
+   * inbound message was dropped without ever being processed.
+   */
+  expiredUnconsumedConversationItemsDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -40,7 +45,7 @@ export async function runHostedRetentionCleanup(input: {
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeRetentionDate(input.now ?? new Date());
-  const expiredMailboxItemsDeleted = await deleteExpiredMailboxItems({
+  const expiredMailboxItems = await deleteExpiredMailboxItems({
     now,
     prisma,
   });
@@ -64,7 +69,9 @@ export async function runHostedRetentionCleanup(input: {
 
   return {
     expiredComputerRunsCleanedUp,
-    expiredMailboxItemsDeleted,
+    expiredMailboxItemsDeleted: expiredMailboxItems.deleted,
+    expiredUnconsumedConversationItemsDeleted:
+      expiredMailboxItems.unconsumedConversationItems,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted,
@@ -191,13 +198,35 @@ async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRec
 async function deleteExpiredMailboxItems(input: {
   now: Date;
   prisma: PrismaClient;
-}): Promise<number> {
+}): Promise<{ deleted: number; unconsumedConversationItems: number }> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  return await input.prisma.$executeRaw`
+  // The content deadline is absolute, so an expired row is deleted whether or
+  // not the runtime ever consumed it. An unconsumed conversation row reaching
+  // this point means a member's message went unprocessed for the whole
+  // retention window — a real delivery failure — and deleting it silently
+  // would erase the only evidence that it happened. Report those separately so
+  // the loss is visible rather than inferred from a gap in the sequence.
+  const deletedRows = await input.prisma.$queryRaw<
+    Array<{ consumedAt: Date | null; kind: string }>
+  >`
     DELETE FROM "hosted_mailbox_item"
     WHERE "expires_at" <= ${input.now}
        OR "created_at" < ${cutoff}
+    RETURNING "consumed_at" AS "consumedAt", "kind"
   `;
+
+  const unconsumedConversationItems = deletedRows.filter(
+    (row) => row.consumedAt === null && row.kind === "conversation.message",
+  ).length;
+
+  if (unconsumedConversationItems > 0) {
+    console.error("Hosted mailbox retention deleted unconsumed conversation messages.", {
+      code: "hosted_mailbox_retention_unconsumed_conversation_items",
+      unconsumedConversationItems,
+    });
+  }
+
+  return { deleted: deletedRows.length, unconsumedConversationItems };
 }
 
 async function deleteOldHostedRuntimeLogs(input: {

@@ -402,7 +402,12 @@ describe('assistant store persistence seams', () => {
 
     await replaceTranscriptEntries(paths, session.sessionId, transcriptEntries)
 
-    await expect(pruneAssistantTranscriptRetention(paths)).resolves.toEqual({
+    // Pin `now` inside the content-retention window so this case stays about
+    // trimming; expiry of old inbound text is covered separately.
+    await expect(pruneAssistantTranscriptRetention(paths, {
+      now: new Date('2026-04-08T04:00:00.000Z'),
+    })).resolves.toEqual({
+      entriesRedacted: 0,
       entriesTrimmed: 6,
       transcriptsTrimmed: 1,
     })

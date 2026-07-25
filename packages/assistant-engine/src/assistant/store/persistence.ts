@@ -58,6 +58,16 @@ import type { ResolvedAssistantSession } from './types.js'
 export const ASSISTANT_INDEX_STORE_VERSION = 1
 export const ASSISTANT_AUTOMATION_STATE_VERSION = 1
 export const ASSISTANT_TRANSCRIPT_AUDIT_RETENTION_LIMIT = 100
+/**
+ * How long an inbound message's verbatim text may survive in a transcript.
+ *
+ * The audit limit above is a count, not a clock: a low-volume thread keeps its
+ * hundred most recent entries forever. Ordinary attachment-free messages never
+ * produce an inbox capture, so for those the transcript is the only durable
+ * copy of what the member wrote and a count cap alone leaves it indefinitely.
+ * This matches the capture-ledger window so one deadline covers both paths.
+ */
+export const ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000
 const ASSISTANT_RECENT_SESSIONS_INDEX_LIMIT = 50
 
 const assistantAutomationStateCache = createAssistantBoundedRuntimeCache<string, AssistantAutomationState>({
@@ -312,14 +322,18 @@ export async function replaceTranscriptEntries(
 
 export async function pruneAssistantTranscriptRetention(
   paths: AssistantStatePaths,
+  options: { now?: Date } = {},
 ): Promise<{
+  entriesRedacted: number
   entriesTrimmed: number
   transcriptsTrimmed: number
 }> {
+  const now = options.now ?? new Date()
   await ensureAssistantStateDirectory(paths.transcriptsDirectory)
   const entries = await readdir(paths.transcriptsDirectory, {
     withFileTypes: true,
   })
+  let entriesRedacted = 0
   let entriesTrimmed = 0
   let transcriptsTrimmed = 0
 
@@ -347,25 +361,66 @@ export async function pruneAssistantTranscriptRetention(
     }
 
     const retained = trimAssistantTranscriptEntriesForAudit(parsed.values)
-    if (retained.length === parsed.values.length) {
+    const redaction = redactExpiredAssistantTranscriptEntries(retained, now)
+    const trimmedCount = parsed.values.length - retained.length
+    if (trimmedCount === 0 && redaction.redactedCount === 0) {
       continue
     }
 
-    const trimmedCount = parsed.values.length - retained.length
     await writeTextFileAtomic(
       transcriptPath,
-      retained.length > 0
-        ? `${retained.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
+      redaction.entries.length > 0
+        ? `${redaction.entries.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
         : '',
     )
+    entriesRedacted += redaction.redactedCount
     entriesTrimmed += trimmedCount
     transcriptsTrimmed += 1
   }
 
   return {
+    entriesRedacted,
     entriesTrimmed,
     transcriptsTrimmed,
   }
+}
+
+/**
+ * Clear the text of inbound entries past the content-retention window.
+ *
+ * Only `user` entries are redacted: they are the member's own words, which is
+ * what the retention policy covers. The entry itself stays so the transcript
+ * still shows a message occurred at that point in the conversation, and
+ * `textRetiredAt` records that the text expired rather than was empty.
+ */
+export function redactExpiredAssistantTranscriptEntries(
+  entries: readonly AssistantTranscriptEntry[],
+  now: Date,
+): { entries: AssistantTranscriptEntry[]; redactedCount: number } {
+  const cutoffMs = now.getTime() - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
+  let redactedCount = 0
+
+  const next = entries.map((entry) => {
+    if (entry.kind !== 'user' || entry.textRetiredAt !== undefined) {
+      return entry
+    }
+    if (entry.text.length === 0) {
+      return entry
+    }
+    const createdAtMs = Date.parse(entry.createdAt)
+    if (!Number.isFinite(createdAtMs) || createdAtMs >= cutoffMs) {
+      return entry
+    }
+
+    redactedCount += 1
+    return {
+      ...entry,
+      text: '',
+      textRetiredAt: now.toISOString(),
+    }
+  })
+
+  return { entries: next, redactedCount }
 }
 
 export function trimAssistantTranscriptEntriesForAudit(

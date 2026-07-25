@@ -691,6 +691,13 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // Stamped when message-content retention has cleared this entry's text. The
+  // transcript is the only durable copy of an inbound message that never
+  // produced an inbox capture, so it carries the same 14-day deadline as the
+  // capture ledger. Optional and additive: entries written before retention
+  // existed stay valid, and its absence means the text is genuinely empty
+  // rather than expired.
+  textRetiredAt: isoTimestampSchema.optional(),
 })
 
 const assistantChannelCleanupMessageSchema = z

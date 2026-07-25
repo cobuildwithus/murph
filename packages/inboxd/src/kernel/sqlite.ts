@@ -112,6 +112,15 @@ export interface InboxRuntimeStore extends ParserRuntimeStore {
   listCaptures(filters?: InboxListFilters): InboxCaptureRecord[];
   searchCaptures(filters: InboxSearchFilters): InboxSearchHit[];
   getCapture(captureId: string): InboxCaptureRecord | null;
+  /**
+   * Clear a capture's projected text and its search index entry.
+   *
+   * Retention redacts the capture ledger, but the projection is a separate
+   * durable copy that hosted snapshots carry, so a redacted message would stay
+   * searchable until something happened to trigger a full rebuild. Returns
+   * whether a row was actually updated.
+   */
+  redactCaptureText(captureId: string): boolean;
   getAttachment(attachmentId: string): {
     capture: InboxCaptureRecord;
     attachment: InboxCaptureRecord["attachments"][number];
@@ -1214,6 +1223,16 @@ function createInboxRuntimeStore(
       );
 
       return rows.map(createSearchHitFromRow);
+    },
+    redactCaptureText(captureId) {
+      const updated = database
+        .prepare("update capture set text_content = null where capture_id = ? and text_content is not null")
+        .run(captureId);
+      if (updated.changes === 0) {
+        return false;
+      }
+      refreshCaptureSearchIndex(database, captureId);
+      return true;
     },
     getCapture(captureId) {
       const row = getCaptureStatement.get(captureId) as Record<string, unknown> | undefined;
