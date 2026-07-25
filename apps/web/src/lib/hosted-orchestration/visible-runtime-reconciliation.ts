@@ -11,13 +11,13 @@ import {
   readHostedMailboxWakeByItemId,
 } from "../hosted-mailbox/store";
 import {
-  buildInactiveMemberAccessNoticeResponse,
-  buildSignupLinkResponse,
-} from "../hosted-onboarding/webhook-provider-linq-shared";
-import {
   resolveHostedRecognizedInboundAccess,
   type HostedRecognizedInboundAccessResolution,
 } from "../hosted-onboarding/recognized-inbound-access";
+import {
+  buildInactiveMemberAccessNoticeResponse,
+  buildSignupLinkResponse,
+} from "../hosted-onboarding/webhook-provider-linq-shared";
 import {
   drainHostedLinqSideEffectsDirect,
 } from "../hosted-onboarding/webhook-transport";
@@ -27,14 +27,18 @@ import {
 } from "./runtime-reconciliation-facts";
 
 const HOSTED_VISIBLE_ACCESS_RETRY_MS = 30_000;
+type HostedRuntimeReconciliationFacts = Awaited<
+  ReturnType<typeof readHostedRuntimeReconciliationFacts>
+>;
 
 export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   input: Parameters<typeof readHostedRuntimeReconciliationFacts>[0],
-): Promise<Awaited<ReturnType<typeof readHostedRuntimeReconciliationFacts>>> {
+): Promise<HostedRuntimeReconciliationFacts> {
   const facts = await readHostedRuntimeReconciliationFacts(input);
+  const blockedReason = facts.blocked?.reason;
   if (
-    facts.blocked?.reason !== "user_not_active"
-    && facts.blocked?.reason !== "ai_usage_denied"
+    blockedReason !== "user_not_active"
+    && blockedReason !== "ai_usage_denied"
   ) {
     return facts;
   }
@@ -53,10 +57,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     mailboxItemId: item.id,
     prisma,
   });
-  if (
-    !wake
-    || !isHostedVisibleDirectConversationWake(wake)
-  ) {
+  if (!wake || !isHostedVisibleDirectConversationWake(wake)) {
     return facts;
   }
 
@@ -83,7 +84,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     prisma,
   });
   if (access.kind === "allowed") {
-    return facts.blocked.reason === "user_not_active"
+    return blockedReason === "user_not_active"
       ? await readHostedRuntimeReconciliationFacts(input)
       : facts;
   }
@@ -166,9 +167,10 @@ function readHostedRecognizedInboundNoticeCode(
     : "signup_required";
 }
 
-function withHostedVisibleAccessRetryAt<T extends {
-  blocked: { reason: string; retryAt: string | null } | null;
-}>(facts: T, retryAt: Date): T {
+function withHostedVisibleAccessRetryAt(
+  facts: HostedRuntimeReconciliationFacts,
+  retryAt: Date,
+): HostedRuntimeReconciliationFacts {
   if (!facts.blocked) {
     return facts;
   }
