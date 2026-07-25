@@ -90,10 +90,9 @@ export function isHostedMemberMessagingSetupRequired(input: {
 }): boolean {
   const messaging = resolveHostedMemberMessagingState(input);
 
-  // Billing and trial clocks start only once Murph has a replyable channel.
-  // A linked Telegram identity is not enough because the bot cannot initiate
-  // the first conversation; the inbound thread becomes the delivery authority.
-  return !messaging.hasDirectMessagingChannel;
+  // A linked Telegram account completes identity setup. Billing readiness is
+  // stricter and separately requires a replyable thread at the mutation edge.
+  return !messaging.hasDirectMessagingChannel && !messaging.telegramAwaitingInbound;
 }
 
 export function resolveHostedMemberChannels(input: {
