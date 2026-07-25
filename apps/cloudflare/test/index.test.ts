@@ -27,6 +27,7 @@ import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-r
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
+  readDeployContainerSmokeAttempt,
   resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
 import {
@@ -767,6 +768,78 @@ describe("cloudflare worker routes", () => {
     expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
+  it("routes a signed attempt-scoped deploy smoke request to its own container", async () => {
+    const baseEnv = createWorkerEnv();
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=2");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      // Signing over the attempt-bearing search proves the smoke's attempt is
+      // covered by the signature rather than an unauthenticated tack-on.
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-version-123-attempt-2");
+  });
+
+  it("rejects a signed deploy smoke request with a malformed attempt before starting a container", async () => {
+    const baseEnv = createWorkerEnv();
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=0");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported deploy container smoke attempt.",
+      ok: false,
+    });
+    expect(smokeGetByName).not.toHaveBeenCalled();
+  });
+
   it("uses the local build deploy smoke Durable Object name before version metadata", () => {
     expect(resolveDeployContainerSmokeObjectName({
       CF_VERSION_METADATA: {
@@ -788,6 +861,38 @@ describe("cloudflare worker routes", () => {
       },
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
     })).toBe("__deploy-smoke-version-123");
+  });
+
+  it("scopes the deploy smoke Durable Object name to the retry attempt", () => {
+    const env = {
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+    } as const;
+
+    // The worker version is constant for a whole smoke run, so the attempt is the
+    // only thing that moves a retry onto a fresh container instance.
+    expect(resolveDeployContainerSmokeObjectName(env, 1))
+      .toBe("__deploy-smoke-version-123-attempt-1");
+    expect(resolveDeployContainerSmokeObjectName(env, 2))
+      .toBe("__deploy-smoke-version-123-attempt-2");
+    expect(resolveDeployContainerSmokeObjectName(env)).toBe("__deploy-smoke-version-123");
+  });
+
+  it("reads a positive deploy smoke attempt and rejects malformed ones", () => {
+    const read = (search: string) =>
+      readDeployContainerSmokeAttempt(
+        new URL(`https://worker.example.test/internal/deploy/container-smoke${search}`),
+      );
+
+    expect(read("")).toBeNull();
+    expect(read("?attempt=1")).toBe(1);
+    expect(read("?attempt=300")).toBe(300);
+    for (const search of ["?attempt=0", "?attempt=-1", "?attempt=1.5", "?attempt=abc", "?attempt=10000"]) {
+      expect(() => read(search)).toThrow(RangeError);
+    }
   });
 
   it("uses a local-build-specific deploy smoke Durable Object name in hosted-local mode", async () => {
