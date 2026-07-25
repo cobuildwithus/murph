@@ -4,7 +4,6 @@ import { promises as fs } from "node:fs";
 import {
   classifyExperimentStorageFile,
   EXPERIMENTS_DIRECTORY,
-  EXPERIMENT_OUTCOMES_DIRECTORY,
   isExperimentDocumentRelativePath,
   type ExperimentStorageFileKind,
 } from "@murphai/contracts";
@@ -28,6 +27,10 @@ export interface ExperimentStorageEntry {
 export interface CanonicalExperimentDocumentPathPage {
   relativePaths: string[];
   yielded: boolean;
+}
+
+function isMarkdownFileName(name: string): boolean {
+  return path.extname(name).toLowerCase() === ".md";
 }
 
 export function assertExperimentDocumentRelativePath(relativePath: string): void {
@@ -119,6 +122,14 @@ export async function listCanonicalExperimentDocumentPaths(
  * Lifecycle maintenance uses this boundary instead of the general storage
  * scan so foreground work can interrupt directory enumeration and so one
  * maintenance pass can never admit an unbounded number of documents.
+ *
+ * Residue that cannot be a canonical document is skipped rather than fatal.
+ * Directories, symlinks, and non-Markdown files are inert here, and
+ * `validateVault` already reports them as storage issues, so refusing to list
+ * anything because one is present only costs the caller its whole pass. A
+ * stray Markdown file is the one case still worth failing closed on: it may be
+ * a mis-named experiment document, and silently dropping it would take that
+ * experiment out of lifecycle care without anyone noticing.
  */
 export async function listCanonicalExperimentDocumentPathsInterruptible(input: {
   vaultRoot: string;
@@ -148,24 +159,22 @@ export async function listCanonicalExperimentDocumentPathsInterruptible(input: {
     return { relativePaths: [], yielded: true };
   }
   const relativePaths: string[] = [];
-  const outcomesDirectoryName = EXPERIMENT_OUTCOMES_DIRECTORY.split("/").at(-1);
 
   for await (const entry of await fs.opendir(experimentRoot.absolutePath)) {
     if (input.shouldYield?.() === true) {
       return { relativePaths: [], yielded: true };
     }
 
-    if (entry.isDirectory() && entry.name === outcomesDirectoryName) {
-      continue;
-    }
-
     const relativePath = `${EXPERIMENTS_DIRECTORY}/${entry.name}`;
     if (!entry.isFile() || !isExperimentDocumentRelativePath(relativePath)) {
-      throw new VaultError(
-        "EXPERIMENT_STORAGE_INVALID",
-        "Experiment storage contains an unsupported direct entry.",
-        { relativePath },
-      );
+      if (entry.isFile() && isMarkdownFileName(entry.name)) {
+        throw new VaultError(
+          "EXPERIMENT_STORAGE_INVALID",
+          "Experiment storage contains an unsupported direct Markdown entry.",
+          { relativePath },
+        );
+      }
+      continue;
     }
 
     if (relativePaths.length >= input.maxDocuments) {

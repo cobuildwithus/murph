@@ -2303,6 +2303,38 @@ async function applyHostedManagedAutomationsBestEffort(input: {
     });
   }
 
+  if (result.experimentLifecycleFailure !== undefined) {
+    // The pass still delivered every automation that does not depend on the
+    // experiment scan, so this is reported and not treated as a failed setup.
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      result.experimentLifecycleFailure,
+      "Hosted managed automation experiment lifecycle staging failed.",
+      { includeSafeIdentity: true },
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          ...buildHostedManagedAutomationStageDiagnostics({
+            stage: "experiment_lifecycle",
+          }),
+          murphManagedAutomationExperimentLifecycleFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
+
   if (result.yielded === true) {
     return {
       checkpointReason: "assistant_runtime_commit",

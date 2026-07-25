@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "vitest";
 
 import {
+  createExperiment,
   initializeVault,
   MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,
   readExperimentLifecycleFrontmatterDocuments,
@@ -58,6 +59,57 @@ test("experiment lifecycle reads never traverse the outcomes tree", async () => 
     assert.deepEqual(
       await readExperimentLifecycleFrontmatterDocuments({ vaultRoot }),
       { items: [], yielded: false },
+    );
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("experiment lifecycle reads skip residue that cannot be a document", async () => {
+  const vaultRoot = await makeVault("murph-experiment-lifecycle-residue");
+  const experimentRoot = path.join(vaultRoot, "bank/experiments");
+
+  try {
+    await createExperiment({ slug: "sleep-reset", title: "Sleep Reset", vaultRoot });
+    // Empty directories left behind by a completed media promotion.
+    await fs.mkdir(path.join(experimentRoot, "media/sleep-reset/2026-06-26"), {
+      recursive: true,
+    });
+    // Residue a synced filesystem adds on its own.
+    await fs.writeFile(path.join(experimentRoot, ".DS_Store"), "finder", "utf8");
+    await fs.writeFile(path.join(experimentRoot, "scratch.txt"), "notes", "utf8");
+    await fs.symlink(
+      path.join(experimentRoot, "sleep-reset.md"),
+      path.join(experimentRoot, "alias-link.md"),
+    );
+
+    const result = await readExperimentLifecycleFrontmatterDocuments({ vaultRoot });
+    assert.equal(result.yielded, false);
+    assert.deepEqual(result.items.map((item) => item.slug), ["sleep-reset"]);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("experiment lifecycle reads still fail closed on a stray Markdown document", async () => {
+  const vaultRoot = await makeVault("murph-experiment-lifecycle-stray-md");
+  const experimentRoot = path.join(vaultRoot, "bank/experiments");
+
+  try {
+    await fs.writeFile(
+      path.join(experimentRoot, "Sleep Reset Copy.md"),
+      "---\nslug: sleep-reset\n---\n",
+      "utf8",
+    );
+
+    await assert.rejects(
+      readExperimentLifecycleFrontmatterDocuments({ vaultRoot }),
+      (error: unknown) =>
+        error instanceof VaultError
+        && error.code === "EXPERIMENT_STORAGE_INVALID"
+        // The rejected path is what makes this diagnosable in production.
+        && (error.details as { relativePath?: string }).relativePath
+          === "bank/experiments/Sleep Reset Copy.md",
     );
   } finally {
     await fs.rm(vaultRoot, { recursive: true, force: true });

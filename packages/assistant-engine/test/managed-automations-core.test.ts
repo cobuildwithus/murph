@@ -1,4 +1,5 @@
-import { rm } from 'node:fs/promises'
+import { rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import {
   initializeVault,
@@ -128,6 +129,34 @@ describe('applyMurphManagedAutomations core integration', () => {
       skipped: 0,
       updated: 0,
     })
+  })
+
+  it('still creates unrelated automations when experiment lifecycle staging fails', async () => {
+    const vaultRoot = await createVaultRoot()
+    // A stray Markdown document is the one entry the experiment scan still
+    // refuses, and it must not take the rest of the pass down with it.
+    await writeFile(
+      join(vaultRoot, 'bank/experiments/Stray Copy.md'),
+      '---\nslug: stray\n---\n',
+      'utf8',
+    )
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-09T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    expect(result.created).toBe(5)
+    expect(result.experimentLifecycleFailure).toMatchObject({
+      code: 'EXPERIMENT_STORAGE_INVALID',
+    })
+    expect(
+      await showAutomation({
+        automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+        vaultRoot,
+      }),
+    ).toMatchObject({ status: 'active' })
   })
 
   it('creates managed health automations through the canonical automation registry', async () => {
