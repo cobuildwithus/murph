@@ -100,7 +100,7 @@ export function WideFeature({
         >
           <div
             className={cn(
-              "max-w-[240px] px-3.5 py-2 text-[0.8125rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)] sm:max-w-[280px] sm:px-4 sm:py-2.5 sm:text-[0.9375rem]",
+              "max-w-[240px] px-3.5 py-2 text-[0.875rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)] sm:max-w-[280px] sm:px-4 sm:py-2.5 sm:text-[0.9375rem]",
               t.bubble,
               artifactSide === "left"
                 ? "rounded-2xl rounded-tl-[6px]"
@@ -152,7 +152,7 @@ function CompactCard({
         <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
           {headline}
         </h3>
-        <p className="text-[0.8125rem] leading-[1.55] text-pretty text-[#635a48] sm:text-[0.875rem] sm:leading-[1.6]">
+        <p className="text-[0.875rem] leading-[1.55] text-pretty text-[#635a48] sm:leading-[1.6]">
           {body}
         </p>
       </div>
@@ -191,7 +191,7 @@ function RecoveryArtifact() {
             key={s.label}
             className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-1.5 py-2.5 min-[400px]:block min-[400px]:rounded-xl min-[400px]:bg-[#f5f0e8]/70 min-[400px]:px-3 min-[400px]:py-3 min-[400px]:ring-1 min-[400px]:ring-black/[0.03]"
           >
-            <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#736a58] min-[400px]:text-[9px]">
+            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
               {s.label}
             </span>
             <p className="font-serif text-[1rem] font-semibold leading-none tracking-tight tabular-nums text-[#2d3436] min-[400px]:mt-1.5 min-[400px]:text-[1.05rem]">
@@ -495,7 +495,7 @@ function HabitArtifact() {
 
 export function AsksGridSection() {
   return (
-    <section className="bg-[#f5f0e8] px-4 pt-10 pb-20 sm:px-8 sm:pt-12 sm:pb-20 lg:px-16 lg:pt-16 lg:pb-28">
+    <section className="bg-[#f5f0e8] px-4 pt-10 pb-20 sm:px-8 sm:pt-20 sm:pb-20 lg:px-16 lg:pt-28 lg:pb-28">
       <div className="mx-auto max-w-[1200px]">
         {/* Bridges the group-chat story above back to the 1:1 assistant:
             everything below happens in a private thread with Murph. */}

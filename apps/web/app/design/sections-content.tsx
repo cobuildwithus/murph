@@ -72,6 +72,7 @@ export function SectionsContent() {
           id="homepage-feature-cards"
           data-design-section="homepage-feature-cards"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
         >
           <TogetherSection />
           <AsksGridSection />

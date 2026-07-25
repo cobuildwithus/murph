@@ -43,3 +43,6 @@ desktop layout.
   plus a direct homepage check at iPhone Mini width.
 - Canonical `pnpm test:diff` or the required hosted-web verification lane.
 - Required product, frontend, coverage, and second-model review gates.
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25

@@ -36,8 +36,12 @@ test("AsksGridSection stacks dense health findings at iPhone Mini widths", () =>
   const markup = renderToStaticMarkup(createElement(AsksGridSection));
 
   assert.match(markup, /pt-10 pb-20/);
+  assert.match(markup, /sm:pt-20/);
+  assert.match(markup, /lg:pt-28/);
   assert.match(markup, /min-\[400px\]:grid-cols-3/);
   assert.match(markup, /min-\[420px\]:flex/);
+  assert.match(markup, /text-\[0\.875rem\]/);
+  assert.match(markup, /text-\[9px\]/);
   assert.match(markup, /Latest panel · vs March/);
   assert.match(markup, /Best HRV in 2 weeks/);
 });

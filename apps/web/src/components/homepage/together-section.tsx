@@ -7,7 +7,7 @@ import {
 
 export function TogetherSection() {
   return (
-    <section className="bg-[#f5f0e8] px-4 pt-20 pb-10 sm:px-8 sm:pt-20 sm:pb-12 lg:px-16 lg:pt-28 lg:pb-16">
+    <section className="bg-[#f5f0e8] px-4 pt-20 pb-10 sm:px-8 sm:pt-20 sm:pb-20 lg:px-16 lg:pt-28 lg:pb-28">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
