@@ -1,0 +1,49 @@
+name: Debug PR957 Web Build
+
+on:
+  push:
+    branches:
+      - fix/visible-secondary-messaging-outcomes
+
+permissions:
+  contents: read
+
+jobs:
+  build-log:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Capture hosted web production build
+        shell: bash
+        run: |
+          set +e
+          pnpm --dir apps/web build > web-build.log 2>&1
+          status=$?
+          printf '%s\n' "$status" > web-build.status
+          exit 0
+
+      - name: Upload build log
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: pr957-web-build-log
+          path: |
+            web-build.log
+            web-build.status
+          retention-days: 1
+          if-no-files-found: error
