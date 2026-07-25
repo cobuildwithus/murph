@@ -14,6 +14,7 @@ import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
+import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
@@ -109,6 +110,12 @@ export function SectionsContent() {
 
       <StudySection title="Personal usage credit states">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass">
+        <GrowthScorecardStudy />
       </StudySection>
 
       <Separator />

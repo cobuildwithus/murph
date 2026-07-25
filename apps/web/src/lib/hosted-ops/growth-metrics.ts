@@ -1,6 +1,11 @@
 import "server-only";
 
-import { HostedBillingStatus, type Prisma, type PrismaClient } from "@prisma/client";
+import {
+  HostedBillingStatus,
+  HostedUsageCreditPurchaseStatus,
+  type Prisma,
+  type PrismaClient,
+} from "@prisma/client";
 
 import {
   HOSTED_PLAN_CODES,
@@ -65,6 +70,7 @@ type HostedGrowthPrisma = Pick<
   | "hostedMailboxItem"
   | "hostedMember"
   | "hostedMemberBillingRef"
+  | "hostedUsageCreditPurchase"
 >;
 
 const INBOUND_MESSAGE_MAILBOX_KIND = "conversation.message";
@@ -196,6 +202,10 @@ export interface HostedGrowthTrialCohortRow {
 }
 
 export interface HostedGrowthDashboard {
+  activeMembers: {
+    trailing7Days: number;
+    wowPercent: number | null;
+  };
   capturedAt: string;
   conversion: {
     converted: number;
@@ -216,6 +226,9 @@ export interface HostedGrowthDashboard {
   trialStarts: {
     trailing7Days: number;
     wowPercent: number | null;
+  };
+  usageTopUps: {
+    totalFulfilled: number;
   };
   weeklyRows: HostedGrowthWeeklyRow[];
 }
@@ -578,6 +591,9 @@ export async function readHostedGrowthDashboard(
   const todayStart = startOfUtcDay(now);
   const recentStart = addUtcDays(todayStart, -63);
   const dailyStart = addUtcDays(todayStart, -(DAILY_SERIES_DAYS - 1));
+  const currentSevenDayStart = addUtcDays(todayStart, -6);
+  const previousSevenDayStart = addUtcDays(todayStart, -13);
+  const currentSevenDayEnd = addUtcDays(todayStart, 1);
 
   const [
     current,
@@ -586,6 +602,9 @@ export async function readHostedGrowthDashboard(
     snapshots,
     matureStarted,
     matureConverted,
+    totalFulfilledUsageTopUps,
+    activeMembersTrailing7Days,
+    activeMembersPrevious7Days,
   ] = await Promise.all([
     readCurrentHostedGrowthMetrics(now, prisma),
     prisma.hostedMember.findMany({
@@ -667,6 +686,39 @@ export async function readHostedGrowthDashboard(
         },
       },
     }),
+    prisma.hostedUsageCreditPurchase.count({
+      where: {
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+      },
+    }),
+    prisma.hostedMember.count({
+      where: {
+        ...realHostedMemberWhere,
+        hostedMailboxItems: {
+          some: {
+            kind: INBOUND_MESSAGE_MAILBOX_KIND,
+            occurredAt: {
+              gte: currentSevenDayStart,
+              lt: currentSevenDayEnd,
+            },
+          },
+        },
+      },
+    }),
+    prisma.hostedMember.count({
+      where: {
+        ...realHostedMemberWhere,
+        hostedMailboxItems: {
+          some: {
+            kind: INBOUND_MESSAGE_MAILBOX_KIND,
+            occurredAt: {
+              gte: previousSevenDayStart,
+              lt: currentSevenDayStart,
+            },
+          },
+        },
+      },
+    }),
   ]);
   const trialStartRows = rawTrialStartRows.map((row): HostedGrowthTrialStartRow => ({
     currentBillingPhase: row.currentBillingPhase,
@@ -695,12 +747,10 @@ export async function readHostedGrowthDashboard(
     todayStart,
     addUtcDays(todayStart, 1),
   );
-  const currentSevenDayStart = addUtcDays(todayStart, -6);
-  const previousSevenDayStart = addUtcDays(todayStart, -13);
   const newMembersTrailing7Days = countCreatedRowsInRange(
     memberRows,
     currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentSevenDayEnd,
   );
   const newMembersPrevious7Days = countCreatedRowsInRange(
     memberRows,
@@ -710,7 +760,7 @@ export async function readHostedGrowthDashboard(
   const trialStartsTrailing7Days = countTrialStartsInRange(
     trialStartRows,
     currentSevenDayStart,
-    addUtcDays(todayStart, 1),
+    currentSevenDayEnd,
   );
   const trialStartsPrevious7Days = countTrialStartsInRange(
     trialStartRows,
@@ -719,6 +769,13 @@ export async function readHostedGrowthDashboard(
   );
 
   return {
+    activeMembers: {
+      trailing7Days: activeMembersTrailing7Days,
+      wowPercent: calculatePercentChange(
+        activeMembersTrailing7Days,
+        activeMembersPrevious7Days,
+      ),
+    },
     capturedAt: now.toISOString(),
     conversion: calculateTrialConversionSummary({
       matureConverted,
@@ -752,6 +809,9 @@ export async function readHostedGrowthDashboard(
         trialStartsTrailing7Days,
         trialStartsPrevious7Days,
       ),
+    },
+    usageTopUps: {
+      totalFulfilled: totalFulfilledUsageTopUps,
     },
     weeklyRows,
   };
