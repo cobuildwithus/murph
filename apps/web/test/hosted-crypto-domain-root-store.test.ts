@@ -407,13 +407,17 @@ test("discards a prepared hosted domain root candidate when another writer wins 
   }
 });
 
-test("rejects a prepared hosted domain root candidate bound to another user", async () => {
+test("rejects a prepared hosted domain root candidate bound to another user before any database work", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
-  gcpKmsMock.client = createLocalKmsClient({
-    encryptCalls: [],
-    signCalls: [],
-    signer: signer.privateKey,
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
   });
   stubHostedCryptoEnv({
     cloudflarePublicJwk: cloudflareRecipient.publicJwk,
@@ -424,20 +428,73 @@ test("rejects a prepared hosted domain root candidate bound to another user", as
     prepareHostedCryptoDomainRootCandidates,
     provisionHostedCryptoDomainRootsForUserTx,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
-  const tx = createCapturingTransaction();
+  const recorder = createStepRecordingTransaction(steps);
 
   const prepared = await prepareHostedCryptoDomainRootCandidates({
-    prisma: tx.prisma,
+    prisma: recorder.prisma,
     userId: "member-test-other",
   });
 
+  steps.length = 0;
   await expect(provisionHostedCryptoDomainRootsForUserTx({
     prepared,
-    reason: "test.mismatched-candidate",
-    tx: tx.prisma,
+    reason: "test.mismatched-candidate-user",
+    tx: recorder.prisma,
     userId: "member-test-mine",
   })).rejects.toThrow(/does not match the requested user\/domain/u);
-  assert.equal(tx.persistedEnvelopes.length, 0);
+  // Rejecting after the advisory lock or the re-read would still refuse the
+  // insert, but it would take a per-domain lock on behalf of a candidate the
+  // caller was never allowed to submit. The guard has to run first.
+  assert.deepEqual(steps, []);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
+});
+
+test("rejects a prepared hosted domain root candidate bound to another domain before any database work", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls: [],
+      signCalls: [],
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    provisionHostedCryptoDomainRootsForUserTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: recorder.prisma,
+    userId: "member-test-crossed-domain",
+  });
+  const deviceCandidate = prepared.get("device");
+  assert.ok(deviceCandidate);
+
+  // Same user, so only the domain differs: the device envelope is filed under
+  // the control key. Inserting it would store a device-scoped root as the
+  // control root, and every control-domain decrypt would then reach for wraps
+  // bound to a different domain's encryption context.
+  const crossedDomains = new Map(prepared);
+  crossedDomains.set("control", deviceCandidate);
+
+  steps.length = 0;
+  await expect(provisionHostedCryptoDomainRootsForUserTx({
+    prepared: crossedDomains,
+    reason: "test.mismatched-candidate-domain",
+    tx: recorder.prisma,
+    userId: "member-test-crossed-domain",
+  })).rejects.toThrow(/does not match the requested user\/domain/u);
+  assert.deepEqual(steps, []);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
 });
 
 test("web runtime crypto context fails closed instead of provisioning missing worker roots", async () => {
