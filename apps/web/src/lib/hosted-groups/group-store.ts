@@ -37,6 +37,7 @@ import {
   createHostedEmailLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
+  createHostedTelegramUserLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -380,6 +381,9 @@ interface HostedGroupSharedMemberSource {
       phoneLookupKey: string | null;
       phoneNumberVerifiedAt: Date | null;
     } | null;
+    routing: {
+      telegramUserLookupKey: string | null;
+    } | null;
   };
   memberId: string;
 }
@@ -407,6 +411,7 @@ type HostedGroupSharedReadCapture =
 export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
   linqSenderHandles?: readonly string[];
   prisma?: PrismaClient;
+  telegramSenderHandles?: readonly string[];
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
   runtimeMemberId: string;
 }): Promise<HostedRuntimeGroupSharedReadResult> {
@@ -447,6 +452,11 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
                       phoneNumberVerifiedAt: true,
                     },
                   },
+                  routing: {
+                    select: {
+                      telegramUserLookupKey: true,
+                    },
+                  },
                 },
               },
               memberId: true,
@@ -468,10 +478,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         };
       }
       const currentTurnHandlesByParticipantId =
-        matchHostedGroupLinqSenderHandles(
-          group.members,
-          input.linqSenderHandles ?? [],
-        );
+        matchHostedGroupCurrentTurnSenderHandles(group.members, {
+          linqSenderHandles: input.linqSenderHandles ?? [],
+          telegramSenderHandles: input.telegramSenderHandles ?? [],
+        });
       const members = group.members.map((member) => ({
         currentTurnHandles:
           currentTurnHandlesByParticipantId.get(member.id) ?? [],
@@ -2154,31 +2164,34 @@ async function readHostedGroupMemberRoster(
   });
 }
 
-function matchHostedGroupLinqSenderHandles(
+/**
+ * Resolves current-turn sender handles to at most one current membership each.
+ *
+ * Matching is strictly scoped to the sending channel's identity index. A
+ * Telegram user id is a bare digit string that would otherwise normalize into a
+ * valid phone-number lookup key and could match an unrelated member's verified
+ * phone, so cross-channel matching is never attempted.
+ */
+function matchHostedGroupCurrentTurnSenderHandles(
   members: readonly HostedGroupSharedMemberSource[],
-  senderHandles: readonly string[],
+  senderHandles: {
+    linqSenderHandles: readonly string[];
+    telegramSenderHandles: readonly string[];
+  },
 ): Map<string, string[]> {
   const matchedHandlesByParticipantId = new Map<string, string[]>();
-  for (const senderHandle of new Set(senderHandles)) {
-    const emailLookupKeys = new Set(
-      createHostedEmailLookupKeyReadCandidates(senderHandle),
-    );
-    const phoneLookupKeys = new Set(
-      createHostedPhoneLookupKeyReadCandidates(senderHandle),
-    );
-    const matchedMembers = members.filter((member) => {
-      const emailAuthorization = member.member.emailAuthorization;
-      const identity = member.member.identity;
-      return Boolean(
-        emailAuthorization?.verifiedEmailVerifiedAt
-        && emailAuthorization.verifiedEmailLookupKey
-        && emailLookupKeys.has(emailAuthorization.verifiedEmailLookupKey),
-      ) || Boolean(
-        identity?.phoneNumberVerifiedAt
-        && identity.phoneLookupKey
-        && phoneLookupKeys.has(identity.phoneLookupKey),
-      );
-    });
+  const linqPresent = senderHandles.linqSenderHandles.length > 0;
+  const telegramPresent = senderHandles.telegramSenderHandles.length > 0;
+  if (linqPresent && telegramPresent) {
+    return matchedHandlesByParticipantId;
+  }
+  const channelHandles = telegramPresent
+    ? senderHandles.telegramSenderHandles
+    : senderHandles.linqSenderHandles;
+  for (const senderHandle of new Set(channelHandles)) {
+    const matchedMembers = telegramPresent
+      ? matchHostedGroupTelegramSenderHandle(members, senderHandle)
+      : matchHostedGroupLinqSenderHandle(members, senderHandle);
     if (matchedMembers.length !== 1) {
       continue;
     }
@@ -2193,6 +2206,47 @@ function matchHostedGroupLinqSenderHandles(
   }
 
   return matchedHandlesByParticipantId;
+}
+
+function matchHostedGroupLinqSenderHandle(
+  members: readonly HostedGroupSharedMemberSource[],
+  senderHandle: string,
+): HostedGroupSharedMemberSource[] {
+  const emailLookupKeys = new Set(
+    createHostedEmailLookupKeyReadCandidates(senderHandle),
+  );
+  const phoneLookupKeys = new Set(
+    createHostedPhoneLookupKeyReadCandidates(senderHandle),
+  );
+  return members.filter((member) => {
+    const emailAuthorization = member.member.emailAuthorization;
+    const identity = member.member.identity;
+    return Boolean(
+      emailAuthorization?.verifiedEmailVerifiedAt
+      && emailAuthorization.verifiedEmailLookupKey
+      && emailLookupKeys.has(emailAuthorization.verifiedEmailLookupKey),
+    ) || Boolean(
+      identity?.phoneNumberVerifiedAt
+      && identity.phoneLookupKey
+      && phoneLookupKeys.has(identity.phoneLookupKey),
+    );
+  });
+}
+
+function matchHostedGroupTelegramSenderHandle(
+  members: readonly HostedGroupSharedMemberSource[],
+  senderHandle: string,
+): HostedGroupSharedMemberSource[] {
+  const telegramUserLookupKeys = new Set(
+    createHostedTelegramUserLookupKeyReadCandidates(senderHandle),
+  );
+  return members.filter((member) => {
+    const routing = member.member.routing;
+    return Boolean(
+      routing?.telegramUserLookupKey
+      && telegramUserLookupKeys.has(routing.telegramUserLookupKey),
+    );
+  });
 }
 
 async function assertHostedGroupRuntimeDestinationTx(

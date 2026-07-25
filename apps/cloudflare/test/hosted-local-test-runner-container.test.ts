@@ -696,6 +696,42 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }
   });
 
+  it("does not publish a held shutdown checkpoint after its request is aborted", async () => {
+    const userId = "member_shutdown_checkpoint_barrier_aborted";
+    const realHandler = vi.fn(async () => new Response("checkpoint committed", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic live-invocation wake interrupted the checkpoint.");
+    const checkpointRequest = createSnapshotCompleteRequest(
+      userId,
+      "a".repeat(64),
+      "idle_shutdown",
+    );
+    const abortableCheckpointRequest = new Request(checkpointRequest, {
+      signal: abortController.signal,
+    });
+    armShutdownCheckpointPublicationBarrier(userId);
+
+    try {
+      const heldPublication = handler(
+        abortableCheckpointRequest,
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+
+      abortController.abort(abortReason);
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldPublication).rejects.toBe(abortReason);
+      expect(realHandler).not.toHaveBeenCalled();
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("unarmed");
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
   it("keeps the hosted-local test composition out of the production worker entry graph", async () => {
     // @cloudflare/containers keys outboundByHost by class NAME, so importing
     // the hosted-local-test subclass anywhere in the production graph would

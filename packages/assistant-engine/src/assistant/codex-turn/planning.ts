@@ -503,8 +503,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     : null
   const assistantTone = effectiveAssistantStyle?.tone
     ?? preferenceContext.assistantTone
-  const assistantPersonality = effectiveAssistantStyle?.personality
-    ?? preferenceContext.assistantPersonality
+  // Unhinged is not part of persona identity: every persona resolves it to the
+  // neutral default 0. Rendering that default band for a member who never set
+  // Unhinged would violate the sparse-dial thread contract and rotate every
+  // persona user's thread fingerprint on deploy. Keep the persona-derived
+  // Humor/Push/Detail bands, but include Unhinged in the thread personality only
+  // when the member's saved sparse preference explicitly owns that key.
+  const assistantPersonality = resolveThreadPersonalityForPrompt(
+    effectiveAssistantStyle?.personality ?? null,
+    preferenceContext.assistantPersonality,
+  )
   const assistantVoice = preferenceContext.assistantVoice
     ?? effectiveAssistantStyle?.voice
     ?? null
@@ -1109,6 +1117,25 @@ export async function resolveAssistantPromptTimeContext(
     currentLocalDate: toLocalDayKey(new Date(), currentTimeZone),
     currentTimeZone,
   }
+}
+
+// Assemble the personality that drives thread-context band rendering. Persona
+// defaults own Humor, Push, and Detail, but never Unhinged: it is included only
+// when the member's saved sparse preference explicitly set it, so a persona
+// user who never touched Unhinged renders no Unhinged band and keeps a stable
+// thread fingerprint.
+function resolveThreadPersonalityForPrompt(
+  effectivePersonality: AssistantPersonalityPreferences | null,
+  savedPersonality: AssistantPersonalityPreferences | null,
+): AssistantPersonalityPreferences | null {
+  if (!effectivePersonality) {
+    return savedPersonality
+  }
+  if (savedPersonality?.unhinged !== undefined) {
+    return effectivePersonality
+  }
+  const { unhinged: _personaDefaultUnhinged, ...withoutUnhinged } = effectivePersonality
+  return withoutUnhinged
 }
 
 export async function resolveAssistantTurnPreferenceContext(

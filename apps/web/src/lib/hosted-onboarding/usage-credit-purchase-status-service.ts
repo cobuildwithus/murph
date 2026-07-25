@@ -26,7 +26,7 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
-import { normalizeHostedGroupUsageJoinCode } from "../hosted-groups/group-usage-funding";
+import { normalizeHostedGroupUsageFundingLocator } from "../hosted-groups/group-usage-funding";
 import { getPrisma } from "../prisma";
 
 const HOSTED_USAGE_CREDIT_CHECKOUT_CREATE_RETRY_DURATION_MS = 30 * 60 * 1_000;
@@ -619,7 +619,7 @@ function readHostedUsageCreditPurchaseTarget(input: Pick<
     } catch {
       return null;
     }
-    const groupJoinCode = normalizeHostedGroupUsageJoinCode(decodedJoinCode);
+    const groupJoinCode = normalizeHostedGroupUsageFundingLocator(decodedJoinCode);
     if (!groupJoinCode) {
       return null;
     }

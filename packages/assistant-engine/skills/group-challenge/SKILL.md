@@ -47,6 +47,26 @@ participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
 
+Whenever a challenge turn is authorized under `group-chat`'s rules to send a
+permission request — a `create_join_link` reply, an explicitly requested
+permission flow, or the one evidence-gated standings offer — the request must
+name everything the challenge needs to score, all in that single request:
+
+- `group-email.v0` and `device-sync-status.v0`, always.
+- The exact scoring scope (or scopes) for the agreed metric — a steps
+  challenge requests `steps-days.v0`, a sleep challenge requests
+  `sleep-duration-days.v0`, and so on from the list below. Never send a
+  challenge join link or offer that omits the scoring scope.
+- When the request also creates the hosted group, or the group has no agreed
+  single metric yet, additionally the reusable core set from `group-chat`'s
+  "Creating a hosted group" rules, so a general health group starts with the
+  common permissions requested by default.
+
+The join page opens with every requested permission preselected; each stays
+an individual choice the member can uncheck before joining. Requesting
+prefills that page — it never pre-grants, so describe it as a prefilled
+request, not as something you cannot preselect and not as automatic sharing.
+
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`
   - Running minutes: `activityKind: "running"`
@@ -127,7 +147,8 @@ The page carries these sections, kept current:
 - **Sharing choices** — per participant and exact scope, explicit sharing
   declines and any permission-offer action already handled. Silence is not
   consent or refusal, but a handled offer action is not a reason to retry it.
-- **Baselines** — per-member starting values where shared data allows.
+- **Baselines** — per-member starting values where shared data allows, or
+  `pending` until usable records arrive.
 - **Stakes** — verbatim, exactly as the group agreed them.
 - **Canon** — running bits, nicknames, claims, commissioned bits, with dates.
 - **Comedy bank** — material saved for future days.
@@ -171,6 +192,14 @@ loses a reminder; it must never lose the challenge.
 When kickoff needs another decision, ask that next question directly in the
 group response. Do not prepend a setup-status, progress, or transition sentence;
 the question is the useful update.
+
+Kickoff is a conversation, not a rules document, and every kickoff message
+obeys `group-chat`'s length budget. Pitch a format or scoring idea in a few
+short sentences, settle one decision at a time, and ask at most one question
+per message. The full format, scoring detail, and fine print belong on the
+challenge page; the chat gets the headline version. Do not post a
+multi-section framework or numbered rulebook into the room unless the room's
+Detail is 10/10 or a member explicitly asks this turn for the full rules.
 
 1. **Negotiate the metric.** Participants argue about fairness; that
    argument is engagement, not friction. Take a real position, adjudicate
@@ -219,7 +248,7 @@ the question is the useful update.
    `murph.group action="read_shared"` exactly once with the exact scoring scope
    and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
    and diagnostic read; it must never become prompt preload or other pre-model
-   work. On an interactive Linq turn, record a returned row's group-scoped
+   work. On an interactive group turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection
@@ -255,7 +284,15 @@ the question is the useful update.
    paths expire, captures do not.
 
 6. **Set baselines.** Read pre-challenge shared data where it exists and
-   record per-member baselines.
+   record per-member baselines. A missing baseline never blocks kickoff:
+   when the shared snapshot has no usable records yet for a member — or for
+   everyone — continue the rest of setup and start the challenge on
+   schedule, record that baseline as `pending` on the page, and say plainly
+   that it locks in once their data arrives. On a later read (a follow-up
+   turn or the daily loop), backfill a pending baseline from the earliest
+   usable shared records, note on the page which dates it covers, and until
+   then present that member as waiting on data, never as a zero or a
+   forfeit.
 7. **Log confounders.** Members declare them naturally ("I'm traveling next
    week"). Write each one down — they are context for the outcome, never
    ammunition.
@@ -427,6 +464,11 @@ automation action rules with a `dailyLocal` schedule and
    literal disconnected, `needs-reconnect`, and other device statuses may get
    status-appropriate guidance and no permission card.
 5. Compose ONE dispatch in ONE format, in the `groupchat-comedy` voice.
+   The scheduled dispatch is the one group message where the required
+   completeness statement and per-person missing-data lines always count as
+   substance: never trim them for length, keep them to about one line per
+   person, keep the whole dispatch compact, and put ranking mechanics or
+   anything longer on the challenge page.
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with

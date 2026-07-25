@@ -38,12 +38,25 @@ vi.mock("@/src/components/murph/murph-assistant-style-picker", () => ({
   },
 }));
 
-vi.mock("@/src/components/murph/murph-contact-card-picker", () => ({
-  MurphContactCardPicker(props: { open?: boolean }) {
-    return props.open
-      ? React.createElement("div", { "data-contact-card-picker": "true" }, "contact card picker")
-      : null;
-  },
+vi.mock("@/src/components/ui/drawer", () => ({
+  Drawer: ({ children, open }: { children?: React.ReactNode; open?: boolean }) =>
+    open
+      ? React.createElement("div", { "data-drawer-open": "true" }, children)
+      : null,
+  DrawerContent: (props: React.HTMLAttributes<HTMLDivElement>) =>
+    React.createElement("div", { ...props, "data-drawer-content": "true" }),
+  DrawerDescription: (props: React.HTMLAttributes<HTMLParagraphElement>) =>
+    React.createElement("p", props),
+  DrawerFooter: (props: React.HTMLAttributes<HTMLDivElement>) =>
+    React.createElement("div", props),
+  DrawerHeader: (props: React.HTMLAttributes<HTMLDivElement>) =>
+    React.createElement("div", props),
+  DrawerTitle: (props: React.HTMLAttributes<HTMLHeadingElement>) =>
+    React.createElement("h2", props),
+}));
+
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => true,
 }));
 
 // Stub the editor but keep the real summary resolver so the row still shows the
@@ -118,6 +131,27 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).toContain("Humor 9");
     expect(markup).toContain("Push 3");
     expect(markup).toContain("Detail 5");
+  });
+
+  test("never surfaces the conversational-only Unhinged dial in the summary", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(CustomizeMurphSettings, {
+        assistant: {
+          tone: null,
+          voice: null,
+          // A hostile/legacy payload carrying an unhinged score must not leak it.
+          personality: {
+            humor: 4,
+            push: null,
+            detail: null,
+            unhinged: 9,
+          } as never,
+        },
+      }),
+    );
+
+    expect(markup).toContain("Humor 4 · Push 3 · Detail 5");
+    expect(markup).not.toContain("Unhinged");
   });
 
   test("keeps the customization rows in their intended order", () => {
@@ -323,8 +357,102 @@ describe("CustomizeMurphSettings", () => {
     await React.act(async () => {
       contactRow?.querySelector("button")?.click();
     });
-    expect(rendered.container.querySelector("[data-contact-card-picker]"))
+    expect(rendered.container.querySelector("[data-drawer-open='true']"))
       .not.toBeNull();
+    expect(rendered.container.textContent).toContain("Pick a new look");
+
+    await rendered.cleanup();
+  });
+
+  test("keeps Settings contact-card handoff understandable and recoverable", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ claim: "settings.current-member.claim" }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const element = React.createElement(CustomizeMurphSettings, {
+      assistant: null,
+      murphPhoneNumber: "+15550100001",
+    });
+    const rendered = await renderClientComponent(element, {
+      location: {
+        host: "app.example.com",
+        href: "https://app.example.com/settings",
+        origin: "https://app.example.com",
+      },
+      requireButton: false,
+    });
+
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+    });
+    await rendered.rerender(element);
+
+    const contactRow = findSettingsRow(rendered.container, "Contact card");
+    await React.act(async () => {
+      contactRow?.querySelector("button")?.click();
+    });
+
+    expect(rendered.container.textContent).toContain("Pick a new look");
+    expect(rendered.container.textContent).toContain(
+      "Delete your current Murph contact first, then save this one fresh.",
+    );
+    expect(rendered.container.textContent).toContain(
+      "You're in an in-app browser, which can't save contacts. This opens Safari instead.",
+    );
+    expect(rendered.container.textContent).toContain("Close");
+
+    const gremlinInput = rendered.container.querySelector<HTMLInputElement>(
+      'input[type="radio"][value="gremlin"]',
+    );
+    expect(gremlinInput).toBeInstanceOf(rendered.window.HTMLInputElement);
+    await React.act(async () => {
+      gremlinInput?.click();
+    });
+
+    const firstAttempt = findButton(
+      rendered.container,
+      "Open in Safari to add Murph",
+    );
+    expect(firstAttempt).not.toBeNull();
+    await React.act(async () => {
+      firstAttempt?.click();
+      await flushPromises();
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      avatar: "gremlin",
+    });
+    expect(rendered.container.querySelector("[role='alert']")?.textContent)
+      .toContain("Couldn't open Safari");
+    expect(rendered.container.querySelector("[data-drawer-open='true']"))
+      .not.toBeNull();
+
+    const retry = findButton(
+      rendered.container,
+      "Open in Safari to add Murph",
+    );
+    expect(retry?.disabled).toBe(false);
+    await React.act(async () => {
+      retry?.click();
+      await flushPromises();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      avatar: "gremlin",
+    });
+    expect(rendered.assign).toHaveBeenCalledWith(
+      "x-safari-https://app.example.com/api/murph-contact-card?handoff=settings.current-member.claim",
+    );
+    await acknowledgeSafariLaunch();
+    expect(rendered.container.querySelector("[data-drawer-open='true']"))
+      .toBeNull();
 
     await rendered.cleanup();
   });
@@ -424,6 +552,31 @@ function makeVoiceTestOption(): MurphContactOption {
     kind: "text",
     label: "Messages",
   };
+}
+
+/** The picker completes only once this document goes away. */
+async function acknowledgeSafariLaunch(): Promise<void> {
+  await React.act(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+    await flushPromises();
+  });
+}
+
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+function findButton(
+  container: Element,
+  label: string,
+): HTMLButtonElement | null {
+  const ButtonElement = container.ownerDocument.defaultView?.HTMLButtonElement;
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === label,
+  );
+  return ButtonElement && button instanceof ButtonElement ? button : null;
 }
 
 function findSettingsRow(container: Element, label: string): HTMLElement | null {

@@ -247,19 +247,46 @@ existing accepted-input and route-binding work is unchanged. The only Web read
 occurs inside the adapter's request method after the model invokes `read_shared`.
 No roster or authority snapshot is preloaded into scheduled context.
 
-Interactive Linq group turns are actor-scoped. The importer derives blinded
-`actorId` from the same trimmed Linq sender value stored for the prompt;
-initial batching splits on actor change, and pre-provider plus live admission
-stop at a foreign group actor. Attribution therefore remains bound to the
-scanner-selected durable operation contexts, and active steering cannot add a
-second participant's identity authority to the turn.
+Interactive Linq and Telegram group turns are actor-scoped. The importer
+derives blinded `actorId` from the same trimmed sender value stored for the
+prompt; initial batching splits on actor change, and pre-provider plus live
+admission stop at a foreign group actor. Telegram supplies that sender only on
+route-authorized non-direct inbound whose webhook-authenticated user id already
+resolved to exactly one active linked member, so anonymous administrators,
+`sender_chat` messages, bots, and unlinked senders stay unattributed.
+Attribution therefore remains bound to the scanner-selected durable operation
+contexts, and active steering cannot add a second participant's identity
+authority to the turn.
+
+Telegram sender evidence is additive on the wire: `linqSenderHandles` keeps its
+existing meaning and `telegramSenderHandles` is a separate optional field, so a
+new runner against an older Web degrades only the not-yet-supported Telegram
+field and never disturbs established iMessage attribution.
+
+Persisted Telegram sender metadata is a runner rollback floor. The strict
+Telegram input-source schema in a preceding runner does not recognize
+`senderHandle` or `senderUsername`, so the first checkpointed workspace snapshot
+containing an attributed Telegram group input cannot be read back by that older
+runner for replay, projection update, or pending-input recovery. Those keys are
+therefore written only when an authoritative route-authorized group sender
+exists, leaving direct threads and unattributable group inbound byte-identical
+to the previous shape. Below that floor the recovery posture is a forward fix or
+an explicit offline migration, not a dual reader. The raw Telegram id and
+optional username follow the existing encrypted assistant-input residue
+retention and snapshot policy.
 
 Interactive `read_shared` requests may carry only bounded, deduplicated
-route-authorized iMessage sender handles from that operation scope. Web matches
-them against current membership phone and verified-email blind indexes selected
-by the same group query. A handle is returned only in the matching member's
-bounded `currentTurnHandles` array and only when it resolves to exactly one
-current membership; that row also carries its group-scoped `participantId`.
+route-authorized sender handles from that operation scope, in the one field that
+names the sending channel. Web matches `linqSenderHandles` against current
+membership phone and verified-email blind indexes, and `telegramSenderHandles`
+against the current membership Telegram-user blind index, all selected by the
+same group query. Matching never crosses channels: a numeric Telegram user id
+would otherwise normalize into a valid phone lookup key and could resolve to an
+unrelated member. Populating both fields in one request fails closed at the
+runtime, the parser, and the store. A handle is
+returned only in the matching member's bounded `currentTurnHandles` array and
+only when it resolves to exactly one current membership; that row also carries
+its group-scoped `participantId`.
 Scheduled, notification, and detached requests carry no handles. The runtime
 drops overlong handles before transport, and the signed group-tool body limit
 covers the declared worst-case JSON expansion for all 32 bounded inputs.
@@ -867,8 +894,8 @@ Settings deltas against conversational preference commands. System pending
 items and durable conversation input records carry it to the canonical
 preference owner, which stores only a per-field applied watermark. Web keeps
 matching nullable per-field projection watermarks for tone, voice, Humor, Push,
-and Detail. The four-case equality-aware rule applies at the canonical owner
-and to Web's Humor, Push, and Detail projection: a newer sequence applies even
+Detail, and the conversational-only Unhinged dial. The four-case equality-aware rule applies at the canonical owner
+and to Web's Humor, Push, Detail, and Unhinged projection: a newer sequence applies even
 when the visible value is unchanged, an older sequence is a field-local stale
 no-op while a fresh sibling still applies, the same sequence and value is an
 idempotent retry, and the same sequence with a different value is a later

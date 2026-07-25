@@ -1355,6 +1355,29 @@ function renderHostedEmailPromptListLine(
   return `${label} - ${textValues.join(", ")}`;
 }
 
+/**
+ * Single source of truth for the Telegram group participant. Attribution is
+ * valid only on route-authorized non-direct inbound, so the prompt sender and
+ * the blinded actor can never disagree about who spoke.
+ */
+function readHostedTelegramGroupSenderHandle(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (!isHostedTelegramConversationMessageWake(wake)) {
+    return null;
+  }
+  if (
+    wake.message.routeAuthority === undefined
+    || wake.message.routeAuthority === null
+    || wake.message.telegramMessage.threadIsDirect !== false
+  ) {
+    return null;
+  }
+  return normalizeHostedAssistantInputSourceMetadataToken(
+    wake.message.telegramMessage.from ?? null,
+  );
+}
+
 function createHostedConversationAssistantInputConversation(
   wake: HostedExecutionConversationMessageWake,
   identifierBlind: HostedAssistantConversationIdentifierBlind,
@@ -1388,7 +1411,13 @@ function createHostedConversationAssistantInputConversation(
         identifierBlind,
         "telegram:bot",
       ),
-      actorId: null,
+      // Blind the same sender value stored for the prompt so group actor
+      // scoping matches Linq: initial batching splits on actor change and
+      // admission stops at a foreign participant.
+      actorId: hashNullableHostedAssistantConversationIdentifier(
+        identifierBlind,
+        readHostedTelegramGroupSenderHandle(wake),
+      ),
       actorIsSelf: false,
       source: "telegram",
       threadId: hashNullableHostedAssistantConversationIdentifier(
@@ -1575,6 +1604,11 @@ function createHostedConversationAssistantInputSourceMetadata(
   if (!mediaGroupId && !replyContext && !externalThreadRouteAuthorityPresent) {
     return null;
   }
+  // Thread-container (group) inbound carries the sending participant so the
+  // assistant can attribute messages. Omit both keys entirely when there is no
+  // authoritative sender so direct threads and unattributable group inbound
+  // keep the exact record shape an older runner can still read.
+  const senderHandle = readHostedTelegramGroupSenderHandle(wake);
 
   return {
     ...(externalThreadRouteAuthorityPresent
@@ -1583,7 +1617,51 @@ function createHostedConversationAssistantInputSourceMetadata(
     kind: "telegram",
     mediaGroupId,
     replyContext,
+    ...(senderHandle
+      ? {
+          senderHandle,
+          senderUsername: readHostedTelegramGroupSenderUsername(wake),
+        }
+      : {}),
   };
+}
+
+/**
+ * Display-only Telegram `@username`. Bound to the same route-authorized group
+ * gate as the sender handle so it can never appear without its authority, and
+ * never used for matching.
+ */
+function readHostedTelegramGroupSenderUsername(
+  wake: HostedExecutionConversationMessageWake,
+): string | null {
+  if (
+    !isHostedTelegramConversationMessageWake(wake)
+    || !readHostedTelegramGroupSenderHandle(wake)
+  ) {
+    return null;
+  }
+  return normalizeHostedAssistantInputTelegramUsername(
+    wake.message.telegramMessage.senderUsername ?? null,
+  );
+}
+
+/**
+ * Telegram usernames are restricted to letters, digits, and underscores, so a
+ * strict charset check keeps user-controlled text out of the prompt.
+ */
+const HOSTED_ASSISTANT_INPUT_TELEGRAM_USERNAME_PATTERN = /^[A-Za-z0-9_]{1,32}$/u;
+
+function normalizeHostedAssistantInputTelegramUsername(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeHostedAssistantInputSourceMetadataToken(value);
+  if (!normalized) {
+    return null;
+  }
+  const bare = normalized.startsWith("@") ? normalized.slice(1) : normalized;
+  return HOSTED_ASSISTANT_INPUT_TELEGRAM_USERNAME_PATTERN.test(bare)
+    ? bare
+    : null;
 }
 
 function hashHostedAssistantInputTelegramMediaGroupId(

@@ -102,18 +102,19 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
       joinCode: "JOIN123",
       permissions: [{
         description:
-          "Shares your health-source names, basic connection status (such as connected or needs attention), when Murph observed the status, and when Murph last completed a connection-wide sync job. A completed sync does not prove health data arrived. This permission does not share account details, device IDs, errors, or health values.",
+          "Shares which health sources are connected. No health values.",
         label: "Health source connection status",
         projectionScope: { projectionKind: "device-sync-status.v0" },
         projectionScopeKey: "device-sync-status.v0",
       }],
+      postJoinContactOption: null,
       postJoinDestination: "/home",
     }),
   );
 
   expect(markup).toContain("Health source connection status");
   expect(markup).toContain(
-    "Shares your health-source names, basic connection status (such as connected or needs attention), when Murph observed the status, and when Murph last completed a connection-wide sync job. A completed sync does not prove health data arrived. This permission does not share account details, device IDs, errors, or health values.",
+    "Shares which health sources are connected. No health values.",
   );
   expect(markup).toContain("has-[:focus-visible]:ring-2");
   expect(markup).toContain('type="checkbox"');
@@ -196,7 +197,7 @@ test("returns an authenticated new member to the same group intent", async () =>
   );
 });
 
-test("opens the post-auth destination only after membership succeeds", async () => {
+test("returns to the dashboard through a real link once membership succeeds", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
@@ -209,6 +210,7 @@ test("opens the post-auth destination only after membership succeeds", async () 
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
       permissions: [],
+      postJoinContactOption: null,
       postJoinDestination: "/home?initialVisit=true",
     }),
   );
@@ -227,19 +229,57 @@ test("opens the post-auth destination only after membership succeeds", async () 
     },
     url: "/api/groups/join/JOIN123/accept",
   });
-  expect(mocks.routerPush).not.toHaveBeenCalled();
   expect(container.textContent).toContain("You're in Sunday Sleep Crew.");
 
-  const openMurphButton = Array.from(container.querySelectorAll("button")).find(
-    (candidate) => candidate.textContent === "Open Murph",
+  // The hand-off must be a real anchor: an onClick-only button leaves the click
+  // unacknowledged for the whole transition, which reads as a dead control.
+  const returnLink = Array.from(container.querySelectorAll("a")).find(
+    (candidate) => candidate.textContent?.includes("Back to Murph"),
   );
-  expect(openMurphButton).toBeTruthy();
+  expect(returnLink).toBeTruthy();
+  expect(returnLink?.getAttribute("href")).toBe("/home?initialVisit=true");
+  expect(mocks.routerPush).not.toHaveBeenCalled();
+});
+
+test("hands a messaging member back to the channel Murph reaches them on", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [],
+      postJoinContactOption: {
+        href: "https://t.me/withmurph_bot",
+        kind: "telegram",
+        label: "Telegram",
+        rel: "noopener noreferrer",
+        target: "_blank",
+      },
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
 
   await act(async () => {
-    openMurphButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
   });
 
-  expect(mocks.routerPush).toHaveBeenCalledWith("/home?initialVisit=true");
+  const returnLink = Array.from(container.querySelectorAll("a")).find(
+    (candidate) => candidate.textContent?.includes("Back to Murph"),
+  );
+  expect(returnLink?.getAttribute("href")).toBe("https://t.me/withmurph_bot");
+  expect(returnLink?.getAttribute("target")).toBe("_blank");
+  expect(returnLink?.getAttribute("aria-label")).toBe(
+    "Back to Murph in Telegram (opens in a new tab)",
+  );
+  expect(container.querySelector('a[href="/home"]')).toBeNull();
 });
 
 test("binds an existing-member sharing update to the rendered membership id", async () => {
@@ -255,6 +295,7 @@ test("binds an existing-member sharing update to the rendered membership id", as
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
       permissions: [],
+      postJoinContactOption: null,
       postJoinDestination: "/home",
     }),
   );

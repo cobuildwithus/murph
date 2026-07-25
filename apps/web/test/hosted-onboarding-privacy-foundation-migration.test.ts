@@ -63,6 +63,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'assistantHumorCausalSeq BigInt? @map("assistant_humor_causal_seq")',
     'assistantPush Int? @map("assistant_push")',
     'assistantPushCausalSeq BigInt? @map("assistant_push_causal_seq")',
+    'assistantUnhinged Int? @map("assistant_unhinged")',
+    'assistantUnhingedCausalSeq BigInt? @map("assistant_unhinged_causal_seq")',
     'assistantTone String? @map("assistant_tone")',
     'assistantToneCausalSeq BigInt? @map("assistant_tone_causal_seq")',
     'assistantVoice String? @map("assistant_voice")',
@@ -883,6 +885,8 @@ describe("hosted Prisma baseline migration", () => {
       "20260720230000_hosted_group_usage_funding",
       "20260721160000_clinical_retrieval_wire_identity",
       "20260722190000_hosted_phone_call_origin_session",
+      "20260723230000_hosted_member_assistant_unhinged",
+      "20260724160000_hosted_account_exit_reason",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(

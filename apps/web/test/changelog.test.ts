@@ -22,51 +22,89 @@ describe("changelog registry", () => {
     expect(ids.length).toBeGreaterThan(0);
   });
 
-  it("publishes the complete July 17 through July 20 shipment set", () => {
+  it("publishes the complete July 20 through July 24 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 4).map((edition) => ({
+      listChangelogEditions().slice(0, 5).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-07-24",
+        itemIds: [
+          "group-replies-stay-short",
+          "group-usage-always-fundable",
+          "group-contact-card-reshare",
+          "group-work-requests-declined",
+          "group-join-permissions-preselected",
+          "usage-top-up-returns-to-chat",
+          "telegram-signup-completes-setup",
+        ],
+      },
+      {
+        id: "2026-07-23",
+        itemIds: [
+          "updated-legal-documents-keep-chat-working",
+          "reactions-read-in-context",
+          "group-usage-percent-visible",
+          "group-daily-text-cap-doubled",
+          "challenge-kickoff-asks-for-intros",
+          "generated-images-actually-arrive",
+          "daily-activity-totals-count-every-workout",
+          "signup-holds-under-a-rush",
+          "meal-capture-closes-the-day-itself",
+          "whoop-at-capacity-opens-full-sync-guide",
+          "home-survives-a-failed-panel",
+          "invites-explain-which-email-to-use",
+          "group-song-and-contact-card-together",
+        ],
+      },
+      {
+        id: "2026-07-22",
+        itemIds: [
+          "onboarding-sounds-like-a-conversation",
+          "biomarker-pages-explain-the-number",
+          "family-usage-top-ups",
+          "garmin-historical-permission-preflight",
+          "knowledge-page",
+          "two-week-experiment-baselines",
+          "progress-updates-before-slow-work",
+          "approved-files-send-themselves",
+          "group-ask-answers-come-back-promptly",
+          "hosted-work-runs-on-two-cores",
+          "text-murph-after-personalizing",
+          "mobile-settings-and-connect-polish",
+          "whoop-full-sync-dialog-actions",
+        ],
+      },
+      {
+        id: "2026-07-21",
+        itemIds: [
+          "murph-personas",
+          "consented-group-to-member-questions",
+          "group-usage-funding",
+          "biomarkers-index-rebuilt",
+          "low-usage-mentioned-in-conversation",
+          "group-newsletter-setup",
+          "completed-experiments-show-daily-points",
+          "experiment-results-match-the-dashboard",
+        ],
+      },
       {
         id: "2026-07-20",
         itemIds: [
           "challenge-standings-explain-missing-data",
           "phone-link-settings-recovery",
           "weekly-insights-skip-obvious-weekend",
-        ],
-      },
-      {
-        id: "2026-07-19",
-        itemIds: ["medical-records-plain-language"],
-      },
-      {
-        id: "2026-07-18",
-        itemIds: [
-          "native-replies-to-exact-message",
-          "automatic-meal-capture-guidance",
-          "medical-records-import-recovery",
-          "cold-replies-drop-finished-media",
-        ],
-      },
-      {
-        id: "2026-07-17",
-        itemIds: [
-          "medical-records-one-time-copy",
-          "measured-biomarker-history",
-          "device-metrics-on-biomarkers",
-          "completed-experiment-results-return",
-          "onboarding-one-health-story",
-          "first-plan-includes-support",
-          "background-imports-reply-first",
-          "computer-handoff-done-faster",
-          "scheduled-messages-name-the-subject",
-          "exercise-images-when-useful",
-          "appointment-calls-start-naturally",
-          "reactions-target-the-message",
-          "whoop-full-sync-guide",
-          "first-hello-available-imessage-number",
+          "scheduled-messages-get-the-full-murph",
+          "pulse-finishes-after-payment-setup",
+          "contaminant-tests-on-product-pages",
+          "private-experiments-open-from-home",
+          "named-lab-marker-answers-faster",
+          "dense-voice-memo-keeps-onboarding-moving",
+          "welcome-continues-your-conversation",
+          "approval-page-sign-in-recovery",
+          "strava-connections-paused",
         ],
       },
     ]);
@@ -165,8 +203,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-20");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-14");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-07-24");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-18");
   });
 
   it("resolves only known canonical edition cursors", () => {

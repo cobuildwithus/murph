@@ -10,7 +10,10 @@ import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { Separator } from "@/src/components/ui/separator";
+import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ConnectSourceCardStudy } from "./connect-source-card-study";
+import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { GroupJoinStudy } from "./group-join-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
 import {
@@ -68,14 +71,32 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Family plan invite acceptance">
+        <FamilyInviteJoinStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Connect source card actions">
         <ConnectSourceCardStudy />
       </StudySection>
 
       <Separator />
 
+      <StudySection title="Account deletion exit reason">
+        <AccountExitReasonStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Home partial-load recovery">
         <HomeLoadStateStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Group join actions">
+        <GroupJoinStudy />
       </StudySection>
 
       <Separator />

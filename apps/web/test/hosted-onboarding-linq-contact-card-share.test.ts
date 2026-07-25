@@ -52,7 +52,7 @@ describe("hosted Linq contact-card share reservations", () => {
     expect(prisma.rows[0]?.linqChatLookupKey).not.toContain("chat_123");
   });
 
-  it("throttles repeat vCard shares for 10 minutes, then allows a re-share", async () => {
+  it("throttles repeat vCard shares for 90 seconds, then allows a re-share", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-06-27T12:00:00.000Z");
 
@@ -66,14 +66,14 @@ describe("hosted Linq contact-card share reservations", () => {
     await expect(reserveHostedLinqContactCardShareAttempt({
       chatId: "chat_123",
       memberId: "member_123",
-      now: new Date("2026-06-27T12:09:59.000Z"),
+      now: new Date("2026-06-27T12:01:29.000Z"),
       prisma: prisma.client,
     })).resolves.toEqual({
       action: "skip",
       reason: "recent_attempt",
     });
 
-    const nextAttempt = new Date("2026-06-27T12:10:00.000Z");
+    const nextAttempt = new Date("2026-06-27T12:01:30.000Z");
     await expect(reserveHostedLinqContactCardShareAttempt({
       chatId: "chat_123",
       memberId: "member_123",
@@ -96,7 +96,7 @@ describe("hosted Linq contact-card share reservations", () => {
       entries: { ...TEST_KEYRING_ENTRIES },
     });
     prisma.rows.push(createContactCardShareRow({
-      lastContactCardShareAttemptedAt: new Date("2026-06-27T11:55:00.000Z"),
+      lastContactCardShareAttemptedAt: new Date("2026-06-27T11:59:30.000Z"),
       linqChatLookupKey: oldLookupKey,
     }));
 

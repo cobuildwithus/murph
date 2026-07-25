@@ -53,7 +53,10 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
-import { lockHostedMemberRow } from "./shared";
+import {
+  type HostedOnboardingReadClient,
+  lockHostedMemberRow,
+} from "./shared";
 
 export type HostedMemberActivationResult = {
   activated: boolean;
@@ -65,6 +68,20 @@ export type HostedMemberActivationResult = {
 type HostedMemberActivationSnapshot = HostedMemberSnapshot & {
   core: HostedMemberActivationCoreState;
 };
+
+export async function hasHostedMemberActivationProof(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  return await hasHostedMailboxItemByKind({
+    kind: "member.activated",
+    prisma: input.prisma,
+    userId: input.memberId,
+  }) || await hasActiveHostedCryptoDomainRootsForUserTx({
+    tx: input.prisma,
+    userId: input.memberId,
+  });
+}
 
 export async function activateHostedMemberForPositiveSourceTx(input: {
   dispatchContext: HostedStripeDispatchContext;
@@ -183,14 +200,9 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
 
   if (input.skipIfPreviouslyActivated) {
     const previouslyActivated = Boolean(existingWake)
-      || await hasHostedMailboxItemByKind({
-        kind: "member.activated",
+      || await hasHostedMemberActivationProof({
+        memberId: currentMember.core.id,
         prisma: input.prisma,
-        userId: currentMember.core.id,
-      })
-      || await hasActiveHostedCryptoDomainRootsForUserTx({
-        tx: input.prisma,
-        userId: currentMember.core.id,
       });
 
     if (previouslyActivated) {

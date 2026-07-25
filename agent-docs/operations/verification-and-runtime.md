@@ -165,7 +165,7 @@ assistant-runtime bridge, and assistant-engine tool/prompt tests; then run
 Capture authenticated, fixture-safe desktop and mobile `/labs` proof without
 putting a real query or ZIP in a durable artifact. Complete the local
 `product-experience-review`, the preliminary ReviewGPT prompt/frontend/coverage
-pass, the review-only Fable UI pass, and the separate final ReviewGPT gate
+pass, the review-only Fable or Opus UI pass, and the separate final ReviewGPT gate
 before handoff.
 Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.

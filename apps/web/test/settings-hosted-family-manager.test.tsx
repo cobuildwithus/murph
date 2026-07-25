@@ -946,7 +946,7 @@ test("HostedFamilyManager hides the no-contact hint when the active contact has 
   }
 });
 
-test("HostedFamilyManager leaves payment actions only on the frozen Family member", async () => {
+test("HostedFamilyManager surfaces the top-up dialog inside each member's manage modal", async () => {
   const { HostedFamilyManager } = await import(
     "@/src/components/settings/hosted-family-settings-actions"
   );
@@ -958,7 +958,7 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
     status: "checkout_open" as const,
     url: "https://checkout.stripe.test/session",
   };
-  const { cleanup, container } = await renderClientComponent(
+  const { cleanup, container, window } = await renderClientComponent(
     createElement(HostedFamilyManager, {
       ...props,
       members: [
@@ -985,20 +985,15 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
   );
 
   try {
+    // The top-up entry only lives inside a member's manage modal now, so
+    // nothing renders it inline in the roster.
+    assert.equal(buttonByTextOrNull(container, "Add usage"), null);
+
+    // The frozen member's manage modal surfaces the payment-recovery action.
+    await clickLastButton(container, window, "Manage");
     expect([...container.querySelectorAll("button")].filter(
       (button) => button.textContent === "Add usage",
     )).toHaveLength(1);
-    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activePurchase: null,
-        checkoutUrl:
-          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
-        contactOptions: [payerTopUpContactOption()],
-        offers: [],
-        scope: "family",
-        targetLabel: "you",
-      }),
-    );
     expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
       expect.objectContaining({
         activePurchase,
@@ -1008,6 +1003,28 @@ test("HostedFamilyManager leaves payment actions only on the frozen Family membe
         offers: [],
         scope: "family",
         targetLabel: "Family member",
+      }),
+    );
+
+    // The owner's manage modal gates offers away and shows no payment action.
+    const dismiss = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Dismiss dialog"]',
+    );
+    assert.ok(dismiss);
+    await act(async () => {
+      dismiss.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+    await clickButton(container, window, "Manage");
+    assert.equal(buttonByTextOrNull(container, "Add usage"), null);
+    expect(mocks.usageTopUpDialogProps).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activePurchase: null,
+        checkoutUrl:
+          "/api/settings/billing/family/members/member_owner/usage-credit/checkout",
+        contactOptions: [payerTopUpContactOption()],
+        offers: [],
+        scope: "family",
+        targetLabel: "you",
       }),
     );
   } finally {

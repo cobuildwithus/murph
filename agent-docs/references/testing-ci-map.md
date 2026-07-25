@@ -57,8 +57,8 @@ port propagation, dynamic-tool registration, private-direct audience policy,
 action parsing/execution, and stable prompt guidance. Final change proof uses
 `pnpm test:diff` across every touched owner plus
 `pnpm test:scenario-integrity`, authenticated desktop/mobile browser proof,
-the required frontend and coverage specialist audits, the review-only Fable UI
-pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
+the required frontend and coverage specialist audits, the review-only Fable or
+Opus UI pass, and ReviewGPT. Routine tests stub Junction; they do not call the live
 catalog or expose a production credential.
 
 Hosted usage-credit coverage is split across focused hosted-web unit

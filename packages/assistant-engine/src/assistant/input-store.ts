@@ -362,6 +362,15 @@ const assistantInputTelegramSourceMetadataSchema = z
     replyContext: safeNullableAssistantInputMetadataTextSchema(
       'sourceMetadata.replyContext',
     ),
+    // Group (thread-container) inbound only: the sending participant's handle,
+    // so the assistant can attribute messages and detect being addressed.
+    senderHandle: privateAssistantInputRouteScalarSchema(
+      'sourceMetadata.senderHandle',
+    ).nullish(),
+    // Display-only Telegram @username. Never attribution authority.
+    senderUsername: safeAssistantInputTokenSchema(
+      'sourceMetadata.senderUsername',
+    ).nullish(),
   })
   .strict()
 

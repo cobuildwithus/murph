@@ -75,6 +75,7 @@ import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
 } from "@/src/lib/hosted-privacy/account-data-shared";
 import {
   buildHostedMemberBillingPrivateColumns,
@@ -213,6 +214,21 @@ describe("parseHostedAccountDeletionRequest", () => {
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
     })).toEqual({
       confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitFeedback: null,
+    });
+  });
+
+  it("carries an answered exit reason and note", () => {
+    expect(parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitNote: "  Too many texts on weekends.  ",
+      exitReason: "too_many_texts",
+    })).toEqual({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitFeedback: {
+        note: "Too many texts on weekends.",
+        reason: "too_many_texts",
+      },
     });
   });
 
@@ -235,6 +251,39 @@ describe("parseHostedAccountDeletionRequest", () => {
     expect(error).toBeInstanceOf(HostedOnboardingError);
     expect((error as HostedOnboardingError).code).toBe(expectedCode);
     expect((error as HostedOnboardingError).httpStatus).toBe(400);
+  });
+
+  // The exit survey is optional telemetry attached to an irreversible privacy
+  // action, so a malformed answer must degrade to "skipped" rather than block
+  // someone from deleting their own account.
+  it.each([
+    ["an unknown reason code", { exitReason: "because_i_said_so" }],
+    ["a non-string reason", { exitReason: 12 }],
+    ["a note with no reason", { exitNote: "orphaned note" }],
+    ["an empty reason", { exitReason: "" }],
+  ])("still deletes, recording no reason, given %s", (_label, extra) => {
+    expect(parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      ...extra,
+    })).toEqual({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitFeedback: null,
+    });
+  });
+
+  it("drops a whitespace-only note and truncates an oversized one", () => {
+    expect(parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitNote: "   ",
+      exitReason: "privacy_concerns",
+    }).exitFeedback).toEqual({ note: null, reason: "privacy_concerns" });
+
+    const oversized = parseHostedAccountDeletionRequest({
+      confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+      exitNote: "n".repeat(HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH + 50),
+      exitReason: "not_useful_enough",
+    }).exitFeedback;
+    expect(oversized?.note).toHaveLength(HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH);
   });
 });
 

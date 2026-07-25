@@ -4126,6 +4126,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
                 detail: { source: "default", value: 5 },
                 humor: { source: "custom", value: 8 },
                 push: { source: "default", value: 3 },
+                unhinged: { source: "default", value: 0 },
               },
             },
           }), {
@@ -4282,6 +4283,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           detail: { source: "default", value: 5 },
           humor: { source: "custom", value: 8 },
           push: { source: "default", value: 3 },
+          unhinged: { source: "default", value: 0 },
         },
       },
     });

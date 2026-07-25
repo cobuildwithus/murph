@@ -111,7 +111,7 @@ test("supported persona defaults resolve from the main personality", () => {
     resolveAssistantEffectiveStyle({ persona: "navy-seal-with-classic" }),
     {
       persona: "navy-seal-with-classic",
-      personality: { humor: 1, push: 10, detail: 2 },
+      personality: { humor: 1, push: 10, detail: 2, unhinged: 0 },
       tone: "formal",
       voice: "drill-sergeant",
     },
@@ -126,7 +126,7 @@ test("explicit tone, voice, and dial preferences override combination defaults",
     voice: "warm",
   }), {
     persona: "navy-seal-with-scientist",
-    personality: { humor: 1, push: 6, detail: 2 },
+    personality: { humor: 1, push: 6, detail: 2, unhinged: 0 },
     tone: "casual",
     voice: "warm",
   });
@@ -164,7 +164,7 @@ test("missing persona preserves Classic Murph with existing overrides", () => {
     voice: "classic",
   }), {
     persona: "classic",
-    personality: { humor: 9, push: 3, detail: 5 },
+    personality: { humor: 9, push: 3, detail: 5, unhinged: 0 },
     tone: "formal",
     voice: "classic",
   });
