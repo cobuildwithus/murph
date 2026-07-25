@@ -409,6 +409,7 @@ describe('assistant store persistence seams', () => {
     })).resolves.toEqual({
       entriesRedacted: 0,
       entriesTrimmed: 6,
+      nextEligibleAt: '2026-04-22T00:07:00.000Z',
       transcriptsTrimmed: 1,
     })
 
@@ -423,6 +424,19 @@ describe('assistant store persistence seams', () => {
       kind: 'error',
       text: 'recent error',
     })
+  })
+
+  it('preserves an abort reason before transcript retention scans files', async () => {
+    const paths = await createAssistantPaths(
+      'assistant-store-persistence-transcript-retention-abort-',
+    )
+    const controller = new AbortController()
+    const reason = new Error('foreground work interrupted transcript retention')
+    controller.abort(reason)
+
+    await expect(pruneAssistantTranscriptRetention(paths, {
+      signal: controller.signal,
+    })).rejects.toBe(reason)
   })
 
   it('initializes and synchronizes the session index store across alias and conversation-key changes', async () => {

@@ -4,6 +4,7 @@ import {
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
   HOSTED_MAILBOX_RETENTION_MS,
+  HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
   HOSTED_RUN_LOG_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
@@ -17,13 +18,14 @@ describe("hosted retention cleanup", () => {
     const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
     const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
     const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
-    // The mailbox delete runs first and now returns the rows it removed; the
+    // The mailbox retirement runs first; the
     // due-workspace claim is the second raw query.
     const queryRaw = vi.fn()
-      .mockResolvedValueOnce(Array.from({ length: 7 }, () => ({
-        consumedAt: new Date("2026-04-20T00:00:00.000Z"),
-        kind: "conversation.message",
-      })))
+      .mockResolvedValueOnce([{
+        policyNonReplies: 0n,
+        retired: 7n,
+        tombstonesDeleted: 3n,
+      }])
       .mockResolvedValueOnce([
         { userId: "member_due_1" },
         { userId: "member_due_2" },
@@ -51,8 +53,9 @@ describe("hosted retention cleanup", () => {
       signalRuntimeRecheck,
     })).resolves.toEqual({
       expiredComputerRunsCleanedUp: 0,
-      expiredMailboxItemsDeleted: 7,
-      expiredUnconsumedConversationItemsDeleted: 0,
+      expiredConversationPolicyNonRepliesRecorded: 0,
+      expiredMailboxContentRetired: 7,
+      expiredMailboxTombstonesDeleted: 3,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 8,
@@ -60,14 +63,21 @@ describe("hosted retention cleanup", () => {
     });
 
     const mailboxDeleteSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
-    expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_item"');
-    expect(mailboxDeleteSql).toContain('"expires_at" <=');
-    expect(mailboxDeleteSql).toContain('"created_at" <');
-    expect(mailboxDeleteSql).not.toContain("consumed_seq");
-    expect(mailboxDeleteSql).not.toContain("tombstoned");
+    expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_item"');
+    expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_payload"');
+    expect(mailboxDeleteSql).toContain('"content_retired_at"');
+    expect(mailboxDeleteSql).toContain("'policy_non_reply.content_expired'");
+    expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_lane_counter"');
+    expect(mailboxDeleteSql).toContain('"consumed_seq" = GREATEST');
+    expect(mailboxDeleteSql).toContain('MIN(blocker."lane_seq") - 1');
     expect(queryRaw.mock.calls[0]?.slice(1)).toEqual([
       now,
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+      now,
+      now,
+      now,
+      now,
+      new Date(now.getTime() - HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS),
     ]);
     expect(hostedRuntimeLogDeleteMany).toHaveBeenCalledWith({
       where: {
@@ -162,14 +172,14 @@ describe("hosted retention cleanup", () => {
     });
   });
 
-  it("reports expired conversation rows the runtime never consumed", async () => {
+  it("records an explicit policy non-reply instead of silently dropping accepted work", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const queryRaw = vi.fn()
-      .mockResolvedValueOnce([
-        { consumedAt: null, kind: "conversation.message" },
-        { consumedAt: new Date("2026-04-20T00:00:00.000Z"), kind: "conversation.message" },
-        { consumedAt: null, kind: "assistant.ask" },
-      ])
+      .mockResolvedValueOnce([{
+        policyNonReplies: 1n,
+        retired: 3n,
+        tombstonesDeleted: 0n,
+      }])
       .mockResolvedValueOnce([]);
     const prisma = {
       $executeRaw: vi.fn().mockResolvedValue(0),
@@ -178,30 +188,18 @@ describe("hosted retention cleanup", () => {
       hostedRuntimeLog: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
       hostedWebSession: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     };
-    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    try {
-      // Only the unconsumed conversation row counts: a consumed row was
-      // processed normally, and a non-conversation lane is not member content.
-      await expect(runHostedRetentionCleanup({
-        now,
-        prisma: prisma as never,
-        signalRuntimeRecheck: vi.fn(),
-      })).resolves.toMatchObject({
-        expiredMailboxItemsDeleted: 3,
-        expiredUnconsumedConversationItemsDeleted: 1,
-      });
-
-      expect(errorLog).toHaveBeenCalledWith(
-        expect.stringContaining("unconsumed conversation messages"),
-        expect.objectContaining({
-          code: "hosted_mailbox_retention_unconsumed_conversation_items",
-          unconsumedConversationItems: 1,
-        }),
-      );
-    } finally {
-      errorLog.mockRestore();
-    }
+    await expect(runHostedRetentionCleanup({
+      now,
+      prisma: prisma as never,
+      signalRuntimeRecheck: vi.fn(),
+    })).resolves.toMatchObject({
+      expiredConversationPolicyNonRepliesRecorded: 1,
+      expiredMailboxContentRetired: 3,
+    });
+    const sql = String(queryRaw.mock.calls[0]?.[0].join("?"));
+    expect(sql).toContain('"payload_inline_ciphertext" = NULL');
+    expect(sql).toContain('"payload_ref" = NULL');
+    expect(sql).toContain('"consumed_at" = CASE');
   });
 
   it("finishes database cleanup before timing out stuck media-retention signals", async () => {
@@ -213,9 +211,11 @@ describe("hosted retention cleanup", () => {
       const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 3 });
       const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
       const queryRaw = vi.fn()
-        .mockResolvedValueOnce([
-          { consumedAt: new Date("2026-04-20T00:00:00.000Z"), kind: "conversation.message" },
-        ])
+        .mockResolvedValueOnce([{
+          policyNonReplies: 0n,
+          retired: 1n,
+          tombstonesDeleted: 0n,
+        }])
         .mockResolvedValueOnce([{ userId: "member_due_stuck" }]);
       const signalRuntimeRecheck = vi.fn(() => new Promise(() => undefined));
       const prisma = {
@@ -245,8 +245,9 @@ describe("hosted retention cleanup", () => {
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
         expiredComputerRunsCleanedUp: 0,
-        expiredMailboxItemsDeleted: 1,
-        expiredUnconsumedConversationItemsDeleted: 0,
+        expiredConversationPolicyNonRepliesRecorded: 0,
+        expiredMailboxContentRetired: 1,
+        expiredMailboxTombstonesDeleted: 0,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 2,
@@ -295,8 +296,12 @@ describe("hosted retention cleanup", () => {
     ) => {
       // The mailbox delete shares $queryRaw with the due-workspace claim, so
       // branch on the statement rather than on call order.
-      if (sql.join("?").includes('DELETE FROM "hosted_mailbox_item"')) {
-        return [];
+      if (sql.join("?").includes('UPDATE "hosted_mailbox_item"')) {
+        return [{
+          policyNonReplies: 0n,
+          retired: 0n,
+          tombstonesDeleted: 0n,
+        }];
       }
       const selected = workspaces
         .filter((workspace) => workspace.wakeAt <= dueAt)

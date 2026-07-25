@@ -691,6 +691,10 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // The message receipt that owns the content-retention deadline. This may
+  // precede createdAt when accepted work waits before entering a transcript.
+  // Legacy and non-message entries omit it and fall back to createdAt.
+  contentReceivedAt: isoTimestampSchema.optional(),
   // Stamped when message-content retention has cleared this entry's text. The
   // transcript is the only durable copy of an inbound message that never
   // produced an inbox capture, so it carries the same 14-day deadline as the

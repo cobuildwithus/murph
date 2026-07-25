@@ -19,7 +19,9 @@ import {
   showAutomation,
 } from "@murphai/core";
 import {
+  openInboxRuntime,
   persistCanonicalInboxCapture,
+  rebuildRuntimeFromVault,
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionRuntimeControlWake,
@@ -28,6 +30,7 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
+  appendAssistantTranscriptEntries,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
   listAssistantTranscriptEntries,
@@ -256,6 +259,7 @@ import {
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
+  restoreHostedWorkspaceRuntimeJobWorkspace,
 } from "../src/hosted-runtime/workspace-restore.ts";
 import {
   normalizeHostedAssistantRuntimeConfig,
@@ -275,6 +279,7 @@ import {
   resolveHostedPendingAssistantInputWakeAt,
 } from "../src/hosted-runtime/pending-assistant-input.ts";
 import {
+  createHostedAssistantInputSource,
   selectHostedAssistantInputIds,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
@@ -4409,6 +4414,279 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, null);
     } finally {
       await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("retains no inbound phrase after a scheduled snapshot restore and later-turn read", async () => {
+    const workspaceRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-retention-proof-"),
+    );
+    const sourceVaultRoot = path.join(workspaceRoot, "source-vault");
+    const liveVaultRoot = path.join(workspaceRoot, "live-vault");
+    const restoredVaultRoot = path.join(workspaceRoot, "restored-vault");
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const artifactBytesByHash = new Map<string, Uint8Array>();
+    const contentPhrase = "private apricot retention proof phrase";
+    const captureId = "cap_workspace_message_retention_proof";
+    const inputRecordedAt = "2026-04-01T00:00:00.000Z";
+    const dueWakeAt = "2026-04-15T00:00:00.000Z";
+    const sessionId = "session_workspace_message_retention_proof";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot: sourceVaultRoot });
+      await persistCanonicalInboxCapture({
+        vaultRoot: sourceVaultRoot,
+        captureId,
+        eventId: "evt_01JQ8PWXP5A68SQM1W0GYM41R7",
+        storedAt: inputRecordedAt,
+        input: {
+          source: "telegram",
+          externalId: "msg-workspace-message-retention-proof",
+          accountId: "self",
+          thread: {
+            id: "thread-workspace-message-retention-proof",
+            isDirect: true,
+          },
+          actor: {
+            isSelf: false,
+          },
+          occurredAt: inputRecordedAt,
+          receivedAt: inputRecordedAt,
+          text: contentPhrase,
+          attachments: [],
+          raw: {
+            body: contentPhrase,
+          },
+        },
+      });
+      const sourceRuntime = await openInboxRuntime({
+        vaultRoot: sourceVaultRoot,
+      });
+      try {
+        await rebuildRuntimeFromVault({
+          enqueueParserJobs: false,
+          runtime: sourceRuntime,
+          vaultRoot: sourceVaultRoot,
+        });
+        assert.equal(
+          sourceRuntime.searchCaptures({ text: "apricot" }).length,
+          1,
+        );
+      } finally {
+        sourceRuntime.close();
+      }
+      const parserDirectory = path.join(
+        sourceVaultRoot,
+        "derived",
+        "inbox",
+        captureId,
+      );
+      await mkdir(parserDirectory, { recursive: true });
+      await writeFile(
+        path.join(parserDirectory, "attachment-text.json"),
+        `${JSON.stringify({ text: contentPhrase })}\n`,
+        "utf8",
+      );
+      await saveAssistantAutomationState(sourceVaultRoot, {
+        autoReply: [{
+          channel: "telegram",
+          eligibleAfter: null,
+          enabledAt: inputRecordedAt,
+        }],
+        updatedAt: inputRecordedAt,
+        version: 1,
+      });
+      const pendingInput = await upsertAssistantInputEvent({
+        event: {
+          content: {
+            text: contentPhrase,
+            transcriptText: contentPhrase,
+            userMessageContent: [{
+              text: contentPhrase,
+              type: "text" as const,
+            }],
+          },
+          conversation: {
+            accountId: "acct_1",
+            actorId: "actor_1",
+            actorIsSelf: false,
+            source: "telegram",
+            threadId: "thread-workspace-message-retention-proof",
+            threadIsDirect: true,
+          },
+          occurredAt: inputRecordedAt,
+          receivedAt: inputRecordedAt,
+          replyTarget: {
+            channel: "telegram",
+            messageId: "msg-workspace-message-retention-proof",
+            threadId: "thread-workspace-message-retention-proof",
+          },
+          sourceRef: {
+            dedupeKey: "dedupe_workspace_message_retention_proof",
+            eventId: "evt_workspace_message_retention_proof",
+            itemId: "item_workspace_message_retention_proof",
+            kind: "hosted-mailbox" as const,
+            lane: "conversation" as const,
+            laneSeq: "10",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            payloadSource: "inline" as const,
+            source: "hosted-mailbox" as const,
+            wakeSchema: "murph.hosted-execution-wake.v1",
+          },
+        },
+        vault: sourceVaultRoot,
+      });
+      await enqueueHostedPendingAssistantInputId({
+        inputId: pendingInput.inputId,
+        vaultRoot: sourceVaultRoot,
+      });
+      await appendAssistantTranscriptEntries(sourceVaultRoot, sessionId, [{
+        contentReceivedAt: inputRecordedAt,
+        createdAt: inputRecordedAt,
+        kind: "user",
+        text: contentPhrase,
+      }]);
+
+      const baseBundle = await snapshotHostedBundleRoots({
+        kind: "vault",
+        roots: [{ root: sourceVaultRoot, rootKey: "vault" }],
+      });
+      assert.ok(baseBundle);
+      const baseHash = sha256HostedBundleHex(baseBundle);
+      artifactBytesByHash.set(baseHash, baseBundle);
+      const baseSnapshotRef = createBundleRef({
+        hash: baseHash,
+        key: `synthetic/message-retention/${baseHash}.bundle`,
+        size: baseBundle.byteLength,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_message_retention_proof",
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            processingMode: "inbox_media_retention",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const bundle = await snapshotHostedBundleRoots({
+              kind: "vault",
+              roots: [{ root: liveVaultRoot, rootKey: "vault" }],
+            });
+            assert.ok(bundle);
+            const hash = sha256HostedBundleHex(bundle);
+            artifactBytesByHash.set(hash, bundle);
+            return {
+              snapshotRef: createBundleRef({
+                hash,
+                key: `synthetic/message-retention/${hash}.bundle`,
+                size: bundle.byteLength,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error(
+              "Retention-only processing must not import mailbox items.",
+            );
+          },
+          platform: createPlatform({
+            artifactBytesByHash,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events: [],
+              workspace: createWorkspaceState({
+                inboxMediaRetentionWakeAt: dueWakeAt,
+                snapshotRef: baseSnapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error(
+              "Retention-only processing must not enter the assistant phase.",
+            );
+          },
+          vaultRoot: liveVaultRoot,
+        },
+      );
+
+      assert.equal(result.status, "idle");
+      const retainedSnapshotRef = checkpointRequests.at(-1)?.snapshotRef ?? null;
+      assert.ok(retainedSnapshotRef);
+      await restoreHostedWorkspaceRuntimeJobWorkspace({
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests: [],
+            events: [],
+            workspace: createWorkspaceState({
+              snapshotRef: retainedSnapshotRef,
+              version: "1",
+            }),
+          }),
+        }),
+        vaultRoot: restoredVaultRoot,
+        workspace: createWorkspaceState({
+          snapshotRef: retainedSnapshotRef,
+          version: "1",
+        }),
+      });
+
+      const restoredRuntime = await openInboxRuntime({
+        vaultRoot: restoredVaultRoot,
+      });
+      try {
+        assert.equal(
+          restoredRuntime.searchCaptures({ text: "apricot" }).length,
+          0,
+        );
+        const capture = restoredRuntime.getCapture(captureId);
+        assert.ok(capture);
+        assert.equal(capture.text, null);
+        assert.deepEqual(capture.raw, {});
+      } finally {
+        restoredRuntime.close();
+      }
+      await assert.rejects(
+        access(path.join(
+          restoredVaultRoot,
+          "derived",
+          "inbox",
+          captureId,
+          "attachment-text.json",
+        )),
+        { code: "ENOENT" },
+      );
+      const retiredInput = await readAssistantInputEvent({
+        inputId: pendingInput.inputId,
+        vault: restoredVaultRoot,
+      });
+      assert.ok(retiredInput?.contentRetiredAt);
+      assert.equal(JSON.stringify(retiredInput).includes(contentPhrase), false);
+      const transcript = await listAssistantTranscriptEntries(
+        restoredVaultRoot,
+        sessionId,
+      );
+      assert.equal(transcript[0]?.text, "");
+      assert.ok(transcript[0]?.textRetiredAt);
+      const laterTurnSource = createHostedAssistantInputSource({
+        initialPendingInputIds: [],
+        pendingInputRefreshMode: "none",
+        selectedInputIds: [pendingInput.inputId],
+        vaultRoot: restoredVaultRoot,
+      });
+      const laterTurn = await laterTurnSource.listInputCandidates({
+        sourceId: "telegram",
+      });
+      assert.equal(JSON.stringify(laterTurn).includes(contentPhrase), false);
+    } finally {
+      await removeTempRoot(workspaceRoot);
     }
   });
 

@@ -3,6 +3,9 @@ import {
   type CodexWarmThreadCompactionOutcome,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
+  runAssistantTranscriptContentRetention,
+} from "@murphai/assistant-engine/assistant-store";
+import {
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_SOURCE_PATH,
   ASSISTANT_IDLE_COMPACTION_USAGE_ESTIMATE_VERSION,
   buildAssistantMaintenanceUsageRecord,
@@ -24,6 +27,7 @@ import {
 } from "@murphai/core";
 import {
   runInboxMediaRetention,
+  runInboxEnvelopeMigration,
   runInboxTextRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
@@ -31,6 +35,9 @@ import {
 } from "@murphai/inboxd/retention";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
+import {
+  runHostedPendingAssistantInputContentRetention,
+} from "./pending-input-index.ts";
 
 // Compact only when the saving clears the measured post-compaction floor
 // (~40k tokens); below this the compact call costs more than it recovers. Keep
@@ -114,6 +121,25 @@ export async function runHostedIdleCheckpointMaintenance(input: {
     let retentionWake: HostedIdleMaintenanceWake = {};
     if (input.vaultRoot) {
       try {
+        const pendingInputRetention =
+          await runHostedPendingAssistantInputContentRetention({
+            signal: abortController.signal,
+            vaultRoot: input.vaultRoot,
+          });
+        retentionWake = resolveAssistantTranscriptRetentionWake(
+          pendingInputRetention.nextEligibleAt,
+        );
+        const transcriptRetention =
+          await runAssistantTranscriptContentRetention({
+            signal: abortController.signal,
+            vault: input.vaultRoot,
+          });
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveAssistantTranscriptRetentionWake(
+            transcriptRetention.nextEligibleAt,
+          ),
+        );
         const retentionResult = await runInboxMediaRetention({
           materializeCandidatePaths: input.materializeRetentionCandidatePaths ?? undefined,
           ...(input.pendingWork ? { maxAttachments: 1 } : {}),
@@ -123,13 +149,27 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
-        retentionWake = resolveInboxMediaRetentionWake(retentionResult);
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxMediaRetentionWake(retentionResult),
+        );
+        const envelopeMigration = await runInboxEnvelopeMigration({
+          apply: true,
+          ...(input.pendingWork ? { maxFiles: 1 } : {}),
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        if (envelopeMigration.hasMore) {
+          retentionWake = mergeInboxRetentionWakes(
+            retentionWake,
+            resolveInboxMediaRetentionImmediateWake(),
+          );
+        }
         // Text retention runs after the media pass and shares its wake pointer:
         // both expire inbound content on the same 14-day clock, so a second
         // pointer would only create two schedules to keep in agreement.
         const textRetentionResult = await runInboxTextRetention({
           ...(input.pendingWork ? { maxCaptures: 1 } : {}),
-          protectedCaptureIds: input.protectedCaptureIds,
           signal: abortController.signal,
           vaultRoot: input.vaultRoot,
         });
@@ -412,7 +452,22 @@ function resolveInboxTextRetentionWake(
     };
   }
 
+  if (result.legacyCapturesSkipped > 0) {
+    return resolveInboxMediaRetentionFailureWake();
+  }
+
   return {};
+}
+
+function resolveAssistantTranscriptRetentionWake(
+  nextEligibleAt: string | null,
+): HostedIdleMaintenanceWake {
+  return nextEligibleAt
+    ? {
+        nextWakeAt: nextEligibleAt,
+        nextWakeReason: "inbox_media_retention",
+      }
+    : {};
 }
 
 /** Keep the earlier of two retention wakes so neither pass is scheduled late. */

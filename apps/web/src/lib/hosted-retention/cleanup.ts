@@ -15,6 +15,7 @@ export const HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS = 7 * DAY_MS;
 // Re-exported for existing importers; the window itself is owned by the mailbox
 // store so the retention DELETE and the live-item read filter cannot drift.
 export { HOSTED_MAILBOX_RETENTION_MS };
+export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
@@ -26,12 +27,9 @@ type HostedRuntimeRecheckSignal = (input: {
 
 export interface HostedRetentionCleanupResult {
   expiredComputerRunsCleanedUp: number;
-  expiredMailboxItemsDeleted: number;
-  /**
-   * Expired rows that the runtime never consumed. Non-zero means a member's
-   * inbound message was dropped without ever being processed.
-   */
-  expiredUnconsumedConversationItemsDeleted: number;
+  expiredConversationPolicyNonRepliesRecorded: number;
+  expiredMailboxContentRetired: number;
+  expiredMailboxTombstonesDeleted: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -45,7 +43,7 @@ export async function runHostedRetentionCleanup(input: {
 } = {}): Promise<HostedRetentionCleanupResult> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeRetentionDate(input.now ?? new Date());
-  const expiredMailboxItems = await deleteExpiredMailboxItems({
+  const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
   });
@@ -69,9 +67,10 @@ export async function runHostedRetentionCleanup(input: {
 
   return {
     expiredComputerRunsCleanedUp,
-    expiredMailboxItemsDeleted: expiredMailboxItems.deleted,
-    expiredUnconsumedConversationItemsDeleted:
-      expiredMailboxItems.unconsumedConversationItems,
+    expiredConversationPolicyNonRepliesRecorded:
+      expiredMailboxItems.policyNonReplies,
+    expiredMailboxContentRetired: expiredMailboxItems.retired,
+    expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted,
@@ -195,38 +194,149 @@ async function readDefaultHostedRuntimeRecheckSignal(): Promise<HostedRuntimeRec
   return runtimeSignalModule.signalHostedRuntimeRecheckRuntime;
 }
 
-async function deleteExpiredMailboxItems(input: {
+async function retireExpiredMailboxContent(input: {
   now: Date;
   prisma: PrismaClient;
-}): Promise<{ deleted: number; unconsumedConversationItems: number }> {
+}): Promise<{
+  policyNonReplies: number;
+  retired: number;
+  tombstonesDeleted: number;
+}> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  // The content deadline is absolute, so an expired row is deleted whether or
-  // not the runtime ever consumed it. An unconsumed conversation row reaching
-  // this point means a member's message went unprocessed for the whole
-  // retention window — a real delivery failure — and deleting it silently
-  // would erase the only evidence that it happened. Report those separately so
-  // the loss is visible rather than inferred from a gap in the sequence.
-  const deletedRows = await input.prisma.$queryRaw<
-    Array<{ consumedAt: Date | null; kind: string }>
+  const structuralCutoff = new Date(
+    input.now.getTime() - HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
+  );
+  // Retire content in place before pruning ordinary structural tombstones.
+  // An unhandled conversation row becomes an explicit policy non-reply in the
+  // same owner row, and its lane watermark advances in the same transaction.
+  // That keeps accepted-work terminality durable while both inline and sidecar
+  // ciphertext disappear at the privacy deadline.
+  const rows = await input.prisma.$queryRaw<
+    Array<{
+      policyNonReplies: bigint;
+      retired: bigint;
+      tombstonesDeleted: bigint;
+    }>
   >`
-    DELETE FROM "hosted_mailbox_item"
-    WHERE "expires_at" <= ${input.now}
-       OR "created_at" < ${cutoff}
-    RETURNING "consumed_at" AS "consumedAt", "kind"
+    WITH eligible AS MATERIALIZED (
+      SELECT
+        "id",
+        "user_id",
+        "lane",
+        "lane_seq",
+        "kind",
+        "consumed_at"
+      FROM "hosted_mailbox_item"
+      WHERE "content_retired_at" IS NULL
+        AND (
+          "expires_at" <= ${input.now}
+          OR "created_at" <= ${cutoff}
+        )
+      FOR UPDATE
+    ),
+    removed_sidecars AS (
+      DELETE FROM "hosted_mailbox_payload" AS payload
+      USING eligible
+      WHERE payload."mailbox_item_id" = eligible."id"
+      RETURNING payload."mailbox_item_id"
+    ),
+    retired AS (
+      UPDATE "hosted_mailbox_item" AS item
+      SET
+        "payload_inline_ciphertext" = NULL,
+        "payload_ref" = NULL,
+        "payload_bytes" = NULL,
+        "payload_hash" = NULL,
+        "content_retired_at" = ${input.now},
+        "retention_disposition" = CASE
+          WHEN eligible."kind" = 'conversation.message'
+            AND eligible."consumed_at" IS NULL
+            THEN 'policy_non_reply.content_expired'
+          ELSE NULL
+        END,
+        "consumed_at" = CASE
+          WHEN eligible."kind" = 'conversation.message'
+            AND eligible."consumed_at" IS NULL
+            THEN ${input.now}
+          ELSE eligible."consumed_at"
+        END,
+        "updated_at" = ${input.now}
+      FROM eligible
+      WHERE item."id" = eligible."id"
+      RETURNING
+        item."id",
+        item."user_id",
+        item."lane",
+        item."lane_seq",
+        item."retention_disposition"
+    ),
+    conversation_users AS (
+      SELECT DISTINCT "user_id"
+      FROM retired
+      WHERE "lane" = 'conversation'
+        AND "retention_disposition" = 'policy_non_reply.content_expired'
+    ),
+    conversation_floor AS (
+      SELECT
+        conversation_users."user_id",
+        COALESCE(
+          MIN(blocker."lane_seq") - 1,
+          counter."next_seq" - 1
+        ) AS "lane_seq"
+      FROM conversation_users
+      JOIN "hosted_mailbox_lane_counter" AS counter
+        ON counter."user_id" = conversation_users."user_id"
+        AND counter."lane" = 'conversation'
+      LEFT JOIN "hosted_mailbox_item" AS blocker
+        ON blocker."user_id" = conversation_users."user_id"
+        AND blocker."lane" = 'conversation'
+        AND blocker."consumed_at" IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM retired AS policy_non_reply
+          WHERE policy_non_reply."id" = blocker."id"
+            AND policy_non_reply."retention_disposition"
+              = 'policy_non_reply.content_expired'
+        )
+      GROUP BY
+        conversation_users."user_id",
+        counter."next_seq"
+    ),
+    advanced AS (
+      UPDATE "hosted_mailbox_lane_counter" AS counter
+      SET
+        "consumed_seq" = GREATEST(
+          counter."consumed_seq",
+          LEAST(conversation_floor."lane_seq", counter."next_seq" - 1)
+        ),
+        "updated_at" = ${input.now}
+      FROM conversation_floor
+      WHERE counter."user_id" = conversation_floor."user_id"
+        AND counter."lane" = 'conversation'
+      RETURNING counter."user_id"
+    ),
+    pruned AS (
+      DELETE FROM "hosted_mailbox_item"
+      WHERE "content_retired_at" IS NOT NULL
+        AND "retention_disposition" IS NULL
+        AND "created_at" < ${structuralCutoff}
+      RETURNING "id"
+    )
+    SELECT
+      (SELECT COUNT(*) FROM retired)::bigint AS "retired",
+      (
+        SELECT COUNT(*)
+        FROM retired
+        WHERE "retention_disposition" = 'policy_non_reply.content_expired'
+      )::bigint AS "policyNonReplies",
+      (SELECT COUNT(*) FROM pruned)::bigint AS "tombstonesDeleted"
   `;
-
-  const unconsumedConversationItems = deletedRows.filter(
-    (row) => row.consumedAt === null && row.kind === "conversation.message",
-  ).length;
-
-  if (unconsumedConversationItems > 0) {
-    console.error("Hosted mailbox retention deleted unconsumed conversation messages.", {
-      code: "hosted_mailbox_retention_unconsumed_conversation_items",
-      unconsumedConversationItems,
-    });
-  }
-
-  return { deleted: deletedRows.length, unconsumedConversationItems };
+  const result = rows[0];
+  return {
+    policyNonReplies: Number(result?.policyNonReplies ?? 0n),
+    retired: Number(result?.retired ?? 0n),
+    tombstonesDeleted: Number(result?.tombstonesDeleted ?? 0n),
+  };
 }
 
 async function deleteOldHostedRuntimeLogs(input: {

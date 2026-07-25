@@ -34,6 +34,7 @@ async function makeTempDirectory(name: string): Promise<string> {
 async function persistTextCapture(input: {
   captureId: string;
   eventId: string;
+  receivedAt?: string;
   recordedAt: string;
   text: string;
   vaultRoot: string;
@@ -50,7 +51,7 @@ async function persistTextCapture(input: {
       thread: { id: "thread-1", isDirect: true },
       actor: { isSelf: false },
       occurredAt: input.recordedAt,
-      receivedAt: input.recordedAt,
+      receivedAt: input.receivedAt ?? input.recordedAt,
       text: input.text,
       attachments: [],
       raw: {
@@ -171,7 +172,35 @@ test("runInboxTextRetention is idempotent and reports the next eligible wake", a
   assert.equal(second.nextEligibleAt, expectedWake);
 });
 
-test("runInboxTextRetention honors protected captures and the batch ceiling", async () => {
+test("runInboxTextRetention anchors expiry to receipt rather than delayed storage", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-receipt");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+  const receivedAt = "2026-06-10T10:00:00.000Z";
+
+  await persistTextCapture({
+    captureId: "cap_text_delayed_storage",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3",
+    receivedAt,
+    recordedAt: "2026-06-20T10:00:00.000Z",
+    text: "content stored after a delayed import",
+    vaultRoot,
+  });
+
+  const result = await runInboxTextRetention({
+    now: "2026-06-24T10:00:00.000Z",
+    vaultRoot,
+  });
+  assert.equal(result.expiredCaptures, 1);
+  assert.equal(
+    findCapture(
+      await readCaptureRecords(vaultRoot),
+      "cap_text_delayed_storage",
+    ).text,
+    undefined,
+  );
+});
+
+test("runInboxTextRetention enforces the deadline and batch ceiling", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-bounds");
   await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
 
@@ -192,22 +221,17 @@ test("runInboxTextRetention honors protected captures and the batch ceiling", as
 
   const protectedRun = await runInboxTextRetention({
     now: NOW,
-    protectedCaptureIds: ["cap_text_protected"],
     vaultRoot,
   });
-  assert.equal(protectedRun.expiredCaptures, 1);
+  assert.equal(protectedRun.expiredCaptures, 2);
 
   const records = await readCaptureRecords(vaultRoot);
-  assert.equal(findCapture(records, "cap_text_protected").text, "a message still being worked on");
+  assert.equal(findCapture(records, "cap_text_protected").text, undefined);
   assert.equal(findCapture(records, "cap_text_other").text, undefined);
 
-  // With the protection lifted the remaining capture expires, and a ceiling of
-  // zero is a no-op rather than an unbounded sweep.
+  // A ceiling of zero remains a no-op rather than an unbounded sweep.
   const noop = await runInboxTextRetention({ maxCaptures: 0, now: NOW, vaultRoot });
   assert.equal(noop.expiredCaptures, 0);
-
-  const finalRun = await runInboxTextRetention({ now: NOW, vaultRoot });
-  assert.equal(finalRun.expiredCaptures, 1);
 });
 
 test("runInboxTextRetention leaves legacy envelope captures alone and counts them", async () => {
@@ -251,6 +275,116 @@ test("runInboxTextRetention leaves legacy envelope captures alone and counts the
   assert.equal(legacy.text, "a legacy message body");
   assert.equal(legacy.envelopePath, envelopePath);
   assert.equal(legacy.textRetiredAt, undefined);
+});
+
+test("runInboxTextRetention redacts a migrated legacy/current record pair together", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-migrated");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+  const captureId = "cap_01HQW7K0M9N8P7Q6R5S4T3VC01";
+  const sourceDirectory = `raw/inbox/email/2026/06/${captureId}`;
+  const envelopePath = `${sourceDirectory}/envelope.json`;
+  const shared = {
+    captureId,
+    identityKey: "email:self",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VC00",
+    source: "email",
+    externalId: "msg-migrated",
+    thread: { id: "thread-migrated", isDirect: true },
+    actor: { isSelf: false },
+    occurredAt: OLD_AT,
+    recordedAt: OLD_AT,
+    raw: { provider: "test", quotedBody: "private legacy content" },
+    sourceDirectory,
+    attachments: [],
+    text: "a migrated legacy message body",
+  };
+  const relativePath = "ledger/inbox-captures/2026/2026-06.jsonl";
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath,
+    record: {
+      schemaVersion: "murph.inbox-capture.v1",
+      ...shared,
+      rawRefs: [envelopePath],
+      envelopePath,
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath,
+    record: {
+      schemaVersion: "murph.inbox-capture.v2",
+      ...shared,
+      rawRefs: [],
+    },
+  });
+  const laterCaptureId = "cap_01HQW7K0M9N8P7Q6R5S4T3VC03";
+  const laterSourceDirectory =
+    `raw/inbox/email/2026/06/${laterCaptureId}`;
+  const laterEnvelopePath = `${laterSourceDirectory}/envelope.json`;
+  const laterShared = {
+    ...shared,
+    captureId: laterCaptureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3VC02",
+    externalId: "msg-migrated-later",
+    sourceDirectory: laterSourceDirectory,
+    text: "a later migrated legacy message body",
+  };
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath,
+    record: {
+      schemaVersion: "murph.inbox-capture.v1",
+      ...laterShared,
+      rawRefs: [laterEnvelopePath],
+      envelopePath: laterEnvelopePath,
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath,
+    record: {
+      schemaVersion: "murph.inbox-capture.v2",
+      ...laterShared,
+      rawRefs: [],
+    },
+  });
+
+  const result = await runInboxTextRetention({
+    maxCaptures: 1,
+    now: NOW,
+    vaultRoot,
+  });
+  assert.equal(result.expiredCaptures, 1);
+  assert.equal(result.hasMoreEligibleCaptures, true);
+  assert.equal(result.legacyCapturesSkipped, 0);
+  const allRecords = await readCaptureRecords(vaultRoot);
+  const records = allRecords.filter(
+    (record) => record.captureId === captureId,
+  );
+  assert.equal(records.length, 2);
+  for (const record of records) {
+    assert.equal(record.text, undefined);
+    assert.deepEqual(record.raw, {});
+    assert.equal(record.textRetiredAt, NOW);
+    assert.ok(!JSON.stringify(record).includes("private legacy content"));
+  }
+  const laterRecords = allRecords.filter(
+    (record) => record.captureId === laterCaptureId,
+  );
+  assert.equal(laterRecords.length, 2);
+  assert.ok(laterRecords.every(
+    (record) => record.text === "a later migrated legacy message body",
+  ));
+
+  const followUp = await runInboxTextRetention({
+    maxCaptures: 1,
+    now: NOW,
+    vaultRoot,
+  });
+  assert.equal(followUp.expiredCaptures, 1);
+  assert.equal(followUp.hasMoreEligibleCaptures, false);
+  await validateVault({ vaultRoot });
 });
 
 test("expired capture text stops being searchable without a projection rebuild", async () => {
@@ -311,6 +445,26 @@ test("expired captures leave no projected carrier of the message body", async ()
     before.close();
   }
 
+  const parserDirectory = path.join(
+    vaultRoot,
+    "derived",
+    "inbox",
+    "cap_text_old",
+    "attachments",
+    "att_text_old_01",
+    "attempts",
+    "attempt_1",
+  );
+  await fs.mkdir(parserDirectory, { recursive: true });
+  await fs.writeFile(
+    path.join(parserDirectory, "result.json"),
+    JSON.stringify({ markdown: "kumquat parser derivative" }),
+  );
+  await fs.writeFile(
+    path.join(parserDirectory, "manifest.json"),
+    JSON.stringify({ resultPath: "result.json" }),
+  );
+
   await runInboxTextRetention({ now: NOW, vaultRoot });
 
   // raw_json carried the Telegram reply preview that the canonical pass strips,
@@ -324,6 +478,58 @@ test("expired captures leave no projected carrier of the message body", async ()
   } finally {
     after.close();
   }
+  await assert.rejects(fs.access(path.join(parserDirectory, "result.json")));
+  await assert.rejects(fs.access(path.join(parserDirectory, "manifest.json")));
+});
+
+test("attachment-only captures still retire parser derivatives", async () => {
+  const vaultRoot = await makeTempDirectory(
+    "murph-inbox-text-retention-attachment-only",
+  );
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+  const captureId = "cap_attachment_only_old";
+  await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId,
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W4",
+    storedAt: OLD_AT,
+    input: {
+      accountId: "self",
+      actor: { isSelf: false },
+      attachments: [],
+      externalId: `msg-${captureId}`,
+      occurredAt: OLD_AT,
+      raw: {},
+      receivedAt: OLD_AT,
+      source: "telegram",
+      text: null,
+      thread: { id: "thread-1", isDirect: true },
+    },
+  });
+  const parserDirectory = path.join(
+    vaultRoot,
+    "derived",
+    "inbox",
+    captureId,
+    "attachments",
+    "att_attachment_only_01",
+    "attempts",
+    "attempt_1",
+  );
+  await fs.mkdir(parserDirectory, { recursive: true });
+  await fs.writeFile(
+    path.join(parserDirectory, "result.json"),
+    JSON.stringify({ markdown: "private parser-only content" }),
+  );
+
+  const result = await runInboxTextRetention({ now: NOW, vaultRoot });
+
+  assert.equal(result.expiredCaptures, 1);
+  assert.equal(
+    findCapture(await readCaptureRecords(vaultRoot), captureId).textRetiredAt,
+    NOW,
+  );
+  await assert.rejects(fs.access(path.join(parserDirectory, "result.json")));
 });
 
 test("a projection failure leaves the capture un-expired so the next pass retries", async () => {

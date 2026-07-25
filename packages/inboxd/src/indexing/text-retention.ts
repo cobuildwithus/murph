@@ -28,7 +28,6 @@ type CurrentInboxCaptureRecord = Extract<
 export interface RunInboxTextRetentionInput {
   maxCaptures?: number;
   now?: Date | string;
-  protectedCaptureIds?: Iterable<string>;
   signal?: AbortSignal | null;
   vaultRoot: string;
 }
@@ -54,7 +53,7 @@ interface ShardRedaction {
 }
 
 /**
- * Expire inbound message content 14 days after it was recorded.
+ * Expire inbound message content 14 days after it was received.
  *
  * Message text is not a standalone file the way attachment media is, so this
  * cannot mirror `runInboxMediaRetention` and unlink bytes: the text lives inside
@@ -79,7 +78,6 @@ export async function runInboxTextRetention(
   }
 
   const cutoffMs = Date.parse(now) - INBOX_TEXT_RETENTION_WINDOW_MS;
-  const protectedCaptureIds = new Set(input.protectedCaptureIds ?? []);
 
   return await withCanonicalWriteLockScope(input.vaultRoot, async () => {
     const lock = await acquireCanonicalWriteLock(input.vaultRoot);
@@ -102,7 +100,6 @@ export async function runInboxTextRetention(
         const redaction = await planShardRedaction({
           cutoffMs,
           now,
-          protectedCaptureIds,
           relativePath,
           remaining,
           signal: input.signal,
@@ -129,7 +126,7 @@ export async function runInboxTextRetention(
         (total, shard) => total + shard.expiredCaptures,
         0,
       );
-      if (expiredCaptures === 0) {
+      if (redactions.length === 0) {
         return {
           expiredCaptures: 0,
           hasMoreEligibleCaptures,
@@ -150,7 +147,11 @@ export async function runInboxTextRetention(
       // record claimed retention was complete. Hosted inbox init uses
       // rebuild: false, so no later rebuild is guaranteed to repair it.
       await redactCaptureProjections({
-        captureIds: redactions.flatMap((shard) => shard.redactedCaptureIds),
+        captureIds: [
+          ...new Set(
+            redactions.flatMap((shard) => shard.redactedCaptureIds),
+          ),
+        ],
         vaultRoot: input.vaultRoot,
       });
 
@@ -163,8 +164,9 @@ export async function runInboxTextRetention(
         vaultRoot: input.vaultRoot,
         operationType: "inbox_text_retention",
         summary:
-          `Expire message content for ${expiredCaptures} inbox capture`
-          + `${expiredCaptures === 1 ? "" : "s"}.`,
+          `Expire message content for ${
+            new Set(redactions.flatMap((shard) => shard.redactedCaptureIds)).size
+          } inbox capture(s).`,
         occurredAt: now,
         mutate: async ({ batch }) => {
           for (const shard of redactions) {
@@ -218,7 +220,6 @@ async function redactCaptureProjections(input: {
 async function planShardRedaction(input: {
   cutoffMs: number;
   now: string;
-  protectedCaptureIds: ReadonlySet<string>;
   relativePath: string;
   remaining: number;
   signal?: AbortSignal | null;
@@ -233,11 +234,24 @@ async function planShardRedaction(input: {
     relativePath: input.relativePath,
     vaultRoot: input.vaultRoot,
   });
+  const currentCaptureIds = new Set<string>();
+  for (const rawRecord of rawRecords) {
+    const parsed = safeParseContract<InboxCaptureRecord>(
+      inboxCaptureRecordSchema,
+      rawRecord,
+    );
+    if (
+      parsed.success
+      && parsed.data.schemaVersion === "murph.inbox-capture.v2"
+    ) {
+      currentCaptureIds.add(parsed.data.captureId);
+    }
+  }
 
   const records: InboxCaptureRecord[] = [];
   const redactedCaptureIds: string[] = [];
+  const selectedCaptureIds = new Set<string>();
   const storedPathsToDelete: string[] = [];
-  let expiredCaptures = 0;
   let hasMore = false;
   let legacyCapturesSkipped = 0;
   let nextEligibleAt: string | null = null;
@@ -257,53 +271,70 @@ async function planShardRedaction(input: {
     }
 
     const record = parsed.data;
-    const recordedAtMs = Date.parse(record.recordedAt);
-    if (record.textRetiredAt !== undefined || !Number.isFinite(recordedAtMs)) {
+    const receivedAtMs = Date.parse(record.receivedAt ?? record.recordedAt);
+    if (record.textRetiredAt !== undefined || !Number.isFinite(receivedAtMs)) {
       records.push(record);
       continue;
     }
 
     if (isLegacyCapture(record)) {
-      records.push(record);
-      if (recordedAtMs <= input.cutoffMs) {
-        legacyCapturesSkipped += 1;
+      if (receivedAtMs > input.cutoffMs) {
+        records.push(record);
+        nextEligibleAt = selectEarliestWake(
+          nextEligibleAt,
+          new Date(receivedAtMs + INBOX_TEXT_RETENTION_WINDOW_MS).toISOString(),
+        );
+        continue;
       }
+      if (!currentCaptureIds.has(record.captureId)) {
+        records.push(record);
+        legacyCapturesSkipped += 1;
+        continue;
+      }
+      if (
+        !selectedCaptureIds.has(record.captureId)
+        && selectedCaptureIds.size >= input.remaining
+      ) {
+        records.push(record);
+        hasMore = true;
+        continue;
+      }
+      selectedCaptureIds.add(record.captureId);
+      records.push(redactLegacyCaptureRecord(record, input.now));
+      redactedCaptureIds.push(record.captureId);
       continue;
     }
 
-    if (!hasExpirableContent(record)) {
-      records.push(record);
-      continue;
-    }
-
-    if (input.protectedCaptureIds.has(record.captureId)) {
-      records.push(record);
-      continue;
-    }
-
-    if (recordedAtMs > input.cutoffMs) {
+    if (receivedAtMs > input.cutoffMs) {
       records.push(record);
       nextEligibleAt = selectEarliestWake(
         nextEligibleAt,
-        new Date(recordedAtMs + INBOX_TEXT_RETENTION_WINDOW_MS).toISOString(),
+        new Date(receivedAtMs + INBOX_TEXT_RETENTION_WINDOW_MS).toISOString(),
       );
       continue;
     }
 
-    if (expiredCaptures >= input.remaining) {
+    if (
+      !selectedCaptureIds.has(record.captureId)
+      && selectedCaptureIds.size >= input.remaining
+    ) {
       records.push(record);
       hasMore = true;
       continue;
     }
 
-    const redacted = redactCaptureRecord(record, input.now);
+    selectedCaptureIds.add(record.captureId);
+    const redacted = await redactCaptureRecord(
+      record,
+      input.now,
+      input.vaultRoot,
+    );
     records.push(redacted.record);
     redactedCaptureIds.push(record.captureId);
     storedPathsToDelete.push(...redacted.storedPathsToDelete);
-    expiredCaptures += 1;
   }
 
-  if (expiredCaptures === 0) {
+  if (redactedCaptureIds.length === 0) {
     return { hasMore, legacyCapturesSkipped, nextEligibleAt, shard: null };
   }
 
@@ -312,13 +343,30 @@ async function planShardRedaction(input: {
     legacyCapturesSkipped,
     nextEligibleAt,
     shard: {
-      expiredCaptures,
+      expiredCaptures: selectedCaptureIds.size,
       records,
       redactedCaptureIds,
       relativePath: input.relativePath,
       storedPathsToDelete,
     },
   };
+}
+
+function redactLegacyCaptureRecord(
+  record: Exclude<InboxCaptureRecord, CurrentInboxCaptureRecord>,
+  now: string,
+): InboxCaptureRecord {
+  const next = {
+    ...record,
+    raw: {},
+    rawRefs: record.rawRefs.filter(
+      (ref) => normalizeStoredPath(ref)
+        !== normalizeStoredPath(record.envelopePath),
+    ),
+    textRetiredAt: now,
+  } as InboxCaptureRecord;
+  delete (next as { text?: unknown }).text;
+  return next;
 }
 
 /**
@@ -333,13 +381,20 @@ async function planShardRedaction(input: {
  * written to the capture and projected as opaque metadata — so dropping it
  * costs no functionality.
  */
-function redactCaptureRecord(
+async function redactCaptureRecord(
   record: CurrentInboxCaptureRecord,
   now: string,
-): { record: InboxCaptureRecord; storedPathsToDelete: string[] } {
+  vaultRoot: string,
+): Promise<{ record: InboxCaptureRecord; storedPathsToDelete: string[] }> {
   const storedPathsToDelete = record.textContent
     ? [normalizeStoredPath(record.textContent.storedPath)]
     : [];
+  storedPathsToDelete.push(
+    ...(await walkVaultFiles(
+      vaultRoot,
+      normalizeRelativeVaultPath(`derived/inbox/${record.captureId}`),
+    )),
+  );
 
   const deleted = new Set(storedPathsToDelete);
   const next = {
@@ -359,32 +414,17 @@ function redactCaptureRecord(
 }
 
 /**
- * Legacy v1 captures are deliberately out of scope.
- *
- * A v1 record stores the verbatim provider payload in a separate envelope file,
- * and `envelopePath` is required by that schema, so retention cannot delete the
- * envelope without leaving the record pointing at missing bytes — which
- * `validateVault` reports as RAW_REFERENCE_MISSING. Clearing only the inline
- * text while the envelope survives would be a false guarantee. Retiring
- * envelopes is already `runInboxEnvelopeMigration`'s job, and it owns the
- * equivalence checks that make the deletion safe; once a capture is migrated to
- * v2 it expires through the normal path here. Counted rather than ignored so a
- * vault still holding legacy captures past the window is visible.
+ * A legacy v1 capture can be redacted only after the same shard contains its
+ * migrated v2 replacement. The envelope migrator owns the equivalence proof
+ * and receipt-guarded envelope deletion; the paired v2 record is therefore the
+ * durable proof that clearing the remaining inline legacy copy is safe.
+ * Unpaired legacy records are counted rather than partially redacted so the
+ * missing migration stays visible.
  */
 function isLegacyCapture(
   record: InboxCaptureRecord,
 ): record is Exclude<InboxCaptureRecord, CurrentInboxCaptureRecord> {
   return record.schemaVersion !== "murph.inbox-capture.v2";
-}
-
-function hasExpirableContent(record: CurrentInboxCaptureRecord): boolean {
-  if (typeof record.text === "string" && record.text.length > 0) {
-    return true;
-  }
-  if (record.textContent) {
-    return true;
-  }
-  return Object.keys(record.raw).length > 0;
 }
 
 function serializeShard(records: readonly InboxCaptureRecord[]): string {

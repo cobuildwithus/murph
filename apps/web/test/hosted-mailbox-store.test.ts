@@ -26,6 +26,7 @@ import {
   hasHostedMailboxItemByKind,
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  projectHostedMailboxItem,
   readHostedMailboxConsumedSeqByLane,
   readHostedMailboxLiveItemById,
   readHostedMailboxRecentLiveConversationItemIds,
@@ -67,7 +68,7 @@ function expectLiveHostedMailboxWhere(fields: Record<string, unknown>) {
   return expect.objectContaining({
     ...fields,
     createdAt: {
-      gte: expect.any(Date),
+      gt: expect.any(Date),
     },
     OR: [
       {
@@ -97,7 +98,7 @@ describe("readHostedMailboxLiveItemById", () => {
     expect(findFirst).toHaveBeenCalledWith({
       where: {
         createdAt: {
-          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+          gt: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
         },
         id: "mailbox-live-1",
         OR: [
@@ -106,6 +107,24 @@ describe("readHostedMailboxLiveItemById", () => {
         ],
       },
     });
+  });
+
+  it("hides payload content at the exact 14-day age boundary", () => {
+    const createdAt = new Date(
+      FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS,
+    );
+    const projected = projectHostedMailboxItem(
+      buildHostedMailboxItemRow({
+        createdAt,
+        expiresAt: null,
+        payloadInlineCiphertext: "cipher_at_deadline",
+        payloadRef: "hosted-mailbox-payload:mailbox_ref_1",
+      }),
+      { payloadAvailabilityAt: FIXED_NOW },
+    );
+
+    expect(projected.payloadInlineCiphertext).toBeNull();
+    expect(projected.payloadRef).toBeNull();
   });
 });
 
@@ -164,7 +183,7 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
       take: 100,
       where: {
         createdAt: {
-          gte: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
+          gt: new Date(FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS),
         },
         kind: "conversation.message",
         lane: "conversation",
@@ -268,7 +287,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
       where: {
         assistantInputLookupKey: { in: string[] };
         causalSeq: { not: null };
-        createdAt: { gte: Date };
+        createdAt: { gt: Date };
         kind: string;
         lane: string;
         OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
@@ -282,7 +301,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
             candidate.assistantInputLookupKey,
           )
           && candidate.causalSeq !== null
-          && candidate.createdAt >= args.where.createdAt.gte
+          && candidate.createdAt > args.where.createdAt.gt
           && candidate.kind === args.where.kind
           && candidate.lane === args.where.lane
           && candidate.userId === args.where.userId
@@ -600,7 +619,7 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
       take: number;
       where: {
         assistantInputLookupKey: { in: string[] };
-        createdAt: { gte: Date };
+        createdAt: { gt: Date };
         kind: string;
         lane: string;
         OR: [{ expiresAt: null }, { expiresAt: { gt: Date } }];
@@ -611,7 +630,7 @@ describe("readHostedMailboxConversationWakeByAssistantInputId", () => {
         args.where.assistantInputLookupKey.in.includes(
           candidate.assistantInputLookupKey,
         )
-        && candidate.createdAt >= args.where.createdAt.gte
+        && candidate.createdAt > args.where.createdAt.gt
         && candidate.kind === args.where.kind
         && candidate.lane === args.where.lane
         && candidate.userId === args.where.userId
@@ -2114,7 +2133,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
           agedInlineSeq3,
           liveSeq4,
         ].filter((row) =>
-          row.createdAt.getTime() >= FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS
+          row.createdAt.getTime() > FIXED_NOW.getTime() - HOSTED_MAILBOX_TEST_RETENTION_MS
           && (row.expiresAt === null || row.expiresAt > FIXED_NOW)
         )
       ),

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 
 ## Current Guardrails
 
@@ -76,6 +76,7 @@ Last verified: 2026-07-22
   pinned to the original target and membership generation; expiry is the
   existing ten-minute mailbox deadline, with no second lease, timer, status
   row, or delivery ledger.
+- The inbound message-content deadline does not cancel accepted work invisibly. Before local content retirement, the pending-input owner writes the existing terminal suppression evidence for any still-nonterminal input; the next successful idle checkpoint carries that exact mailbox item id until Web stamps the row and advances only the contiguous conversation floor. An unimported expired conversation row is terminalized in place by Web as `policy_non_reply.content_expired`, with payload ciphertext cleared in the same retention statement. Content retirement and checkpoint retries are idempotent, future deadlines share the existing `inbox_media_retention` wake, interrupted bounded passes retry, and an exact preselection sweep prevents a restored overdue input from starting a reply.
 - Scheduled group Assistant Ask stays inside the ordinary scheduled Codex turn:
   start the selected requests, then use ordinary shell waits and exact replay to
   poll every accepted request until it returns completed or unavailable. The

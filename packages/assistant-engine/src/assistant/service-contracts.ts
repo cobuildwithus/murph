@@ -196,6 +196,7 @@ export interface AssistantTurnSharedPlan {
 export interface PersistedUserTurn {
   turnCreatedAt: string
   turnId: string
+  userContentReceivedAt?: string | null
   userTranscriptRef: AssistantAcceptedTurnInputItemInput['transcriptRef'] | null
   userPersisted: boolean
 }

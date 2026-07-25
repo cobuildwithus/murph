@@ -322,22 +322,28 @@ export async function replaceTranscriptEntries(
 
 export async function pruneAssistantTranscriptRetention(
   paths: AssistantStatePaths,
-  options: { now?: Date } = {},
+  options: { now?: Date; signal?: AbortSignal | null } = {},
 ): Promise<{
   entriesRedacted: number
   entriesTrimmed: number
+  nextEligibleAt: string | null
   transcriptsTrimmed: number
 }> {
+  options.signal?.throwIfAborted()
   const now = options.now ?? new Date()
   await ensureAssistantStateDirectory(paths.transcriptsDirectory)
+  options.signal?.throwIfAborted()
   const entries = await readdir(paths.transcriptsDirectory, {
     withFileTypes: true,
   })
+  options.signal?.throwIfAborted()
   let entriesRedacted = 0
   let entriesTrimmed = 0
+  let nextEligibleAt: string | null = null
   let transcriptsTrimmed = 0
 
   for (const entry of entries) {
+    options.signal?.throwIfAborted()
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
       continue
     }
@@ -346,7 +352,9 @@ export async function pruneAssistantTranscriptRetention(
     let raw: string
     try {
       raw = await readFile(transcriptPath, 'utf8')
+      options.signal?.throwIfAborted()
     } catch (error) {
+      options.signal?.throwIfAborted()
       if (isMissingFileError(error)) {
         continue
       }
@@ -362,17 +370,23 @@ export async function pruneAssistantTranscriptRetention(
 
     const retained = trimAssistantTranscriptEntriesForAudit(parsed.values)
     const redaction = redactExpiredAssistantTranscriptEntries(retained, now)
+    nextEligibleAt = selectEarlierAssistantRetentionWake(
+      nextEligibleAt,
+      redaction.nextEligibleAt,
+    )
     const trimmedCount = parsed.values.length - retained.length
     if (trimmedCount === 0 && redaction.redactedCount === 0) {
       continue
     }
 
+    options.signal?.throwIfAborted()
     await writeTextFileAtomic(
       transcriptPath,
       redaction.entries.length > 0
         ? `${redaction.entries.map((retainedEntry) => JSON.stringify(retainedEntry)).join('\n')}\n`
         : '',
     )
+    options.signal?.throwIfAborted()
     entriesRedacted += redaction.redactedCount
     entriesTrimmed += trimmedCount
     transcriptsTrimmed += 1
@@ -381,6 +395,7 @@ export async function pruneAssistantTranscriptRetention(
   return {
     entriesRedacted,
     entriesTrimmed,
+    nextEligibleAt,
     transcriptsTrimmed,
   }
 }
@@ -396,9 +411,14 @@ export async function pruneAssistantTranscriptRetention(
 export function redactExpiredAssistantTranscriptEntries(
   entries: readonly AssistantTranscriptEntry[],
   now: Date,
-): { entries: AssistantTranscriptEntry[]; redactedCount: number } {
+): {
+  entries: AssistantTranscriptEntry[]
+  nextEligibleAt: string | null
+  redactedCount: number
+} {
   const cutoffMs = now.getTime() - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS
   let redactedCount = 0
+  let nextEligibleAt: string | null = null
 
   const next = entries.map((entry) => {
     if (entry.kind !== 'user' || entry.textRetiredAt !== undefined) {
@@ -407,8 +427,19 @@ export function redactExpiredAssistantTranscriptEntries(
     if (entry.text.length === 0) {
       return entry
     }
-    const createdAtMs = Date.parse(entry.createdAt)
-    if (!Number.isFinite(createdAtMs) || createdAtMs >= cutoffMs) {
+    const contentReceivedAtMs = Date.parse(
+      entry.contentReceivedAt ?? entry.createdAt,
+    )
+    if (!Number.isFinite(contentReceivedAtMs)) {
+      return entry
+    }
+    if (contentReceivedAtMs > cutoffMs) {
+      nextEligibleAt = selectEarlierAssistantRetentionWake(
+        nextEligibleAt,
+        new Date(
+          contentReceivedAtMs + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+        ).toISOString(),
+      )
       return entry
     }
 
@@ -420,7 +451,20 @@ export function redactExpiredAssistantTranscriptEntries(
     }
   })
 
-  return { entries: next, redactedCount }
+  return { entries: next, nextEligibleAt, redactedCount }
+}
+
+function selectEarlierAssistantRetentionWake(
+  current: string | null,
+  candidate: string | null,
+): string | null {
+  if (candidate === null) {
+    return current
+  }
+  if (current === null) {
+    return candidate
+  }
+  return Date.parse(candidate) < Date.parse(current) ? candidate : current
 }
 
 export function trimAssistantTranscriptEntriesForAudit(

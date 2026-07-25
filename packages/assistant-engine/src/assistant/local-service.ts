@@ -145,6 +145,7 @@ import {
 import {
   normalizeNullableString,
 } from './shared.js'
+import { readAssistantInputEvent } from './input-store.js'
 import {
   resolveAssistantAcceptedMessageTarget,
   type AssistantAcceptedMessageTargetAuthorizer,
@@ -257,6 +258,7 @@ function isHostedComputerToolTransportAvailable(input: {
 }
 
 async function appendUserTranscriptEntryForTurn(input: {
+  contentReceivedAt?: string | null
   createdAt?: string | null
   detail: string
   sessionId: string
@@ -273,6 +275,9 @@ async function appendUserTranscriptEntryForTurn(input: {
     input.sessionId,
     [
       {
+        ...(input.contentReceivedAt
+          ? { contentReceivedAt: input.contentReceivedAt }
+          : {}),
         kind: 'user',
         text: input.text,
         ...(input.createdAt === undefined ? {} : { createdAt: input.createdAt }),
@@ -313,8 +318,14 @@ async function persistUserTurn(
   let turnCreatedAt = new Date().toISOString()
   let userPersisted = false
   let userTranscriptRef: AssistantAcceptedTurnInputTranscriptRef | null = null
+  const userContentReceivedAt =
+    await resolveAcceptedInputContentReceivedAt({
+      inputs: input.acceptedTurnInput?.initialInputs ?? [],
+      vault: input.vault,
+    })
   if (plan.persistUserPromptOnFailure) {
     const persisted = await appendUserTranscriptEntryForTurn({
+      contentReceivedAt: userContentReceivedAt,
       detail: 'user prompt persisted before provider execution',
       sessionId: resolved.session.sessionId,
       text: input.prompt,
@@ -329,6 +340,7 @@ async function persistUserTurn(
   return {
     turnCreatedAt,
     turnId,
+    userContentReceivedAt,
     userTranscriptRef,
     userPersisted,
   }
@@ -350,6 +362,7 @@ async function completeUnverifiedExternalAudienceTurn(input: {
   let turnCreatedAt = input.userTurn.turnCreatedAt
   if (!input.userTurn.userPersisted) {
     const persisted = await appendUserTranscriptEntryForTurn({
+      contentReceivedAt: input.userTurn.userContentReceivedAt,
       detail: 'user prompt persisted before deterministic audience-safety reply',
       sessionId: input.session.sessionId,
       text: input.message.prompt,
@@ -813,6 +826,7 @@ export async function sendAssistantMessageLocal(
             return
           }
           const persisted = await appendUserTranscriptEntryForTurn({
+            contentReceivedAt: currentUserTurn.userContentReceivedAt,
             createdAt: currentUserTurn.turnCreatedAt,
             detail: persistInput.detail,
             sessionId: resolved.session.sessionId,
@@ -1345,6 +1359,7 @@ export async function sendAssistantMessageLocal(
               session: failedNoReplySession,
               turnCreatedAt: currentUserTurn.turnCreatedAt,
               turnId: currentUserTurn.turnId,
+              userContentReceivedAt: currentUserTurn.userContentReceivedAt,
             })
             currentSession = session
             emitTurnTiming({
@@ -1642,6 +1657,7 @@ export async function sendAssistantMessageLocal(
           session: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           turnId: currentUserTurn.turnId,
+          userContentReceivedAt: currentUserTurn.userContentReceivedAt,
         })
         currentSession = session
         emitTurnTiming({
@@ -2211,7 +2227,14 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
   })
   const refsByInputId = new Map<string, AssistantAcceptedTurnInputTranscriptRef>()
   for (const plan of transcriptPlans) {
+    const contentReceivedAt = await resolveAcceptedInputContentReceivedAt({
+      inputs: input.acceptedInputItems.filter((item) =>
+        plan.inputIds.includes(item.id)
+      ),
+      vault: input.vault,
+    })
     const persisted = await appendUserTranscriptEntryForTurn({
+      contentReceivedAt,
       detail:
         'accepted active-turn input persisted for provider request',
       sessionId: input.sessionId,
@@ -2224,6 +2247,36 @@ async function appendAcceptedActiveTurnInputTranscriptEntries(input: {
     }
   }
   return refsByInputId
+}
+
+async function resolveAcceptedInputContentReceivedAt(input: {
+  inputs: readonly AssistantAcceptedTurnInputItemInput[]
+  vault: string
+}): Promise<string | null> {
+  const events = await Promise.all(
+    input.inputs
+      .filter((item) => item.source === 'assistant-input')
+      .map((item) =>
+        readAssistantInputEvent({
+          inputId: item.id,
+          vault: input.vault,
+        })
+      ),
+  )
+  let earliestMs: number | null = null
+  for (const event of events) {
+    if (!event) {
+      continue
+    }
+    const receivedAtMs = Date.parse(event.receivedAt ?? event.occurredAt)
+    if (
+      Number.isFinite(receivedAtMs)
+      && (earliestMs === null || receivedAtMs < earliestMs)
+    ) {
+      earliestMs = receivedAtMs
+    }
+  }
+  return earliestMs === null ? null : new Date(earliestMs).toISOString()
 }
 
 function resolveAcceptedActiveTurnTranscriptAppendPlans(input: {

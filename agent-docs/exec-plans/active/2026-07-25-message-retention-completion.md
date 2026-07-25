@@ -48,6 +48,19 @@ Updated: 2026-07-25
     bodies.
   - New retention services, queues, lifecycle tables, or reconciliation loops.
 
+## Carrier inventory
+
+| Carrier | Deadline behavior |
+| --- | --- |
+| Hosted mailbox inline/sidecar ciphertext | Clear payload fields and delete the sidecar in place; an unconsumed conversation becomes a durable policy non-reply without crossing a younger lane gap. |
+| Inbox capture v2 | Clear inline/out-of-line text and provider raw content, stamp `textRetiredAt`, and preserve structural metadata. |
+| Legacy inbox capture/envelope | Run the existing equivalence migration first, then redact the paired v1/v2 ledger copies; leave an unpaired legacy record visible and retry migration. |
+| Inbox SQLite, attachment text, and FTS | Clear text/raw/derived-path projections before the canonical retention marker commits, then rebuild the search row. |
+| Capture-owned parser bundles | Delete the owning `derived/inbox/<captureId>` files atomically with the canonical capture rewrite. |
+| Assistant input events | Scan pending and already-terminal events; suppress unresolved accepted work first, then clear message, transcript, quote, inline-fragment, raw, and derived content while preserving routing structure. |
+| Assistant user transcript entries | Persist the original receipt separately from transcript creation, redact at that inclusive deadline, and schedule the earliest captureless wake. |
+| Hosted mailbox quotations | Retire with the encrypted mailbox payload; decoded Telegram quote context is cleared from the assistant input event, and the Linq group-reaction quote is cleared from its assistant-input sidecar before the event is stamped retired. Any transcript copy follows the same receipt deadline. |
+
 ## Constraints
 
 - Technical constraints:
@@ -109,12 +122,29 @@ Updated: 2026-07-25
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest suites for every touched owner during iteration.
-  - Production-path retention/checkpoint/restore/search/later-turn scenario.
-  - `pnpm verify:acceptance`.
-  - `scripts/review-gpt-pr-head-preflight.sh 936`.
-- Expected outcomes:
+- Completed proof:
+  - Assistant Engine: 174 files passed, 1 skipped; 2,662 tests passed,
+    5 skipped.
+  - Assistant Runtime: 76 files passed; 1,857 tests passed, 2 skipped.
+  - Inbox: 24 files passed; 220 tests passed, 3 skipped.
+  - Focused Web retention owners: 134 tests passed.
+  - Isolated local-Postgres migration and Assistant Ask retention proof:
+    2 tests passed after all migrations applied.
+  - Scenario-manifest integrity: 204 scenarios, 11 sample inputs, and 28
+    golden-output directories passed.
+  - Production-path checkpoint/restore regression proves the retained unique
+    phrase is absent from inbox search, capture raw/text, parser output,
+    assistant input, transcript, and later-turn source after a second restore.
+  - Canonical `pnpm test:diff` passed every affected typecheck plus Contracts,
+    Assistant Engine, Assistant CLI, and Assistant Runtime before stopping on
+    an unrelated current-`main` CLI audit mismatch: its unchanged test expects
+    wording no longer present in the unchanged ReviewGPT prompt.
+- Remaining completion gates:
+  - Preliminary `completion-specialists` ReviewGPT pass and finding triage.
+  - Parent final review and `pnpm verify:acceptance`.
+  - `scripts/finish-task`, final pushed-head ReviewGPT, CI, and clean-merge
+    proof.
+- Expected final outcomes:
   - No in-scope unique phrase survives in a durable carrier after the scheduled
     retention pass and restore.
   - Structural facts and distilled canonical records remain.

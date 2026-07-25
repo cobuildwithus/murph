@@ -29,6 +29,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(async () => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   await Promise.all(
     tempRoots.splice(0).map((root) =>
@@ -532,6 +533,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("batches newly enqueued exact successors while the pre-provider selection is empty", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const source = createHostedAssistantInputSource({
@@ -635,6 +638,8 @@ describe("createHostedAssistantInputSource", () => {
   });
 
   it("discovers input queued after an empty background selection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const selection = await selectHostedAssistantInputIds({
@@ -1296,6 +1301,8 @@ describe("selectHostedAssistantInputIds", () => {
   });
 
   it("background mode selects bounded oldest non-terminal pending ids", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-24T00:00:00.000Z"));
     const vaultRoot = await createTempVault();
     await enableLinqAutoReply(vaultRoot);
     const oldest = await upsertAssistantInputEvent({

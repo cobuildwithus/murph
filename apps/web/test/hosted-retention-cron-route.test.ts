@@ -27,7 +27,9 @@ describe("hosted retention cron route", () => {
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.runHostedRetentionCleanup.mockResolvedValue({
       expiredComputerRunsCleanedUp: 4,
-      expiredMailboxItemsDeleted: 7,
+      expiredConversationPolicyNonRepliesRecorded: 1,
+      expiredMailboxContentRetired: 7,
+      expiredMailboxTombstonesDeleted: 2,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 3,
       oldRuntimeLogsDeleted: 6,
@@ -47,7 +49,9 @@ describe("hosted retention cron route", () => {
     await expect(response.json()).resolves.toEqual({
       cleanup: {
         expiredComputerRunsCleanedUp: 4,
-        expiredMailboxItemsDeleted: 7,
+        expiredConversationPolicyNonRepliesRecorded: 1,
+        expiredMailboxContentRetired: 7,
+        expiredMailboxTombstonesDeleted: 2,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 3,
         oldRuntimeLogsDeleted: 6,

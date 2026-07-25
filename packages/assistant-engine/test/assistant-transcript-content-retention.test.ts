@@ -65,7 +65,7 @@ describe('assistant transcript content retention', () => {
     expect(second.redactedCount).toBe(0)
   })
 
-  it('treats the window boundary as not yet expired', () => {
+  it('expires at the exact window boundary', () => {
     const boundary = new Date(
       NOW.getTime() - ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
     ).toISOString()
@@ -74,7 +74,42 @@ describe('assistant transcript content retention', () => {
       NOW,
     )
 
-    expect(result.redactedCount).toBe(0)
+    expect(result.redactedCount).toBe(1)
+    expect(result.entries[0]?.text).toBe('')
+  })
+
+  it('uses the original receipt when a message enters the transcript later', () => {
+    const result = redactExpiredAssistantTranscriptEntries(
+      [
+        entry({
+          kind: 'user',
+          contentReceivedAt: isoDaysAgo(14),
+          createdAt: isoDaysAgo(1),
+          text: 'a delayed accepted message',
+        }),
+      ],
+      NOW,
+    )
+
+    expect(result.redactedCount).toBe(1)
+    expect(result.entries[0]?.text).toBe('')
+  })
+
+  it('reports the earliest future content deadline', () => {
+    const oldest = isoDaysAgo(13)
+    const result = redactExpiredAssistantTranscriptEntries(
+      [
+        entry({ kind: 'user', createdAt: isoDaysAgo(3), text: 'newer' }),
+        entry({ kind: 'user', createdAt: oldest, text: 'older' }),
+      ],
+      NOW,
+    )
+
+    expect(result.nextEligibleAt).toBe(
+      new Date(
+        Date.parse(oldest) + ASSISTANT_TRANSCRIPT_CONTENT_RETENTION_MS,
+      ).toISOString(),
+    )
   })
 
   it('ignores entries with unparseable timestamps rather than guessing', () => {

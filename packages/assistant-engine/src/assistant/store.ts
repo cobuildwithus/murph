@@ -39,6 +39,7 @@ import {
   readAssistantTranscriptTailEntries,
   readAutomationState,
   retireLegacyAssistantConversationKey,
+  pruneAssistantTranscriptRetention,
   writeAutomationState,
   replaceTranscriptEntries,
   synchronizeAssistantIndexes,
@@ -93,6 +94,22 @@ export function isAssistantSessionNotFoundError(error: unknown): boolean {
       'code' in error &&
       (error as { code?: unknown }).code === 'ASSISTANT_SESSION_NOT_FOUND',
   )
+}
+
+export async function runAssistantTranscriptContentRetention(input: {
+  now?: Date
+  signal?: AbortSignal | null
+  vault: string
+}): Promise<Awaited<ReturnType<typeof pruneAssistantTranscriptRetention>>> {
+  return await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    input.signal?.throwIfAborted()
+    await ensureAssistantState(paths)
+    input.signal?.throwIfAborted()
+    return await pruneAssistantTranscriptRetention(paths, {
+      now: input.now ?? new Date(),
+      signal: input.signal,
+    })
+  }, input.signal)
 }
 
 export async function resolveAssistantSession(
@@ -589,6 +606,9 @@ export async function appendAssistantTranscriptEntriesWithRefs(
         kind: entry.kind,
         text: entry.text,
         createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
+        ...(normalizeNullableString(entry.contentReceivedAt)
+          ? { contentReceivedAt: normalizeNullableString(entry.contentReceivedAt) }
+          : {}),
       }),
     )
     await appendTranscriptEntries(paths, sessionId, parsed)
@@ -695,6 +715,9 @@ function parseAssistantTranscriptEntries(
       kind: entry.kind,
       text: entry.text,
       createdAt: normalizeNullableString(entry.createdAt) ?? new Date().toISOString(),
+      ...(normalizeNullableString(entry.contentReceivedAt)
+        ? { contentReceivedAt: normalizeNullableString(entry.contentReceivedAt) }
+        : {}),
     }),
   )
 }

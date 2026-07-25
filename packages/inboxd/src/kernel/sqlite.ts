@@ -1242,7 +1242,7 @@ function createInboxRuntimeStore(
         .prepare("update capture set text_content = null, raw_json = '{}' where capture_id = ?")
         .run(captureId);
       database
-        .prepare("update capture_attachment set extracted_text = null, transcript_text = null where capture_id = ?")
+        .prepare("update capture_attachment set derived_path = null, extracted_text = null, transcript_text = null where capture_id = ?")
         .run(captureId);
       refreshCaptureSearchIndex(database, captureId);
       return true;

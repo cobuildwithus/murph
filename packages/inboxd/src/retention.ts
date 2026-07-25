@@ -14,3 +14,7 @@ export {
   type InboxTextRetentionResult,
   type RunInboxTextRetentionInput,
 } from "./indexing/text-retention.ts";
+export {
+  runInboxEnvelopeMigration,
+  type InboxEnvelopeMigrationResult,
+} from "./indexing/envelope-migration.ts";

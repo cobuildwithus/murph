@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-07-21
+Last verified: 2026-07-25
 
 ## Decision
 
@@ -365,6 +365,12 @@ foreground/default work arrives, the runner preempts that exact child through
 the existing container abort seam, clears the old fence by identity, and starts
 foreground work. Retention remains recoverable through the workspace's projected
 retention wake instead of becoming a second scheduler concern.
+The same wake owns all receipt-anchored inbound message-content work: pending
+input suppression and redaction, transcript redaction, media expiration, legacy
+envelope migration, capture/parser/projection redaction, and their earliest
+future deadline. An overdue pending-input pass runs before background input
+selection as well as during idle maintenance, so restored content cannot begin a
+reply after its deadline.
 Runtime-fence liveness uses one container probe vocabulary: exact-active,
 inactive, mismatched, or indeterminate. The probe only answers whether the
 container still has the requested fence identity in flight. It does not own
@@ -681,6 +687,16 @@ a bounded legacy admitted input unreplied, but it cannot send an unsolicited
 historical message. Exact terminal item stamps are idempotent, and repeated
 idle checkpoints safely resend them until the durable floor confirms the
 accepted transaction.
+
+Mailbox retention clears payload ciphertext in place rather than deleting an
+accepted conversation gap. At the inclusive 14-day deadline, an unconsumed
+conversation row receives `policy_non_reply.content_expired`, `consumed_at`, and
+content-retirement metadata in the same statement that deletes its payload
+sidecar and clears inline payload fields. The lane counter advances only through
+the first remaining unconsumed conversation sequence; it never jumps across a
+younger gap. Policy non-reply tombstones remain as durable terminal evidence,
+while ordinary content-free mailbox tombstones may be pruned after their
+separate structural window.
 
 Accepted Linq reply delivery carries an earlier copy of the same exact-item
 consume authority:
@@ -1789,8 +1805,8 @@ routing.
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
-- runtime timers, assistant next wake projection, and inbox media retention wake
-  projection
+- runtime timers, assistant next wake projection, and the shared inbound
+  message/media retention wake projection
 - checkpoint timing
 - the invocation-local one-child Assistant Ask controller, sealed target
   context builder, consented personal candidate pass, fresh outgoing reviewer,
@@ -1850,9 +1866,9 @@ outbox truth, or per-user runner coordination.
 
 Private runtime timers live in local runtime state and surface only as redacted
 due-time projection on the workspace/status surface. Assistant work uses
-`nextWakeAt` and `nextWakeReason`; inbox media retention uses the independent
-`inboxMediaRetentionWakeAt` field. Web does not materialize timer rows, and
-Cloudflare does not persist timer work items.
+`nextWakeAt` and `nextWakeReason`; inbound message and media retention share the
+independent `inboxMediaRetentionWakeAt` field. Web does not materialize timer
+rows, and Cloudflare does not persist timer work items.
 
 If the runner needs a synthetic in-process object for logging or execution
 plumbing, it may use an internal-only `runtime.timer` wake. That object is not a

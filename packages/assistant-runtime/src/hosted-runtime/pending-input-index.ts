@@ -2,7 +2,12 @@ import path from "node:path";
 
 import {
   hasCompleteAssistantAutoReplyTerminalEvidence,
+  readAssistantAutoReplyTerminalEvidenceByEvidenceId,
+  writeAssistantAutoReplySuppressionEvidence,
 } from "@murphai/assistant-engine/assistant-automation";
+import {
+  markAssistantOutboxIntentMirrorTerminalById,
+} from "@murphai/assistant-engine/assistant-outbox";
 import {
   compareAssistantInputCursors,
   createStoreBackedAssistantInputSource,
@@ -10,6 +15,7 @@ import {
   listAssistantInputEvents,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
+  retireAssistantInputEventContent,
   type AssistantInputCursor,
   type AssistantInputEventRecord,
 } from "@murphai/assistant-engine";
@@ -17,7 +23,10 @@ import {
   readAssistantAutomationState,
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
-import { INBOX_MEDIA_RETENTION_WINDOW_MS } from "@murphai/inboxd/retention";
+import {
+  INBOX_MEDIA_RETENTION_WINDOW_MS,
+  INBOX_TEXT_RETENTION_WINDOW_MS,
+} from "@murphai/inboxd/retention";
 import {
   parseVersionedJsonStateEnvelope,
   readLocalStateTextFile,
@@ -47,6 +56,15 @@ export interface HostedPendingAssistantInputMediaRetentionProtections {
   protectedCaptureIds: string[];
   protectedStoredPaths: string[];
 }
+
+export interface HostedPendingAssistantInputContentRetentionResult {
+  inputsRetired: number;
+  inputsSuppressed: number;
+  nextEligibleAt: string | null;
+}
+
+export const HOSTED_PENDING_INPUT_RETENTION_SUPPRESSION_REASON =
+  "message content expired before a reply completed";
 
 interface HostedPendingAssistantInputStateReadResult {
   legacy: boolean;
@@ -170,6 +188,206 @@ export async function collectHostedPendingAssistantInputMediaRetentionProtection
     protectedCaptureIds: [...protectedCaptureIds].sort(),
     protectedStoredPaths: [...protectedStoredPaths].sort(),
   };
+}
+
+export async function runHostedPendingAssistantInputContentRetention(input: {
+  now?: Date | string;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+}): Promise<HostedPendingAssistantInputContentRetentionResult> {
+  input.signal?.throwIfAborted();
+  const now = normalizeHostedPendingInputRetentionNow(input.now);
+  const cutoffMs = now.getTime() - INBOX_TEXT_RETENTION_WINDOW_MS;
+  const unresolvedInputIds = new Set(
+    await compactHostedUnresolvedAssistantInputIds({
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    }),
+  );
+  const listed = await listAssistantInputEvents({
+    limit: Number.MAX_SAFE_INTEGER,
+    signal: input.signal,
+    vault: input.vaultRoot,
+  });
+  const candidates: Array<{
+    event: AssistantInputEventRecord;
+    terminal: boolean;
+  }> = [];
+  let nextEligibleAt: string | null = null;
+
+  for (const event of listed.events) {
+    input.signal?.throwIfAborted();
+    if (event.contentRetiredAt) {
+      continue;
+    }
+    const receivedAtMs = resolveHostedPendingInputReceivedAtMs(event);
+    if (!Number.isFinite(receivedAtMs)) {
+      // Invalid responsibility timestamps cannot extend private-content
+      // retention. Treat them as due and preserve the structural event.
+      candidates.push({
+        event,
+        terminal:
+          !unresolvedInputIds.has(event.inputId)
+          || await resolveHostedPendingInputRetentionTerminality({
+            event,
+            now,
+            vaultRoot: input.vaultRoot,
+          }),
+      });
+      continue;
+    }
+    if (receivedAtMs > cutoffMs) {
+      nextEligibleAt = selectEarlierHostedPendingInputRetentionWake(
+        nextEligibleAt,
+        new Date(
+          receivedAtMs + INBOX_TEXT_RETENTION_WINDOW_MS,
+        ).toISOString(),
+      );
+      continue;
+    }
+    candidates.push({
+      event,
+      terminal:
+        !unresolvedInputIds.has(event.inputId)
+        || await resolveHostedPendingInputRetentionTerminality({
+          event,
+          now,
+          vaultRoot: input.vaultRoot,
+        }),
+    });
+  }
+
+  let inputsRetired = 0;
+  let inputsSuppressed = 0;
+  for (const candidate of candidates) {
+    input.signal?.throwIfAborted();
+    if (!candidate.terminal) {
+      await writeAssistantAutoReplySuppressionEvidence({
+        captureIds: candidate.event.projection.captureId
+          ? [candidate.event.projection.captureId]
+          : [],
+        inputIds: [candidate.event.inputId],
+        reason: HOSTED_PENDING_INPUT_RETENTION_SUPPRESSION_REASON,
+        recordedAt: now.toISOString(),
+        vault: input.vaultRoot,
+      });
+      inputsSuppressed += 1;
+    }
+    const retired = await retireAssistantInputEventContent({
+      inputId: candidate.event.inputId,
+      now,
+      signal: input.signal,
+      vault: input.vaultRoot,
+    });
+    if (retired.retired) {
+      inputsRetired += 1;
+    }
+  }
+
+  return {
+    inputsRetired,
+    inputsSuppressed,
+    nextEligibleAt,
+  };
+}
+
+async function resolveHostedPendingInputRetentionTerminality(input: {
+  event: AssistantInputEventRecord;
+  now: Date;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const evidence =
+    await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+      input.vaultRoot,
+      input.event.inputId,
+    )
+    ?? (
+      input.event.projection.captureId
+        ? await readAssistantAutoReplyTerminalEvidenceByEvidenceId(
+            input.vaultRoot,
+            input.event.projection.captureId,
+          )
+        : null
+    );
+  if (evidence?.terminal.kind !== "reply_intent_committed") {
+    return await hasCompleteAssistantAutoReplyTerminalEvidence({
+      captureId: input.event.projection.captureId,
+      inputId: input.event.inputId,
+      vault: input.vaultRoot,
+    });
+  }
+
+  const intentId = evidence.terminal.deliveryIntentId;
+  if (!intentId) {
+    return false;
+  }
+  let intent: Awaited<
+    ReturnType<typeof markAssistantOutboxIntentMirrorTerminalById>
+  > = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    intent = await markAssistantOutboxIntentMirrorTerminalById({
+      error: Object.assign(
+        new Error(HOSTED_PENDING_INPUT_RETENTION_SUPPRESSION_REASON),
+        { code: "ASSISTANT_AUTO_REPLY_CONTENT_EXPIRED" },
+      ),
+      failedAt: input.now,
+      intentId,
+      onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable"],
+      status: "abandoned",
+      vault: input.vaultRoot,
+    });
+    if (
+      intent === null
+      || !["awaiting_approval", "pending", "retryable"].includes(intent.status)
+    ) {
+      break;
+    }
+  }
+  if (
+    intent
+    && ["awaiting_approval", "pending", "retryable"].includes(intent.status)
+  ) {
+    // A prepared-dispatch claim can change the ownership token between the
+    // by-id read and the locked compare. Retry from the new owner above; if
+    // contention persists, fail the retention pass so it never retires the
+    // input while leaving a later reply deliverable.
+    throw new Error(
+      "Assistant input retention could not terminalize its queued reply intent.",
+    );
+  }
+
+  // A sent reply is answered. A currently sending effect may already have
+  // crossed a non-idempotent provider boundary, so retention must not pretend
+  // it was safely cancelled. Pre-dispatch and retryable intents are abandoned
+  // above; failed, abandoned, or missing intents become policy non-replies.
+  return intent?.status === "sent" || intent?.status === "sending";
+}
+
+function resolveHostedPendingInputReceivedAtMs(
+  event: AssistantInputEventRecord,
+): number {
+  return Date.parse(event.receivedAt ?? event.occurredAt);
+}
+
+function normalizeHostedPendingInputRetentionNow(
+  value: Date | string | undefined,
+): Date {
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return value;
+  }
+  if (typeof value === "string" && Number.isFinite(Date.parse(value))) {
+    return new Date(value);
+  }
+  return new Date();
+}
+
+function selectEarlierHostedPendingInputRetentionWake(
+  current: string | null,
+  candidate: string,
+): string {
+  return current === null || Date.parse(candidate) < Date.parse(current)
+    ? candidate
+    : current;
 }
 
 function isHostedPendingAssistantInputOlderThanRetention(input: {

@@ -1716,12 +1716,14 @@ const inboxCaptureRecordFields = {
       rawRefs: uniqueArray(patternedString(RELATIVE_PATH_PATTERN), { uniqueItems: true }),
       attachments: z.array(inboxCaptureAttachmentSchema),
       // Stamped when retention expires this capture's message content. Two jobs:
-      // it distinguishes a redacted capture from one that never carried text (an
-      // image-only message), and it is the idempotence marker that stops the
-      // sweep from reconsidering the same record every pass. Shared by both
-      // schema versions so legacy captures — all long past the window — can be
-      // redacted through the same path. Additive and optional, so records
-      // written before retention existed stay valid.
+      // it distinguishes a capture whose content carriers were checked and
+      // retired from one that has not reached the deadline, and it is the
+      // idempotence marker that stops the sweep from reconsidering the same
+      // record every pass. This includes attachment-only captures because
+      // parser derivatives can contain message content even when the capture
+      // has no inline text. Shared by both schema versions so legacy captures
+      // can be redacted through the same path. Additive and optional, so
+      // records written before retention existed stay valid.
       textRetiredAt: isoDateTimeString().optional(),
 } as const;
 
