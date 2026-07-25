@@ -814,6 +814,67 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       );
   });
 
+  it("applies an update whose only change is the arrival timestamp", async () => {
+    const harness = createAuthorityHarness({
+      connectionSources: [
+        {
+          connectionId: "conn_123",
+          displayName: null,
+          firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastDataAt: "2026-04-08T00:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T10:05:00.000Z",
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey: "junction_garmin",
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        },
+      ],
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [
+            {
+              connectionId: "conn_123",
+              sources: [
+                {
+                  // Every field matches the current row except the arrival, which
+                  // is exactly the shape a live carrier produces.
+                  displayName: null,
+                  firstSeenAt: "2026-04-06T09:00:00.000Z",
+                  lastDataAt: "2026-04-09T00:00:00.000Z",
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: "2026-04-06T10:05:00.000Z",
+                  observedLastSeenAt: "2026-04-06T10:05:00.000Z",
+                  resourceAvailabilitySummary: { activity: true },
+                  sourceInstanceKey: "junction_garmin",
+                  sourceProviderSlug: "garmin",
+                  status: "connected",
+                },
+              ],
+            },
+          ],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    // Dropping lastDataAt from the no-op comparison would silently discard this
+    // and leave the stale timestamp behind as a false stall.
+    expect(harness.upsertConnectionSource).toHaveBeenCalledWith(
+      expect.objectContaining({ lastDataAt: "2026-04-09T00:00:00.000Z" }),
+    );
+  });
+
   it("persists runtime source availability updates without rewriting connection state", async () => {
     const harness = createAuthorityHarness();
     const { applyHostedDeviceSyncRuntimeResult } = await import(

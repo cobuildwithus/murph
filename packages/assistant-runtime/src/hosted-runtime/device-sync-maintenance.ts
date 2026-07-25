@@ -500,8 +500,9 @@ async function runHostedDeviceSyncDenseRawRetention(input: {
  * provider still reports the connection healthy, and the pull floor cannot
  * distinguish "no data upstream" from "carrier dead". This is the only place
  * that silence becomes observable, so it is emitted on the same hourly pass
- * that already runs for the connection. The hosted log's event cooldown keeps a
- * days-long stall from writing an entry every hour.
+ * that already runs for the connection. Nothing downstream deduplicates hosted
+ * log writes, so the evaluator decides when a still-stalled source is worth
+ * re-reporting and this only writes the entries it marks.
  */
 async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
@@ -531,7 +532,7 @@ async function writeHostedDeviceSyncSourceStalledRuntimeLogs(input: {
         })),
       });
 
-      for (const entry of stale) {
+      for (const entry of stale.filter((candidate) => candidate.shouldReport)) {
         await writeHostedRuntimeLogBestEffort({
           entry: {
             component: "device-sync",

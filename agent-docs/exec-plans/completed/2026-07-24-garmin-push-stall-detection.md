@@ -35,9 +35,10 @@ Record per-source data arrival and evaluate it on the existing hourly pass.
 - Add a pure staleness evaluator in `packages/device-syncd` that flags a
   push-primary source whose `last_data_at` (or `first_seen_at`, for a source
   that never delivered) is older than its threshold.
-- Emit one `device-sync.source_stalled` hosted runtime log event per stale
-  source from the existing device-sync maintenance pass, under the existing
-  event cooldown.
+- Emit `device-sync.source_stalled` hosted runtime log events from the existing
+  device-sync maintenance pass. Nothing downstream deduplicates hosted log
+  writes, so the evaluator owns the report cadence: the first evaluation past
+  the threshold, then one per `repeatReportHours`.
 
 ## Invariants
 

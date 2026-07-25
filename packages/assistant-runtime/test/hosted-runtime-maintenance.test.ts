@@ -1994,7 +1994,7 @@ describe("runHostedDeviceSyncPass", () => {
             {
               displayName: null,
               firstSeenAt: "2026-04-01T00:00:00.000Z",
-              lastDataAt: "2026-04-01T00:00:00.000Z",
+              lastDataAt: "2026-04-06T12:00:00.000Z",
               lastErrorCode: null,
               lastErrorMessage: null,
               lastSeenAt: "2026-04-08T00:00:00.000Z",
@@ -2055,11 +2055,11 @@ describe("runHostedDeviceSyncPass", () => {
     assert.equal(entry.component, "device-sync");
     assert.equal(entry.level, "warn");
     assert.deepEqual(entry.redactedJson, {
-      lastDataAt: "2026-04-01T00:00:00.000Z",
+      lastDataAt: "2026-04-06T12:00:00.000Z",
       provider: "aggregator",
       reason: "stopped_delivering",
-      silentHours: 168,
-      silentSinceAt: "2026-04-01T00:00:00.000Z",
+      silentHours: 36,
+      silentSinceAt: "2026-04-06T12:00:00.000Z",
       sourceProviderSlug: "garmin",
       thresholdHours: 36,
     });
