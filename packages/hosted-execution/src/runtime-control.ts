@@ -1241,8 +1241,9 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "update_display_name";
       result:
-        // A null group means the chat was renamed and there is no hosted group
-        // record yet to carry the same label.
+        // The chat was renamed. A null group means no updated hosted group
+        // summary came back — either the chat has no hosted group record or the
+        // label write was not confirmed. It does not prove which.
         | { status: "ok"; group: HostedRuntimeGroupSummary | null }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }

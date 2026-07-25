@@ -1585,9 +1585,11 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
-      .toContain('a renamed chat with no hosted group record yet returns status="ok" with group=null');
+      .toContain('group=null means only that no updated group summary came back');
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("never read it as proof that the group does not exist or that the label was saved");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
-      .toContain("stores the same hosted group label when the chat has a hosted group record");
+      .toContain("then tries to store the same hosted group label");
   });
 
   it("rejects invalid update_display_name arguments", () => {

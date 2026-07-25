@@ -574,8 +574,10 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
   // exists once the group has a hosted record, so observe that record after the
   // provider accepted — a group created while the rename was in flight still
   // gets the label — and keep the write best-effort: a title the chat already
-  // shows must not be reported as a failed rename. A null group means the label
-  // was not stored, and the next rename or group read carries it instead.
+  // shows must not be reported as a failed rename. A null group therefore says
+  // only that no updated summary came back, whether because there is no record
+  // or because the write failed; another rename is the only thing that stores
+  // the label afterwards.
   let updated: Awaited<
     ReturnType<typeof updateHostedGroupDisplayNameByRuntimeMemberIdTx>
   > = null;
