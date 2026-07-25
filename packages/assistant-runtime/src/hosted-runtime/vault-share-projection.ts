@@ -28,6 +28,7 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
   HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY,
@@ -878,11 +879,15 @@ export function selectProjectableWorkoutsDays(
       continue;
     }
 
-    const kind = normalizeActivityKindToken(row.activityKind ?? "");
+    // A row without a specific activity kind still reached here through
+    // positive workout evidence, so it is a real workout with a generic
+    // provider label. Disclose it generically instead of failing the whole
+    // projection and erasing every other member workout in the window.
+    const kind = normalizeActivityKindToken(row.activityKind ?? "")
+      ?? HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND;
     const minutes = row.durationMinutes;
     if (
-      !kind
-      || kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
+      kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
       || typeof minutes !== "number"
       || !Number.isFinite(minutes)
       || minutes <= 0

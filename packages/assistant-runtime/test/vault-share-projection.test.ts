@@ -1602,6 +1602,60 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
+  it("discloses a generic provider workout instead of emptying the projection", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_generic_whoop_workout",
+        kind: "activity_session",
+        // WHOOP maps an unusable sport name to the canonical generic type.
+        occurredAt: "2026-07-03T19:00:00.000Z",
+        dayKey: "2026-07-03",
+        recordedAt: "2026-07-03T20:00:00.000Z",
+        timeZone: "UTC",
+        source: "device",
+        externalRef: {
+          system: "whoop",
+          resourceType: "workout",
+          resourceId: "whoop-generic-1",
+        },
+        activityType: "workout",
+        durationMinutes: 40,
+      },
+      {
+        schemaVersion: "murph.event.v1",
+        id: "evt_specific_running_workout",
+        kind: "activity_session",
+        occurredAt: "2026-07-02T18:30:00.000Z",
+        dayKey: "2026-07-02",
+        recordedAt: "2026-07-02T19:20:00.000Z",
+        timeZone: "UTC",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-workouts",
+          resourceId: "junction-specific-1",
+        },
+        activityType: "running",
+        durationMinutes: 30,
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      // The generic row is real workout evidence, so it is disclosed plainly.
+      expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
+        .toMatchObject([{ kind: "workout", minutes: 40 }]);
+      // And it must not take the unrelated specific workout down with it.
+      expect(findWorkoutsRecord(selected, "2026-07-02")?.data.workouts)
+        .toMatchObject([{ kind: "running", minutes: 30 }]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("widens the UTC source read for the Asia/Tokyo earliest local window day", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",

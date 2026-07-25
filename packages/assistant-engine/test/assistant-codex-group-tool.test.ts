@@ -774,11 +774,12 @@ describe("murph.group dynamic tool", () => {
             // literal is stated once for the projection instead of per record.
             days: {
               "2026-07-18": [{
-                kind: "running",
+                kindIndex: 0,
                 minutes: 45,
                 startLocalMs: 64_800_001,
               }],
             },
+            kinds: ["running"],
             timeSemantics: "canonical-event-zone-or-vault-zone.v0",
           }],
         }],
@@ -865,8 +866,9 @@ describe("murph.group dynamic tool", () => {
     expect(Object.values(days ?? {}).every(Array.isArray)).toBe(true);
     expect(days).toEqual({
       "2026-07-24": [],
-      "2026-07-25": [{ kind: "running", minutes: 30, startLocalMs: 68_400_000 }],
+      "2026-07-25": [{ kindIndex: 0, minutes: 30, startLocalMs: 68_400_000 }],
     });
+    expect(projection.kinds).toEqual(["running"]);
     // Pending dates are named once at the projection, not folded into the value.
     expect(projection.provisional).toEqual(["2026-07-25"]);
   });
@@ -3514,6 +3516,7 @@ function readGroupToolPayload(
 
 interface ReadSharedProjectionShape {
   days?: Record<string, unknown>;
+  kinds?: string[];
   provisional?: string[];
   records?: { data: Record<string, unknown> }[];
   timeSemantics?: string;

@@ -3323,6 +3323,10 @@ function groupSharedWorkoutsModelProjection(
   // referee is instructed to run on an open local date.
   const days: Record<string, unknown> = {}
   const provisional: string[] = []
+  // Activity kinds repeat on every workout and can be up to 80 characters, which
+  // made them the largest remaining budget dimension. A member's week uses only a
+  // handful of distinct kinds, so they are listed once and referenced by index.
+  const kinds: string[] = []
   let timeSemantics: string | undefined
   for (const record of projection.records) {
     const entries = Object.entries(record.data)
@@ -3339,12 +3343,34 @@ function groupSharedWorkoutsModelProjection(
     if (entries.find(([key]) => key === 'provisional')?.[1] === true) {
       provisional.push(date)
     }
-    days[date] = workouts
+    const dayWorkouts: unknown[] = []
+    for (const workout of workouts) {
+      const workoutEntries = Object.entries(
+        workout as Record<string, unknown>,
+      )
+      const kind = workoutEntries.find(([key]) => key === 'kind')?.[1]
+      if (typeof kind !== 'string') {
+        return null
+      }
+      let kindIndex = kinds.indexOf(kind)
+      if (kindIndex === -1) {
+        kindIndex = kinds.push(kind) - 1
+      }
+      dayWorkouts.push({
+        kindIndex,
+        ...Object.fromEntries(
+          workoutEntries.filter(([key]) => key !== 'kind'),
+        ),
+      })
+    }
+    days[date] = dayWorkouts
   }
   return {
     dataStatus: projection.dataStatus,
     days,
     grantStatus: projection.grantStatus,
+    // Each workout's `kindIndex` points into this list.
+    ...(kinds.length === 0 ? {} : { kinds }),
     projectionScope: projection.projectionScope,
     projectionScopeKey: projection.projectionScopeKey,
     // Dates whose member-local day is still open, so scoring them would settle

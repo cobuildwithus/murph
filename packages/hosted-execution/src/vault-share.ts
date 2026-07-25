@@ -412,6 +412,15 @@ export const HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS =
 // than truncating a day.
 export const HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY = 13;
 export const HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH = 80;
+/**
+ * Providers can emit a real workout with no usable sport name; WHOOP maps an
+ * unusable `sport_name` to the canonical type `workout`. The activity-kind
+ * resolver deliberately rejects such generic tokens because it exists to
+ * classify adherence, not to label a disclosure. A workout proved by durable
+ * external-reference evidence is still a workout the group asked to see, so it
+ * is disclosed under this truthful generic label rather than dropped.
+ */
+export const HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND = "workout";
 
 export interface HostedVaultShareDailyMetricData {
   date: string;

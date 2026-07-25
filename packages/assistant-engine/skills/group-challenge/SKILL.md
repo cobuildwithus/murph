@@ -140,7 +140,10 @@ threshold does not count as after it.
 
 `workouts.v0` reads as `days`, an object keyed by ISO date whose value is
 always that day's list of workouts. Each element discloses only
-`startLocalMs`, `minutes`, and `kind`. The projection states `timeSemantics`
+`startLocalMs`, `minutes`, and `kindIndex`. Activity kinds are listed once per
+projection in `kinds`, and `kindIndex` is that list's position: a workout's
+activity type is `kinds[workout.kindIndex]`. A generic provider workout with no
+specific sport is disclosed truthfully as `workout`. The projection states `timeSemantics`
 once, and its required value is `canonical-event-zone-or-vault-zone.v0`: the
 local clock uses the canonical event timezone when available and otherwise the
 member vault timezone; it does not prove physical workout location. A settled
