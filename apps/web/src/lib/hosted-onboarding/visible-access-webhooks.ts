@@ -118,6 +118,7 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
   }
 
   const delivery = await sendHostedTelegramAccessNotice({
+    authorizedTelegramUserId: summary.senderTelegramUserId,
     memberId: memberResolution.lookup.core.id,
     message: access.message,
     noticeCode: readHostedRecognizedInboundNoticeCode(access),
