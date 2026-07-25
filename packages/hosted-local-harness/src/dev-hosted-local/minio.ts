@@ -23,8 +23,11 @@ import {
 import type {
   BufferedNamedChildProcess,
 } from "./types.ts";
+import { HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE } from "./minio-image-contract.ts";
 
-const DEFAULT_HOSTED_LOCAL_MINIO_IMAGE = "minio/minio:RELEASE.2025-09-07T16-13-09Z";
+// Still the upstream ref: the GHCR mirror only becomes the default once the
+// mirror workflow has published it from main.
+const DEFAULT_HOSTED_LOCAL_MINIO_IMAGE = HOSTED_LOCAL_MINIO_UPSTREAM_IMAGE;
 const DEFAULT_HOSTED_LOCAL_MINIO_DATA_DIR = path.join(".tmp", "hosted-local-minio-r2");
 const HOSTED_LOCAL_MINIO_DATA_DIR_ENV = "MURPH_DEV_MINIO_DATA_DIR";
 const HOSTED_LOCAL_MINIO_PORT_ENV = "MURPH_DEV_MINIO_PORT";
