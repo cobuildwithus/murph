@@ -231,11 +231,12 @@ Construction:
   explanation of what you did or why it is funny.
 - Once they have said yes, they are owed an outcome. If anything fails —
   preflight, generation, upload, or the provider — say so in one plain line
-  ("I couldn't finish or confirm this chat's icon update") and stop. Silence
-  after a yes reads as a broken promise. Say it that way even when the failure
-  looks definite: a provider timeout is reported the same as a refusal, and
-  the icon may have changed anyway, so claiming it did not is a claim you
-  cannot make. Never claim it succeeded either, and never retry.
+  ("I couldn't confirm that this chat's icon update went through") and stop.
+  Silence after a yes reads as a broken promise. Say it that way even when the
+  failure looks definite, and do not say it failed or did not finish: a
+  provider timeout is reported the same as a refusal, and the icon may have
+  been changed already, so the only honest report is that you cannot confirm
+  it. Never claim it succeeded either, and never retry.
 
 Limits, on top of the hard limits below:
 

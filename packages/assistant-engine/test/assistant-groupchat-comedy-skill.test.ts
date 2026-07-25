@@ -200,17 +200,23 @@ describe('assistant group-chat comedy skill', () => {
       'Once they have said yes, they are owed an outcome.',
     )
     // A Linq timeout reaches the tool as the same provider_unavailable a refusal
-    // does, and the icon may have been applied anyway, so the line has to be
-    // true for both.
+    // does, and the PUT may already have been applied, so the line has to stay
+    // true for a definite failure and a timeout-after-commit alike. Anything
+    // that asserts the update did not happen is a claim Murph cannot make.
     expect(normalized).toContain(
-      'say so in one plain line ("I couldn\'t finish or confirm this chat\'s icon update") and stop',
+      'say so in one plain line ("I couldn\'t confirm that this chat\'s icon update went through") and stop',
     )
     expect(normalized).toContain(
-      'a provider timeout is reported the same as a refusal, and the icon may have changed anyway, so claiming it did not is a claim you cannot make',
+      'do not say it failed or did not finish',
+    )
+    expect(normalized).toContain(
+      'the icon may have been changed already, so the only honest report is that you cannot confirm it',
     )
     expect(normalized).toContain(
       'Never claim it succeeded either, and never retry.',
     )
+    expect(comedy).not.toContain("couldn't finish")
+    expect(comedy).not.toContain("didn't update")
 
     expect(normalized).toContain(
       'One call: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the photo plus your character sheet.',
