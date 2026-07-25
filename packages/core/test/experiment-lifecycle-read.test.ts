@@ -43,13 +43,18 @@ test("experiment lifecycle reads discard a partially enumerated snapshot when as
   }
 });
 
-test("experiment lifecycle reads never traverse the outcomes tree", async () => {
+test("experiment lifecycle reads never list anything from the outcomes tree", async () => {
   const vaultRoot = await makeVault("murph-experiment-lifecycle-outcomes");
 
   try {
     await fs.mkdir(path.join(vaultRoot, "bank/experiments/outcomes"), {
       recursive: true,
     });
+    await fs.writeFile(
+      path.join(vaultRoot, "bank/experiments/outcomes/completed-2026-04-01.json"),
+      "{}\n",
+      "utf8",
+    );
     await fs.writeFile(
       path.join(vaultRoot, "bank/experiments/outcomes/not-an-outcome.txt"),
       "ignored by lifecycle frontmatter reads",
@@ -122,6 +127,10 @@ test("experiment lifecycle reads never report a document hidden below the root a
   for (const hidden of [
     "recovered/sleep-reset.md",
     "recovered/deeper/still/sleep-reset.md",
+    // The reserved outcomes subtree is not exempt from this: it is walked by
+    // the same rule as any other directory.
+    "outcomes/sleep-reset.md",
+    "outcomes/nested/sleep-reset.md",
   ]) {
     const vaultRoot = await makeVault("murph-experiment-lifecycle-hidden-md");
     const experimentRoot = path.join(vaultRoot, "bank/experiments");
@@ -139,8 +148,9 @@ test("experiment lifecycle reads never report a document hidden below the root a
         (error: unknown) =>
           error instanceof VaultError
           && error.code === "EXPERIMENT_STORAGE_INVALID"
+          // The rejected path names the hidden document itself.
           && (error.details as { relativePath?: string }).relativePath
-            === "bank/experiments/recovered",
+            === `bank/experiments/${hidden}`,
         `hidden document ${hidden}`,
       );
     } finally {
