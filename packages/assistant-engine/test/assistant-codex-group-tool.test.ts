@@ -223,6 +223,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_SHARED_READ_TOOL.inputSchema.properties.action.enum).toEqual([
       "read_shared",
     ]);
+    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
+      .toContain('status="partial" with omittedParticipantIds');
+    expect(MURPH_GROUP_SHARED_READ_TOOL.description)
+      .toContain("never infer departure, score, diagnostic state, or permission state");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('status="partial" with omittedParticipantIds');
 
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
@@ -719,6 +725,7 @@ describe("murph.group dynamic tool", () => {
           projectionScopeKey: "workouts.v0",
           records: [{
             data: {
+              calendarClosedThroughDate: "2026-07-17",
               date: "2026-07-18",
               timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
               workouts: [{
@@ -766,6 +773,7 @@ describe("murph.group dynamic tool", () => {
           // Projections are keyed by scope, so each one no longer restates it.
           projections: {
             "workouts.v0": {
+              calendarClosedThroughDate: "2026-07-17",
               // Days are keyed by their ISO date, and the one required semantics
               // literal is stated once for the projection, not per record.
               days: {
@@ -798,7 +806,7 @@ describe("murph.group dynamic tool", () => {
       .toHaveLength(1);
   });
 
-  it("keeps every workouts day value an array and lists provisional dates", async () => {
+  it("keeps every workouts day value an array and hoists its completion watermark", async () => {
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
         currentTurnHandles: [],
@@ -813,6 +821,7 @@ describe("murph.group dynamic tool", () => {
           records: [
             {
               data: {
+                calendarClosedThroughDate: "2026-07-24",
                 date: "2026-07-24",
                 timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
                 workouts: [],
@@ -822,8 +831,8 @@ describe("murph.group dynamic tool", () => {
             },
             {
               data: {
+                calendarClosedThroughDate: "2026-07-24",
                 date: "2026-07-25",
-                provisional: true as const,
                 timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
                 workouts: [{ kind: "running", minutes: 30, startLocalMs: 68_400_000 }],
               },
@@ -867,8 +876,7 @@ describe("murph.group dynamic tool", () => {
       "2026-07-25": [{ kindIndex: 0, minutes: 30, startLocalMs: 68_400_000 }],
     });
     expect(projection.kinds).toEqual(["running"]);
-    // Pending dates are named once at the projection, not folded into the value.
-    expect(projection.provisional).toEqual(["2026-07-25"]);
+    expect(projection.calendarClosedThroughDate).toBe("2026-07-24");
   });
 
   it("leaves an existing daily scope's model shape unchanged", async () => {
@@ -1057,30 +1065,55 @@ describe("murph.group dynamic tool", () => {
   });
 
   it("names omitted members instead of failing an oversized shared read", async () => {
-    // A big roster must not cost everyone their standings, but a member who
-    // silently disappeared would be indistinguishable from one with no data and
-    // could be chased with diagnostics or a permission card for data they did
-    // share. Dropped members are therefore named, never quietly removed.
+    const dates = [
+      "2026-07-24",
+      "2026-07-23",
+      "2026-07-22",
+      "2026-07-21",
+      "2026-07-20",
+      "2026-07-19",
+      "2026-07-18",
+    ];
+    const workoutKinds = Array.from({ length: 13 }, (_unused, index) =>
+      `activity-${String(index).padStart(2, "0")}-${"x".repeat(65)}`
+    );
+    // This uses the production roster, day, workout-count, and activity-kind
+    // bounds. A dense but valid roster must not cost everyone their standings,
+    // while capacity-omitted members must remain explicitly current.
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
-      members: Array.from({ length: 3 }, (_unused, index) => ({
+      members: Array.from({ length: 32 }, (_unused, index) => ({
         currentTurnHandles: [],
-        displayName: `Member ${"x".repeat(30_000)}`,
+        displayName: `Member ${index}`,
         memberId: `member_oversized_${index}`,
         participantId: `participant_oversized_${index}`,
         projections: [{
-          dataStatus: "missing" as const,
+          dataStatus: "available" as const,
           grantStatus: "granted" as const,
-          projectionScope: { projectionKind: "steps-days.v0" as const },
-          projectionScopeKey: "steps-days.v0",
-          records: [],
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records: dates.map((date) => ({
+            data: {
+              calendarClosedThroughDate: "2026-07-24",
+              date,
+              timeSemantics:
+                "canonical-event-zone-or-vault-zone.v0" as const,
+              workouts: workoutKinds.map((kind, workoutIndex) => ({
+                kind,
+                minutes: 1_440 - workoutIndex,
+                startLocalMs: 86_399_999 - workoutIndex,
+              })),
+            },
+            occurredAt: `${date}T00:00:00.000Z`,
+            recordKey: date,
+          })),
         }],
       })),
-      requestedProjectionScopeKeys: ["steps-days.v0"],
+      requestedProjectionScopeKeys: ["workouts.v0"],
       status: "ok",
     }));
     const request = readMurphDynamicToolRequest(groupToolCall({
       action: "read_shared",
-      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
     }));
     if (!request || request.kind !== "group") {
       throw new Error("Expected group request.");
@@ -1100,20 +1133,19 @@ describe("murph.group dynamic tool", () => {
     });
 
     const payload = JSON.parse(JSON.stringify(readGroupToolPayload(result)));
-    // Still a usable result rather than a refusal.
-    expect(payload.result.status).toBe("ok");
+    expect(payload.result.status).toBe("partial");
     // Whole members only: whoever remains is complete.
     expect(payload.result.members.length).toBeGreaterThan(0);
-    expect(payload.result.members.length).toBeLessThan(3);
+    expect(payload.result.members.length).toBeLessThan(32);
     for (const member of payload.result.members) {
-      expect(Object.keys(member.projections)).toEqual(["steps-days.v0"]);
+      expect(Object.keys(member.projections)).toEqual(["workouts.v0"]);
+      expect(member.projections["workouts.v0"].days)
+        .toHaveProperty("2026-07-24");
     }
-    // Everyone dropped is named, so the referee can say so rather than treat
-    // them as missing data.
     expect(payload.result.omittedParticipantIds.length)
-      .toBe(3 - payload.result.members.length);
+      .toBe(32 - payload.result.members.length);
     for (const omitted of payload.result.omittedParticipantIds) {
-      expect(omitted).toMatch(/^participant_oversized_\d$/u);
+      expect(omitted).toMatch(/^participant_oversized_\d+$/u);
     }
     expect(JSON.stringify(payload).length).toBeLessThanOrEqual(64_000);
   });
@@ -3562,10 +3594,10 @@ function readGroupToolPayload(
 }
 
 interface ReadSharedProjectionShape {
+  calendarClosedThroughDate?: string;
   days?: Record<string, unknown>;
   status?: string;
   kinds?: string[];
-  provisional?: string[];
   records?: { data: Record<string, unknown> }[];
   timeSemantics?: string;
 }

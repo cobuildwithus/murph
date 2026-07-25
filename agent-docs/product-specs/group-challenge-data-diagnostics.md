@@ -1,6 +1,6 @@
 # Group Challenge Data Diagnostics
 
-Last verified: 2026-07-18
+Last verified: 2026-07-25
 
 Status: Implemented
 
@@ -69,6 +69,14 @@ requested scope. Each cell distinguishes `not_granted`, `granted` plus
 come only from the separately granted profile snapshot. Authority, decryption,
 parsing, or bound failures return one typed `unavailable` result without shared
 records rather than falling back to cached data.
+
+That full Web result remains the authority boundary. The assistant-engine model
+adapter compacts it to the model's bounded result. If whole member rows still
+exceed that bound, it returns `status="partial"` and names each still-current
+capacity-omitted membership in `omittedParticipantIds`. Omission does not imply
+departure, a score, a diagnostic state, or a permission state. The assistant
+keeps those participants unverified and unranked and labels any standings
+partial; this model-only compaction never changes stored or Web-returned truth.
 
 Each returned member has a `participantId` derived from that group's
 `HostedGroupMember` row. It is stable only for the lifetime of that exact group
@@ -149,7 +157,8 @@ to each `in` participant and stops at the first match:
 
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data through the reporting cutoff | Include the participant in settled ranked standings only when the fact is not a current-local-day value. A same-day value may appear only in clearly labeled provisional/live standings. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. For deep/REM sleep, `data.provisional: true` remains pending. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Live diagnostic result with `needs-reconnect` or `disconnected` | The current shared read lacks a usable metric and its cause is unverified. Separately name the literal source label and coarse status. | The literal status supports asking the participant to reconnect that source privately; do not claim reconnecting will restore the metric. |
@@ -172,6 +181,18 @@ refresh is complete; exact-marker rejection ships only after that drain.
 Distinct workouts on one day add in the canonical workout-day rollup; Murph
 must never explain or correct a day by replacing one workout's minutes with
 another's.
+
+`workouts.v0` completion is conservative and monotonic. Its producer advances
+`calendarClosedThroughDate` only after a date has ended in UTC-12, the last
+civil timezone to leave it. Event-local or validated vault time zones still
+determine each workout's disclosed date and local start time, but neither the
+member's current declared timezone nor `time-zone.v0` controls settlement.
+The UTC-12 eligibility threshold can occur up to 26 hours after the member's
+own midnight. A stale visible snapshot stays pending until the next ordinary
+projection refresh advances the watermark; no finite refresh deadline is
+promised. Once a dated settled standings snapshot is published on the challenge
+page, later imported health data may be recorded as late context but does not
+silently rewrite that published ruling.
 
 ## Apple Health boundary
 

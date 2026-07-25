@@ -244,7 +244,7 @@ function scoreSettledWorkoutsDate(
   if (!record) {
     return { status: "missing" };
   }
-  if (record.data.provisional === true) {
+  if (date > record.data.calendarClosedThroughDate) {
     return { status: "pending" };
   }
   return {
@@ -893,7 +893,7 @@ describe("selectProjectableWorkoutDays", () => {
 });
 
 describe("selectProjectableWorkoutsDays", () => {
-  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const nowMs = Date.parse("2026-07-04T12:00:00.000Z");
 
   it("emits one day-keyed record with every workout in canonical local-clock order", () => {
     const selected = selectProjectableWorkoutsDays({
@@ -922,8 +922,8 @@ describe("selectProjectableWorkoutsDays", () => {
     expect(selected).toHaveLength(7);
     expect(findWorkoutsRecord(selected, "2026-07-03")).toEqual({
       data: {
+        calendarClosedThroughDate: "2026-07-03",
         date: "2026-07-03",
-        provisional: true,
         timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
         workouts: [
           {
@@ -951,7 +951,7 @@ describe("selectProjectableWorkoutsDays", () => {
   it("keeps a member behind group midnight pending and settles a later threshold flip", () => {
     const date = "2026-07-04";
     const thresholdLocalMs = 18 * 60 * 60 * 1_000;
-    const afterGroupMidnight = Date.parse("2026-07-04T10:30:00.000Z");
+    const afterGroupMidnight = Date.parse("2026-07-04T15:30:00.000Z");
     expect(
       formatTimeZoneDateTimeParts(afterGroupMidnight, "Pacific/Kiritimati").dayKey,
     ).toBe("2026-07-05");
@@ -973,8 +973,8 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
     expect(findWorkoutsRecord(initial, date)?.data).toMatchObject({
+      calendarClosedThroughDate: "2026-07-03",
       date,
-      provisional: true,
       workouts: [{ startLocalMs: 60 * 60 * 1_000 }],
     });
     expect(scoreSettledWorkoutsDate(initial, date, thresholdLocalMs)).toEqual({
@@ -995,7 +995,7 @@ describe("selectProjectableWorkoutsDays", () => {
       vaultTimeZone: "UTC",
     });
     expect(findWorkoutsRecord(updatedButOpen, date)?.data).toMatchObject({
-      provisional: true,
+      calendarClosedThroughDate: "2026-07-03",
       workouts: [
         { startLocalMs: 60 * 60 * 1_000 },
         { startLocalMs: 19 * 60 * 60 * 1_000 },
@@ -1008,13 +1008,12 @@ describe("selectProjectableWorkoutsDays", () => {
     )).toEqual({ status: "pending" });
 
     const settled = selectProjectableWorkoutsDays({
-      nowMs: Date.parse("2026-07-05T07:30:00.000Z"),
+      nowMs: Date.parse("2026-07-05T12:30:00.000Z"),
       rows: [earlyWorkout, laterWorkout],
       vaultTimeZone: "UTC",
     });
-    expect(findWorkoutsRecord(settled, date)?.data).not.toHaveProperty(
-      "provisional",
-    );
+    expect(findWorkoutsRecord(settled, date)?.data)
+      .toHaveProperty("calendarClosedThroughDate", date);
     expect(scoreSettledWorkoutsDate(settled, date, thresholdLocalMs)).toEqual({
       qualifies: true,
       status: "settled",
@@ -1022,34 +1021,45 @@ describe("selectProjectableWorkoutsDays", () => {
     });
   });
 
-  it("settles a date once the member's declared timezone has passed it", () => {
-    // A member far ahead of the group settles promptly on their own declared
-    // clock rather than waiting for the group's, and without the calendar being
-    // inferred from whichever workout happens to be latest.
-    const memberNowMs = Date.parse("2026-07-04T11:00:00.000Z");
+  it("settles a date only after the last civil timezone has passed it", () => {
+    const beforeGlobalCloseMs = Date.parse("2026-07-05T11:59:59.999Z");
     expect(
-      formatTimeZoneDateTimeParts(memberNowMs, "America/Los_Angeles").dayKey,
-    ).toBe("2026-07-04");
-    expect(
-      formatTimeZoneDateTimeParts(memberNowMs, "Pacific/Kiritimati").dayKey,
+      formatTimeZoneDateTimeParts(beforeGlobalCloseMs, "America/Los_Angeles").dayKey,
     ).toBe("2026-07-05");
+    expect(
+      formatTimeZoneDateTimeParts(beforeGlobalCloseMs, "Pacific/Kiritimati").dayKey,
+    ).toBe("2026-07-06");
 
-    const selected = selectProjectableWorkoutsDays({
-      nowMs: memberNowMs,
-      rows: [activitySessionRow({
-        activityKind: "running",
-        date: "2026-07-04",
-        durationMinutes: 30,
-        recordIds: ["evt_member_ahead_settled"],
-        startedAt: "2026-07-04T05:00:00.000Z",
-        timeZone: "Pacific/Kiritimati",
-      })],
+    const workout = activitySessionRow({
+      activityKind: "running",
+      date: "2026-07-04",
+      durationMinutes: 30,
+      recordIds: ["evt_global_close"],
+      startedAt: "2026-07-04T05:00:00.000Z",
+      timeZone: "Pacific/Kiritimati",
+    });
+    const pending = selectProjectableWorkoutsDays({
+      nowMs: beforeGlobalCloseMs,
+      rows: [workout],
       vaultTimeZone: "Pacific/Kiritimati",
     });
-    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).not
-      .toHaveProperty("provisional");
+    expect(findWorkoutsRecord(pending, "2026-07-04")?.data)
+      .toHaveProperty("calendarClosedThroughDate", "2026-07-03");
     expect(scoreSettledWorkoutsDate(
-      selected,
+      pending,
+      "2026-07-04",
+      18 * 60 * 60 * 1_000,
+    )).toEqual({ status: "pending" });
+
+    const settled = selectProjectableWorkoutsDays({
+      nowMs: Date.parse("2026-07-05T12:00:00.000Z"),
+      rows: [workout],
+      vaultTimeZone: "Pacific/Kiritimati",
+    });
+    expect(findWorkoutsRecord(settled, "2026-07-04")?.data)
+      .toHaveProperty("calendarClosedThroughDate", "2026-07-04");
+    expect(scoreSettledWorkoutsDate(
+      settled,
       "2026-07-04",
       18 * 60 * 60 * 1_000,
     )).toEqual({
@@ -1059,7 +1069,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
   });
 
-  it("dates a travelling workout in its event zone but settles it on the declared zone", () => {
+  it("dates a travelling workout in its event zone without using that zone for settlement", () => {
     const travelNowMs = Date.parse("2026-07-04T15:30:00.000Z");
     expect(formatTimeZoneDateTimeParts(travelNowMs, "Asia/Tokyo").dayKey)
       .toBe("2026-07-05");
@@ -1086,12 +1096,8 @@ describe("selectProjectableWorkoutsDays", () => {
       date: "2026-07-04",
       workouts: [{ startLocalMs: 22 * 60 * 60 * 1_000 }],
     });
-    // Finality is decided by the member's declared zone, which is still on
-    // 2026-07-04, so the day is not settled yet even though it has ended where
-    // they are travelling. A stable declared clock is what stops a later import
-    // reclassifying a day already reported to the group.
     expect(findWorkoutsRecord(selected, "2026-07-04")?.data)
-      .toHaveProperty("provisional", true);
+      .toHaveProperty("calendarClosedThroughDate", "2026-07-03");
     // The zone itself is still never embedded in a workout record; it is shared
     // only through the separately granted time-zone.v0 scope.
     expect(JSON.stringify(selected)).not.toMatch(
@@ -1099,7 +1105,7 @@ describe("selectProjectableWorkoutsDays", () => {
     );
   });
 
-  it("keeps the member calendar's current date provisional across travel zones", () => {
+  it("keeps the globally open date pending across travel zones", () => {
     const travelNowMs = Date.parse("2026-07-04T16:00:00.000Z");
     expect(formatTimeZoneDateTimeParts(
       travelNowMs,
@@ -1132,7 +1138,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
 
     expect(findWorkoutsRecord(selected, "2026-07-04")?.data).toMatchObject({
-      provisional: true,
+      calendarClosedThroughDate: "2026-07-03",
       workouts: [{ kind: "running", startLocalMs: 30 * 60 * 1_000 }],
     });
   });
@@ -1171,7 +1177,87 @@ describe("selectProjectableWorkoutsDays", () => {
     expect(utcRecord?.sourceRevision).toBe(newYorkRecord?.sourceRevision);
   });
 
-  it("keeps both repeated-DST-hour workouts and settles only after the local date closes", () => {
+  it("does not reopen a completed date when the declared timezone changes", () => {
+    const rows = [activitySessionRow({
+      activityKind: "running",
+      date: "2026-07-03",
+      durationMinutes: 45,
+      recordIds: ["evt_timezone_change"],
+      startedAt: "2026-07-03T18:00:00.000Z",
+      timeZone: "UTC",
+    })];
+
+    const beforeChange = selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: "America/Los_Angeles",
+    });
+    const afterChange = selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: "Pacific/Kiritimati",
+    });
+
+    expect(afterChange).toEqual(beforeChange);
+    expect(scoreSettledWorkoutsDate(
+      afterChange,
+      "2026-07-03",
+      18 * 60 * 60 * 1_000,
+    )).toMatchObject({ status: "settled" });
+  });
+
+  it("does not require a declared timezone when the event timezone is valid", () => {
+    const rows = [activitySessionRow({
+      activityKind: "running",
+      date: "2026-07-03",
+      durationMinutes: 45,
+      recordIds: ["evt_no_declared_timezone"],
+      startedAt: "2026-07-03T18:00:00.000Z",
+      timeZone: "UTC",
+    })];
+
+    expect(selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: null,
+    })).toEqual(selectProjectableWorkoutsDays({
+      nowMs,
+      rows,
+      vaultTimeZone: "Pacific/Kiritimati",
+    }));
+  });
+
+  it("defers a valid date-line workout outside the window without erasing it", () => {
+    const selected = selectProjectableWorkoutsDays({
+      nowMs,
+      rows: [
+        activitySessionRow({
+          activityKind: "running",
+          date: "2026-07-03",
+          durationMinutes: 30,
+          recordIds: ["evt_inside_window"],
+          startedAt: "2026-07-03T18:00:00.000Z",
+          timeZone: "UTC",
+        }),
+        activitySessionRow({
+          activityKind: "cycling",
+          date: "2026-07-05",
+          durationMinutes: 30,
+          recordIds: ["evt_across_date_line"],
+          startedAt: "2026-07-04T11:30:00.000Z",
+          timeZone: "Pacific/Kiritimati",
+        }),
+      ],
+      vaultTimeZone: "UTC",
+    });
+
+    expect(selected).toHaveLength(7);
+    expect(findWorkoutsRecord(selected, "2026-07-03")?.data.workouts)
+      .toHaveLength(1);
+    expect(findWorkoutsRecord(selected, "2026-07-05")).toBeUndefined();
+  });
+
+  it("keeps both repeated-DST-hour workouts and settles only after global close", () => {
     const rows = [
       activitySessionRow({
         activityKind: "running",
@@ -1191,12 +1277,12 @@ describe("selectProjectableWorkoutsDays", () => {
       }),
     ];
     const open = selectProjectableWorkoutsDays({
-      nowMs: Date.parse("2026-11-01T06:30:00.000Z"),
+      nowMs: Date.parse("2026-11-01T13:00:00.000Z"),
       rows,
       vaultTimeZone: "UTC",
     });
     expect(findWorkoutsRecord(open, "2026-11-01")?.data).toMatchObject({
-      provisional: true,
+      calendarClosedThroughDate: "2026-10-31",
       workouts: [
         { kind: "cycling", startLocalMs: 75 * 60 * 1_000 },
         { kind: "running", startLocalMs: 75 * 60 * 1_000 },
@@ -1209,12 +1295,12 @@ describe("selectProjectableWorkoutsDays", () => {
     )).toEqual({ status: "pending" });
 
     const settled = selectProjectableWorkoutsDays({
-      nowMs: Date.parse("2026-11-02T05:30:00.000Z"),
+      nowMs: Date.parse("2026-11-02T12:00:00.000Z"),
       rows,
       vaultTimeZone: "UTC",
     });
-    expect(findWorkoutsRecord(settled, "2026-11-01")?.data).not
-      .toHaveProperty("provisional");
+    expect(findWorkoutsRecord(settled, "2026-11-01")?.data)
+      .toHaveProperty("calendarClosedThroughDate", "2026-11-01");
     expect(scoreSettledWorkoutsDate(
       settled,
       "2026-11-01",
@@ -1460,6 +1546,7 @@ describe("selectProjectableWorkoutsDays", () => {
 
     expect(selected).toHaveLength(7);
     expect(findWorkoutsRecord(selected, "2026-07-03")?.data).toEqual({
+      calendarClosedThroughDate: "2026-07-03",
       date: "2026-07-03",
       timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
       workouts: [],
@@ -1478,6 +1565,27 @@ describe("selectProjectableWorkoutsDays", () => {
       "2026-07-04",
       18 * 60 * 60 * 1_000,
     )).toEqual({ status: "pending" });
+    // A reader never advances a stale snapshot from its own clock.
+    expect(scoreSettledWorkoutsDate(
+      selected,
+      "2026-07-04",
+      18 * 60 * 60 * 1_000,
+    )).toEqual({ status: "pending" });
+
+    const refreshed = selectProjectableWorkoutsDays({
+      nowMs: Date.parse("2026-07-05T12:00:00.000Z"),
+      rows: [],
+      vaultTimeZone: "Pacific/Kiritimati",
+    });
+    expect(scoreSettledWorkoutsDate(
+      refreshed,
+      "2026-07-04",
+      18 * 60 * 60 * 1_000,
+    )).toEqual({
+      qualifies: false,
+      status: "settled",
+      workoutCount: 0,
+    });
     expect(scoreSettledWorkoutsDate(
       selected,
       "2026-06-27",

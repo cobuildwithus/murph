@@ -12,6 +12,8 @@ import {
   type HostedVaultShareProjectionScope,
 } from "@murphai/hosted-execution/vault-share";
 
+import { HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION } from "./projection-display-copy";
+
 type HostedVaultShareSelectableProjectionKind =
   (typeof HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS)[number];
 
@@ -47,8 +49,7 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
 }> = {
   "time-zone.v0": {
     label: "Time zone",
-    description:
-      "Shares your time zone so the group knows which day your data belongs to. No location.",
+    description: HOSTED_VAULT_SHARE_TIME_ZONE_DESCRIPTION,
   },
   "group-email.v0": {
     label: "Email address",

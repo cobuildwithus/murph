@@ -879,23 +879,11 @@ export function selectProjectableWorkoutsDays(
     }
     const timeZone = normalizeIanaTimeZone(row.timeZone) ?? vaultTimeZone;
     if (!timeZone) {
-      continue;
+      return [];
     }
 
     const localStart = readProjectableWorkoutLocalStart(startedAt, timeZone);
-    const currentDate = readTimeZoneDate(input.nowMs, timeZone);
-    if (!localStart || !currentDate) {
-      continue;
-    }
-    const earliestDate = shiftIsoDate(
-      currentDate,
-      -(HOSTED_VAULT_SHARE_PROJECTION_DAILY_RECORD_WINDOW - 1),
-    );
-    if (
-      !earliestDate
-      || localStart.date < earliestDate
-      || localStart.date > currentDate
-    ) {
+    if (!localStart) {
       continue;
     }
 
@@ -944,17 +932,15 @@ export function selectProjectableWorkoutsDays(
     }
   }
 
-  // The member's own declared timezone anchors the window and settlement. It is
-  // a stable fact, so an ingested workout cannot reclassify an already reported
-  // day the way a calendar derived from the latest candidate could. It is also
-  // the same timezone shared through time-zone.v0, so the group can see which
-  // clock decided a day rather than having to trust an undisclosed one.
-  const calendarTimeZone = normalizeIanaTimeZone(vaultTimeZone);
-  if (!calendarTimeZone) {
+  // A date is complete only after it has ended in UTC-12, the last civil
+  // timezone to leave it. This boundary is global and monotonic: changing a
+  // member's declared timezone cannot reopen a result that was already final.
+  const calendarCurrentDate = readTimeZoneDate(input.nowMs, "Etc/GMT+12");
+  if (!calendarCurrentDate) {
     return [];
   }
-  const calendarCurrentDate = readTimeZoneDate(input.nowMs, calendarTimeZone);
-  if (!calendarCurrentDate) {
+  const calendarClosedThroughDate = shiftIsoDate(calendarCurrentDate, -1);
+  if (!calendarClosedThroughDate) {
     return [];
   }
   const windowDates = readRecentIsoDates(
@@ -969,7 +955,7 @@ export function selectProjectableWorkoutsDays(
   const groups = new Map<string, ProjectableWorkoutCandidate[]>();
   for (const candidate of dedupedCandidates) {
     if (!windowDateSet.has(candidate.row.date)) {
-      return [];
+      continue;
     }
     const group = groups.get(candidate.row.date) ?? [];
     group.push(candidate);
@@ -984,15 +970,11 @@ export function selectProjectableWorkoutsDays(
     const workouts = candidates
       .map((candidate) => candidate.workout)
       .sort(compareHostedVaultShareWorkouts);
-    const provisional = date === calendarCurrentDate
-      || candidates.some((candidate) =>
-        date === readTimeZoneDate(input.nowMs, candidate.timeZone)
-      );
 
     return {
       data: {
+        calendarClosedThroughDate,
         date,
-        ...(provisional ? { provisional: true } : {}),
         timeSemantics: HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
         workouts,
       },
@@ -1000,6 +982,7 @@ export function selectProjectableWorkoutsDays(
       recordKey: date,
       ...sourceRevisionField(
         deriveWorkoutsSourceRevision({
+          calendarClosedThroughDate,
           candidates,
           date,
           workouts,
@@ -1838,6 +1821,7 @@ function deriveCompositeMetricSeriesSourceRevision(
 }
 
 function deriveWorkoutsSourceRevision(input: {
+  calendarClosedThroughDate: string;
   candidates: readonly ProjectableWorkoutCandidate[];
   date: string;
   workouts: readonly HostedVaultShareWorkout[];
@@ -1853,6 +1837,7 @@ function deriveWorkoutsSourceRevision(input: {
   }
 
   return hashOpaqueSourceRevision({
+    calendarClosedThroughDate: input.calendarClosedThroughDate,
     date: input.date,
     projectionKind: "workouts.v0",
     revisions: revisions.sort(),

@@ -27,11 +27,13 @@ join-policy, or permission-offer facts. Use
 `murph.group action="read_shared"` when the current turn needs shared group
 data or exact current-turn membership attribution. Pass one to three exact
 projection scopes. That read happens after the model turn has begun and returns
-every current group member with an explicit `status` for
-each requested scope. It is the only hosted model-facing path to the current
-Web-owned shared snapshot; do not use `vault-cli group shared`, `vault-cli group
-weekly`, a preloaded roster, or a remembered prompt snapshot as an alternate
-source.
+every current group member only when `status="ok"`, with an explicit projection
+`status` for each requested scope. A model-size `status="partial"` result
+instead names every still-current capacity-omitted member as described under
+**Shared challenge data**. It is the only hosted model-facing path to the
+current Web-owned shared snapshot; do not use `vault-cli group shared`,
+`vault-cli group weekly`, a preloaded roster, or a remembered prompt snapshot
+as an alternate source.
 
 On an interactive group turn, a shared member's `currentTurnHandles` may contain
 only exact, route-authorized `Sender:` handles from the current prompt that Web
@@ -424,6 +426,11 @@ usable record in the current snapshot,
 and `status="available"` as usable only from the returned records. A
 recorded zero is available data. Never infer a grant from a record, rank
 missing data as zero, or let an empty result hide an opted-in participant.
+`status="ok"` contains every current member. A model-size `status="partial"`
+result names still-current capacity-omitted members in
+`omittedParticipantIds`; never infer that they left or infer their score,
+diagnostic state, or permission state, and never present partial standings as
+complete.
 
 `status="unavailable"` means Web could not resolve current authority and the
 direct bounded snapshot. It returns no roster or projection payload. Do not use stale

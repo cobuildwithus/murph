@@ -169,8 +169,8 @@ describe("workouts.v0 snapshot bounds", () => {
         const date = `2026-07-${String(24 - dayIndex).padStart(2, "0")}`;
         return {
           data: {
+            calendarClosedThroughDate: "2026-07-23",
             date,
-            provisional: true,
             timeSemantics: "canonical-event-zone-or-vault-zone.v0",
             workouts: Array.from(
               { length: HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY },
@@ -199,7 +199,7 @@ describe("workouts.v0 snapshot bounds", () => {
     const encoder = new TextEncoder();
 
     const snapshotBytes = encoder.encode(serialized).byteLength;
-    expect(snapshotBytes).toBe(15_913);
+    expect(snapshotBytes).toBe(16_067);
     expect(snapshotBytes).toBeLessThanOrEqual(
       HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES,
     );
@@ -475,6 +475,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       projectionScope: WORKOUTS_SCOPE,
       records: [{
         data: {
+          calendarClosedThroughDate: date,
           date,
           timeSemantics: "canonical-event-zone-or-vault-zone.v0",
           workouts: [{ kind: "running", minutes: 30, startLocalMs: 0 }],

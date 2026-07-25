@@ -124,20 +124,20 @@ with no card at all.
 - REM sleep minutes: `rem-sleep-days.v0`
 - Sleep timing: `sleep-times.v0`
 - Every workout's local start time, duration, and type by day: `workouts.v0`
-- The member's own time zone: `time-zone.v0`. Not a scoring metric — it tells
-  you which calendar day a member's daily facts belong to and when that day has
-  finished for them, so a challenge can settle their day on their own clock
-  instead of waiting for it to end everywhere on earth. It shares a time zone,
-  never a location.
+- The member's currently declared time zone: `time-zone.v0`. This is optional,
+  human-readable context, not a scoring metric or settlement authority. Workout
+  dates still use the event/vault-zone semantics below, and a current time zone
+  neither proves location nor reopens a completed challenge date.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 
-For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer
-marks the open member-local date `data.provisional: true`; absence means settled. Rank only settled
-records and keep provisional values pending or clearly labeled provisional/live until
-that member's own local day closes. Never use a group, schedule, or UTC clock,
-disclose the private event/vault timezone, or promise a dispatch. Other scopes keep their existing
-date behavior; current-date Steps remains scoreable.
+For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open
+member-local date `data.provisional: true`; absence means settled. Rank only
+settled records and keep provisional values pending or clearly labeled
+provisional/live until that member's own local day closes. Never substitute a
+reader, group, or schedule clock, disclose the private event/vault timezone, or
+promise a dispatch. Other scopes keep their existing date behavior;
+current-date Steps remains scoreable.
 
 For a challenge such as "any workout starting after 6 PM," normalize the
 configured threshold once at kickoff to an integer number of milliseconds
@@ -163,12 +163,18 @@ qualifying workout. A date absent from `days` is unobserved: it is not
 `false`, zero, or evidence that no workout happened, so leave the participant
 unscored and report missing data. That same undisclosed zone dates the day.
 
-The projection may also carry `provisional`, a list of dates whose
-member-local day has not closed yet. Check `provisional.includes(date)` before
-scoring: a provisional date is pending, not missing and not zero, because a
-later workout can still change it. Report it as settling once that member's own
-local day closes, and never send a pending date into missing-data diagnostics
-or a permission offer.
+The projection also carries `calendarClosedThroughDate`, a producer-owned
+completion watermark. Score a workout date only when
+`date <= calendarClosedThroughDate`; a later date is pending, not missing or
+zero, because another workout can still change it. The producer advances this
+watermark only after the date has ended in UTC-12, the last civil timezone to
+leave it. That eligibility threshold can occur up to 26 hours after a member's
+own midnight, but the visible snapshot advances only on the next ordinary
+projection refresh and has no promised finite refresh deadline. Completion can
+never regress when the member's declared timezone changes. Never advance a
+stale snapshot from the reader's clock. A refreshed projection advances the
+watermark through the existing projection wake; do not create a scheduler,
+diagnose missing data, or offer permission for a pending date.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -227,7 +233,10 @@ The page carries these sections, kept current:
   saved vault image ref of every generated image, and the full script or
   lyrics of any voice memo or song.
 - **Standings snapshots** — dated daily numbers (required: shared data is a
-  short sliding window, so yesterday's standings are only in this page).
+  short sliding window, so yesterday's standings are only in this page). The
+  first settled snapshot for a date owns that published ruling; later imported
+  health data may be recorded as late context, but must not silently rewrite
+  the result the group already received.
 - **Confounders & protected notes** — declared confounders and who is having
   a rough stretch and is off-limits for jokes right now.
 
@@ -400,16 +409,22 @@ automation action rules with a `dailyLocal` schedule and
 
    `status="ok"` returns every current group member and, for each requested
    scope, an explicit `status`, and only the bounded records
-   allowed by current exact authority. Each returned `participantId` identifies
-   only that membership in this group; it carries no account, device, provider,
-   or route identity. Left join those members to the challenge roster by exact
+   allowed by current exact authority. A model-size `status="partial"` result
+   keeps every returned member whole and names the still-current capacity-
+   omitted members in `omittedParticipantIds`. Never infer that an omitted
+   member left or infer their score, diagnostic state, or permission state; do
+   not score, diagnose, or offer permission for them, and publish only
+   explicitly partial standings. Each returned `participantId` identifies only
+   that membership in this group; it carries no account, device, provider, or
+   route identity. Left join those members to the challenge roster by exact
    `participantId`, never by display name. Duplicate or changed names do not
    change that join. Leaving and rejoining creates a new `participantId`; do
    not reuse or automatically replace the prior membership id without fresh
    attributable evidence. Never let an empty record set hide an opted-in
-   participant. A challenge participant absent from the current member result
-   is no longer a current member; do not score or diagnose them from retained
-   challenge history. `status="none"` means there is no current hosted group.
+   participant. A challenge participant absent from both the current member
+   rows and `omittedParticipantIds` is no longer a current member; do not score
+   or diagnose them from retained challenge history. `status="none"` means
+   there is no current hosted group.
    `status="unavailable"` returns no roster or projection payload because
    Web could not resolve current authority and the direct bounded snapshot. In
    either case, do not publish standings or try another data path. Say only
@@ -430,13 +445,16 @@ automation action rules with a `dailyLocal` schedule and
    Do not retry on every scheduled run; reconsider only after new attributable
    evidence makes that one association exact.
 
-   Classify every `in` participant in a successful result before composing:
+   Classify every `in` participant with a returned row in a successful result
+   before composing; capacity-omitted participants remain unverified and
+   unranked:
    Each projection carries one `status`. `status="not_granted"` means the group
    share is not granted; `status="missing"` means it is granted but
    no usable record was returned; and `status="available"` means use only the
-   returned records. If every record otherwise eligible for a completed-date
-   ruling is provisional, keep the participant pending, skip diagnostics and
-   permission offers, and say the value settles once that member's own local day closes. Apply `group-chat`'s
+   returned records. If every record otherwise eligible under that scope's
+   producer-owned completion marker is pending, keep the participant pending,
+   skip diagnostics and permission offers, and describe the applicable
+   settlement rule. Apply `group-chat`'s
    **Shared fact limits** before scoring.
    A genuinely missing snapshot still follows the recovery evidence order
    below.
@@ -449,8 +467,9 @@ automation action rules with a `dailyLocal` schedule and
      data eligible under the scope's applicable date behavior: rank the
      participant from that metric evidence.
    - A completed-date scoring projection is `granted` and `available`, but every
-     record otherwise eligible for the ruling is provisional: keep the participant
-     pending and unranked; do not enter diagnostics or permission offers.
+     record otherwise eligible under the scope's producer-owned completion
+     marker is pending: keep the participant pending and unranked; do not enter
+     diagnostics or permission offers.
    - The scoring projection is `not_granted`: say that the participant has not
      shared that challenge metric with this group. Unless their sharing choices
      record an explicit decline or prior handled offer action for that exact

@@ -98,6 +98,7 @@ const VALID_WORKOUT_RECORD = {
 
 const VALID_WORKOUTS_RECORD = {
   data: {
+    calendarClosedThroughDate: "2026-07-03",
     date: "2026-07-03",
     timeSemantics:
       HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
@@ -967,29 +968,58 @@ describe("workouts.v0 delivery records", () => {
     });
   });
 
-  it("preserves the producer-owned provisional marker", () => {
-    const record = {
-      ...VALID_WORKOUTS_RECORD,
-      data: {
-        ...VALID_WORKOUTS_RECORD.data,
-        provisional: true,
-      },
-    };
-    expect(parseHostedVaultShareDeliverRequest({
-      projectionKind: "workouts.v0",
-      records: [record],
-    }).records).toEqual([record]);
-    for (const provisional of [false, "yes"] as const) {
+  it("requires a strict producer-owned calendar completion watermark", () => {
+    for (const calendarClosedThroughDate of [
+      undefined,
+      "07/03/2026",
+      "2026-7-3",
+    ] as const) {
       expect(() =>
         parseHostedVaultShareDeliverRequest({
           projectionKind: "workouts.v0",
           records: [{
-            ...record,
-            data: { ...record.data, provisional },
+            ...VALID_WORKOUTS_RECORD,
+            data: {
+              ...VALID_WORKOUTS_RECORD.data,
+              calendarClosedThroughDate,
+            },
           }],
         })
-      ).toThrow(/provisional is invalid/u);
+      ).toThrow(/calendarClosedThroughDate/u);
     }
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "workouts.v0",
+        records: [{
+          ...VALID_WORKOUTS_RECORD,
+          data: {
+            ...VALID_WORKOUTS_RECORD.data,
+            provisional: true,
+          },
+        }],
+      })
+    ).toThrow(/provisional is invalid/u);
+  });
+
+  it("rejects inconsistent completion watermarks in one projection", () => {
+    expect(() =>
+      parseHostedVaultShareDeliverRequest({
+        projectionKind: "workouts.v0",
+        records: [
+          VALID_WORKOUTS_RECORD,
+          {
+            ...VALID_WORKOUTS_RECORD,
+            data: {
+              ...VALID_WORKOUTS_RECORD.data,
+              calendarClosedThroughDate: "2026-07-02",
+              date: "2026-07-02",
+            },
+            occurredAt: "2026-07-02T00:00:00.000Z",
+            recordKey: "2026-07-02",
+          },
+        ],
+      })
+    ).toThrow(/one calendarClosedThroughDate/u);
   });
 
   it("accepts settled observed-zero days and local-clock boundaries", () => {

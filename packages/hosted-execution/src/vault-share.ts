@@ -410,8 +410,8 @@ export const HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS =
   "canonical-workout-day" as const;
 export const HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS =
   "canonical-event-zone-or-vault-zone.v0" as const;
-// With seven maximum-size day records, 13 workouts/day serialize to a 15,936-byte
-// delivery request and a 15,913-byte snapshot. A 14-workout/day request is 16,993
+// With seven maximum-size day records, 13 workouts/day serialize to a 16,090-byte
+// delivery request and a 16,067-byte snapshot. A 14-workout/day request is 17,147
 // bytes and cannot cross the 16 KiB ingress ceiling. Parsers reject overflow rather
 // than truncating a day.
 export const HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY = 13;
@@ -449,8 +449,8 @@ export interface HostedVaultShareWorkout {
 }
 
 export interface HostedVaultShareWorkoutsDayData {
+  calendarClosedThroughDate: string;
   date: string;
-  provisional?: true;
   timeSemantics: typeof HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS;
   workouts: HostedVaultShareWorkout[];
 }
@@ -917,8 +917,7 @@ export function parseHostedVaultShareDeliveryRecord(
   );
   const provisional = requireObject(record.data, "Vault share delivery record data").provisional;
   const completedDateScope = projectionScope.projectionKind === "deep-sleep-days.v0"
-    || projectionScope.projectionKind === "rem-sleep-days.v0"
-    || projectionScope.projectionKind === "workouts.v0";
+    || projectionScope.projectionKind === "rem-sleep-days.v0";
   if (provisional !== undefined && (provisional !== true || !completedDateScope)) {
     throw new TypeError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
   }
@@ -1347,8 +1346,17 @@ function parseHostedVaultShareWorkoutsDayData(
   assertObjectKeys(
     data,
     "Vault share workouts data",
-    ["date", "provisional", "timeSemantics", "workouts"],
+    ["calendarClosedThroughDate", "date", "timeSemantics", "workouts"],
   );
+  const calendarClosedThroughDate = requireString(
+    data.calendarClosedThroughDate,
+    "Vault share workouts data calendarClosedThroughDate",
+  );
+  if (!isStrictIsoDate(calendarClosedThroughDate)) {
+    throw new TypeError(
+      "Vault share workouts data calendarClosedThroughDate is invalid.",
+    );
+  }
   const date = parseHostedVaultShareDailyDate(data.date, {
     dataLabel: "Vault share workouts data",
     occurredAt: context.occurredAt,
@@ -1380,7 +1388,7 @@ function parseHostedVaultShareWorkoutsDayData(
     );
   }
 
-  return { date, timeSemantics, workouts };
+  return { calendarClosedThroughDate, date, timeSemantics, workouts };
 }
 
 function parseHostedVaultShareWorkout(
@@ -1778,12 +1786,31 @@ export function parseHostedVaultShareDeliverRequest(
     );
   }
 
+  const parsedRecords = records.map((record) =>
+    parseHostedVaultShareDeliveryRecord(record, projectionScope)
+  );
+  if (projectionKind === "workouts.v0") {
+    let calendarClosedThroughDate: string | undefined;
+    for (const record of parsedRecords) {
+      if (!("workouts" in record.data)) {
+        throw new TypeError("Vault share workouts record data is invalid.");
+      }
+      if (
+        calendarClosedThroughDate !== undefined
+        && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
+      ) {
+        throw new TypeError(
+          "Vault share workouts records must use one calendarClosedThroughDate.",
+        );
+      }
+      calendarClosedThroughDate = record.data.calendarClosedThroughDate;
+    }
+  }
+
   return {
     projectionKind,
     projectionScope,
-    records: records.map((record) =>
-      parseHostedVaultShareDeliveryRecord(record, projectionScope),
-    ),
+    records: parsedRecords,
   };
 }
 

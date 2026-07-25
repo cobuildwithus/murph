@@ -46,19 +46,37 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'original threshold wording and normalized integer `thresholdLocalMs`',
     )
+    expect(challenge).toContain(
+      'Score a workout date only when `date <= calendarClosedThroughDate`',
+    )
+    expect(challenge).toContain(
+      'after the date has ended in UTC-12, the last civil timezone to leave it',
+    )
+    expect(challenge).toContain(
+      'the visible snapshot advances only on the next ordinary projection refresh and has no promised finite refresh deadline',
+    )
+    expect(challenge).toContain(
+      'Never advance a stale snapshot from the reader\'s clock.',
+    )
+    expect(challenge).toContain(
+      'human-readable context, not a scoring metric or settlement authority',
+    )
+    expect(challenge).toContain(
+      'must not silently rewrite the result the group already received',
+    )
   })
 
   it('keeps established Steps challenges on their existing date behavior', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
+      'For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.',
     )
     expect(challenge).toContain(
       'Other scopes keep their existing date behavior; current-date Steps remains scoreable.',
     )
     expect(challenge).toContain(
-      'Never use a group, schedule, or UTC clock',
+      'Never substitute a reader, group, or schedule clock',
     )
     expect(challenge).not.toContain('scoringTimeZone')
     expect(challenge).not.toContain('scoringDateRule')
@@ -77,14 +95,12 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'If every record otherwise eligible for a completed-date ruling is provisional, keep the participant pending',
+      'If every record otherwise eligible under that scope\'s producer-owned completion marker is pending, keep the participant pending',
     )
     expect(challenge).toContain(
       'skip diagnostics and permission offers',
     )
-    expect(challenge).toContain(
-      'say the value settles once that member\'s own local day closes.',
-    )
+    expect(challenge).toContain('describe the applicable settlement rule.')
     expect(challenge).not.toContain('next dispatch')
     expect(challenge).toContain(
       'A completed-date `pending` participant is never eligible for either offer.',
@@ -94,7 +110,7 @@ describe('assistant group challenge diagnostics guidance', () => {
   it('scores prior-date records for the new completed-date scopes normally', async () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const completedDateRule =
-      'For `deep-sleep-days.v0`, `rem-sleep-days.v0`, and `workouts.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
+      'For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open member-local date `data.provisional: true`; absence means settled.'
 
     expect(challenge).toContain(completedDateRule)
     expect(challenge).toContain(
@@ -144,6 +160,15 @@ describe('assistant group challenge diagnostics guidance', () => {
       '`status="ok"` returns every current group member',
     )
     expect(challenge).toContain(
+      'A model-size `status="partial"` result keeps every returned member whole',
+    )
+    expect(challenge).toContain(
+      'Never infer that an omitted member left or infer their score, diagnostic state, or permission state',
+    )
+    expect(challenge).toContain(
+      'do not score, diagnose, or offer permission for them',
+    )
+    expect(challenge).toContain(
       'Never let an empty record set hide an opted-in participant.',
     )
     expect(challenge).toContain(
@@ -174,7 +199,19 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(groupChat).toContain(
       'It is the only hosted model-facing path to the current Web-owned shared snapshot',
     )
+    expect(groupChat).toContain(
+      'returns every current group member only when `status="ok"`',
+    )
+    expect(groupChat).toContain(
+      'instead names every still-current capacity-omitted member',
+    )
+    expect(groupChat).not.toContain(
+      'returns every current group member with an explicit `status`',
+    )
     expect(groupChat).toContain('rank missing data as zero')
+    expect(groupChat).toContain(
+      'A model-size `status="partial"` result names still-current capacity-omitted members',
+    )
   })
 
   it('records scoped participant keys at kickoff and fails closed for legacy identity backfill', async () => {
@@ -227,7 +264,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
     const evidence = [
       'The scoring projection is `granted` and `available`, with challenge-metric data eligible under the scope\'s applicable date behavior',
-      'A completed-date scoring projection is `granted` and `available`, but every record otherwise eligible for the ruling is provisional',
+      'A completed-date scoring projection is `granted` and `available`, but every record otherwise eligible under the scope\'s producer-owned completion marker is pending',
       'The scoring projection is `not_granted`',
       'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while `device-sync-status.v0` is `not_granted`',
       'The scoring projection is `granted` but is genuinely missing usable challenge-metric data for reasons other than completed-date eligibility, while a recent `device-sync-status.v0` record is `available`',

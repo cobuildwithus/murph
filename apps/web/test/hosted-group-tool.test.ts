@@ -1439,6 +1439,7 @@ describe("hosted group join policy", () => {
     }).requestedVaultShareProjectionKinds).toEqual([]);
 
     expect(projectHostedVaultShareProjectionDisplays([
+      { projectionKind: "time-zone.v0" },
       { projectionKind: "group-email.v0" },
       { projectionKind: "sleep-times.v0" },
       SLEEP_DURATION_SCOPE,
@@ -1458,6 +1459,14 @@ describe("hosted group join policy", () => {
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
         projectionScopeKey: "group-email.v0",
+      },
+      {
+        description:
+          "Shares your current time-zone name as optional group context. It does not determine score dates or prove your exact location.",
+        label: "Time zone",
+        projectionKind: "time-zone.v0",
+        projectionScope: { projectionKind: "time-zone.v0" },
+        projectionScopeKey: "time-zone.v0",
       },
       {
         description: "Shares your last 7 days of sleep start and end times.",
