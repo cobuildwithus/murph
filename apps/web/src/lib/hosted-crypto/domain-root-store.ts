@@ -140,7 +140,7 @@ export async function provisionHostedCryptoDomainRootsForUserTx(input: {
 }
 
 export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
-  tx: HostedCryptoTx;
+  tx: HostedCryptoClient;
   userId: string;
 }): Promise<boolean> {
   const rows = await input.tx.$queryRaw<Array<{ domainCount: number }>>`

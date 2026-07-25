@@ -2781,6 +2781,51 @@ test('sendAssistantNotificationLocal releases typing after accepted delivery', a
   )
 })
 
+test('sendAssistantNotificationLocal does not checkpoint a new output-only direct session', async () => {
+  const session = createAssistantSession({
+    sessionId: 'session-new-output-only-notification',
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Deliver the notification.',
+      text: 'Notification response.',
+    }),
+    session,
+  })
+  const beforeProviderAcceptedInputs = vi.fn(async () => undefined)
+  const { sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+    onExecuteCodexTurnWithRecovery: async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: null,
+        codexContinuation: {
+          kind: 'explicit-structured-history',
+        },
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: providerResult,
+      }
+    },
+    providerResult,
+    sessionCreated: true,
+    turnId: 'turn-new-output-only-notification',
+  })
+
+  await sendAssistantNotificationLocal({
+    beforeProviderAcceptedInputs,
+    executionContext: {
+      hosted: null,
+    },
+    instructions: 'Deliver this notification.',
+    vault: '/vaults/new-output-only-notification',
+  })
+
+  expect(beforeProviderAcceptedInputs).toHaveBeenCalledExactlyOnceWith({
+    acceptedInputs: [],
+  })
+})
+
 test('sendAssistantNotificationLocal defers queue-only notification commit until delivery is accepted', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -4131,6 +4176,7 @@ async function loadNotificationTurnHarness(input: {
   ) => Promise<AssistantCodexTurnRecoveryOutcome>
   providerOutcome?: AssistantCodexTurnRecoveryOutcome
   providerResult: ExecutedAssistantProviderTurnResult
+  sessionCreated?: boolean
   sharedPlan?: AssistantTurnSharedPlan
   turnId: string
 }) {
@@ -4207,6 +4253,7 @@ async function loadNotificationTurnHarness(input: {
       timezone: 'Australia/Sydney',
     })),
     resolveAssistantSessionForMessage: vi.fn(async () => ({
+      created: input.sessionCreated === true,
       session: input.providerResult.session,
     })),
     resolveAssistantTurnRoute: vi.fn(() => input.providerResult.route),

@@ -98,7 +98,15 @@ describe('assistant group-chat style guidance', () => {
       'React with `murph.react_to_message`, using the exact visible accepted-message `message_ref`',
     )
     expect(normalized).toContain(
-      'Keep ordinary replies flat. In a busy room, use `murph.select_reply_target`',
+      'Keep ordinary replies flat. Use `murph.select_reply_target`',
+    )
+    // The live-but-scrolled-past boundary is what separates a legitimate
+    // targeted reply from reviving a topic the room already left.
+    expect(normalized).toContain(
+      'when what you say answers a specific earlier message the room has scrolled past but not moved on from, or when several conversations are interleaved and a bare reply would look like it belongs to the wrong one.',
+    )
+    expect(normalized).toContain(
+      'When you are simply adding to the room rather than answering one message, stay flat.',
     )
     expect(normalized).toContain(
       'The selection applies to the whole response, including every `---` bubble.',
@@ -124,6 +132,139 @@ describe('assistant group-chat style guidance', () => {
       'Never send a separate unrequested status or permission-card companion follow-up',
     )
     expect(normalized).not.toContain('Exactly one message per turn.')
+  })
+
+  it('watches a live volley instead of buffering a reply to it', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'When people are talking to each other and nothing needs you yet, watch instead of answering: run a short shell `sleep` for a few seconds, never more than about 10, then look again and run the ladder against the room as it now stands.',
+    )
+    // Waiting must never become an excuse to override the ladder's silence,
+    // closed-room, and not-for-you rules.
+    expect(normalized).toContain(
+      'Waiting never overrides the ladder',
+    )
+    expect(normalized).toContain(
+      'a wait that ends in no message is a correct outcome.',
+    )
+    expect(normalized).toContain(
+      'Do not wait when someone needs an answer now',
+    )
+    expect(normalized).toContain(
+      'a comedic interjection can be better precisely because it lands immediately.',
+    )
+    expect(normalized).toContain(
+      'never mention waiting, sleeping, or commands.',
+    )
+  })
+
+  it('answers a moment rather than covering the whole backlog', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'After watching, say one thing or nothing.',
+    )
+    expect(normalized).toContain(
+      'You are answering a moment, not a backlog: never recap what you read, never work through it point by point, and never write a message whose only job is coverage.',
+    )
+    expect(normalized).toContain(
+      'Often a reaction alone is the better move.',
+    )
+    expect(normalized).toContain(
+      'When what you say targets an earlier message, use the stale-message reply-target rule below.',
+    )
+    // The narrow multi-answer case is about people who asked, never about
+    // volume of unread messages.
+    expect(normalized).toContain(
+      'The one exception is people, not volume: if two people each asked you something that still needs an answer, answer both of them, briefly, in that one message.',
+    )
+  })
+
+  it('separates a still-live earlier ask from a topic the room has left', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // Live side: still-unanswered and still in the room's attention, so the
+    // reply is anchored to that message.
+    expect(normalized).toContain(
+      'when what you say answers a specific earlier message the room has scrolled past but not moved on from',
+    )
+    // Stale side: the room genuinely moved on and nobody is waiting, so the
+    // point waits for a natural opening instead of being revived.
+    expect(normalized).toContain(
+      'If the conversation has moved on, do not revive it to answer a stale message; fold the point into the next natural opening or scheduled update instead.',
+    )
+  })
+
+  it('sanctions no wording that treats a volley as work to cover', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // Guard the whole family of digest framings, not just the exact sentences
+    // an earlier revision happened to use. Any permissive phrasing here lets
+    // the model synthesize one catch-all reply to a banter volley, which is
+    // the behavior this guidance exists to prevent.
+    for (const digestFraming of [
+      /answer(?:ing)? the whole burst/i,
+      /against the whole burst/i,
+      /everything that arrived/i,
+      /merged reply covering/i,
+      /burst-covering/i,
+      /answer once against/i,
+      /respond(?:ing)? to each (?:message|one)/i,
+      /reply to (?:all|each) of (?:them|the messages)/i,
+    ]) {
+      expect(normalized).not.toMatch(digestFraming)
+    }
+  })
+
+  it('names the inbound timestamp as the signal for what the room is doing', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // buildAssistantAutoReplyContextLines emits ONE `Occurred at:` per turn —
+    // a single time, or a first-to-last range when inputs were grouped. The
+    // guidance must describe that contract and never claim a per-message
+    // timestamp, which the prompt builder does not render.
+    expect(normalized).toContain(
+      'Every turn opens with an `Occurred at:` time — a single timestamp, or a first-to-last range when several messages arrived together — and earlier turns keep theirs above in this conversation.',
+    )
+    expect(normalized).not.toContain('Each inbound message carries an')
+    expect(normalized).toContain(
+      'times a few seconds apart, or a range whose whole span is only a few seconds, mean the room is live and mid-volley.',
+    )
+    // A wide grouped range cannot expose the gap immediately before the newest
+    // message, so it must not be read as evidence either way.
+    expect(normalized).toContain(
+      'A wide range hides the gap that matters, so treat it as ambiguous.',
+    )
+    // A cold thread or a compacted one may not expose earlier times; the safe
+    // default is to answer rather than sit on a reply.
+    expect(normalized).toContain(
+      'When the times are missing or ambiguous, do not wait.',
+    )
+  })
+
+  it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    expect(normalized).toContain(
+      'react to what deserves it, reply to the one or two things actually meant for you, and let the rest go.',
+    )
+    // Reply targeting has exactly one owner (the Message shape rule below).
+    // Stating it here too produced a contradiction, because catching up was
+    // telling Murph to anchor a reply precisely when the stale rule forbids
+    // reviving the topic at all.
+    expect(normalized).not.toContain(
+      'targeting that message when the room has moved on',
+    )
+    expect(normalized).toContain(
+      'Nobody writes a recap of what they missed.',
+    )
+    expect(normalized).toContain(
+      'mostly read and enjoy it; jump in when someone asks you something, when a beat is clearly yours, or when you have a genuinely funny line and you have not already been talking a lot.',
+    )
+    expect(normalized).toContain(
+      'Before jumping in, notice how much you have already said recently. If you just posted, the bar for speaking again is much higher.',
+    )
   })
 
   it('lets a server-owned permission card stand alone', async () => {

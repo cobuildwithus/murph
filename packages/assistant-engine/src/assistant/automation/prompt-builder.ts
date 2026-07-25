@@ -128,6 +128,7 @@ export function buildAssistantAutoReplyPrompt(
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: inputs.length,
       })
     })
@@ -198,6 +199,7 @@ export async function prepareAssistantAutoReplyInput(
         projectionStatus: entry.projection?.status ?? null,
         replyContext: entry.telegramMetadata?.replyContext ?? null,
         senderHandle: readAssistantInputGroupSenderHandle(entry.sourceMetadata),
+        senderName: readAssistantInputGroupSenderName(entry.sourceMetadata),
         totalInputs: preparedInputs.length,
       })
     })
@@ -309,9 +311,23 @@ export function renderAssistantInputAttachmentDescriptorPromptSection(input: {
 function readAssistantInputGroupSenderHandle(
   metadata: AssistantInputSourceMetadata | null,
 ): string | null {
-  return metadata?.kind === 'linq'
+  return metadata?.kind === 'linq' || metadata?.kind === 'telegram'
     ? normalizeNullableString(metadata.senderHandle)
     : null
+}
+
+/**
+ * Display-only sender name. Returned only alongside an authoritative handle so
+ * it can never stand in for attribution.
+ */
+function readAssistantInputGroupSenderName(
+  metadata: AssistantInputSourceMetadata | null,
+): string | null {
+  if (metadata?.kind !== 'telegram' || !readAssistantInputGroupSenderHandle(metadata)) {
+    return null
+  }
+  const username = normalizeNullableString(metadata.senderUsername)
+  return username ? `@${username}` : null
 }
 
 export function renderAssistantInputGroupParticipantAddedPrompt(input: {
@@ -371,11 +387,15 @@ function renderAssistantAutoReplyInputSection(input: {
   projectionStatus?: AssistantInputProjectionStatus | null
   replyContext: string | null
   senderHandle?: string | null
+  senderName?: string | null
   totalInputs: number
 }): string | null {
   const sections: string[] = []
   if (input.senderHandle) {
     sections.push(`Sender: ${input.senderHandle}`)
+  }
+  if (input.senderHandle && input.senderName) {
+    sections.push(`Sender name: ${input.senderName}`)
   }
   if (input.groupContext) {
     sections.push(input.groupContext)

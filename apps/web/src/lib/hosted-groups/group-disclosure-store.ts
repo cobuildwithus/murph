@@ -12,9 +12,13 @@ import {
 import {
   createHostedGroupDisclosurePermissionLookupKey,
   createHostedGroupDisclosurePermissionLookupKeyReadCandidates,
-  createHostedLinqMessageLookupKey,
-  createHostedLinqMessageLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
+import {
+  createHostedGroupOfferMessageLookupKey,
+  createHostedGroupOfferMessageLookupKeyReadCandidates,
+  type HostedGroupOfferChannel,
+  type HostedGroupOfferMessageBinding,
+} from "./offer-message-binding";
 import {
   openHostedUserSecureBoxString,
   openHostedUserSecureBoxStrings,
@@ -191,7 +195,7 @@ export async function admitHostedGroupDisclosurePermissionAppendTx(input: {
 
 export async function recordHostedGroupDisclosurePermissionTx(input: {
   groupId: string;
-  messageId: string | null;
+  message: HostedGroupOfferMessageBinding;
   originAssistantInputId: string;
   permissionText: string;
   postedAt: Date;
@@ -206,9 +210,9 @@ export async function recordHostedGroupDisclosurePermissionTx(input: {
     groupId: input.groupId,
     originAssistantInputId: input.originAssistantInputId,
   });
-  const messageLookupKey = createHostedLinqMessageLookupKey(input.messageId);
+  const messageLookupKey = createHostedGroupOfferMessageLookupKey(input.message);
   const messageLookupKeyReadCandidates =
-    createHostedLinqMessageLookupKeyReadCandidates(input.messageId);
+    createHostedGroupOfferMessageLookupKeyReadCandidates(input.message);
   if (!messageLookupKey || messageLookupKeyReadCandidates.length === 0) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_DISCLOSURE_MESSAGE_ID_REQUIRED",
@@ -328,6 +332,7 @@ async function readHostedGroupDisclosurePermissionAppendAdmissionAfterLock(input
 }
 
 export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
+  channel: HostedGroupOfferChannel;
   memberId: string;
   messageLookupKeyReadCandidates: readonly string[];
   now: Date;
@@ -397,7 +402,7 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
   }
   const route = await input.tx.hostedThreadRoute.findFirst({
     where: {
-      channel: "linq",
+      channel: input.channel,
       containerMemberId: groupRuntimeMemberId,
       threadIdentityLookupKey: { in: threadIdentityLookupKeyReadCandidates },
     },

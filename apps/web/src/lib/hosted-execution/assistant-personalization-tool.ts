@@ -255,6 +255,10 @@ function buildHostedAssistantPersonalitySettings(input: {
       defaultValue: effective.push,
       value: input.personality.push,
     }),
+    unhinged: buildHostedAssistantPersonalitySetting({
+      defaultValue: effective.unhinged,
+      value: input.personality.unhinged,
+    }),
   };
 }
 

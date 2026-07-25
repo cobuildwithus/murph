@@ -92,3 +92,27 @@ test("OnboardingSteps hides the labs card when lab sync is complete", async () =
   assert.match(markup, /Step 2/);
   assert.doesNotMatch(markup, /Step 3/);
 });
+
+test("OnboardingSteps hides the message card until an action is supplied", async () => {
+  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
+  const markup = renderToStaticMarkup(createElement(OnboardingSteps));
+
+  assert.doesNotMatch(markup, /Message Murph/);
+});
+
+test("OnboardingSteps leads with the message card and takes the primary style", async () => {
+  const { OnboardingSteps } = await import("@/src/components/home/onboarding-steps");
+  const markup = renderToStaticMarkup(createElement(OnboardingSteps, {
+    messageMurphAction: createElement("a", { href: "https://t.me/example_bot" }, "Message"),
+  }));
+
+  assert.match(markup, /Message Murph/);
+  assert.match(markup, /Murph can&#x27;t message you first/);
+  assert.ok(markup.indexOf("Message Murph") < markup.indexOf("Connect devices"));
+  assert.match(markup, /href="https:\/\/t\.me\/example_bot"/);
+  // The message step takes over the primary treatment from connect devices.
+  assert.equal(markup.match(/border-primary\/35/gu)?.length, 1);
+  assert.ok(
+    markup.indexOf("border-primary/35") < markup.indexOf("Connect devices"),
+  );
+});

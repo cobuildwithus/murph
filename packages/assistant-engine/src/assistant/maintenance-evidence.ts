@@ -1,8 +1,8 @@
 import {
   assistantConversationHistoryUtf8Bytes,
+  compareAssistantTimestampsAscending,
   limitAssistantConversationHistoryTextBytes,
-} from './codex-turn/planning.js'
-import { compareAssistantTimestampsAscending } from './shared.js'
+} from './shared.js'
 import {
   listAssistantTranscriptTailEntries,
   listAssistantSessions,

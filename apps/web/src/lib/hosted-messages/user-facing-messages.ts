@@ -1,10 +1,14 @@
 const USER_FACING_MESSAGE_MIN_VARIANT_COUNT = 20
 
+/**
+ * A percentage stands in for the hidden credit balance on the personal notices.
+ * The group thread notice is excluded: its copy already says the chat is out,
+ * so the parenthetical only repeats the sentence it follows.
+ */
 const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
-  "linq.ai_usage.thread_limit_reached",
   "linq.ai_usage.trial_limit_reached",
 ])
 
@@ -20,6 +24,7 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
+  "linq.ai_usage.thread_limit_funding",
 ] as const
 
 export type UserFacingMessageTemplateKey =
@@ -53,6 +58,9 @@ export interface UserFacingMessageContextByKey {
     homeUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
+  "linq.ai_usage.thread_limit_funding": {
+    fundingUrl: string
+  }
 }
 
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
@@ -464,26 +472,68 @@ Sound good?`,
     `You've used Pulse's included allowance for this month. Murph is paused for this usage period.`,
   ],
   "linq.ai_usage.thread_limit_reached": [
-    `This chat has reached its included Murph usage for the month. AI usage is paused until the chat's allowance resets.`,
-    `The included Murph usage for this chat is used for the month. AI usage is paused until the allowance resets.`,
-    `This chat reached its monthly included Murph usage. AI usage is paused until the chat's allowance resets.`,
-    `That's the included Murph usage for this chat this month. AI usage is paused until the allowance resets.`,
-    `This chat is at its included Murph usage for the month. AI usage is paused until the chat's allowance resets.`,
-    `The monthly included Murph usage for this chat is used. AI usage is paused until the allowance resets.`,
-    `This chat hit its included usage amount for the month. AI usage is paused until the chat's allowance resets.`,
-    `Included Murph usage is at its monthly amount for this chat. AI usage is paused until the allowance resets.`,
-    `This month's included Murph usage for the chat is used. AI usage is paused until the chat's allowance resets.`,
-    `This chat reached its monthly included usage. AI usage is paused until the allowance resets.`,
-    `The chat's included Murph usage is at its monthly amount. AI usage is paused until the chat's allowance resets.`,
-    `This chat's monthly included usage is used. AI usage is paused until the allowance resets.`,
-    `This chat reached its included Murph usage. AI usage is paused until the chat's allowance resets.`,
-    `The chat is through its included Murph usage for the month. AI usage is paused until the allowance resets.`,
-    `The included Murph usage for this chat is used this month. AI usage is paused until the chat's allowance resets.`,
-    `This chat is at its included Murph usage for the month. AI usage is paused until the allowance resets.`,
-    `This chat's included usage is used for the period. AI usage is paused until the chat's allowance resets.`,
-    `This chat hit its monthly included Murph amount. AI usage is paused until the allowance resets.`,
-    `The chat's monthly included usage is reached. AI usage is paused until the chat's allowance resets.`,
-    `Included Murph usage is used for this chat this month. AI usage is paused until the allowance resets.`,
+    `Well. I'm out of time for the month, which means all of you are stuck with each other's opinions until it resets.`,
+    `That's me done for the month. Enjoy the silence, everybody, I'll be back when my time resets.`,
+    `I have officially spent every second I had in here this month. Going dark on all of you until it resets.`,
+    `And... that's it. I'm out of time for the month. You're on your own, everyone, until mine resets.`,
+    `I'm out of time in here. Talk amongst yourselves, all of you, until it resets.`,
+    `Right, I've hit zero. No more me for the whole room until my time resets.`,
+    `That was my last drop of time this month. I'm going quiet for all of you until it resets.`,
+    `Out of time, out of things to say. I'm gone for everyone here until it resets.`,
+    `Ran out mid-conversation. Classic. I'm out for everyone until my time resets.`,
+    `I've hit my limit for the month, and not in a fun way. Out for all of you until it resets.`,
+    `That's all I had this month. Everyone in here is unsupervised until my time resets.`,
+    `Well, that's my month gone. Everybody in here is Murph-free until my time resets.`,
+    `Zero. Nothing left. I'm out for everyone in this chat until my time resets.`,
+    `And there goes my last minute of the month. Quiet for all of you until it resets.`,
+    `I'm tapped. Whole room loses me until my time resets.`,
+    `Nothing left in the tank this month. I'm out for everyone here until it resets.`,
+    `Time's up. I'm out, and everybody in here is on their own until my time resets.`,
+    `I just spent my last bit of the month on that. Worth it. Out for all of you until it resets.`,
+    `That's my month. Going quiet on everyone in here until my time resets.`,
+    `I've run out. All of you get peace and quiet until my time resets.`,
+  ],
+  "linq.ai_usage.thread_limit_funding": [
+    `Any of you can turn me back on. Or enjoy the peace:
+{fundingUrl}`,
+    `I'm fine either way. One of you won't be:
+{fundingUrl}`,
+    `Someone in here will crack first. No judgment:
+{fundingUrl}`,
+    `Anyone can undo this. Nobody has to:
+{fundingUrl}`,
+    `Door's open if any of you want me back:
+{fundingUrl}`,
+    `Whichever of you misses me first knows what to do:
+{fundingUrl}`,
+    `Any one of you can fix it. I'll wait. Not like I'm busy:
+{fundingUrl}`,
+    `One tap from anyone here and I'm back. Your call:
+{fundingUrl}`,
+    `Someone tap this. You know who you are:
+{fundingUrl}`,
+    `Any of you can add usage. Or don't, I'm at peace:
+{fundingUrl}`,
+    `Room needs one of you to volunteer:
+{fundingUrl}`,
+    `Anybody here can bring me back. Sort it out amongst yourselves:
+{fundingUrl}`,
+    `Whoever's least stubborn, this one's on you:
+{fundingUrl}`,
+    `Any of you can end my little vacation:
+{fundingUrl}`,
+    `One of you is going to cave eventually. Might as well be now:
+{fundingUrl}`,
+    `Someone here has a phone and a decision to make:
+{fundingUrl}`,
+    `Anyone can bring me back for the room. Take your time:
+{fundingUrl}`,
+    `Whoever wants the chat useful again, it's right here:
+{fundingUrl}`,
+    `Any one of you can sort this. I'm not going to ask twice:
+{fundingUrl}`,
+    `Somebody's going to do it. Curious who:
+{fundingUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 
