@@ -40,7 +40,7 @@ Updated: 2026-07-25
     route-gated room-model dynamic tool, service contracts, group skill
     guidance, and focused tests.
   - Durable architecture, security, reliability, index, and testing claims
-    required to describe and verify the changed boundary.
+    required to describe, deploy, and verify the changed boundary.
   - PR #950 metadata, ReviewGPT rounds, CI remediation, merge, and worktree
     retirement.
 - Out of scope:
@@ -97,6 +97,10 @@ Updated: 2026-07-25
    Mitigation: enforce one 8 KiB UTF-8 limit at the canonical knowledge write
    boundary for both full rewrites and append attempts, rejecting before the
    prior page changes.
+7. Risk: Rolling back the runner after it persists the new immutable automation
+   id causes an old bundle to treat silent maintenance as ordinary delivery.
+   Mitigation: require immediate runner rollout and exact-fingerprint smoke,
+   then hold that bundle as the rollback floor and forward-fix.
 
 ## Tasks
 
