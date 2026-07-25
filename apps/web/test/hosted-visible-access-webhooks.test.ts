@@ -182,6 +182,7 @@ describe("visible access webhook recovery", () => {
     });
 
     expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledWith({
+      authorizedTelegramUserId: "456",
       memberId: "member_telegram",
       message: "Billing needs attention.",
       noticeCode: "billing_inactive",
