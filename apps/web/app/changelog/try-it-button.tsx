@@ -10,7 +10,6 @@ import {
   MessageCircle,
   Send,
 } from "lucide-react";
-import dynamic from "next/dynamic";
 import { useState, type ReactNode } from "react";
 
 import {
@@ -20,23 +19,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import type {
   MurphContactKind,
   MurphContactOption,
 } from "@/src/lib/murph-contact-routing";
-
-const HostedAuthPanelIsland = dynamic(
-  () =>
-    import(
-      "@/src/components/hosted-onboarding/hosted-auth-panel-island"
-    ).then((mod) => mod.HostedAuthPanelIsland),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="text-sm text-[#736a58]">Loading sign in...</div>
-    ),
-  },
-);
 
 const CONTACT_OPTION_ICONS = {
   email: Mail,
@@ -259,25 +246,12 @@ function AuthGateButton({
         {label}
         <ArrowIcon />
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md p-6 md:p-7">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-              Log in or sign up
-            </DialogTitle>
-            <DialogDescription>
-              Sign in to send this directly to Murph on your preferred channel.
-            </DialogDescription>
-          </DialogHeader>
-          {open ? (
-            <HostedAuthPanelIsland
-              methods={["phone", "telegram", "email"]}
-              requireLaunchConsentOnCompletion
-              size="compact"
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <AuthDialog
+        description="Sign in to send this directly to Murph on your preferred channel."
+        open={open}
+        onOpenChange={setOpen}
+        requireLaunchConsentOnCompletion
+      />
     </>
   );
 }

@@ -48,14 +48,29 @@ snapshot of the pushed PR head and contains:
   delta, empty for round 1
 - the current source, tests, and repository guidance included by the packager
 
-If any required artifact is missing, unreadable, stale, or inconsistent with
-the checked commit, state the exact evidence gap, return `ROUND_OUTCOME:
-INVALID`, and stop. For round 2 or later, also stop as invalid if either ancestry
-field in `review-round.json` is not `true`, or if the invocation does not state
-the same first-reviewed head as the artifact and summarize the prior round's
-findings, local dispositions, landed corrections, and underlying mechanisms.
-Treat that summary as process metadata, not repository evidence, and verify its
-code claims against the ZIP.
+Stop as `INVALID` only when the code evidence itself will not support a review:
+`pr.diff`, `changed-files.txt`, `review-round.json`, the round diffs, or the
+source snapshot is missing, unreadable, or does not correspond to the checked
+commit. For round 2 or later, also stop as invalid if either ancestry field in
+`review-round.json` is not `true`, since the remediation delta then cannot be
+trusted to describe the change under review. State the exact evidence gap and
+stop.
+
+Do not stop for a discrepancy confined to the descriptive content of
+`review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
+prose that has drifted behind the current head — or for an invocation that is
+missing its prior-round summary. Those degrade the author's account of the
+change, not your ability to read the code. Record them as notes (see Output)
+and complete the substantive review. A stale table is never a reason to leave
+real defects unreviewed; say what is wrong with it and review anyway.
+
+For round 2 or later the invocation should state the same first-reviewed head as
+the artifact and summarize the prior round's findings, local dispositions,
+landed corrections, and underlying mechanisms. Treat that summary as process
+metadata, not repository evidence, and verify its code claims against the ZIP.
+When it is absent or thin, reconstruct what you can from
+`since-first-reviewed-head.diff` and `since-previous-reviewed-head.diff`, note
+the gap, and continue.
 
 Round 1 is the only full-patch audit. In round 1, review `pr.diff` in repository
 context and classify a qualifying finding as `ORIGINAL_PR`.
@@ -334,6 +349,16 @@ For an Experience Collapse, also state the removed words, actions, screens,
 choices, concepts, or waits and the clarity, accessibility, consent, trust, and
 control that the smaller experience preserves.
 
+When `pr-body.md` describes the change inaccurately — a change-shape table that
+does not match your count of `pr.diff`, a validation claim contradicted by the
+snapshot, or prose describing an earlier head — add `Body discrepancy: <claimed
+value> vs <counted value>, counted by <method>` after the findings and before
+the outcome, one line per discrepancy. Report every one you find. These are
+notes, not qualifying findings, and they do not prevent `PASS`: they tell the
+author what to correct in the document without withholding the review of the
+code. Apply the same treatment when the invocation omits its prior-round
+summary.
+
 When a user-facing frontend change has no readable rendered artifacts inside
 `codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and
 before the outcome. The gap is not independently a qualifying finding and does
@@ -354,8 +379,11 @@ End with exactly one of these lines:
 `ROUND_OUTCOME: INVALID`
 
 Use `PASS` only when there are no qualifying findings and every claimed prior
-correction is proven effective. Use `INVALID` only for an evidence or invocation
-failure; it does not count as a substantive round. Put the selected outcome
+correction is proven effective; body discrepancies and rendered evidence gaps
+are notes and do not withhold it. Use `INVALID` only when the code evidence will
+not support a review at all, as defined in Evidence and round scope; it does not
+count as a substantive round. An inaccurate PR body is never grounds for
+`INVALID`. Put the selected outcome
 immediately before this exact final line, and do not use the token elsewhere:
 
 REVIEW_COMPLETE
