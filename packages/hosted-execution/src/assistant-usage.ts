@@ -42,6 +42,12 @@ const ASSISTANT_USAGE_RAW_AUDIO_KEYS = new Set<string>([
 const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
   "characterCount",
 ]);
+// Provider-reported billed cost for pass-through-priced rows (today: xAI
+// x_search). Integer ticks where 1 USD = 10^10 ticks, so the same
+// non-negative-integer rule applies.
+const ASSISTANT_USAGE_RAW_COST_KEYS = new Set<string>([
+  "cost_in_usd_ticks",
+]);
 export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
 export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
@@ -572,6 +578,93 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
   });
 }
 
+// Raw usage keys copied verbatim from the xAI Responses API usage object.
+// cost_in_usd_ticks is the billing basis (1 USD = 10^10 ticks); the token
+// counts are context only. Keys the provider omits stay absent.
+const HOSTED_XAI_SEARCH_RAW_USAGE_KEYS = [
+  "cached_input_tokens",
+  "cost_in_usd_ticks",
+  "input_tokens",
+  "output_tokens",
+  "reasoning_tokens",
+] as const;
+
+// Usage record for Worker-mediated xAI x_search calls. The billing basis is
+// the provider-reported cost in the response usage object, so the interceptor
+// buffers the completed response and passes that usage object through here.
+// Each completed provider request gets a synthetic turn id just like hosted
+// transcription and ElevenLabs.
+export function buildHostedXaiSearchUsageRecord(input: {
+  memberId: string;
+  model: string;
+  providerRequestId?: string | null;
+  usage?: Record<string, unknown> | null;
+}): AssistantUsageRecord {
+  const turnId = `turn_xai_search_${randomUUID().replaceAll("-", "")}`;
+  const rawUsageJson: Record<string, unknown> = {};
+  for (const key of HOSTED_XAI_SEARCH_RAW_USAGE_KEYS) {
+    const value = input.usage?.[key];
+    if (isNonNegativeInteger(value)) {
+      rawUsageJson[key] = value;
+    }
+  }
+  const cachedDetailTokens = readHostedXaiSearchDetailToken(
+    input.usage,
+    "input_tokens_details",
+    "cached_tokens",
+  );
+  if (cachedDetailTokens !== null) {
+    rawUsageJson.input_tokens_details = { cached_tokens: cachedDetailTokens };
+  }
+  const reasoningDetailTokens = readHostedXaiSearchDetailToken(
+    input.usage,
+    "output_tokens_details",
+    "reasoning_tokens",
+  );
+  if (reasoningDetailTokens !== null) {
+    rawUsageJson.output_tokens_details = { reasoning_tokens: reasoningDetailTokens };
+  }
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "XAI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://api.x.ai",
+    credentialSource: "platform",
+    featureKey: "x-search",
+    memberId: input.memberId,
+    occurredAt: new Date().toISOString(),
+    provider: "xai",
+    providerName: "xAI",
+    providerRequestId: input.providerRequestId ?? null,
+    ...(Object.keys(rawUsageJson).length > 0 ? { rawUsageJson } : {}),
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    triggerKind: "x-search",
+    turnId,
+    usageId: createAssistantUsageId({
+      attemptCount: 1,
+      turnId,
+    }),
+    usageExtractionSourcePath: "xai.responses",
+    usageExtractionVersion: "xai-x-search-v1",
+  });
+}
+
+function readHostedXaiSearchDetailToken(
+  usage: Record<string, unknown> | null | undefined,
+  detailKey: "input_tokens_details" | "output_tokens_details",
+  tokenKey: string,
+): number | null {
+  const detail = usage?.[detailKey];
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+    return null;
+  }
+  const value = (detail as Record<string, unknown>)[tokenKey];
+  return isNonNegativeInteger(value) ? value : null;
+}
+
 export function createAssistantUsageReportingUserId(input: {
   memberId: string;
   reportingSecret?: string | null;
@@ -873,7 +966,8 @@ function normalizeOptionalRawUsageJsonRecord(
     if (
       ASSISTANT_USAGE_RAW_TOKEN_KEYS.has(key) ||
       ASSISTANT_USAGE_RAW_AUDIO_KEYS.has(key) ||
-      ASSISTANT_USAGE_RAW_TTS_KEYS.has(key)
+      ASSISTANT_USAGE_RAW_TTS_KEYS.has(key) ||
+      ASSISTANT_USAGE_RAW_COST_KEYS.has(key)
     ) {
       if (!isNonNegativeInteger(entry)) {
         throw new TypeError(`${label}.${key} must be a non-negative integer.`);

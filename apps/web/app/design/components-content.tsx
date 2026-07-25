@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Monitor } from "lucide-react";
+import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
@@ -26,6 +26,7 @@ import {
 } from "@/src/components/settings/assistant-model-artwork";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
+import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
@@ -36,7 +37,7 @@ import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import { Badge } from "@/src/components/ui/badge";
@@ -77,6 +78,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { PlanVisual } from "@/src/components/ui/plan-visual";
 import {
+  IN_APP_BROWSER_DESCRIPTION,
+  IN_APP_BROWSER_PRIMARY_ACTION,
   MURPH_CONTACT_AVATAR_OPTIONS,
   MurphContactAvatarArt,
   MurphContactAvatarGrid,
@@ -1121,6 +1124,30 @@ export function ComponentsContent() {
               value={inlineContactAvatarId}
             />
           </div>
+          <div className="max-w-sm rounded-xl border border-border bg-card p-5">
+            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+              In-app browser CTA
+            </p>
+            <p className="mb-4 text-sm leading-6 text-muted-foreground">
+              On an iOS in-app browser (X, Instagram, Facebook, TikTok, and the
+              like) the WebKit view fetches the vCard but never hands it to the
+              contact importer, so the normal add silently does nothing. There
+              the primary action becomes a Safari escape instead.
+            </p>
+            <div className="flex flex-col gap-2">
+              <a
+                className={buttonVariants({ className: "w-full", size: "xl" })}
+                href="#in-app-browser-cta-preview"
+                onClick={(event) => event.preventDefault()}
+              >
+                <ContactRound data-icon="inline-start" />
+                {IN_APP_BROWSER_PRIMARY_ACTION}
+              </a>
+              <p className="px-2 text-center text-xs leading-5 text-muted-foreground">
+                {IN_APP_BROWSER_DESCRIPTION}
+              </p>
+            </div>
+          </div>
         </Section>
 
         <Separator />
@@ -1296,6 +1323,17 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Section title="Trial Billing Banner">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Shown on Home when a Pulse trial is paused with billing still attached. It is the
+            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
+            to the Subscription controls rather than here.
+          </p>
+          <TrialBillingBanner />
+        </Section>
+
+        <Separator />
 
         <Section title="Active Experiment Banner & Profile Stats">
           <div className="flex items-stretch gap-4">

@@ -124,7 +124,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
   HOSTED_RUNTIME_GROUP_SHARED_READ_DISPLAY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS,
@@ -1088,19 +1088,18 @@ export function parseHostedRuntimeGroupToolRequest(
   if (action === "read_shared") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "linqSenderHandles", "projectionScopes"]),
+      new Set([
+        "action",
+        "linqSenderHandles",
+        "projectionScopes",
+        "telegramSenderHandles",
+      ]),
       "Hosted runtime group tool read_shared request",
     );
+    const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
     return {
       action,
-      ...(record.linqSenderHandles === undefined
-          || record.linqSenderHandles === null
-        ? {}
-        : {
-            linqSenderHandles: parseHostedRuntimeGroupLinqSenderHandles(
-              record.linqSenderHandles,
-            ),
-          }),
+      ...senderHandles,
       projectionScopes: parseHostedRuntimeGroupSharedRequestedProjectionScopes(
         record.projectionScopes,
         "Hosted runtime group tool read_shared request projectionScopes",
@@ -1402,11 +1401,50 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   };
 }
 
-function parseHostedRuntimeGroupLinqSenderHandles(value: unknown): string[] {
-  return parseHostedRuntimeGroupBoundedHandles(value, {
-    allowEmpty: false,
-    label: "Hosted runtime group tool read_shared request linqSenderHandles",
-  });
+/**
+ * Reads current-turn sender evidence. Each channel owns its own field because
+ * Web matches each against a different member identity index; supplying both is
+ * a contradiction and fails closed rather than guessing which one is
+ * authoritative.
+ */
+function parseHostedRuntimeGroupSenderHandlesRequest(
+  record: Record<string, unknown>,
+): {
+  linqSenderHandles?: string[];
+  telegramSenderHandles?: string[];
+} {
+  const linqPresent = record.linqSenderHandles !== undefined
+    && record.linqSenderHandles !== null;
+  const telegramPresent = record.telegramSenderHandles !== undefined
+    && record.telegramSenderHandles !== null;
+  if (linqPresent && telegramPresent) {
+    throw new TypeError(
+      "Hosted runtime group tool read_shared request must not supply sender handles for more than one channel.",
+    );
+  }
+  if (linqPresent) {
+    return {
+      linqSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.linqSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request linqSenderHandles",
+        },
+      ),
+    };
+  }
+  if (telegramPresent) {
+    return {
+      telegramSenderHandles: parseHostedRuntimeGroupBoundedHandles(
+        record.telegramSenderHandles,
+        {
+          allowEmpty: false,
+          label: "Hosted runtime group tool read_shared request telegramSenderHandles",
+        },
+      ),
+    };
+  }
+  return {};
 }
 
 function parseHostedRuntimeGroupCurrentTurnHandles(
@@ -1436,7 +1474,7 @@ function parseHostedRuntimeGroupBoundedHandles(
   const handles = entries.map((entry, index) =>
     parseHostedRuntimeGroupAskBoundedText({
       label: `${label}[${index}]`,
-      maxCodePoints: HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+      maxCodePoints: HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
       value: entry,
     })
   );
@@ -2312,7 +2350,15 @@ export function parseHostedRuntimeGroupToolResponse(
     const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
     if (status === "ok") {
       assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
-      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+      return {
+        action,
+        result: {
+          status,
+          group: result.group === null
+            ? null
+            : parseHostedRuntimeGroupSummary(result.group),
+        },
+      };
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");

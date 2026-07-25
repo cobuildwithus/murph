@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import {
+  EXPERIMENTS_DIRECTORY,
   ID_PREFIXES,
   rawImportManifestSchema,
   safeParseContract,
@@ -899,6 +901,40 @@ async function createAndVerifyCapture(
   return verified;
 }
 
+/**
+ * Removes the legacy directories a promotion just emptied, deepest first.
+ *
+ * Promotion deletes files but the directories that held them are not vault
+ * content, so nothing else ever reclaims them. Leaving them behind is what
+ * turned a completed repair into residue that later readers had to tolerate.
+ * `rmdir` succeeds only on an empty directory, so a directory that still holds
+ * anything is left exactly as it is.
+ */
+async function removeEmptiedLegacyDirectories(
+  vaultRoot: string,
+  deletedRelativePaths: readonly string[],
+): Promise<void> {
+  const directories = new Set<string>();
+  for (const deletedRelativePath of deletedRelativePaths) {
+    let current = path.posix.dirname(deletedRelativePath);
+    while (current.startsWith(`${EXPERIMENTS_DIRECTORY}/`)) {
+      directories.add(current);
+      current = path.posix.dirname(current);
+    }
+  }
+
+  const depth = (relativePath: string): number => relativePath.split("/").length;
+  for (const relativePath of [...directories].sort((left, right) =>
+    depth(right) - depth(left)
+  )) {
+    try {
+      await fs.rmdir(resolveVaultPath(vaultRoot, relativePath).absolutePath);
+    } catch {
+      // Still populated, already gone, or concurrently reused.
+    }
+  }
+}
+
 function summarizeBlockers(
   blockers: readonly ExperimentMediaRepairBlocker[],
 ): Record<string, number> {
@@ -1076,6 +1112,11 @@ export async function repairExperimentMediaInternal(
     summary: "Promote misplaced experiment media and remove verified legacy copies",
     vaultRoot: input.vaultRoot,
   });
+
+  await removeEmptiedLegacyDirectories(
+    input.vaultRoot,
+    detection.candidates.map((candidate) => candidate.relativePath),
+  );
 
   return resultFromDetection({
     auditPaths: [deletion.auditPath],

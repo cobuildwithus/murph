@@ -144,6 +144,11 @@
       "import": "./dist/text/shared.js",
       "default": "./dist/text/shared.js"
     },
+    "./xai-runtime": {
+      "types": "./dist/xai-runtime.d.ts",
+      "import": "./dist/xai-runtime.js",
+      "default": "./dist/xai-runtime.js"
+    },
     "./vault-cli-contracts": {
       "types": "./dist/vault-cli-contracts.d.ts",
       "import": "./dist/vault-cli-contracts.js",

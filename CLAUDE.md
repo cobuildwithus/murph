@@ -13,6 +13,45 @@ Do not create a second workflow here. In particular:
 - Follow the privacy rules in `AGENTS.md`; omit personal names from PR titles and
   bodies as well as committed artifacts.
 
+## Frontend changes are not done until they are seen
+
+For any user-facing `apps/web` UI change, run the app and look at the change
+before calling it complete, then attach hosted desktop and mobile screenshots to
+the PR. This is the existing `/design` catalog rule in
+`agent-docs/operations/agent-workflow-routing.md`; it is repeated here because it
+is the step most often skipped. Green tests and a typecheck are not evidence that
+a screen renders correctly. Secondary worktrees must isolate ports, database, and
+Next dist dir first, per `agent-docs/operations/hosted-local-worktree-dev.md`.
+
+## Write the whole PR body when you open the PR
+
+`agent-docs/operations/completion-workflow.md` defines the required PR body. Every
+`Required:` section is mandatory on the first push, not something to backfill after
+a reviewer asks: why this PR exists, user goal, user experience, invariants,
+non-obvious affected surfaces, preliminary specialist lenses, the five-row
+change-shape table, and the design proof — plus deployment skew when the PR
+touches a deploy boundary.
+
+CI mechanically enforces only the design proof, so the other sections are the ones
+that silently go missing. Do not let a green pipeline stand in for the contract:
+if a section does not apply, write `None` or `Not applicable` with a one-line
+reason rather than dropping the heading. Reviewers read the body to decide what to
+hold the diff against, and an absent invariants or affected-surfaces section costs
+a full review round.
+
+## Run ReviewGPT immediately, never queue it
+
+Start a ReviewGPT round the moment it is due. Do not park it behind a watcher,
+a poll loop, or a "wait until the browser lanes are free" script. Launch it, and
+if that attempt stalls before `Draft model selected`, kill it and launch again on
+another lane. Retrying is cheap; waiting is not.
+
+Lane contention across concurrent sessions is the normal state of this machine,
+not an exceptional condition to wait out. A queued round can sit idle for hours
+while the machine never reaches the idle threshold the queue was watching for,
+and the review is the gate on landing, so every hour it waits is an hour the work
+does not ship. Report the round's outcome, not the fact that it is scheduled.
+
 ## Never use real people or conversations as examples
 
 When describing a bug, writing reasoning, or building fixtures/tests, never use a

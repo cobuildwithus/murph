@@ -89,9 +89,9 @@ test("dashboard consent reloads the exact route once after the accepted handoff"
   );
   cleanupRender = rendered.cleanup;
 
-  await acceptBothLaunchScopes(rendered.container, rendered.window);
+  expectNoLaunchCheckboxes(rendered.container);
 
-  const continueButton = findButton(rendered.container, "Continue");
+  const continueButton = findButton(rendered.container, "Consent");
   await act(async () => {
     continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     await flushPromises();
@@ -155,18 +155,18 @@ test("dashboard consent keeps a failed save retryable and continues after retry"
   );
   cleanupRender = rendered.cleanup;
 
-  await acceptBothLaunchScopes(rendered.container, rendered.window);
+  expectNoLaunchCheckboxes(rendered.container);
 
-  const continueButton = findButton(rendered.container, "Continue");
+  const continueButton = findButton(rendered.container, "Consent");
   await act(async () => {
     continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     await flushPromises();
   });
 
-  expect(rendered.container.textContent).toContain("Unable to record consent");
   expect(rendered.container.textContent).toContain(
     "Consent save is temporarily unavailable.",
   );
+  expect(rendered.container.querySelector("[data-slot=alert]")).toBeTruthy();
   expect(continueButton.disabled).toBe(false);
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
   expect(readRequestedConsentScopes()).toEqual([
@@ -224,26 +224,9 @@ test("persisted partial consent submits only the missing scope and reloads the e
 
   expect(rendered.container.textContent).toContain("Finish your consent");
   expect(rendered.container.textContent).not.toContain("Review what changed");
-  const checkboxes = [
-    ...rendered.container.querySelectorAll('input[type="checkbox"]'),
-  ] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(1);
+  expectNoLaunchCheckboxes(rendered.container);
 
-  await act(async () => {
-    const healthDataCheckbox = checkboxes[0]!;
-    healthDataCheckbox.checked = true;
-    healthDataCheckbox.dispatchEvent(
-      new rendered.window.Event("click", { bubbles: true, cancelable: true }),
-    );
-    healthDataCheckbox.dispatchEvent(
-      new rendered.window.Event("input", { bubbles: true }),
-    );
-    healthDataCheckbox.dispatchEvent(
-      new rendered.window.Event("change", { bubbles: true }),
-    );
-  });
-
-  const continueButton = findButton(rendered.container, "Continue");
+  const continueButton = findButton(rendered.container, "Consent");
   await act(async () => {
     continueButton.dispatchEvent(
       new rendered.window.Event("click", { bubbles: true }),
@@ -359,32 +342,18 @@ test.each([
   });
   expect(rendered.container.textContent).not.toContain("Finish your consent");
   expect(rendered.container.textContent).not.toContain("Review what changed");
+  const launchActionLabel = submittedScopes.includes("launch.health-data")
+    ? "Consent"
+    : "Agree";
   expect(
-    [...rendered.container.querySelectorAll("button")].filter((button) =>
-      button.textContent?.includes("Continue"),
+    [...rendered.container.querySelectorAll("button")].filter(
+      (button) => button.textContent?.trim() === launchActionLabel,
     ),
   ).toHaveLength(1);
 
-  const checkboxes = [
-    ...rendered.container.querySelectorAll('input[type="checkbox"]'),
-  ] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(submittedScopes.length);
-  for (const checkbox of checkboxes) {
-    await act(async () => {
-      checkbox.checked = true;
-      checkbox.dispatchEvent(
-        new rendered.window.Event("click", { bubbles: true, cancelable: true }),
-      );
-      checkbox.dispatchEvent(
-        new rendered.window.Event("input", { bubbles: true }),
-      );
-      checkbox.dispatchEvent(
-        new rendered.window.Event("change", { bubbles: true }),
-      );
-    });
-  }
+  expectNoLaunchCheckboxes(rendered.container);
 
-  const continueButton = findButton(rendered.container, "Continue");
+  const continueButton = findButton(rendered.container, launchActionLabel);
   await act(async () => {
     continueButton.dispatchEvent(
       new rendered.window.Event("click", { bubbles: true }),
@@ -476,8 +445,8 @@ test("a consent preview uses only its injected in-memory acceptance owner", asyn
   );
   cleanupRender = rendered.cleanup;
 
-  await acceptBothLaunchScopes(rendered.container, rendered.window);
-  const continueButton = findButton(rendered.container, "Continue");
+  expectNoLaunchCheckboxes(rendered.container);
+  const continueButton = findButton(rendered.container, "Consent");
   await act(async () => {
     continueButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
     await flushPromises();
@@ -493,23 +462,8 @@ test("a consent preview uses only its injected in-memory acceptance owner", asyn
   expect(rendered.reload).not.toHaveBeenCalled();
 });
 
-async function acceptBothLaunchScopes(
-  container: HTMLElement,
-  window: Window & typeof globalThis,
-) {
-  const checkboxes = [
-    ...container.querySelectorAll('input[type="checkbox"]'),
-  ] as HTMLInputElement[];
-  expect(checkboxes).toHaveLength(2);
-
-  for (const checkbox of checkboxes) {
-    await act(async () => {
-      checkbox.checked = true;
-      checkbox.dispatchEvent(new window.Event("click", { bubbles: true, cancelable: true }));
-      checkbox.dispatchEvent(new window.Event("input", { bubbles: true }));
-      checkbox.dispatchEvent(new window.Event("change", { bubbles: true }));
-    });
-  }
+function expectNoLaunchCheckboxes(container: HTMLElement) {
+  expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
 }
 
 function createLaunchConsentStatus(input: {

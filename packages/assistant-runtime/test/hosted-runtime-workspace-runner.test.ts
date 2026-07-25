@@ -149,11 +149,13 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
   test("carries two initial conversation inputs through singleton foreground reruns before checkpointing", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runner-initial-input-tail-"));
     const olderItem = createMailboxItem({
+      causalSeq: "11",
       id: "mailbox_initial_input_tail_older",
       laneSeq: "1",
       occurredAt: "2026-04-26T00:00:01.000Z",
     });
     const newerItem = createMailboxItem({
+      causalSeq: "12",
       id: "mailbox_initial_input_tail_newer",
       laneSeq: "2",
       occurredAt: "2026-04-26T00:00:02.000Z",
@@ -248,6 +250,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(firstPass.latestAssistantInputBatch?.assistantInputIds, [newerInputId]);
       assert.deepEqual(firstPass.latestAssistantInputBatch?.assistantInputRecords, [{
         assistantInputId: newerInputId,
+        causalSeq: "12",
         linqDeliveryContext: newerContext,
       }]);
       assert.deepEqual(firstPass.latestAssistantInputBatch?.linqDeliveryContexts, [newerContext]);

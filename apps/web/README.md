@@ -253,11 +253,17 @@ The hosted Prisma schema keeps ownership sharp and nested:
   secure-box ciphertext; new writes never populate the nullable legacy JSON
   columns. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
-  Murph. The web owner bounds the aggregate start path at 40 seconds. Because
+  Murph. The call row persists the exact initiating resident-session id for
+  request-key idempotency. Final analysis appends an
+  `assistant.notification.requested` system-mailbox event: Murph composes the
+  result in its own voice and proactively messages the member's resolved
+  messaging route, and may skip a non-meaningful result (allow-send-or-skip).
+  The result JSON is framed as untrusted provider/callee text. The web owner
+  bounds the aggregate start path at 40 seconds. Because
   Retell create-call has no documented idempotency contract, a connection or
   timeout ambiguity preserves the durable row as `starting`; the same request
   key never blindly creates another provider call. Exact replays resolve the
-  durable row before new-call notification, transfer, encryption, or access
+  durable row before new-call transfer, encryption, or access
   prerequisites. After the reservation commits, a pointer-only web Workflow is
   armed within the same 40-second aggregate deadline and before Retell dispatch,
   so the durable row remains blocking authority while the bounded Workflow
@@ -931,6 +937,20 @@ per module runtime, with five seconds for connection acquisition and 30 seconds
 for idle retirement; tune those values only from measured pool and database
 pressure. Connection failure logs expose only a fixed failure category and
 numeric total, idle, and waiting counts.
+
+That module retries only the two failures that prove the database did no work,
+because replaying anything else could duplicate an effect. A `pool_checkout_timeout`
+means the statement never reached Postgres, so the operation is retried; a
+`transaction_start_timeout` is Prisma's `P2028` raised before it invokes the
+transaction callback, so the transaction is retried. Both get three attempts
+spaced 250 ms apart, and every attempt logs its category and pool counts, so an
+exhausted retry leaves one line per attempt. `P2028` also covers transactions
+that opened and later expired, and those are never replayed, so the two cases are
+separated by message rather than by code. Failures that may have reached Postgres,
+such as closed connections, TLS faults, or an unreachable host, are reported and
+rethrown untouched. Retries exist because a primary switchover or a thawed Fluid instance
+with stale pooled sockets produces exactly these two errors; they are not a
+substitute for capacity.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the

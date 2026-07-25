@@ -472,6 +472,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
       && name !== "murph.send_vault_file"
+      && name !== "murph.ask_grok"
     );
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
@@ -482,6 +483,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
     expect(allToolNames).toContain("murph.send_progress_update");
+    expect(allToolNames).toContain("murph.ask_grok");
 
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames),
@@ -508,6 +510,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
         vaultFileSendAvailable: true,
+        askGrokAvailable: true,
       },
     );
   });

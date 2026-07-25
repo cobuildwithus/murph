@@ -1767,6 +1767,135 @@ describe("hosted mailbox conversation import adapter", () => {
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
   });
 
+  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
+    );
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_group_telegram",
+        },
+        telegramMessage: {
+          from: "1234567890",
+          messageId: "tg_group_identity",
+          schema: "murph.hosted-telegram-message.v1",
+          senderUsername: "alice_example",
+          text: "hello group",
+          threadId: "chat_group_telegram",
+          threadIsDirect: false,
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_group_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    const event = listed.events[0];
+    assert.ok(event);
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "chat_group_telegram",
+      userId: TEST_USER_ID,
+    });
+    const expectedActorId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "1234567890",
+    );
+
+    // The blinded actor must derive from the same value stored for the prompt
+    // so batching and admission cannot disagree about who spoke.
+    assert.equal(event.conversation?.actorId, expectedActorId);
+    assert.notEqual(event.conversation?.actorId, null);
+    assert.equal(event.conversation?.source, "telegram");
+    assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderHandle
+        : null,
+      "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderUsername
+        : null,
+      "alice_example",
+    );
+  });
+
+  test("keeps direct Telegram threads free of group sender attribution", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-input-telegram-direct-"),
+    );
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "tg_direct_identity",
+          replyContextPreview: "Replying to: earlier",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello",
+          threadId: "chat_direct_telegram",
+          threadIsDirect: true,
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_direct_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    const event = listed.events[0];
+    assert.ok(event);
+    assert.equal(event.conversation?.actorId, null);
+    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderUsername"),
+      false,
+    );
+  });
+
   test("uses Linq route account, sender actor, and group directness for assistant conversation identity", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-linq-group-"));
     tempRoots.push(parentRoot);

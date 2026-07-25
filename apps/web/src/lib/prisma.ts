@@ -22,6 +22,8 @@ const PG_CONNECTION_TIMEOUT_MS = 5_000;
 const PG_IDLE_TIMEOUT_MS = 30_000;
 const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
+const DATABASE_RETRY_ATTEMPTS = 3;
+const DATABASE_RETRY_DELAY_MS = 250;
 
 type DatabasePoolFailureCategory =
   | "active_connection_error"
@@ -31,6 +33,7 @@ type DatabasePoolFailureCategory =
   | "idle_connection_error"
   | "pool_checkout_timeout"
   | "tls_error"
+  | "transaction_start_timeout"
   | "unreachable";
 
 const DATABASE_POOL_FAILURE_BY_PRISMA_CODE = new Map<
@@ -124,7 +127,7 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
   // via collectPrismaOperationTimings; a pass-through everywhere else. The
   // extension keeps the full PrismaClient surface, so the assertion below is
   // a type-level boundary only.
-  return client.$extends({
+  const extended = client.$extends({
     query: {
       $allOperations({ args, model, operation, query }) {
         const timingActive = isPrismaOperationTimingActive();
@@ -138,23 +141,92 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
             Date.now() - startedAtMs,
           );
         };
-        return query(args).then(
+        // A checkout timeout means the statement never reached Postgres, so the
+        // operation can be replayed without duplicating an effect.
+        return runWithDatabaseRetry(
+          pool,
+          "pool_checkout_timeout",
+          () => query(args),
+        ).then(
           (result) => {
             record();
             return result;
           },
           (error: unknown) => {
             record();
-            const category = resolveDatabasePoolFailureCategory(error);
-            if (category) {
-              reportDatabasePoolFailure(pool, category);
-            }
             throw error;
           },
         );
       },
     },
   }) as PrismaClient;
+
+  return withTransactionStartRetry(extended, pool);
+}
+
+/**
+ * Retries `run` while it keeps failing with `retryableCategory`, which callers
+ * pick to name the one failure that provably did no work at their seam. Every
+ * pool failure is reported with its live pool counts whether or not it is
+ * retried, so an exhausted retry leaves one log line per attempt.
+ */
+async function runWithDatabaseRetry<T>(
+  pool: PgPool,
+  retryableCategory: DatabasePoolFailureCategory,
+  run: () => Promise<T>,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      const category = resolveDatabasePoolFailureCategory(error);
+      if (category) {
+        reportDatabasePoolFailure(pool, category);
+      }
+      if (category !== retryableCategory || attempt >= DATABASE_RETRY_ATTEMPTS) {
+        throw error;
+      }
+      await delay(DATABASE_RETRY_DELAY_MS);
+    }
+  }
+}
+
+/**
+ * Retries `$transaction` when the transaction never began. Prisma raises that
+ * before it invokes the callback, so no statement ran and no callback side
+ * effect happened; any later failure is left alone because the callback may
+ * have done work. This is the shape a primary switchover takes: PgBouncer holds
+ * the client socket and queues `BEGIN`, and Prisma gives up after `maxWait`.
+ *
+ * The wrapper intercepts one method and forwards everything else untouched, so
+ * model delegates and raw queries keep their normal behaviour.
+ */
+function withTransactionStartRetry(
+  client: PrismaClient,
+  pool: PgPool,
+): PrismaClient {
+  return new Proxy(client, {
+    get(target, property) {
+      const value = Reflect.get(target, property) as unknown;
+
+      if (property !== "$transaction" || typeof value !== "function") {
+        return value;
+      }
+
+      return (...args: unknown[]): Promise<unknown> =>
+        runWithDatabaseRetry(
+          pool,
+          "transaction_start_timeout",
+          () => Reflect.apply(value, target, args) as Promise<unknown>,
+        );
+    },
+  });
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function createPrisma(): PrismaClient {
@@ -239,6 +311,11 @@ function resolveDatabasePoolFailureCategory(
       ?? readUnknownStringProperty(current, "originalMessage");
     if (message?.includes("timeout exceeded when trying to connect")) {
       return "pool_checkout_timeout";
+    }
+    // Prisma reports every transaction-API fault as P2028, so only the message
+    // separates "never started" from a transaction that ran and then expired.
+    if (message?.includes("Unable to start a transaction in the given time")) {
+      return "transaction_start_timeout";
     }
     if (message?.includes("Connection terminated due to connection timeout")) {
       return "connection_timeout";
