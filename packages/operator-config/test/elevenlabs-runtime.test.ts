@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import {
+  ELEVENLABS_TTS_MAX_TEXT_LENGTH,
+  ELEVENLABS_TTS_TIMEOUT_MS,
   generateElevenLabsSpeech,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
@@ -139,6 +141,36 @@ test('elevenlabs runtime keeps timeout active while consuming the response body'
     error.context?.timedOut === true
   )
 
-  await vi.advanceTimersByTimeAsync(30_000)
+  await vi.advanceTimersByTimeAsync(ELEVENLABS_TTS_TIMEOUT_MS)
   await result
+})
+
+test('elevenlabs speech timeout leaves headroom over the longest accepted memo', () => {
+  // eleven_v3 synthesizes at roughly 25ms per character (measured 2026-07-25).
+  // The pairing these constants replaced accepted 4000 characters against a 30s
+  // timeout, so long memos could not physically succeed. Keep the timeout at no
+  // less than double the longest accepted memo's expected synthesis time.
+  const expectedSynthesisMs = ELEVENLABS_TTS_MAX_TEXT_LENGTH * 25
+  assert.ok(
+    ELEVENLABS_TTS_TIMEOUT_MS >= expectedSynthesisMs * 2,
+    `timeout ${ELEVENLABS_TTS_TIMEOUT_MS}ms must cover ${expectedSynthesisMs}ms of synthesis with headroom`,
+  )
+})
+
+test('elevenlabs runtime rejects speech text it cannot synthesize before the timeout', async () => {
+  const fetchImplementation = vi.fn()
+
+  await expect(
+    generateElevenLabsSpeech({
+      apiKey: 'elevenlabs-key',
+      fetchImplementation,
+      modelId: 'eleven_v3',
+      text: 'a'.repeat(ELEVENLABS_TTS_MAX_TEXT_LENGTH + 1),
+      voiceId: 'voice_123',
+    }),
+  ).rejects.toSatisfy((error: unknown) =>
+    error instanceof VaultCliError &&
+    error.code === 'ELEVENLABS_INVALID_INPUT'
+  )
+  assert.equal(fetchImplementation.mock.calls.length, 0)
 })

@@ -18,8 +18,18 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
 const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
-const ELEVENLABS_TTS_TIMEOUT_MS = 30_000
 const ELEVENLABS_MUSIC_TIMEOUT_MS = 5 * 60_000
+
+// Speech synthesis time scales with the text, so the accepted length and the
+// request timeout are one decision and must be read together. Measured against
+// eleven_v3 on 2026-07-25: 300 chars took 8.6s, 600 took 17.8s, 900 took 23.0s,
+// and 2900 took over 60s — roughly 25ms per character. The previous pairing
+// accepted 4000 characters against a 30s timeout, so every memo longer than
+// ~1100 characters timed out with certainty. Keep the timeout at several times
+// the longest accepted memo's measured synthesis time so a slow-but-healthy
+// request is never cut off, and raise them together if either changes.
+export const ELEVENLABS_TTS_MAX_TEXT_LENGTH = 1_000
+export const ELEVENLABS_TTS_TIMEOUT_MS = 90_000
 
 export const ELEVENLABS_TTS_OUTPUT_FORMAT = assistantVoiceMemoSpeechOutputFormat
 export const ELEVENLABS_MUSIC_MODEL_ID = assistantVoiceMemoMusicModelId
@@ -76,6 +86,11 @@ export async function generateElevenLabsSpeech(input: {
   const voiceId = normalizeRequiredElevenLabsString(input.voiceId, 'voice id')
   const modelId = normalizeRequiredElevenLabsString(input.modelId, 'model id')
   const text = normalizeRequiredElevenLabsString(input.text, 'text')
+  if (text.length > ELEVENLABS_TTS_MAX_TEXT_LENGTH) {
+    throw createElevenLabsInvalidInputError(
+      `ElevenLabs speech text must contain at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH} characters.`,
+    )
+  }
 
   return await requestElevenLabsAudio({
     apiKey: input.apiKey,
