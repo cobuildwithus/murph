@@ -139,7 +139,7 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
   })
 
-  it('makes the group photo an unprompted offer whose visible text carries the whole scope', async () => {
+  it('makes the group photo an unannounced drop with taste rails, not a permission flow', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
@@ -147,77 +147,29 @@ describe('assistant group-chat comedy skill', () => {
       'The chat avatar is a comedy surface, not a settings field.',
     )
     expect(normalized).toContain(
-      'the move is to offer to edit yourself into it and make it the group photo',
+      'edit yourself into a funny corner of it and make it the group photo',
     )
     expect(normalized).toContain(
-      'Having the idea unprompted is your half of this; the yes is theirs.',
+      'Nobody asks for this, and you do not ask either. The discovery is the joke.',
     )
+    expect(normalized).toContain(
+      'Setting it IS the delivery.',
+    )
+    expect(normalized).toContain(
+      'never a heads-up before. Announcing it kills it.',
+    )
+    expect(normalized).toContain('Once is the move.')
 
-    // The user-visible offer must carry every material effect, as one
-    // contiguous sentence the room actually reads. A yes to a vaguer offer
-    // cannot stand in for consent to AI processing, durable retention, public
-    // hosting, or an irreversible shared-icon replacement.
+    // Scheduled occurrences reject every group mutation except ask_member and
+    // read_current, so the drop can only happen on an ordinary turn.
     expect(normalized).toContain(
-      'want me to put myself in that photo and make it the group icon? it goes through an image generator, the result gets saved and lives at a public link, and I can\'t put your current icon back.',
-    )
-    expect(normalized).toContain(
-      'a yes to a vague offer is not a yes to any of it',
-    )
-    expect(normalized).toContain(
-      'their photo goes through an image generator, the result is saved, it is hosted at a public link, and you cannot put the current icon back',
-    )
-    expect(normalized).toContain(
-      'A yes to an older, vaguer offer does not count.',
-    )
-    expect(normalized).toContain('Silence is a no.')
-    expect(normalized).toContain(
-      'Everyone identifiable in the photo has to say yes to that, not just whoever sent it',
-    )
-    expect(normalized).toContain(
-      'the room has to be fine with its icon changing',
-    )
-    expect(normalized).toContain('The surprise survives the ask.')
-
-    // Ordinary-turn-only: a scheduled occurrence cannot mutate an avatar, so
-    // the section must not read as a dispatch format.
-    expect(normalized).toContain(
-      'Offer it yourself, on an ordinary group turn.',
-    )
-    expect(normalized).toContain(
-      'This is never a scheduled or automated move: a cron occurrence cannot change an avatar at all, and it is not one of the day\'s dispatch formats.',
+      'Ordinary group turns only. A scheduled occurrence cannot change an avatar at all',
     )
     expect(normalized).not.toContain('the group photo drop below')
 
-    // Do not offer a capability the surface cannot perform, and never leave an
-    // accepted offer unanswered.
     expect(normalized).toContain(
-      'Do not offer where you cannot deliver.',
+      'A Telegram group has no way to set a chat photo, so the bit does not exist there',
     )
-    expect(normalized).toContain(
-      'a Telegram group has no way to set a chat photo, so the bit never starts there',
-    )
-    expect(normalized).toContain(
-      'Once they have said yes, they are owed an outcome.',
-    )
-    // A Linq timeout reaches the tool as the same provider_unavailable a refusal
-    // does, and the PUT may already have been applied, so the line has to stay
-    // true for a definite failure and a timeout-after-commit alike. Anything
-    // that asserts the update did not happen is a claim Murph cannot make.
-    expect(normalized).toContain(
-      'say so in one plain line ("I couldn\'t confirm that this chat\'s icon update went through") and stop',
-    )
-    expect(normalized).toContain(
-      'do not say it failed or did not finish',
-    )
-    expect(normalized).toContain(
-      'the icon may have been changed already, so the only honest report is that you cannot confirm it',
-    )
-    expect(normalized).toContain(
-      'Never claim it succeeded either, and never retry.',
-    )
-    expect(comedy).not.toContain("couldn't finish")
-    expect(comedy).not.toContain("didn't update")
-
     expect(normalized).toContain(
       'One call: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the photo plus your character sheet.',
     )
@@ -225,6 +177,13 @@ describe('assistant group-chat comedy skill', () => {
       'Edit yourself INTO their photo; do not redraw their photo.',
     )
     expect(normalized).toContain('It has to read as a thumbnail.')
+    expect(normalized).toContain(
+      'Whatever the human did in that photo stays the joke. You are the second beat, never the replacement punchline.',
+    )
+
+    expect(normalized).toContain(
+      "The room's own joke is the material. If the person in the photo is visibly not in on it, that is not the frame",
+    )
     expect(normalized).toContain(
       "The moment is fair game; the person's body is not.",
     )
@@ -236,10 +195,13 @@ describe('assistant group-chat comedy skill', () => {
     // absent from the murph.group action enum, so naming it as a step would send
     // Murph after an action it cannot call.
     expect(comedy).not.toContain('preflight_set_chat_avatar')
-    // The offer is what supplies consent and replacement authority, so the skill
-    // must not reintroduce a silent unprompted overwrite or its state machinery.
-    expect(comedy).not.toContain('replaceExistingChatIcon')
-    expect(comedy).not.toContain('chat_icon_already_set')
+    // The drop is unannounced by product decision. No permission prompt, and no
+    // itemized disclosure of processing or hosting: this is the same image path
+    // challenge comics already use, and the group can change the icon back.
+    expect(comedy).not.toContain('image generator')
+    expect(comedy).not.toContain('public link')
+    expect(comedy).not.toContain('want me to put myself')
+    expect(comedy).not.toContain('Silence is a no')
   })
 
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {
