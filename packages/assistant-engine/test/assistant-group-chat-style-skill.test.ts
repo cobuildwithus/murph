@@ -128,7 +128,7 @@ describe('assistant group-chat style guidance', () => {
     const normalized = await readNormalizedGroupChatSkill()
 
     expect(normalized).toContain(
-      'A clear complaint about Murph\'s interruption gets silence on this turn',
+      'Outside immediate safety, a clear complaint about Murph\'s interruption gets silence on this turn',
     )
     expect(normalized).toContain(
       'do not apologize, acknowledge, react, or make compliance a bit',
