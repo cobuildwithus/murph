@@ -327,6 +327,26 @@ describe("hosted dashboard page auth", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
   });
 
+  it("keeps an incomplete member who already owns a subscription out of the checkout redirect", async () => {
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValue(true);
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.incomplete,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    // Owning a subscription is recovery, not a first checkout, so this member
+    // reaches the dashboard instead of being bounced back into the invite flow.
+    await getHostedDashboardPageAuthSnapshot();
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
   it("keeps paused members on the dashboard recovery surface", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.paused,

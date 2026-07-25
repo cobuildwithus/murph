@@ -35,6 +35,7 @@ describe("/join session resume page", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValue(false);
     mocks.getHostedPageAuthSnapshot.mockResolvedValue({
       authenticated: false,
       authenticatedMember: null,
@@ -101,7 +102,7 @@ describe("/join session resume page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/home");
   });
 
-  it("redirects paused members home without issuing a fresh checkout invite", async () => {
+  it("redirects paused members to the Subscription controls without issuing a fresh checkout invite", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.paused,
     });
@@ -116,10 +117,10 @@ describe("/join session resume page", () => {
       },
     });
 
-    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
 
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
   });
 
   it("redirects Family-sponsored members home without issuing an invite", async () => {
@@ -147,7 +148,7 @@ describe("/join session resume page", () => {
     expect(mocks.redirect).toHaveBeenCalledWith("/home");
   });
 
-  it("sends a lapsed member to the billing recovery surface", async () => {
+  it("sends a lapsed member to the Subscription controls", async () => {
     const member = createHostedMember({
       billingStatus: HostedBillingStatus.past_due,
     });
@@ -162,10 +163,35 @@ describe("/join session resume page", () => {
       },
     });
 
-    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/home");
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
 
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
-    expect(mocks.redirect).toHaveBeenCalledWith("/home");
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
+  });
+
+  it("sends an incomplete member who already owns a subscription to the Subscription controls", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.incomplete,
+    });
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValue(true);
+    mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+      authenticated: true,
+      authenticatedMember: member,
+      session: {
+        expiresAt: new Date("2026-06-25T00:00:00.000Z"),
+        member,
+        privyUserId: "did:privy:user_123",
+        sessionId: "hws_123",
+      },
+    });
+
+    // Owning a subscription means recovery, not a first checkout, so this member
+    // must reach billing controls rather than a new invite or a generic dashboard.
+    await expect(renderJoinResumePage()).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
+
+    expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
+    expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
+    expect(mocks.redirect).not.toHaveBeenCalledWith("/home");
   });
 
   it("does not issue an invite for blocked members", async () => {
