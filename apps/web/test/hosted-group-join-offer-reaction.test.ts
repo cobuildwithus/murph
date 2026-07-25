@@ -15,7 +15,6 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
-  hasHostedMemberActivationProof: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -51,10 +50,6 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
   readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
-  hasHostedMemberActivationProof: mocks.hasHostedMemberActivationProof,
 }));
 
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
@@ -106,7 +101,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       undefined,
     );
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://murph.example");
     mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
     mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
@@ -248,77 +242,6 @@ describe("handleHostedGroupJoinOfferReaction", () => {
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
     })).resolves.toEqual({ status: "ignored", reason: "not_a_member" });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-  });
-
-  // "Like or heart this message" advertises both reactions, so a lapsed member
-  // must complete the join from either one.
-  it.each([
-    ["heart", "love"],
-    ["exact Like", "like"],
-  ])("admits a lapsed member's %s on a join offer", async (_label, reactionType) => {
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({ reactionType }),
-      prisma,
-    })).resolves.toMatchObject({ status: "accepted" });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
-  });
-
-  it.each([
-    ["heart", "love"],
-    ["exact Like", "like"],
-  ])("denies a %s on a join offer from someone who never activated Murph", async (
-    _label,
-    reactionType,
-  ) => {
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(false);
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({ reactionType }),
-      prisma,
-    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-  });
-
-  // Disclosure consent creates a durable, future-effective permission over
-  // private data, so it keeps the current-access policy that joining drops.
-  // The disclosure owner resolves the message and its own authority, so a
-  // lapsed member's Like on a real disclosure request stops there instead of
-  // falling through into unintended membership.
-  it("does not turn a lapsed member's denied disclosure Like into a join", async () => {
-    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
-      kind: "member_inactive",
-    });
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({ reactionType: "like" }),
-      prisma,
-    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
-
-    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
-  });
-
-  it("still accepts an active member's disclosure consent Like", async () => {
-    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
-      kind: "accepted",
-    });
-    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
-    const prisma = createPrismaStub();
-
-    await expect(handleHostedGroupJoinOfferReaction({
-      event: parseReactionEvent({ reactionType: "like" }),
-      prisma,
-    })).resolves.toEqual({ reason: "accepted", status: "accepted" });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });

@@ -9,7 +9,7 @@ import {
   isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
-import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
@@ -96,8 +96,10 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "not_a_member",
     });
   }
-  // Suspension denies every operation reachable from here.
-  if (member.suspendedAt) {
+  if (
+    member.suspendedAt
+    || !(await readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma }))
+  ) {
     return skipHostedGroupJoinOfferReaction({
       reason: "member_inactive",
     });
@@ -113,11 +115,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     threadId: input.event.linqChatId,
   });
 
-  // An exact Like is only a *possible* disclosure consent: this shape cannot see
-  // which message was reacted to, and the canonical offer advertises "Like or
-  // heart this message", so the same Like also carries the join offer. Each
-  // message-bound owner decides its own operation and authority; this adapter
-  // only sequences them and never pre-judges which effect the Like targets.
   if (isDisclosureConsentReaction) {
     const disclosureResult = await input.prisma.$transaction(async (tx) =>
       acceptHostedGroupDisclosurePermissionReactionTx({
@@ -142,23 +139,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
         reason: "disclosure_grant_limit_reached",
       });
     }
-    // The message proved this Like targets a disclosure request the member may
-    // not currently consent to, so it must not fall through to the join owner.
-    if (disclosureResult.kind === "member_inactive") {
-      return skipHostedGroupJoinOfferReaction({
-        reason: "member_inactive",
-      });
-    }
-  }
-
-  // Joining mirrors the link adapter behind the same offer, which admits any
-  // authenticated, non-suspended member, so a lapsed member is not denied the
-  // action the offer itself advertises. Never-activated handles stay denied and
-  // keep the first-reply contact-card path instead.
-  if (!await hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma })) {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "member_inactive",
-    });
   }
 
   let result: Awaited<ReturnType<typeof acceptHostedGroupJoinOfferTx>>;
