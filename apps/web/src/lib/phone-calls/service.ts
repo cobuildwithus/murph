@@ -4,17 +4,27 @@ import {
   type HostedPhoneCall,
 } from "@prisma/client";
 import type {
+  HostedExecutionExternalThreadRouteAuthority,
+} from "@murphai/hosted-execution";
+import type {
   HostedPhoneCallBrief,
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
+  HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE,
   HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS,
   hostedPhoneCallBriefSchema,
+  isHostedPhoneCallEmergencyNumber,
 } from "@murphai/hosted-execution/phone-calls";
 
 import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
 import { getPrisma } from "../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  isHostedThreadContainerNotificationDestination,
+  requireHostedAssistantNotificationDestination,
+  type HostedAssistantNotificationDestination,
+} from "../hosted-routing/assistant-notification-destination";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
 import {
@@ -44,6 +54,9 @@ import {
   startHostedPhoneCallReconciliationWorkflow,
 } from "./reconciliation-workflow-start";
 import { resolveVerifiedMemberTransferNumber } from "./transfer";
+import {
+  assertHostedGroupPhoneCallRequesterHasOwnMurph,
+} from "./group-requester";
 import {
   hasPhoneCallRuntimeNoActiveEffect,
   markPhoneCallRuntimeNoActiveEffect,
@@ -94,10 +107,24 @@ type HostedPhoneCallReconciliationWorkflowStarter = (
   options: { signal: AbortSignal },
 ) => Promise<unknown>;
 
+type HostedPhoneCallNotificationDestinationResolver = (input: {
+  memberId: string;
+  signal?: AbortSignal;
+}) => Promise<HostedAssistantNotificationDestination>;
+
+type HostedGroupPhoneCallRequesterActivationAsserter = (input: {
+  inboundMailboxItemIds: readonly string[];
+  routeAuthority: HostedExecutionExternalThreadRouteAuthority;
+  signal?: AbortSignal;
+}) => Promise<void>;
+
 export async function createHostedPhoneCall(input: {
   brief: HostedPhoneCallBrief;
   crypto?: HostedPhoneCallCrypto;
+  groupRequesterActivationAsserter?: HostedGroupPhoneCallRequesterActivationAsserter;
+  inboundMailboxItemIds?: readonly string[];
   memberId: string;
+  notificationDestinationResolver?: HostedPhoneCallNotificationDestinationResolver;
   originSessionId: string;
   prisma?: HostedPhoneCallStore;
   reconciliationWorkflowStarter?: HostedPhoneCallReconciliationWorkflowStarter;
@@ -123,6 +150,10 @@ export async function createHostedPhoneCall(input: {
 async function createHostedPhoneCallWithinDeadline(input: Parameters<
   typeof createHostedPhoneCall
 >[0] & { signal: AbortSignal }): Promise<HostedPhoneCallStartResponse> {
+  // Fail closed before any dedupe lookup, reservation, or provider dispatch.
+  // Placing this ahead of the request-key path also means a replayed request
+  // key cannot resurrect a blocked number from an earlier stored brief.
+  assertHostedPhoneCallNotEmergency(input.brief);
   const store = resolveHostedPhoneCallStore(input.prisma);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
@@ -130,6 +161,34 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     ?? startHostedPhoneCallReconciliationWorkflow;
   const resolveTransferNumber =
     input.transferNumberResolver ?? resolveVerifiedMemberTransferNumber;
+  const resolveNotificationDestination = input.notificationDestinationResolver
+    ?? requireHostedAssistantNotificationDestination;
+  const notificationDestination = await resolveNotificationDestination({
+    memberId: input.memberId,
+    signal: input.signal,
+  });
+  input.signal.throwIfAborted();
+  if (isHostedThreadContainerNotificationDestination(notificationDestination)) {
+    const routeAuthority = notificationDestination.externalThreadRouteAuthority;
+    if (!routeAuthority) {
+      throw new Error(
+        "Hosted thread-container notification destination is missing route authority.",
+      );
+    }
+    const assertGroupRequesterActivation =
+      input.groupRequesterActivationAsserter
+      ?? assertHostedGroupPhoneCallRequesterHasOwnMurph;
+    await assertGroupRequesterActivation({
+      inboundMailboxItemIds: input.inboundMailboxItemIds ?? [],
+      routeAuthority,
+      signal: input.signal,
+    });
+    input.signal.throwIfAborted();
+  }
+  const brief = normalizeHostedPhoneCallBriefForConversation({
+    brief: input.brief,
+    notificationDestination,
+  });
   const existing = await store.hostedPhoneCall.findUnique({
     where: {
       memberId_requestKey: {
@@ -140,7 +199,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   });
   if (existing) {
     return await resolveExistingHostedPhoneCall({
-      brief: input.brief,
+      brief,
       call: existing,
       crypto,
       memberId: input.memberId,
@@ -166,7 +225,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   }
 
   input.signal.throwIfAborted();
-  const transferNumber = input.brief.allowTransferToUser
+  const transferNumber = brief.allowTransferToUser
     ? await resolveTransferNumber({
         memberId: input.memberId,
       })
@@ -178,7 +237,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
     callId,
     memberId: input.memberId,
     signal: input.signal,
-    value: input.brief,
+    value: brief,
   });
   input.signal.throwIfAborted();
   const reservation = await store.reserve({
@@ -195,7 +254,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   const call = reservation.call;
   if (!reservation.created) {
     return await resolveExistingHostedPhoneCall({
-      brief: input.brief,
+      brief,
       call,
       crypto,
       memberId: input.memberId,
@@ -261,7 +320,7 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
       throw markPhoneCallRuntimeNoActiveEffect(error);
     }
     started = await runtime.start({
-      brief: input.brief,
+      brief,
       id: call.id,
       memberId: input.memberId,
       transferNumber,
@@ -443,6 +502,28 @@ async function createHostedPhoneCallWithinDeadline(input: Parameters<
   };
 }
 
+function normalizeHostedPhoneCallBriefForConversation(input: {
+  brief: HostedPhoneCallBrief;
+  notificationDestination: HostedAssistantNotificationDestination;
+}): HostedPhoneCallBrief {
+  if (
+    !isHostedThreadContainerNotificationDestination(
+      input.notificationDestination,
+    )
+    || !input.brief.allowTransferToUser
+  ) {
+    return input.brief;
+  }
+
+  // A room-owned call must never bridge the live caller to one participant.
+  // Normalize before dedupe comparison, encryption, and provider dispatch so
+  // every server-owned representation carries the same effective authority.
+  return {
+    ...input.brief,
+    allowTransferToUser: false,
+  };
+}
+
 async function resolveHostedPhoneCallBlockerForNewRequest(input: {
   call: HostedPhoneCall;
   runtime: PhoneCallRuntime;
@@ -500,6 +581,18 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
     }
   }
   throwHostedPhoneCallStartPending();
+}
+
+function assertHostedPhoneCallNotEmergency(brief: HostedPhoneCallBrief): void {
+  if (!isHostedPhoneCallEmergencyNumber(brief.to.phoneNumber)) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED",
+    httpStatus: 400,
+    message: HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE,
+    retryable: false,
+  });
 }
 
 function throwHostedPhoneCallStartPending(): never {

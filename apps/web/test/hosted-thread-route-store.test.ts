@@ -6,9 +6,11 @@ import {
   assertHostedThreadRouteEgressAuthority,
   hasHostedMemberEstablishedLinqThreadRoute,
   readHostedThreadRouteByThreadIdentity,
+  requiresHostedThreadDeliveryRouteRefresh,
 } from "../src/lib/hosted-routing/thread-route-store";
 import {
   createHostedExternalThreadIdentityLookupKey,
+  createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
 } from "../src/lib/hosted-onboarding/contact-privacy";
 
@@ -117,8 +119,13 @@ describe("hosted thread route store", () => {
       channel: "linq",
       threadId: "chat_group_abc",
     });
-    if (!threadIdentityLookupKey) {
-      throw new Error("Expected test thread identity lookup key.");
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected test thread route lookup keys.");
     }
     prisma.hostedThreadRoute.findMany.mockResolvedValueOnce([
       {
@@ -128,6 +135,9 @@ describe("hosted thread route store", () => {
           owner,
         },
         containerMemberId: "member_container_123",
+        deliveryRouteEncrypted: "sealed-route",
+        threadIdentityLookupKey,
+        threadLookupKey,
       },
     ]);
 
@@ -141,6 +151,11 @@ describe("hosted thread route store", () => {
       channel: "linq",
       container,
       containerMemberId: "member_container_123",
+      deliveryRouteState: {
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
       owner,
     });
 
@@ -154,6 +169,71 @@ describe("hosted thread route store", () => {
         }),
       }),
     );
+  });
+
+  it("refreshes missing or rotated delivery material but leaves current routes untouched", () => {
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      channel: "linq",
+      threadId: "chat_group_abc",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected test thread route lookup keys.");
+    }
+    const memberState = {
+      billingStatus: "active" as const,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_container_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    };
+    const route = {
+      channel: "linq" as const,
+      container: memberState,
+      containerMemberId: memberState.id,
+      deliveryRouteState: {
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      owner: {
+        ...memberState,
+        accountGroupMemberships: [],
+        id: "member_owner_123",
+      },
+    };
+
+    expect(requiresHostedThreadDeliveryRouteRefresh({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      route,
+      threadId: "chat_group_abc",
+    })).toBe(false);
+    expect(requiresHostedThreadDeliveryRouteRefresh({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      route: {
+        ...route,
+        deliveryRouteState: {
+          ...route.deliveryRouteState,
+          deliveryRouteEncryptedPresent: false,
+        },
+      },
+      threadId: "chat_group_abc",
+    })).toBe(true);
+    expect(requiresHostedThreadDeliveryRouteRefresh({
+      accountLookupKey: LINQ_ACCOUNT_LOOKUP_KEY,
+      route: {
+        ...route,
+        deliveryRouteState: {
+          ...route.deliveryRouteState,
+          threadLookupKey: "hbidx:external-thread:v0:rotated",
+        },
+      },
+      threadId: "chat_group_abc",
+    })).toBe(true);
   });
 
   it("authorizes legacy egress authorities with stale account lookup keys by thread identity", async () => {

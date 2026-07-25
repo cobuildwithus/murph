@@ -6,29 +6,29 @@ import {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   hostedPhoneCallResultSchema,
-  type HostedExecutionAssistantNotificationRoute,
   type HostedPhoneCallBrief,
   type HostedPhoneCallResult,
 } from "@murphai/hosted-execution";
 
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import { HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS } from "../hosted-crypto/gcp-kms";
 import {
   appendHostedMailboxEnvelopeTx,
 } from "../hosted-mailbox/store";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
+import {
+  requireHostedAssistantNotificationDestination,
+  type HostedAssistantNotificationDestination,
+} from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
-import { HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS } from "../hosted-crypto/gcp-kms";
 import {
   hostedPhoneCallCrypto,
   readHostedPhoneCallBrief,
   readHostedPhoneCallResult,
   type HostedPhoneCallCrypto,
 } from "./crypto";
-import {
-  requireHostedPhoneCallResultNotificationRoute,
-} from "./notification-route";
 import {
   hasRetellBasicAttributesOnlyStorage,
   readRetellCallEndAt,
@@ -274,7 +274,7 @@ async function appendPhoneCallResultNotificationTx(input: {
     );
   }
 
-  const route = await requireHostedPhoneCallResultNotificationRoute({
+  const destination = await requireHostedAssistantNotificationDestination({
     memberId: call.memberId,
     prisma: input.prisma,
   });
@@ -283,9 +283,9 @@ async function appendPhoneCallResultNotificationTx(input: {
     envelope: buildPhoneCallResultNotificationWake({
       brief,
       callId: call.id,
+      destination,
       memberId: call.memberId,
       result,
-      route,
     }),
     tx: input.prisma,
   });
@@ -298,9 +298,9 @@ async function appendPhoneCallResultNotificationTx(input: {
 export function buildPhoneCallResultNotificationWake(input: {
   brief: HostedPhoneCallBrief;
   callId: string;
+  destination: HostedAssistantNotificationDestination;
   memberId: string;
   result: HostedPhoneCallResult;
-  route: HostedExecutionAssistantNotificationRoute;
 }) {
   const notificationKey = `phone-call-result:${input.callId}`;
   return buildHostedExecutionAssistantNotificationRequestedWake({
@@ -310,6 +310,12 @@ export function buildPhoneCallResultNotificationWake(input: {
       deliveryDedupeToken: notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: notificationKey,
+      ...(input.destination.externalThreadRouteAuthority
+        ? {
+            externalThreadRouteAuthority:
+              input.destination.externalThreadRouteAuthority,
+          }
+        : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
         result: input.result,
@@ -317,7 +323,7 @@ export function buildPhoneCallResultNotificationWake(input: {
       responsePolicy: {
         kind: "allow_send_or_skip",
       },
-      route: input.route,
+      route: input.destination.route,
     },
     occurredAt: new Date().toISOString(),
   });

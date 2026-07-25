@@ -13,7 +13,9 @@ import {
 } from "@murphai/hosted-execution/contracts";
 
 import {
+  createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadIdentityLookupKeyReadCandidates,
+  createHostedExternalThreadLookupKey,
   createHostedExternalThreadLookupKeyReadCandidates,
   isHostedExternalThreadChannel,
 } from "../hosted-onboarding/contact-privacy";
@@ -59,6 +61,16 @@ export interface HostedThreadRouteSnapshot {
   channel: HostedThreadRouteChannel;
   container: HostedMemberCoreState;
   containerMemberId: string;
+  /**
+   * Present on snapshots read from the canonical route store. It remains
+   * optional so narrow in-memory route projections used by non-routing callers
+   * do not become a second source of truth.
+   */
+  deliveryRouteState?: {
+    deliveryRouteEncryptedPresent: boolean;
+    threadIdentityLookupKey: string;
+    threadLookupKey: string;
+  };
   owner: HostedThreadRouteOwnerState;
 }
 
@@ -107,6 +119,9 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
         },
       },
       containerMemberId: true,
+      deliveryRouteEncrypted: true,
+      threadIdentityLookupKey: true,
+      threadLookupKey: true,
     },
     where: {
       channel: input.channel,
@@ -144,12 +159,59 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
     });
   }
 
+  const deliveryRouteState =
+    typeof row.threadIdentityLookupKey === "string"
+    && typeof row.threadLookupKey === "string"
+    && (
+      typeof row.deliveryRouteEncrypted === "string"
+      || row.deliveryRouteEncrypted === null
+    )
+      ? {
+          deliveryRouteEncryptedPresent:
+            typeof row.deliveryRouteEncrypted === "string"
+            && row.deliveryRouteEncrypted.length > 0,
+          threadIdentityLookupKey: row.threadIdentityLookupKey,
+          threadLookupKey: row.threadLookupKey,
+        }
+      : null;
+
   return {
     channel: row.channel,
     container: row.container.member,
     containerMemberId: row.containerMemberId,
+    ...(deliveryRouteState ? { deliveryRouteState } : {}),
     owner: row.container.owner,
   };
+}
+
+export function requiresHostedThreadDeliveryRouteRefresh(input: {
+  accountLookupKey: string | null | undefined;
+  route: HostedThreadRouteSnapshot;
+  threadId: string | number | null | undefined;
+}): boolean {
+  const state = input.route.deliveryRouteState;
+  if (!state) {
+    // Production snapshots read above always carry this projection. Reduced
+    // snapshots owned by other tests/callers cannot authorize a route rewrite.
+    return false;
+  }
+
+  const currentThreadIdentityLookupKey =
+    createHostedExternalThreadIdentityLookupKey({
+      channel: input.route.channel,
+      threadId: input.threadId,
+    });
+  const currentThreadLookupKey = createHostedExternalThreadLookupKey({
+    accountLookupKey: input.accountLookupKey,
+    channel: input.route.channel,
+    threadId: input.threadId,
+  });
+
+  return !state.deliveryRouteEncryptedPresent
+    || !currentThreadIdentityLookupKey
+    || !currentThreadLookupKey
+    || state.threadIdentityLookupKey !== currentThreadIdentityLookupKey
+    || state.threadLookupKey !== currentThreadLookupKey;
 }
 
 export async function lockHostedThreadRouteByThreadIdentityTx(input: {

@@ -193,6 +193,7 @@ import {
 import {
   createPhoneCallRequestKey,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
@@ -2799,18 +2800,29 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       try {
-        const result = await phoneCalls.start({
+        const brief = normalizePhoneCallBriefForConversationScope({
           brief: input.request.brief,
+          conversationScope: requestKeyScope.conversationScope,
+        })
+        const result = await phoneCalls.start({
+          brief,
+          ...(requestKeyScope.conversationScope === 'group'
+            ? {
+                inboundMailboxItemIds: [
+                  ...requestKeyScope.inboundMailboxItemIds,
+                ],
+              }
+            : {}),
           originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
-            brief: input.request.brief,
+            brief,
             scope: requestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,
         })
         const resultContextGuidance =
-          'When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.'
+          'When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.'
         if (result.status === "calling") {
           return toolTextResult(
             true,
