@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import {
   decideHostedGroupJoinOutreachSendWindow,
   resolveHostedGroupJoinOutreachSendWindowCoverage,
@@ -84,16 +85,12 @@ describe("hosted group join outreach recipient window", () => {
     })).toEqual({ kind: "send_now" });
   });
 
-  it("keeps an ambiguous international recipient pending instead of dropping it", () => {
-    const now = new Date("2026-07-24T16:00:00.000Z");
-
+  it("terminalizes an unsupported region instead of retrying identical inputs", () => {
+    // A deferral here would re-evaluate the same phone number and clock forever:
+    // the participant would never be texted and the row would never resolve.
     expect(decideHostedGroupJoinOutreachSendWindow({
-      now,
+      now: new Date("2026-07-24T16:00:00.000Z"),
       participantPhoneNumber: "+9795550123",
-    })).toEqual({
-      kind: "defer",
-      nextAttemptAt: new Date("2026-07-25T16:00:00.000Z"),
-      reason: "recipient_timezone_unavailable",
-    });
+    })).toEqual({ kind: "unsupported_region" });
   });
 });

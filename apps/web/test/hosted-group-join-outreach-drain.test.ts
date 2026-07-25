@@ -18,8 +18,6 @@ vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
     value ? `chat:${value}` : null,
   createHostedLinqMessageLookupKey: (value: string | null | undefined) =>
     value ? `message:${value}` : null,
-  createHostedPhoneLookupKeyReadCandidates: (value: string) =>
-    [`phone:${value}`],
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
@@ -169,12 +167,6 @@ describe("hosted group join outreach drain", () => {
       },
       expected: { kind: "skipped", reason: "recipient_now_member" },
       name: "the recipient already has an account",
-    },
-    {
-      arrange: () => {},
-      expected: { kind: "skipped", reason: "recipient_already_outreached" },
-      name: "the recipient already has a cold thread for another group",
-      stub: { priorAttempt: { id: "hgrpjoa_earlier" } },
     },
     {
       arrange: () => {
@@ -365,7 +357,6 @@ function createPrismaStub(options?: {
   attemptCount?: number;
   due?: null;
   offerRevokedAt?: Date;
-  priorAttempt?: { id: string } | null;
 }): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
   updateMany: ReturnType<typeof vi.fn>;
@@ -397,17 +388,13 @@ function createPrismaStub(options?: {
       })),
     },
     hostedGroupJoinOutreach: {
-      // The drain reads three different shapes through findFirst: the due row,
-      // this participant's prior cold attempt, and the newest attempt anywhere
-      // for global pacing. Distinguish them by the predicate each one uses.
+      // The drain reads two shapes through findFirst: the due row, and the
+      // newest attempt anywhere for global pacing.
       findFirst: vi.fn(async (input: {
         where: Record<string, unknown>;
       }) => {
         if ("nextAttemptAt" in input.where) {
           return options?.due === null ? null : dueOutreach;
-        }
-        if ("participantPhoneLookupKey" in input.where) {
-          return options?.priorAttempt ?? null;
         }
         return null;
       }),

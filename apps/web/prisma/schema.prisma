@@ -1400,6 +1400,7 @@ model HostedGroup {
   runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
   members           HostedGroupMember[]
   joinOffers        HostedGroupJoinOffer[]
+  joinOutreaches    HostedGroupJoinOutreach[]
   disclosurePermissions HostedGroupDisclosurePermission[]
 
   @@index([ownerMemberId])
@@ -1441,6 +1442,7 @@ model HostedGroupJoinOutreach {
   lastDeferralReason        String?         @map("last_deferral_reason")
   createdAt                 DateTime        @default(now()) @map("created_at")
   updatedAt                 DateTime        @updatedAt @map("updated_at")
+  group                     HostedGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
   line                      HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
 
   @@unique([offerId, participantPhoneLookupKey], map: "hosted_group_join_outreach_offer_participant_key")

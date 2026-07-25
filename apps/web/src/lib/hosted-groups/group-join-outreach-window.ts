@@ -3,7 +3,6 @@ import "server-only";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 
 const MINUTES_PER_DAY = 24 * 60;
-const UNKNOWN_TIME_ZONE_RETRY_MS = 24 * 60 * 60_000;
 
 type HostedGroupJoinOutreachUtcWindow = {
   endMinuteUtc: number;
@@ -12,16 +11,17 @@ type HostedGroupJoinOutreachUtcWindow = {
 
 export type HostedGroupJoinOutreachSendWindowDecision =
   | { kind: "send_now" }
-  | {
-      kind: "defer";
-      nextAttemptAt: Date;
-      reason: "recipient_quiet_hours" | "recipient_timezone_unavailable";
-    };
+  | { kind: "defer"; nextAttemptAt: Date; reason: "recipient_quiet_hours" }
+  | { kind: "unsupported_region" };
 
 /**
- * Uses only calling-code regions whose plausible civil-zone range has a
- * non-empty intersection outside 23:00-05:00. Unknown or geographically
- * ambiguous codes remain durable deferrals; they are never terminal skips.
+ * Decides whether a cold first text may go out now.
+ *
+ * A region is supported only when its plausible civil-zone range has a window
+ * that is outside 23:00-05:00 everywhere in that range. An unsupported region
+ * is terminal rather than deferred: the inputs are a phone number and the clock,
+ * so a deferral would re-evaluate identical inputs forever and never send or
+ * resolve. Widening the supported set is a data change to the table below.
  */
 export function decideHostedGroupJoinOutreachSendWindow(input: {
   now: Date;
@@ -31,11 +31,7 @@ export function decideHostedGroupJoinOutreachSendWindow(input: {
     input.participantPhoneNumber,
   );
   if (!recipientWindow) {
-    return {
-      kind: "defer",
-      nextAttemptAt: new Date(input.now.getTime() + UNKNOWN_TIME_ZONE_RETRY_MS),
-      reason: "recipient_timezone_unavailable",
-    };
+    return { kind: "unsupported_region" };
   }
 
   const currentMinuteUtc = minuteOfUtcDay(input.now);

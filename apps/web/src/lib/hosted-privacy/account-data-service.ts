@@ -23,6 +23,7 @@ import { readHostedMemberStripeBillingRef } from "../hosted-onboarding/hosted-me
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
+import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-groups/group-join-outreach-drain";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import {
@@ -257,6 +258,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Hosted product feedback rows",
     deletion: "live-delete",
     note: "Deletes assistant-captured product feedback rows. Export includes safe kind/summary metadata and optional published changelog item ids while omitting the internal feedback id.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach",
+    label: "Pre-member group-join outreach intent",
+    deletion: "live-delete",
+    note: "Deletes outreach rows matching the member's phone blind index, including the encrypted participant phone, group and offer association, selected sending line, and replying chat identity. Rows are resolved by phone because the participant may never have become a member. Group deletion removes them by cascade. Export omits them: they are pre-member delivery state, not member-authored content.",
+  },
+  {
+    slug: "prisma.hosted_group_join_outreach_delivery",
+    label: "Group-join outreach provider correlation",
+    deletion: "live-delete",
+    note: "Deletes the hosted_group_join_outreach Linq delivery rows correlated to those outreach ids, so provider attempt and receipt history does not outlive the account.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -1040,6 +1053,44 @@ function buildHostedLinqInviteSignupDeliveryWhere(
   };
 }
 
+
+async function deleteHostedGroupJoinOutreachRowsForMembers(
+  prisma: Prisma.TransactionClient,
+  memberIdFilter: string | { in: string[] },
+): Promise<{ deliveryCount: number; outreachCount: number }> {
+  const identities = await prisma.hostedMemberIdentity.findMany({
+    where: { memberId: memberIdFilter },
+    select: { phoneLookupKey: true },
+  });
+  const phoneLookupKeys = uniqueStrings(
+    identities
+      .map((identity) => identity.phoneLookupKey)
+      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
+  );
+  if (phoneLookupKeys.length === 0) {
+    return { deliveryCount: 0, outreachCount: 0 };
+  }
+
+  const outreaches = await prisma.hostedGroupJoinOutreach.findMany({
+    where: { participantPhoneLookupKey: { in: phoneLookupKeys } },
+    select: { id: true },
+  });
+  const outreachIds = outreaches.map((outreach) => outreach.id);
+  const deliveries = outreachIds.length > 0
+    ? await prisma.hostedLinqDelivery.deleteMany({
+        where: {
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          sourceRef: { in: outreachIds },
+        },
+      })
+    : { count: 0 };
+  const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
+    where: { participantPhoneLookupKey: { in: phoneLookupKeys } },
+  });
+
+  return { deliveryCount: deliveries.count, outreachCount: removed.count };
+}
+
 async function assertNoConnectedAppWritesAfterProviderCleanupTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
@@ -1307,6 +1358,23 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
   }));
+  // Pre-member group-join outreach is keyed by the participant's phone, not by a
+  // member id, so it has to be resolved from the identity rows before they are
+  // deleted below. Without this the encrypted phone and its group association
+  // would outlive the account that the Settings copy promises to erase.
+  const groupJoinOutreachDeletion =
+    await deleteHostedGroupJoinOutreachRowsForMembers(
+      input.prisma,
+      memberIdFilter,
+    );
+  recordCount(
+    "prisma.hosted_group_join_outreach",
+    groupJoinOutreachDeletion.outreachCount,
+  );
+  recordCount(
+    "prisma.hosted_group_join_outreach_delivery",
+    groupJoinOutreachDeletion.deliveryCount,
+  );
   record("prisma.hosted_invite", await input.prisma.hostedInvite.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_event", await input.prisma.hostedConsentEvent.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_consent_grant", await input.prisma.hostedConsentGrant.deleteMany({ where: { memberId: memberIdFilter } }));

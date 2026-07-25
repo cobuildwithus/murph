@@ -52,3 +52,10 @@ ALTER TABLE "hosted_group_join_outreach"
   REFERENCES "hosted_linq_line"("phone_number_lookup_key")
   ON DELETE SET NULL
   ON UPDATE CASCADE;
+
+ALTER TABLE "hosted_group_join_outreach"
+  ADD CONSTRAINT "hosted_group_join_outreach_group_id_fkey"
+  FOREIGN KEY ("group_id")
+  REFERENCES "hosted_group"("id")
+  ON DELETE CASCADE
+  ON UPDATE CASCADE;

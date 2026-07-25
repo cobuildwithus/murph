@@ -433,6 +433,52 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("deletes pre-member group-join outreach and its provider correlation", async () => {
+    // The account is keyed by member id but this outreach is keyed by the
+    // participant's phone blind index, so the deletion promise is only true if it
+    // resolves that identity before removing the identity rows.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
+      groupJoinOutreachRows: [{ id: "hgrpjoa_opaque" }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedGroupJoinOutreach",
+        where: {
+          participantPhoneLookupKey: { in: ["hbidx:phone:v1:participant"] },
+        },
+      },
+      {
+        model: "hostedLinqDelivery",
+        where: {
+          source: "hosted_group_join_outreach",
+          sourceRef: { in: ["hgrpjoa_opaque"] },
+        },
+      },
+    ]));
+
+    const models = deleteCalls.map((call) => call.model);
+    expect(models.indexOf("hostedGroupJoinOutreach"))
+      .toBeLessThan(models.indexOf("hostedMemberIdentity"));
+    // The registry must also declare the store, or the deletion report and the
+    // Settings promise would omit data that was in fact removed.
+    expect(HOSTED_ACCOUNT_DATA_STORE_COVERAGE.map((store) => store.slug))
+      .toEqual(expect.arrayContaining([
+        "prisma.hosted_group_join_outreach",
+        "prisma.hosted_group_join_outreach_delivery",
+      ]));
+  });
+
   it("deletes disclosure grants and owned policies before their membership and group owners", async () => {
     const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -1988,6 +2034,8 @@ function createHostedAccountDeletionPrismaForTest(input: {
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
+  groupJoinOutreachPhoneLookupKeys?: readonly string[];
+  groupJoinOutreachRows?: readonly { id: string }[];
   onTransaction: () => void;
   operationOrder?: string[];
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];
@@ -2008,6 +2056,15 @@ function createHostedAccountDeletionPrismaForTest(input: {
       input.deleteCalls?.push({ model, where: args.where });
       return { count: 1 };
     },
+    findMany: async () => (
+      model === "hostedMemberIdentity"
+        ? (input.groupJoinOutreachPhoneLookupKeys ?? []).map((phoneLookupKey) => ({
+            phoneLookupKey,
+          }))
+        : model === "hostedGroupJoinOutreach"
+          ? input.groupJoinOutreachRows ?? []
+          : []
+    ),
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
     $executeRaw: async (...args: unknown[]) => {
@@ -2085,6 +2142,16 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedMemberIdentity: {
       findUnique: async () => input.identityRecord ?? null,
+      // Pre-member group-join outreach is resolved from the member's phone blind
+      // index before the identity rows are deleted.
+      findMany: async () => input.groupJoinOutreachPhoneLookupKeys
+        ? input.groupJoinOutreachPhoneLookupKeys.map((phoneLookupKey) => ({
+            phoneLookupKey,
+          }))
+        : [],
+    },
+    hostedGroupJoinOutreach: {
+      findMany: async () => input.groupJoinOutreachRows ?? [],
     },
     hostedConnectedAppsSession: {
       findUnique: async () => input.connectedAppsSession
@@ -2227,6 +2294,10 @@ type HostedAccountDeletionConnectedAppIntentRow = {
 type HostedAccountDeletionPrismaDeleteDelegate = {
   count(args: { where: unknown }): Promise<number>;
   deleteMany(args: { where: unknown }): Promise<{ count: number }>;
+  // Some deletion owners must read rows before removing them, such as resolving
+  // pre-member outreach from the member's phone blind index. Reading empty keeps
+  // those paths inert unless a test supplies rows.
+  findMany(args: { where?: unknown; select?: unknown }): Promise<readonly unknown[]>;
 };
 
 type HostedAccountDeletionPrismaTransactionFake = {

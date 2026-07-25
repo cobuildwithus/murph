@@ -2,10 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-import {
-  createHostedLinqChatLookupKey,
-  createHostedPhoneLookupKeyReadCandidates,
-} from "../hosted-onboarding/contact-privacy";
+import { createHostedLinqChatLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
   markHostedLinqDeliveryAcceptedTx,
@@ -33,7 +30,8 @@ import {
 } from "./group-join-outreach-window";
 import { readHostedGroupJoinOutreachParticipantPhone } from "./group-join-outreach-store";
 
-const HOSTED_GROUP_JOIN_OUTREACH_SOURCE = "hosted_group_join_outreach";
+export const HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE =
+  "hosted_group_join_outreach";
 const HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE = "group_join_outreach";
 const HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX = "group-join-outreach:";
 const HOSTED_GROUP_JOIN_OUTREACH_GLOBAL_PACE_MS = 60_000;
@@ -292,34 +290,25 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     });
   }
 
-  const participantPhoneLookupKeyReadCandidates =
-    createHostedPhoneLookupKeyReadCandidates(participantPhoneNumber);
-  // Intentional cold-contact safety: once any provider attempt has started for
-  // this participant, Murph never opens another cold thread for another group,
-  // even days later and even when the first outreach received no reply.
-  const priorAttempt = await input.tx.hostedGroupJoinOutreach.findFirst({
-    where: {
-      dispatchStartedAt: { not: null },
-      id: { not: outreach.id },
-      participantPhoneLookupKey: {
-        in: participantPhoneLookupKeyReadCandidates,
-      },
-    },
-    select: { id: true },
-  });
-  if (priorAttempt) {
-    return skipHostedGroupJoinOutreachTx({
-      now: input.now,
-      outreachId: outreach.id,
-      reason: "recipient_already_outreached",
-      tx: input.tx,
-    });
-  }
-
+  // A reaction to a distinct offer is fresh intent, so nothing here suppresses
+  // it on the basis of an earlier attempt for a different group. Duplicate work
+  // is already collapsed by the unique (offerId, participantPhoneLookupKey) row,
+  // and volume is bounded by global pacing, per-line caps, line health, and
+  // quiet hours.
   const sendWindow = decideHostedGroupJoinOutreachSendWindow({
     now: input.now,
     participantPhoneNumber,
   });
+  if (sendWindow.kind === "unsupported_region") {
+    // Terminal, not deferred: no later sweep can derive a safe window for this
+    // number, so recording the refusal keeps the row from retrying forever.
+    return skipHostedGroupJoinOutreachTx({
+      now: input.now,
+      outreachId: outreach.id,
+      reason: "recipient_region_unsupported",
+      tx: input.tx,
+    });
+  }
   if (sendWindow.kind === "defer") {
     return deferHostedGroupJoinOutreachTx({
       nextAttemptAt: sendWindow.nextAttemptAt,
@@ -405,9 +394,15 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     phoneNumber: line.phoneNumber,
     prisma: input.tx,
     reclaimStalePreProviderAttempt: true,
-    source: HOSTED_GROUP_JOIN_OUTREACH_SOURCE,
+    source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
     sourceRef: outreach.id,
-    status: "provider_dispatch_started",
+    // Ordinary reclaimable `attempted`, not `provider_dispatch_started`: only
+    // the unrelated ai_usage_quota source can reclaim a stale dispatch-started
+    // row, so this claim would otherwise strand the outreach in
+    // delivery_in_flight forever if the process died between this commit and
+    // the provider call. Replay is safe because the provider idempotency key is
+    // the stable `group-join-outreach:<id>`.
+    status: "attempted",
     targetKind: "participant",
     template: HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE,
   });
@@ -511,7 +506,9 @@ function resolveNextUtcDaySendAttempt(input: {
     now: nextDay,
     participantPhoneNumber: input.participantPhoneNumber,
   });
-  return decision.kind === "send_now" ? nextDay : decision.nextAttemptAt;
+  // A capacity deferral only reschedules; region support was already decided
+  // before this point, so an unsupported region cannot reach here.
+  return decision.kind === "defer" ? decision.nextAttemptAt : nextDay;
 }
 
 async function deferHostedGroupJoinOutreachTx(input: {

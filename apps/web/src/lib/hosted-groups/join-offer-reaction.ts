@@ -26,7 +26,10 @@ import {
 import {
   acceptHostedGroupDisclosurePermissionReactionTx,
 } from "./group-disclosure-store";
-import { enqueueHostedGroupJoinOutreachTx } from "./group-join-outreach-store";
+import {
+  enqueueHostedGroupJoinOutreachTx,
+  revokeHostedGroupJoinOutreachForRemovedReactionTx,
+} from "./group-join-outreach-store";
 import {
   acceptHostedGroupJoinOfferTx,
   readHostedGroupJoinOfferTargetTx,
@@ -50,7 +53,10 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "unsupported_reaction";
 
 export type HostedGroupJoinOfferReactionResult =
-  | { status: "accepted"; reason: "accepted" | "outreach_enqueued" }
+  | {
+      status: "accepted";
+      reason: "accepted" | "outreach_enqueued" | "outreach_revoked";
+    }
   | { status: "ignored"; reason: HostedGroupJoinOfferReactionSkipReason };
 
 export async function handleHostedGroupJoinOfferReaction(input: {
@@ -58,11 +64,6 @@ export async function handleHostedGroupJoinOfferReaction(input: {
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<HostedGroupJoinOfferReactionResult> {
-  if (input.event.eventType === "reaction.removed") {
-    return skipHostedGroupJoinOfferReaction({
-      reason: "reaction_removed",
-    });
-  }
   if (input.event.reactionIsFromMe === true) {
     return skipHostedGroupJoinOfferReaction({
       reason: "unsupported_reaction",
@@ -72,7 +73,8 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     input.event,
   );
   if (
-    !isHostedLinqAffirmativeReaction({
+    input.event.eventType !== "reaction.removed"
+    && !isHostedLinqAffirmativeReaction({
       customEmoji: input.event.reactionCustomEmoji,
       eventType: input.event.eventType,
       reactionType: input.event.reactionType,
@@ -107,10 +109,50 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     handle: input.event.reactionFromHandle,
     prisma: input.prisma,
   });
-  if (!member) {
-    const participantPhoneNumber = input.event.reactionFromHandle.includes("@")
+
+  if (input.event.eventType === "reaction.removed") {
+    // Only the pre-member outreach this feature owns is revocable. A member's
+    // removal keeps its previous no-op behavior: their grants are additive and
+    // are not undone by dropping a tapback.
+    const participantPhoneNumber = member
       ? null
-      : normalizePhoneNumber(input.event.reactionFromHandle);
+      : readHostedGroupJoinOfferReactionParticipantPhone(
+          input.event.reactionFromHandle,
+        );
+    if (!participantPhoneNumber) {
+      return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
+    }
+
+    try {
+      const revoked = await input.prisma.$transaction(async (tx) => {
+        const offer = await readHostedGroupJoinOfferTargetTx({
+          messageLookupKeyReadCandidates,
+          threadIdentityLookupKeyReadCandidates,
+          tx,
+        });
+        return revokeHostedGroupJoinOutreachForRemovedReactionTx({
+          groupId: offer.groupId,
+          now: input.event.providerCreatedAt,
+          offerId: offer.offerId,
+          participantPhoneNumber,
+          tx,
+        });
+      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      return revoked.kind === "revoked"
+        ? { status: "accepted", reason: "outreach_revoked" }
+        : skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
+    } catch (error) {
+      if (!readHostedGroupJoinOfferReactionSkipReason(error)) {
+        throw error;
+      }
+      return skipHostedGroupJoinOfferReaction({ reason: "reaction_removed" });
+    }
+  }
+
+  if (!member) {
+    const participantPhoneNumber = readHostedGroupJoinOfferReactionParticipantPhone(
+      input.event.reactionFromHandle,
+    );
     if (!participantPhoneNumber) {
       return skipHostedGroupJoinOfferReaction({ reason: "non_phone_handle" });
     }
@@ -235,6 +277,12 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     });
   }
   return { status: "accepted", reason: "accepted" };
+}
+
+function readHostedGroupJoinOfferReactionParticipantPhone(
+  handle: string,
+): string | null {
+  return handle.includes("@") ? null : normalizePhoneNumber(handle);
 }
 
 function isExactHostedGroupDisclosureLikeReaction(

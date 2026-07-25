@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   claimHostedGroupJoinOutreachReplyContextTx,
   enqueueHostedGroupJoinOutreachTx,
+  revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
 
 const TEST_CONTACT_PRIVACY_KEY =
@@ -118,6 +119,111 @@ describe("hosted group join outreach store", () => {
       updateMany,
     };
   }
+
+
+  // Removing the reaction is the participant's only undo at this entry point,
+  // so a withdrawal that lands before dispatch must stop the private text.
+  function createRevokeTx(existing?: {
+    dispatchStartedAt: Date | null;
+    id: string;
+    sentAt: Date | null;
+    skippedAt: Date | null;
+  } | null) {
+    const createMany = vi.fn(
+      async (_input: {
+        data: { participantPhoneEncrypted: string; skipReason?: string }[];
+        skipDuplicates: boolean;
+      }) => ({ count: 1 }),
+    );
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    return {
+      createMany,
+      tx: {
+        $executeRaw: vi.fn(async () => 0),
+        hostedGroupJoinOutreach: {
+          createMany,
+          findFirst: vi.fn(async () => existing ?? null),
+          updateMany,
+        },
+      } as never,
+      updateMany,
+    };
+  }
+
+  const REVOKE_INPUT = {
+    groupId: "hgrp_opaque",
+    now: new Date("2026-07-24T16:05:00.000Z"),
+    offerId: "hgrpjo_opaque",
+    participantPhoneNumber: "+15551234567",
+  };
+
+  it("terminalizes a pending outreach when the reaction is removed", async () => {
+    const { tx, updateMany } = createRevokeTx({
+      dispatchStartedAt: null,
+      id: "hgrpjoa_opaque",
+      sentAt: null,
+      skippedAt: null,
+    });
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      tx,
+    })).resolves.toEqual({ kind: "revoked" });
+
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        skipReason: "reaction_removed",
+        skippedAt: REVOKE_INPUT.now,
+      },
+      where: expect.objectContaining({ dispatchStartedAt: null }),
+    }));
+  });
+
+  it("records a terminal row so a removal delivered before its add converges", async () => {
+    const { createMany, tx } = createRevokeTx(null);
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      tx,
+    })).resolves.toEqual({ kind: "revoked" });
+
+    const created = createMany.mock.calls[0]?.[0];
+    expect(created?.data[0]?.skipReason).toBe("reaction_removed");
+    expect(created?.data[0]?.participantPhoneEncrypted)
+      .not.toContain("+15551234567");
+  });
+
+  it("does not roll back an outreach whose dispatch already started", async () => {
+    const { tx, updateMany } = createRevokeTx({
+      dispatchStartedAt: new Date("2026-07-24T16:01:00.000Z"),
+      id: "hgrpjoa_opaque",
+      sentAt: null,
+      skippedAt: null,
+    });
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      tx,
+    })).resolves.toEqual({ kind: "dispatch_started" });
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves an already terminal outreach untouched on a duplicate removal", async () => {
+    const { tx, updateMany } = createRevokeTx({
+      dispatchStartedAt: null,
+      id: "hgrpjoa_opaque",
+      sentAt: null,
+      skippedAt: new Date("2026-07-24T16:02:00.000Z"),
+    });
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      tx,
+    })).resolves.toEqual({ kind: "not_pending" });
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
 
   it("recovers the originating group and records the reply", async () => {
     const { tx, updateMany } = createReplyContextTx();

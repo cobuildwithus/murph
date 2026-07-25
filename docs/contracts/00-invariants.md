@@ -198,9 +198,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   fails.
 - A pre-member group-join reaction accepted for proactive outreach is Web-owned
   durable work. Its stable offer-and-participant identity collapses webhook
-  retry, duplicate reaction, and unlike/re-like delivery. Unknown recipient
-  time zone, line health, and line capacity produce typed durable deferrals,
-  never an unrecorded or terminal silent drop.
+  retry, duplicate reaction, and unlike/re-like delivery. Every refusal is typed
+  and durable: line health and capacity defer with a bounded next attempt, and a
+  condition whose inputs cannot change terminates instead of deferring, so no row
+  retries forever and none is dropped unrecorded. Pre-member contact data that a
+  reaction creates participates in the existing account-deletion and
+  group-deletion owners rather than outliving them.
 
 ## Authority, Ownership, And State
 

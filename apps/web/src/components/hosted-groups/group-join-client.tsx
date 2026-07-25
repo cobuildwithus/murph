@@ -53,6 +53,12 @@ export function GroupJoinSignInButton(input: {
       </Button>
       <AuthDialog
         inviteCode={input.inviteCode}
+        // A group-join invite reached by cold outreach is phone-bound: the
+        // provisional member was created from an inbound text, and
+        // authentication-service resolves that invite to the phone method and
+        // rejects a Privy identity without one. Offering Telegram or email here
+        // would let someone finish an entire sign-in that cannot complete.
+        {...(input.inviteCode ? { methods: ["phone"] as const } : {})}
         open={open}
         onCompleted={handleCompleted}
         onOpenChange={setOpen}

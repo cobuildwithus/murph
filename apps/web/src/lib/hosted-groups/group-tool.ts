@@ -1177,12 +1177,13 @@ function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  // The link is the only path that works for someone who does not use Murph yet:
-  // a like from a non-member resolves no member and is dropped. Name that case so
-  // the offer does not read as members-only.
-  return `Like or heart this message to share the following with this group: ${
+  // A reaction from someone who does not use Murph yet now causes Murph to open
+  // a private thread with them, so the offer has to say that plainly: an
+  // unannounced first text is the part a recipient would not expect. The link
+  // stays as the control for choosing different permissions.
+  return `Like or heart this message and Murph will text you privately to help you join and share the following with this group: ${
     renderHostedGroupJoinOfferScopeSentence(input.projectionScopes)
-  }. Haven't joined yet, or want different permissions? Use ${input.joinUrl}.`;
+  }. To choose different permissions, use ${input.joinUrl}.`;
 }
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
