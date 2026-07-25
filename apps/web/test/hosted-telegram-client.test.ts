@@ -32,23 +32,23 @@ describe("sendHostedTelegramTextMessage", () => {
       },
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.telegram.org/bottelegram-token/sendMessage",
-      expect.objectContaining({
-        body: JSON.stringify({
-          business_connection_id: "business_1",
-          chat_id: "42",
-          direct_messages_topic_id: 9,
-          reply_parameters: {
-            allow_sending_without_reply: true,
-            message_id: 17,
-          },
-          text: "Try setup again.",
-        }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      }),
-    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.telegram.org/bottelegram-token/sendMessage");
+    expect(request).toMatchObject({
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(JSON.parse(String(request.body))).toEqual({
+      business_connection_id: "business_1",
+      chat_id: "42",
+      direct_messages_topic_id: 9,
+      reply_parameters: {
+        allow_sending_without_reply: true,
+        message_id: 17,
+      },
+      text: "Try setup again.",
+    });
   });
 
   it("rejects a provider refusal instead of reporting a reply that was never sent", async () => {

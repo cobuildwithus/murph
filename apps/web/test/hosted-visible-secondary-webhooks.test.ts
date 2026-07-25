@@ -56,7 +56,7 @@ describe("visible secondary webhook outcomes", () => {
 
   it.each([
     ["family-invite-not-accepted", true, null, "Family invite"],
-    ["unlinked-telegram", true, "https://withmurph.ai/", "Set it up"],
+    ["unlinked-telegram", true, "https://withmurph.ai/", "choose Telegram"],
     ["ambiguous-telegram-binding", true, null, "isn't linked cleanly"],
     ["telegram-binding-changed", true, null, "isn't linked cleanly"],
     ["group-chat-provision-unavailable", false, null, "group chat"],
@@ -159,7 +159,11 @@ describe("visible secondary webhook outcomes", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_visible_signup",
       idempotencyKey: "visible-secondary:evt_visible_signup",
+      message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
       replyToMessageId: "msg_visible_signup",
+    }));
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining("above"),
     }));
   });
 
@@ -208,7 +212,7 @@ describe("visible secondary webhook outcomes", () => {
       reason: "visible-secondary-reply:unlinked-telegram",
     });
     expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.stringContaining("https://withmurph.ai/"),
+      message: expect.stringMatching(/choose Telegram: https:\/\/withmurph\.ai\//),
       replyToMessageId: 7,
       target: expect.objectContaining({ chatId: "42" }),
     }));

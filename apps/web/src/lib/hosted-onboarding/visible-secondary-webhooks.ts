@@ -67,7 +67,7 @@ const HOSTED_LINQ_CHAT_UNAVAILABLE_REPLY =
 const HOSTED_LINQ_CHAT_UNVERIFIED_REPLY =
   "I couldn't verify this as your Murph chat. Message me from your usual Murph thread or reconnect messaging in Settings.";
 const HOSTED_SIGNUP_LINK_REMINDER_REPLY =
-  "I already sent your setup link above. Open it to finish setting up Murph.";
+  "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.";
 const HOSTED_TELEGRAM_BINDING_REPAIR_REPLY =
   "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.";
 const HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY =
@@ -226,7 +226,7 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
         return HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
       }
       return input.signupUrl
-        ? `I can't match this Telegram account to Murph yet. Set it up here: ${input.signupUrl}\n\nThen message me again.`
+        ? `I can't match this Telegram account to Murph yet. Open this setup page and choose Telegram: ${input.signupUrl}\n\nThen message me again.`
         : null;
     case "ambiguous-telegram-binding":
     case "telegram-binding-changed":
