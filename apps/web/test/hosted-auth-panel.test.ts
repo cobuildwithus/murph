@@ -815,4 +815,36 @@ test("HostedAuthPanel keeps Decline terminal when a late status result says cons
   expect(onCompleted).not.toHaveBeenCalled();
   expect(assign).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain("Hosted legal consent card");
+
+  // The panel stays mounted and returns to auth after a successful decline, so
+  // a member who changes their mind must be able to finish a fresh attempt.
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
+      payload: {
+        activationPending: false,
+        inviteCode: "second-invite-code",
+        joinUrl: "/join/second-invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
+  });
+
+  expect(container.textContent).toContain("Hosted legal consent card");
+
+  const secondContinueButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.includes("Continue"),
+  );
+  await act(async () => {
+    secondContinueButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onCompleted).toHaveBeenCalledTimes(1);
+  expect(onCompleted).toHaveBeenCalledWith({
+    activationPending: false,
+    inviteCode: "second-invite-code",
+    joinUrl: "/join/second-invite-code",
+    stage: "active",
+  });
+  expect(container.textContent).not.toContain("Hosted legal consent card");
 });

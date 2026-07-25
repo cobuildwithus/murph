@@ -156,7 +156,12 @@ export function HostedAuthPanel({
       // The authoritative Murph app session is already gone.
     }
 
+    // Clear the refused completion before releasing terminal priority, so a
+    // late callback from the declined journey still has nothing to advance.
+    // The panel stays mounted and returns to auth, so the next authentication
+    // in this same panel must be able to complete.
     pendingAuthCompletionRef.current = null;
+    consentDeclinedRef.current = false;
     completion.resetCompletion();
     setPendingAuthCompletion(null);
     setConsentDeclinePending(false);
