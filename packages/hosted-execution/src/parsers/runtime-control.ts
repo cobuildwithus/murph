@@ -2441,17 +2441,8 @@ export function parseHostedRuntimeGroupToolResponse(
     const result = requireObject(record.result, "Hosted runtime group tool preflight_set_chat_avatar response result");
     const status = requireString(result.status, "Hosted runtime group tool preflight_set_chat_avatar response status");
     if (status === "ok") {
-      assertAllowedObjectKeys(result, new Set(["chatIconPresent", "status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
-      return {
-        action,
-        result: {
-          chatIconPresent: requireBoolean(
-            result.chatIconPresent,
-            "Hosted runtime group tool preflight_set_chat_avatar chatIconPresent",
-          ),
-          status,
-        },
-      };
+      assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool preflight_set_chat_avatar ok response result");
+      return { action, result: { status } };
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason"]), "Hosted runtime group tool preflight_set_chat_avatar unavailable response result");

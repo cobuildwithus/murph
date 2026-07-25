@@ -1432,39 +1432,14 @@ describe("parseHostedRuntimeGroupTool", () => {
     expect(parseHostedRuntimeGroupToolResponse({
       action: "preflight_set_chat_avatar",
       result: {
-        chatIconPresent: false,
         status: "ok",
       },
     })).toEqual({
       action: "preflight_set_chat_avatar",
       result: {
-        chatIconPresent: false,
         status: "ok",
       },
     });
-
-    expect(parseHostedRuntimeGroupToolResponse({
-      action: "preflight_set_chat_avatar",
-      result: {
-        chatIconPresent: true,
-        status: "ok",
-      },
-    })).toEqual({
-      action: "preflight_set_chat_avatar",
-      result: {
-        chatIconPresent: true,
-        status: "ok",
-      },
-    });
-
-    // The icon slot state is required: a producer that omits it must not be
-    // read as an empty slot.
-    expect(() => parseHostedRuntimeGroupToolResponse({
-      action: "preflight_set_chat_avatar",
-      result: {
-        status: "ok",
-      },
-    })).toThrow();
 
     expect(parseHostedRuntimeGroupToolResponse({
       action: "preflight_set_chat_avatar",

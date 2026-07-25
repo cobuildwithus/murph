@@ -788,11 +788,6 @@ export const MURPH_GROUP_TOOL = {
         description:
           'Required for action="set_chat_avatar". Use "generate" to create a new square avatar from prompt, or "image_ref" to reuse one user-sent JPG, PNG, or WebP image ref.',
       },
-      replaceExistingChatIcon: {
-        type: 'boolean',
-        description:
-          'Optional for action="set_chat_avatar". The group chat photo cannot be read back or restored once replaced, so a chat that already has one is left alone by default. Set true only when this group asked for its photo to be changed.',
-      },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -1467,7 +1462,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       alt: z.string().trim().min(1).max(500).nullable().default(null),
       avatarSource: z.enum(['generate', 'image_ref']),
       imageRef: z.string().trim().min(1).max(1024).optional(),
-      replaceExistingChatIcon: z.boolean().default(false),
       outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
       prompt: z.string().trim().min(1).max(4000).optional(),
       quality: z.enum(['low', 'medium', 'high']).default('medium'),
@@ -1863,7 +1857,6 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'set_chat_avatar'
-      replaceExistingChatIcon: boolean
       avatar:
         | {
             source: 'generate'
@@ -3476,15 +3469,6 @@ async function executeGroupTool(input: {
         result: preflight.result,
       }))
     }
-    if (preflight.result.chatIconPresent && !input.request.replaceExistingChatIcon) {
-      return toolTextResult(true, safeToolPayloadText({
-        action: 'set_chat_avatar',
-        result: {
-          status: 'unavailable',
-          unavailableReason: 'chat_icon_already_set',
-        },
-      }))
-    }
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
@@ -5056,7 +5040,6 @@ function parseGroupArguments(
         ok: true,
         request: {
           action: 'set_chat_avatar',
-          replaceExistingChatIcon: parsed.data.replaceExistingChatIcon,
           avatar: {
             source: 'generate',
             args: {
@@ -5093,7 +5076,6 @@ function parseGroupArguments(
       ok: true,
       request: {
         action: 'set_chat_avatar',
-        replaceExistingChatIcon: parsed.data.replaceExistingChatIcon,
         avatar: {
           alt: parsed.data.alt,
           imageRef: parsed.data.imageRef,

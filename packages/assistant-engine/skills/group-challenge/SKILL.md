@@ -472,9 +472,7 @@ automation action rules with a `dailyLocal` schedule and
    Rotate formats day over day — text bit, comic, voice memo, song,
    sportsbook odds, ruling — and check the sent log so the same format does
    not land twice in a row. A voice memo or song cannot share a turn with
-   other media, so the day's format is a real choice. If the sent log already
-   records a group photo drop for this local day, that WAS the dispatch:
-   finish without a message rather than sending a second one.
+   other media, so the day's format is a real choice.
 6. For images, follow the Comics rules below. Pass the pinned capture paths
    of everyone appearing (plus your character sheet ref when you appear) as
    `referenceImageRefs`, and record the saved vault ref that

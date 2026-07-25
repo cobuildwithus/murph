@@ -1266,7 +1266,7 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "preflight_set_chat_avatar";
       result:
-        | { status: "ok"; chatIconPresent: boolean }
+        | { status: "ok" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
