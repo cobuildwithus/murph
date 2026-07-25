@@ -35,6 +35,14 @@ export function parseHostedExecutionTelegramMessage(
             ),
           ),
         }),
+    ...(record.from === undefined
+      ? {}
+      : {
+          from: readNullableStringValue(
+            record.from,
+            "Hosted execution Telegram message telegramMessage.from",
+          ),
+        }),
     ...(record.mediaGroupId === undefined
       ? {}
       : {
@@ -58,6 +66,14 @@ export function parseHostedExecutionTelegramMessage(
           ),
         }),
     schema: parseHostedExecutionTelegramMessageSchema(record.schema),
+    ...(record.senderUsername === undefined
+      ? {}
+      : {
+          senderUsername: readNullableStringValue(
+            record.senderUsername,
+            "Hosted execution Telegram message telegramMessage.senderUsername",
+          ),
+        }),
     ...(record.text === undefined
       ? {}
       : {

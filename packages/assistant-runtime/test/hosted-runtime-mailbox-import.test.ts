@@ -1375,6 +1375,7 @@ describe("hosted mailbox import loop", () => {
 
   test("returns the latest Linq delivery context imported from the mailbox prefix", async () => {
     const item = createMailboxItem({
+      causalSeq: "17",
       id: "mailbox_item_conversation_linq_context",
       laneSeq: "1",
     });
@@ -1432,6 +1433,7 @@ describe("hosted mailbox import loop", () => {
     assert.deepEqual(result.assistantInputRecords, [
       {
         assistantInputId: "assistant_input_linq_context_1",
+        causalSeq: "17",
         linqDeliveryContext: {
           directRecipientPhoneNumber: "+15550000001",
           fromPhoneNumber: null,
@@ -1570,6 +1572,7 @@ describe("hosted mailbox import loop", () => {
     ]);
     assert.deepEqual(result.assistantInputRecords, [{
       assistantInputId: "assistant_input_conversation_fresh",
+      causalSeq: null,
     }]);
     assert.equal(result.conversationImportedCount, 1);
     assert.equal(result.importedCount, 2);

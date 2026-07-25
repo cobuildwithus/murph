@@ -67,6 +67,7 @@ export async function prepareHostedUsageCreditCheckoutEvent(input: {
   const [session, lineItems] = await Promise.all([
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "checkout.sessions.retrieve.usage-credit-reconciliation",
       read: (options) => input.context.stripe.checkout.sessions.retrieve(
         sessionId,
         undefined,
@@ -75,6 +76,7 @@ export async function prepareHostedUsageCreditCheckoutEvent(input: {
     }),
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "checkout.sessions.listLineItems.usage-credit-reconciliation",
       read: (options) => input.context.stripe.checkout.sessions.listLineItems(
         sessionId,
         { limit: 100 },
@@ -94,6 +96,7 @@ export async function prepareHostedUsageCreditCheckoutEvent(input: {
   const paymentIntent = paymentIntentId
     ? await readHostedUsageCreditStripe({
         context: input.context,
+        operationName: "paymentIntents.retrieve.usage-credit-reconciliation",
         read: (options) => input.context.stripe.paymentIntents.retrieve(
           paymentIntentId,
           { expand: ["latest_charge"] },

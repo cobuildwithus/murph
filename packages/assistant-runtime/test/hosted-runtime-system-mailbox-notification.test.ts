@@ -2099,6 +2099,67 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("preserves turn-owned preference time instead of later transport order", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      causalOrigin: "turn",
+      eventId: "member.preferences.updated:turn-10",
+      memberId: "member_123",
+      occurredAt: FIXED_NOW,
+      preferenceCausalSeq: "10",
+      preferences: {
+        personality: {
+          humor: 8,
+        },
+      },
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          causalSeq: "12",
+          id: "mailbox_item_system_member_preferences_turn_10",
+          laneSeq: "12",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
+        pending: [{
+          preferenceCausalSeq: "10",
+        }],
+      });
+      mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
+        expect(input.preferenceCausalSeq).toBe("10");
+        return {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          nextWakeAt: null,
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["apply-member-preferences"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      assert.equal(prepared?.status, "processed");
+      assert.deepEqual(
+        (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
+        [],
+      );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("preserves mailbox order when rollback restores multiple preference deltas", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const lowerSeqNewerTimestampWake = buildHostedExecutionMemberPreferencesUpdatedWake({

@@ -6,6 +6,8 @@ import {
   assistantPersonalityScoresSchema,
   assistantPersonalitySettingIds,
   assistantPersonalitySettingSchema,
+  assistantWebPersonalityPreferencesSchema,
+  assistantWebPersonalitySettingIds,
   assistantPreferenceCausalSeqSchema,
   assistantPreferenceMutationStateDocumentSchema,
   defaultAssistantPersonalityScores,
@@ -17,14 +19,36 @@ import {
 
 describe("assistant personality preference contracts", () => {
   it("publishes the fixed setting catalog and product defaults", () => {
-    expect(assistantPersonalitySettingIds).toEqual(["humor", "push", "detail"]);
-    expect(assistantPersonalitySettingSchema.options).toEqual(["humor", "push", "detail"]);
+    expect(assistantPersonalitySettingIds).toEqual(["humor", "push", "detail", "unhinged"]);
+    expect(assistantPersonalitySettingSchema.options).toEqual([
+      "humor",
+      "push",
+      "detail",
+      "unhinged",
+    ]);
     expect(defaultAssistantPersonalityScores).toEqual({
       humor: 3,
       push: 3,
       detail: 5,
+      unhinged: 0,
     });
     expect(Object.isFrozen(defaultAssistantPersonalityScores)).toBe(true);
+  });
+
+  it("keeps the conversational-only Unhinged dial out of the web-visible catalog", () => {
+    expect(assistantWebPersonalitySettingIds).toEqual(["humor", "push", "detail"]);
+    expect(assistantWebPersonalitySettingIds).not.toContain("unhinged");
+    // Unhinged accepts the same 0-10 integer contract as every other dial.
+    expect(assistantPersonalityPreferencesSchema.parse({ unhinged: 7 })).toEqual({
+      unhinged: 7,
+    });
+    expect(assistantPersonalityPreferencesSchema.safeParse({ unhinged: 4.5 }).success).toBe(
+      false,
+    );
+    // The web-visible personality schema rejects the conversational-only dial.
+    expect(assistantWebPersonalityPreferencesSchema.safeParse({ unhinged: 7 }).success).toBe(
+      false,
+    );
   });
 
   it("accepts integer scores at both boundaries and rejects invalid scores", () => {
@@ -53,18 +77,22 @@ describe("assistant personality preference contracts", () => {
 
   it("requires every score in the resolved score schema", () => {
     expect(
-      assistantPersonalityScoresSchema.parse({ humor: 0, push: 5, detail: 10 }),
+      assistantPersonalityScoresSchema.parse({ humor: 0, push: 5, detail: 10, unhinged: 8 }),
     ).toEqual({
       humor: 0,
       push: 5,
       detail: 10,
+      unhinged: 8,
     });
-    expect(assistantPersonalityScoresSchema.safeParse({ humor: 3 }).success).toBe(false);
+    expect(
+      assistantPersonalityScoresSchema.safeParse({ humor: 3, push: 3, detail: 5 }).success,
+    ).toBe(false);
     expect(
       assistantPersonalityScoresSchema.safeParse({
         humor: 3,
         push: 3,
         detail: 5,
+        unhinged: 0,
         unknown: 1,
       }).success,
     ).toBe(false);
@@ -75,16 +103,19 @@ describe("assistant personality preference contracts", () => {
       humor: 3,
       push: 3,
       detail: 5,
+      unhinged: 0,
     });
-    expect(resolveAssistantPersonalityScores({ humor: 9, detail: 2 })).toEqual({
+    expect(resolveAssistantPersonalityScores({ humor: 9, detail: 2, unhinged: 8 })).toEqual({
       humor: 9,
       push: 3,
       detail: 2,
+      unhinged: 8,
     });
     expect(defaultAssistantPersonalityScores).toEqual({
       humor: 3,
       push: 3,
       detail: 5,
+      unhinged: 0,
     });
   });
 
@@ -92,6 +123,7 @@ describe("assistant personality preference contracts", () => {
     expect(isAssistantPersonalitySettingId("humor")).toBe(true);
     expect(isAssistantPersonalitySettingId("push")).toBe(true);
     expect(isAssistantPersonalitySettingId("detail")).toBe(true);
+    expect(isAssistantPersonalitySettingId("unhinged")).toBe(true);
     expect(isAssistantPersonalitySettingId("intensity")).toBe(false);
     expect(isAssistantPersonalitySettingId(3)).toBe(false);
   });

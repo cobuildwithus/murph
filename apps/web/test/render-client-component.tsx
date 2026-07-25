@@ -163,6 +163,9 @@ function installGlobals(
   class PointerEventMock extends window.Event {}
 
   vi.stubGlobal("window", window);
+  // next/link schedules prefetching through `self`, so mounting a Link in a
+  // client test needs it defined alongside `window`.
+  vi.stubGlobal("self", window);
   vi.stubGlobal("document", document);
   vi.stubGlobal("navigator", window.navigator);
   vi.stubGlobal("HTMLElement", window.HTMLElement);

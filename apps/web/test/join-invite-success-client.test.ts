@@ -421,6 +421,7 @@ function createStatus(
     },
     messagingSetupRequired: false,
     stage,
+    telegramStartRequired: false,
   };
 }
 

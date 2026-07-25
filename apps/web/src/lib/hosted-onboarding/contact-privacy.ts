@@ -36,6 +36,8 @@ export {
   createHostedStripeSubscriptionLookupKeyReadCandidates,
   createHostedStripeSubscriptionScheduleLookupKey,
   createHostedStripeSubscriptionScheduleLookupKeyReadCandidates,
+  createHostedTelegramMessageLookupKey,
+  createHostedTelegramMessageLookupKeyReadCandidates,
   createHostedTelegramUsernameLookupKey,
   createHostedTelegramUsernameLookupKeyReadCandidates,
   createHostedTelegramUserLookupKey,

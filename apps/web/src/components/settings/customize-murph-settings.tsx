@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  assistantPersonalitySettingIds,
+  assistantWebPersonalitySettingIds,
   assistantVoiceOptions,
-  type AssistantPersonalityScores,
+  type AssistantWebPersonalitySettingId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -33,7 +33,7 @@ type CustomizeMurphAssistant = MurphAssistantStylePreferences & {
 };
 
 const PERSONALITY_DIAL_SUMMARY_LABELS: Record<
-  keyof AssistantPersonalityScores,
+  AssistantWebPersonalitySettingId,
   string
 > = {
   humor: "Humor",
@@ -194,7 +194,7 @@ function formatPersonalitySummary(
   personality: AssistantPersonalitySnapshot | null,
 ): string {
   const scores = resolveAssistantPersonalitySnapshotScores(personality);
-  return assistantPersonalitySettingIds
+  return assistantWebPersonalitySettingIds
     .map((id) => `${PERSONALITY_DIAL_SUMMARY_LABELS[id]} ${scores[id]}`)
     .join(" · ");
 }

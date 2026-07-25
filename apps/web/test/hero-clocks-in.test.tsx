@@ -86,7 +86,7 @@ test("HeroClocksIn renders the reduced-motion group seed", async () => {
   await view.cleanup();
 });
 
-test("automatic demo switches to the group after one private Murph exchange", async () => {
+test("the animated demo opens straight into the group challenge", async () => {
   vi.useFakeTimers();
 
   const view = await renderHero({
@@ -95,56 +95,10 @@ test("automatic demo switches to the group after one private Murph exchange", as
     flushInitialTimers: false,
   });
 
+  // The group gets composed first: the new-message sheet goes up with only
+  // Murph on the To: line, before any friend has flown in.
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(5_500);
-  });
-
-  const privateThread = view.container.textContent ?? "";
-  assert.match(privateThread, /Did the magnesium actually do anything\?/);
-  assert.match(privateThread, /Two weeks in, deep sleep up 18%/);
-  assert.doesNotMatch(privateThread, /DEXA|BodySpec/);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(3_700);
-  });
-
-  const groupThread = view.container.textContent ?? "";
-  assert.match(groupThread, /4 People/);
-  assert.match(groupThread, /referees the week/);
-  assert.doesNotMatch(groupThread, /DEXA|BodySpec/);
-  assert.doesNotMatch(groupThread, /Did the magnesium actually do anything\?/);
-
-  await view.cleanup();
-});
-
-test("group start clears the private 1:1 thread and topic clicks during group mode keep scheduled group beats", async () => {
-  vi.useFakeTimers();
-
-  const view = await renderHero({
-    messengerChannel: "imessage",
-    reducedMotion: false,
-    flushInitialTimers: false,
-  });
-
-  // Play a private exchange first so the thread holds personal health talk.
-  const stepsButton = view.container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Ask Murph about Steps"]',
-  );
-  assert.ok(stepsButton);
-  await act(async () => {
-    stepsButton.click();
-    await vi.advanceTimersByTimeAsync(3_200);
-  });
-  assert.match(view.container.textContent ?? "", /How are my steps this week\?/);
-
-  const theoButton = view.container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Start a group chat with Theo"]',
-  );
-  assert.ok(theoButton);
-
-  await act(async () => {
-    theoButton.click();
-    await vi.advanceTimersByTimeAsync(950);
+    await vi.advanceTimersByTimeAsync(1_400);
   });
 
   assert.match(view.container.textContent ?? "", /New Message/);
@@ -153,9 +107,7 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
     view.container.querySelectorAll("[data-hero-recipient-chip]").length,
     1,
   );
-  assert.ok(
-    view.container.querySelector('[data-hero-recipient-chip="Murph"]'),
-  );
+  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Murph"]'));
 
   // The sheet is a decorative stage prop: hidden from assistive tech, with
   // no operable controls inside.
@@ -164,31 +116,10 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
   assert.equal(sheet.getAttribute("aria-hidden"), "true");
   assert.equal(sheet.querySelectorAll("button").length, 0);
 
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(750);
-  });
-
-  // The group is a fresh conversation: the private exchange must be gone.
-  assert.doesNotMatch(
-    view.container.textContent ?? "",
-    /How are my steps this week\?/,
-  );
-  assert.match(view.container.textContent ?? "", /4 People/);
-  assert.match(view.container.textContent ?? "", /referees the week/);
-
-  // While the sheet covers the thread, every floater is inert so no topic
-  // exchange can pollute the fresh conversation before the reveal.
-  const saunaButton = view.container.querySelector<HTMLButtonElement>(
-    'button[aria-label="Ask Murph about Sauna"]',
-  );
-  assert.ok(saunaButton);
-  assert.equal(saunaButton.disabled, true);
-
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_900);
-  });
-
   // Mid-burst all three member flights animate concurrently.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_700);
+  });
   assert.equal(
     view.container.querySelectorAll(".hero-floater--active").length,
     3,
@@ -198,32 +129,63 @@ test("group start clears the private 1:1 thread and topic clicks during group mo
     await vi.advanceTimersByTimeAsync(1_500);
   });
 
-  assert.ok(
-    view.container.querySelector('[data-hero-recipient-chip="Theo"]'),
-  );
-  assert.ok(
-    view.container.querySelector('[data-hero-recipient-chip="Maya"]'),
-  );
-  assert.ok(
-    view.container.querySelector('[data-hero-recipient-chip="Sam"]'),
-  );
+  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Theo"]'));
+  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Maya"]'));
+  assert.ok(view.container.querySelector('[data-hero-recipient-chip="Sam"]'));
 
+  // Sheet drops away and the challenge kicks off in the group thread.
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_300);
+    await vi.advanceTimersByTimeAsync(4_500);
   });
 
-  // Sheet revealed: topic floaters work again and interleave into the story.
   assert.equal(view.container.querySelector(".hero-compose-sheet"), null);
-  assert.equal(saunaButton.disabled, false);
-  await act(async () => {
-    saunaButton.click();
-  });
+  const groupThread = view.container.textContent ?? "";
+  assert.match(groupThread, /4 People/);
+  assert.match(groupThread, /referees the week/);
+  assert.match(
+    groupThread,
+    /walk challenge starts tomorrow\. loser buys steak dinner/,
+  );
+  assert.match(groupThread, /Baselines are set from everyone's wearables/);
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(14_000);
+    await vi.advanceTimersByTimeAsync(11_000);
   });
 
   assert.match(view.container.textContent ?? "", /Walk challenge · Day 5 of 7/);
+
+  await view.cleanup();
+});
+
+test("floating topic labels are decorative, not solo-Murph prompts", async () => {
+  vi.useFakeTimers();
+
+  const view = await renderHero({
+    messengerChannel: "imessage",
+    reducedMotion: false,
+    flushInitialTimers: false,
+  });
+
+  // The words still float as atmosphere...
+  const floaters = view.container.querySelectorAll(".hero-floater");
+  assert.ok(floaters.length > 0);
+  const text = view.container.textContent ?? "";
+  assert.match(text, /Magnesium/);
+  assert.match(text, /LDL cholesterol/);
+
+  // ...but nothing in the layer is operable, so no click can start a private
+  // 1:1 exchange or a second group.
+  assert.equal(view.container.querySelectorAll(".hero-floater button").length, 0);
+  assert.equal(
+    view.container.querySelector('button[aria-label="Ask Murph about Steps"]'),
+    null,
+  );
+  assert.equal(
+    view.container.querySelector(
+      'button[aria-label="Start a group chat with Theo"]',
+    ),
+    null,
+  );
 
   await view.cleanup();
 });

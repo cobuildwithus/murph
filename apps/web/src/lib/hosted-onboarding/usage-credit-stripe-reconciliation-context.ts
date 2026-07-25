@@ -8,6 +8,7 @@ import {
   createHostedStripeCheckoutSessionLookupKey,
 } from "./contact-privacy";
 import { isHostedOnboardingError } from "./errors";
+import { logHostedStripeFailure } from "./stripe-error-log";
 import {
   encryptHostedUsageCreditPurchaseStripeField,
   HOSTED_USAGE_CREDIT_PURCHASE_STRIPE_PRIVATE_FIELDS,
@@ -158,6 +159,7 @@ export async function withHostedUsageCreditStripePreparationBudget<TResult>(inpu
 
 export async function readHostedUsageCreditStripe<TResult>(input: {
   context: HostedUsageCreditStripePreparationContext;
+  operationName: string;
   read: (options: Stripe.RequestOptions) => Promise<TResult>;
 }): Promise<TResult> {
   throwIfHostedUsageCreditPreparationAborted(input.context.signal);
@@ -176,6 +178,7 @@ export async function readHostedUsageCreditStripe<TResult>(input: {
   try {
     result = await input.read(HOSTED_USAGE_CREDIT_STRIPE_READ_OPTIONS);
   } catch (error) {
+    logHostedStripeFailure({ error, operationName: input.operationName });
     if (isDefinitiveHostedUsageCreditStripeRequestRejection(error)) {
       throw error;
     }

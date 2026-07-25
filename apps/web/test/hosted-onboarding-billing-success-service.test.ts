@@ -604,5 +604,6 @@ function createStatus(input?: {
     },
     messagingSetupRequired: false,
     stage: input?.stage ?? "checkout",
+    telegramStartRequired: false,
   };
 }

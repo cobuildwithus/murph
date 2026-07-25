@@ -20,6 +20,7 @@ import {
 import {
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
 } from '@murphai/hosted-execution/runtime-control'
+import { describeVaultCliFailure } from '@murphai/operator-config/vault-cli-errors'
 
 import { normalizeNullableString } from '../assistant/shared.js'
 
@@ -211,7 +212,10 @@ async function executeGeneratedVoiceMemo(input: {
     }
     return {
       rpcSuccess: false,
-      rpcText: `${label} generated but Linq attachment upload failed`,
+      rpcText: appendFailureDetail(
+        `${label} generated but Linq attachment upload failed`,
+        warnVoiceMemoFailure(`${label} Linq attachment upload`, error),
+      ),
     }
   }
 
@@ -335,7 +339,13 @@ export function createVoiceMemoToolRuntimeFromEnv(input: {
         if (isAbortError(error)) {
           throw error
         }
-        throw new VoiceMemoToolGenerationError(`${label} generation failed`)
+        throw new VoiceMemoToolGenerationError(
+          appendFailureDetail(
+            `${label} generation failed`,
+            warnVoiceMemoFailure(`${label} generation`, error),
+          ),
+          { cause: error },
+        )
       }
 
       if (
@@ -377,9 +387,29 @@ class VoiceMemoToolConfigurationError extends Error {
 }
 
 class VoiceMemoToolGenerationError extends Error {
-  constructor(readonly rpcText: string) {
-    super(rpcText)
+  constructor(readonly rpcText: string, options?: ErrorOptions) {
+    super(rpcText, options)
   }
+}
+
+/**
+ * Logs a provider failure and returns its secret-safe summary for the rpc text.
+ *
+ * Both call sites used to collapse every failure into one fixed sentence and
+ * log nothing, so an operator reading the transcript afterwards could not tell
+ * a quota rejection from a timeout, and no log held the answer either.
+ */
+function warnVoiceMemoFailure(operation: string, error: unknown): string | null {
+  const failure = describeVaultCliFailure(error)
+  console.warn(`Assistant ${operation} failed.`, {
+    failure: failure ?? 'unknown',
+    errorName: error instanceof Error ? error.name : typeof error,
+  })
+  return failure
+}
+
+function appendFailureDetail(rpcText: string, failure: string | null): string {
+  return failure === null ? rpcText : `${rpcText}: ${failure}`
 }
 
 function resolveVoiceMemoDeliveryChannel(

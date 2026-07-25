@@ -222,6 +222,10 @@ export async function startHostedLocalLinqStub(input: {
 } = {}): Promise<HostedLocalLinqStub> {
   const observedRequests: ObservedLinqRequest[] = [];
   const acceptedSendRequests: ObservedLinqRequest[] = [];
+  const acceptedMessagesByIdempotencyKey = new Map<
+    string,
+    HostedLocalLinqAcceptedMessage
+  >();
   const canonicalChats = new Map(
     (input.canonicalChats ?? []).map((chat) => [chat.chatId, chat] as const),
   );
@@ -336,7 +340,8 @@ export async function startHostedLocalLinqStub(input: {
       && request.url
       && /^\/chats\/[^/]+\/messages$/u.test(request.url)
     ) {
-      if (!isObservedLinqMessagePayload(parseObservedLinqJson(body))) {
+      const parsedBody = parseObservedLinqJson(body);
+      if (!isObservedLinqMessagePayload(parsedBody)) {
         writeJsonResponse(response, 400, {
           error: "Expected a Linq send-message payload with a valid text or media part.",
         });
@@ -357,12 +362,31 @@ export async function startHostedLocalLinqStub(input: {
       }
 
       const chatId = request.url.split("/")[2] ?? "unknown";
-      const replayedAcceptedMessage = postAcceptLostAcknowledgmentAcceptedMessage
-        && postAcceptLostAcknowledgmentAcceptedMessage.chatId === chatId
-        && postAcceptLostAcknowledgmentAcceptedMessage.request.body === observedRequest.body
-        && postAcceptLostAcknowledgmentAcceptedMessage.request.url === observedRequest.url
-        ? postAcceptLostAcknowledgmentAcceptedMessage
+      const idempotencyKey = readObservedLinqMessageIdempotencyKey(parsedBody);
+      const acceptedIdempotencyReplay = idempotencyKey
+        ? acceptedMessagesByIdempotencyKey.get(idempotencyKey) ?? null
         : null;
+      if (
+        acceptedIdempotencyReplay
+        && (
+          acceptedIdempotencyReplay.request.body !== observedRequest.body
+          || acceptedIdempotencyReplay.request.url !== observedRequest.url
+        )
+      ) {
+        writeJsonResponse(response, 409, {
+          error: "Conflicting Linq idempotency-key reuse.",
+        });
+        return;
+      }
+      const replayedAcceptedMessage = acceptedIdempotencyReplay
+        ?? (
+          postAcceptLostAcknowledgmentAcceptedMessage
+          && postAcceptLostAcknowledgmentAcceptedMessage.chatId === chatId
+          && postAcceptLostAcknowledgmentAcceptedMessage.request.body === observedRequest.body
+          && postAcceptLostAcknowledgmentAcceptedMessage.request.url === observedRequest.url
+            ? postAcceptLostAcknowledgmentAcceptedMessage
+            : null
+        );
       const acceptedMessage = replayedAcceptedMessage ?? (() => {
         const messageId = `linq_msg_local_${++nextObservedMessageSequence}`;
         const observedMessageIds = observedMessageIdsByChat.get(chatId) ?? [];
@@ -375,6 +399,9 @@ export async function startHostedLocalLinqStub(input: {
           request: observedRequest,
         };
       })();
+      if (idempotencyKey && !replayedAcceptedMessage) {
+        acceptedMessagesByIdempotencyKey.set(idempotencyKey, acceptedMessage);
+      }
 
       if (
         consumeHostedLocalLinqArmedSendFailure(
@@ -898,6 +925,19 @@ function parseObservedLinqJson(body: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
+}
+
+function readObservedLinqMessageIdempotencyKey(
+  payload: Record<string, unknown> | null,
+): string | null {
+  const message = payload?.message;
+  if (!message || typeof message !== "object" || Array.isArray(message)) {
+    return null;
+  }
+  const idempotencyKey = (message as Record<string, unknown>).idempotency_key;
+  return typeof idempotencyKey === "string" && idempotencyKey.trim()
+    ? idempotencyKey.trim()
+    : null;
 }
 
 function classifyObservedLinqAuthorization(

@@ -243,6 +243,7 @@ describe("assistant phone calls", () => {
     const start = vi.fn(async (input) => {
       expect(input).toEqual({
         brief: BASE_BRIEF,
+        originSessionId: "session_phone_call",
         requestKey: expectedRequestKey,
       });
       return {
@@ -279,6 +280,9 @@ describe("assistant phone calls", () => {
       success: true,
     });
     expect(result.rpcResult.contentItems[0]?.text).toContain("phone call accepted or placed: hpc_123");
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.",
+    );
   });
 
   it.each([
@@ -321,6 +325,11 @@ describe("assistant phone calls", () => {
     expect(result.rpcResult.success).toBe(false);
     expect(result.rpcResult.contentItems[0]?.text).toContain(expectedText);
     expect(result.rpcResult.contentItems[0]?.text).toContain("hpc_123");
+    if (status === "starting") {
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        "When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.",
+      );
+    }
   });
 });
 

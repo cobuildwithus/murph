@@ -471,6 +471,30 @@ const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICING_SOURCE =
   "https://elevenlabs.io/pricing/api";
 const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_USD_MICROS_PER_MINUTE = 150_000n;
 
+// xAI x_search is priced from the provider-reported exact cost carried on the
+// record: usage.cost_in_usd_ticks covers tokens plus server-side tool
+// invocations for the whole request, post-discount. 1 USD = 10^10 ticks, so
+// 1 USD micro = 10^4 ticks; convert with a ceiling so aggregate metering never
+// undercounts. A record missing a valid tick count deliberately falls through
+// to token-model pricing, which fails closed on the unpriced model instead of
+// accounting the call as free.
+const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_PRICING_VERSION =
+  "xai-x-search-pricing-2026-07-23";
+const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_PRICING_SOURCE =
+  "https://docs.x.ai/developers/pricing";
+const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_COST_KEY = "cost_in_usd_ticks";
+const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_RAW_USAGE_KEYS: ReadonlySet<string> =
+  new Set([
+    "cached_input_tokens",
+    HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_COST_KEY,
+    "input_tokens",
+    "input_tokens_details",
+    "output_tokens",
+    "output_tokens_details",
+    "reasoning_tokens",
+  ]);
+const HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO = 10_000n;
+
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 500_000n,
   cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
@@ -563,6 +587,31 @@ function resolveHostedAiUsageAllowancePricingDecision(
           tokenPricingBasis,
         },
         pricingVersion: HOSTED_RETELL_USAGE_PRICING_VERSION,
+      },
+    };
+  }
+
+  const xaiSearchMatch = matchHostedAiUsageXaiSearchRecord(record);
+  if (xaiSearchMatch !== null) {
+    assertHostedAiUsageXaiSearchTokenPricingBasis(tokenPricingBasis);
+    const costUsdMicros = divideXaiUsdTicksToMicrosCeil(xaiSearchMatch.costInUsdTicks);
+    return {
+      kind: "priced",
+      priced: {
+        costUsdMicros: counted ? costUsdMicros : 0n,
+        counted,
+        pricingSnapshot: {
+          credentialSource,
+          providerCost: {
+            costInUsdTicks: xaiSearchMatch.costInUsdTicks.toString(),
+            usdTicksPerUsdMicro:
+              HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO.toString(),
+          },
+          pricingSource: HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_PRICING_SOURCE,
+          schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+          tokenPricingBasis,
+        },
+        pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_PRICING_VERSION,
       },
     };
   }
@@ -745,6 +794,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 
   if (matchHostedAiUsageRetellPhoneCallRecord(record) !== null) {
     assertHostedAiUsageRetellTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  if (matchHostedAiUsageXaiSearchRecord(record) !== null) {
+    assertHostedAiUsageXaiSearchTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
   }
 
@@ -2479,6 +2533,70 @@ function assertHostedAiUsageRetellTokenPricingBasis(
       "Retell phone-call hosted usage must use standard token pricing basis.",
     );
   }
+}
+
+// Only Worker-recorded xAI x_search rows with a valid provider-reported cost
+// take the exact-cost branch. A malformed row that merely claims the xai
+// provider must fall through to token-model pricing and fail closed instead of
+// being accounted as free.
+function matchHostedAiUsageXaiSearchRecord(record: AssistantUsageRecord): {
+  costInUsdTicks: bigint;
+} | null {
+  const rawUsageJson = record.rawUsageJson;
+  if (
+    record.provider !== "xai"
+    || record.providerName !== "xAI"
+    || record.apiKeyEnv !== "XAI_API_KEY"
+    || record.baseUrl !== "https://api.x.ai"
+    || record.credentialSource !== "platform"
+    || record.featureKey !== "x-search"
+    || record.surface !== "hosted-runner"
+    || record.triggerKind !== "x-search"
+    || record.usageExtractionSourcePath !== "xai.responses"
+    || record.usageExtractionVersion !== "xai-x-search-v1"
+    || typeof record.requestedModel !== "string"
+    || record.servedModel !== null
+    || record.inputTokens !== null
+    || record.outputTokens !== null
+    || record.reasoningTokens !== null
+    || record.cachedInputTokens !== null
+    || record.cacheWriteTokens !== null
+    || record.totalTokens !== null
+    || rawUsageJson === null
+    || !Object.keys(rawUsageJson).every((key) =>
+      HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_RAW_USAGE_KEYS.has(key),
+    )
+  ) {
+    return null;
+  }
+
+  const costInUsdTicks = readHostedAiUsageNonNegativeInteger(
+    rawUsageJson[HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_COST_KEY],
+  );
+  if (costInUsdTicks === null) {
+    return null;
+  }
+  return {
+    costInUsdTicks,
+  };
+}
+
+function assertHostedAiUsageXaiSearchTokenPricingBasis(
+  tokenPricingBasis: AssistantUsageTokenPricingBasis,
+): void {
+  if (tokenPricingBasis !== "standard") {
+    throw new TypeError(
+      "xAI x_search hosted usage must use standard token pricing basis.",
+    );
+  }
+}
+
+function divideXaiUsdTicksToMicrosCeil(costInUsdTicks: bigint): bigint {
+  return (
+    costInUsdTicks
+    + HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO
+    - 1n
+  ) / HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO;
 }
 
 function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {

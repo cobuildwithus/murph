@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -25,7 +25,11 @@ import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/fam
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
+import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
+import {
+  generateHostedAccountExitReasonId,
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+} from "../hosted-onboarding/shared";
 import {
   assertHostedUsageCreditPurchasesReadyForAccountDeletionTx,
   closeHostedUsageCreditPurchasesForAccountDeletion,
@@ -44,6 +48,9 @@ import {
 import {
   HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH,
+  type HostedAccountExitReasonCode,
+  isHostedAccountExitReasonCode,
 } from "./account-data-shared";
 
 export type HostedAccountStoreDeletionMode =
@@ -468,6 +475,12 @@ export type HostedAccountDataStoreSlug = typeof HOSTED_ACCOUNT_DATA_STORE_COVERA
 
 export interface HostedAccountDeletionRequest {
   confirmationPhrase: typeof HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE;
+  exitFeedback: HostedAccountExitFeedback | null;
+}
+
+export interface HostedAccountExitFeedback {
+  note: string | null;
+  reason: HostedAccountExitReasonCode;
 }
 
 export interface HostedAccountDataCounts {
@@ -553,16 +566,40 @@ export function parseHostedAccountDeletionRequest(
 
   return {
     confirmationPhrase: HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+    exitFeedback: parseHostedAccountExitFeedback(body),
+  };
+}
+
+/**
+ * Reads the optional "why are you leaving" answer. Deliberately lenient: an
+ * absent, unknown, or malformed answer resolves to null instead of throwing,
+ * because nothing about this optional survey may block someone from deleting
+ * their own account. Nothing is authorized off these values.
+ */
+export function parseHostedAccountExitFeedback(
+  body: Record<string, unknown>,
+): HostedAccountExitFeedback | null {
+  if (!isHostedAccountExitReasonCode(body.exitReason)) {
+    return null;
+  }
+
+  const rawNote = typeof body.exitNote === "string" ? body.exitNote.trim() : "";
+  const note = rawNote.slice(0, HOSTED_ACCOUNT_EXIT_NOTE_MAX_LENGTH);
+
+  return {
+    note: note.length > 0 ? note : null,
+    reason: body.exitReason,
   };
 }
 
 export async function deleteHostedAccountData(input: {
+  exitFeedback?: HostedAccountExitFeedback | null;
   memberId: string;
   prisma: PrismaClient;
   request: Request;
 }): Promise<HostedAccountDeletionResult> {
   const member = await input.prisma.hostedMember.findUnique({
-    select: { id: true },
+    select: { billingStatus: true, createdAt: true, id: true },
     where: { id: input.memberId },
   });
 
@@ -722,6 +759,15 @@ export async function deleteHostedAccountData(input: {
   const deletedRuntimeMemberIds = databaseDeletion.deletedRuntimeMemberIds.length > 0
     ? databaseDeletion.deletedRuntimeMemberIds
     : deletionMemberIds;
+  // Recorded only once the member's rows are actually gone, so a deletion that
+  // failed part way through never leaves a phantom exit in the churn record.
+  await recordHostedAccountExitReasonBestEffort({
+    billingStatus: member.billingStatus,
+    feedback: input.exitFeedback ?? null,
+    memberCreatedAt: member.createdAt,
+    now: deletionStartedAt,
+    prisma: input.prisma,
+  });
   await Promise.all(deletedRuntimeMemberIds.map((memberId) =>
     terminateHostedUserRuntimeWorkflowBestEffort({
       reason: "account-deleted",
@@ -762,6 +808,49 @@ export async function deleteHostedAccountData(input: {
       stripeSubscription,
     },
   };
+}
+
+/**
+ * Persists the optional exit answer. Best effort on purpose: the account is
+ * already deleted by this point, and losing one survey row is strictly better
+ * than failing a completed deletion. The free-text note is never logged, since
+ * it is whatever the departing member chose to type.
+ */
+async function recordHostedAccountExitReasonBestEffort(input: {
+  billingStatus: HostedBillingStatus;
+  feedback: HostedAccountExitFeedback | null;
+  memberCreatedAt: Date;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<void> {
+  if (!input.feedback) {
+    return;
+  }
+
+  try {
+    await input.prisma.hostedAccountExitReason.create({
+      data: {
+        billingStatus: input.billingStatus,
+        id: generateHostedAccountExitReasonId(),
+        note: input.feedback.note,
+        reason: input.feedback.reason,
+        tenureDays: countWholeDaysBetween(input.memberCreatedAt, input.now),
+      },
+    });
+  } catch (error) {
+    console.error(
+      `[hosted-privacy] Exit reason capture failed after account deletion (errorCode=${safeErrorCode(error)}).`,
+    );
+  }
+}
+
+function countWholeDaysBetween(startedAt: Date, endedAt: Date): number {
+  const elapsedMs = endedAt.getTime() - startedAt.getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return 0;
+  }
+
+  return Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
 }
 
 async function deleteHostedComputerUseExternalStateForAccountDeletion(input: {
@@ -1065,6 +1154,10 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
     console.error(
       `[hosted-privacy] Stripe subscription cancel failed during account deletion (memberId=${memberId}, errorCode=${cancelErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.account-deletion",
+    });
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
       httpStatus: 502,
@@ -1100,6 +1193,10 @@ async function deleteHostedStripeCustomerBestEffort(input: {
     console.error(
       `[hosted-privacy] Stripe customer deletion failed after account deletion (memberId=${memberId}, errorCode=${stripeErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "customers.del.account-deletion",
+    });
     return { errorCode: stripeErrorCode, status: "failed" };
   }
 }

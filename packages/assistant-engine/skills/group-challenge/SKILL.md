@@ -319,7 +319,8 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
    `murph.group action="read_shared"` with the exact scoring scope alone. That
    is the kickoff attribution and scoring read; it must never become prompt
    preload or other pre-model work. Add the second device-only read described
-   above only when it shows granted scoring data missing for someone. On an interactive Linq turn, record a returned row's group-scoped
+   above only when it shows granted scoring data missing for someone. On an
+   interactive group turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection

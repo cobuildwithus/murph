@@ -334,8 +334,8 @@ do not add a local frontend-review substitute.
 
 After the final user-facing `apps/web` UI and its rendered evidence are stable, a Codex-native parent must attempt one fresh, review-only second-model check from the task checkout while Claude credits are available:
 
-1. Use Fable first with `claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p`, supplying the bounded review packet on stdin.
-2. If Fable cannot run or cannot return a usable review for a non-credit reason, run the same packet once with `claude --model opus --permission-mode plan --no-session-persistence -p`. Fable unavailability is not a blocker when the Opus fallback completes.
+1. Work with either Fable or Opus: `claude --model claude-fable-5 --permission-mode plan --no-session-persistence -p` or `claude --model opus --permission-mode plan --no-session-persistence -p`, supplying the bounded review packet on stdin. Both routes satisfy this check, so choose by availability and the task's UI complexity rather than a fixed order.
+2. If the selected route cannot run or cannot return a usable review for a non-credit reason, run the same packet once with the other route. One route's unavailability is not a blocker when the other completes.
 3. Explicit Claude credit or quota exhaustion is the only non-blocking Claude Code gap. If either attempted route reports it, stop making Claude requests and record the gap without claiming that the double-check passed. Do not add a local frontend-review substitute.
 4. Do not use a shell alias, sweep alternate profile homes, reuse or signal a live Claude session, or commandeer another process. If Claude Code itself cannot run or neither model route can return a usable review for a non-credit reason, report the exact gap and do not claim this double-check passed.
 

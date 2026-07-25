@@ -6,6 +6,11 @@ import {
   buildJoinInvitePreviewStatus,
   parseJoinInvitePreviewStage,
 } from "./join-invite-preview";
+import { HOSTED_APP_SUBSCRIPTION_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import { hasHostedRecoverableBilling } from "@/src/lib/hosted-onboarding/lifecycle";
+import { readHostedMemberOwnsSubscription } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { isHostedMemberSuspended } from "@/src/lib/hosted-onboarding/entitlement";
+import { redirect } from "next/navigation";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
 import { getHostedPrivySession } from "@/src/lib/hosted-onboarding/hosted-session";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -83,6 +88,30 @@ export async function buildJoinInvitePageModel(input: {
     memberId: authSnapshot.authenticatedMember?.id ?? null,
     status,
   });
+  // A member whose billing lapsed after activation recovers from the Subscription
+  // controls, so send them there instead of rendering an invite stage that cannot
+  // help them. This runs on identity, not on the derived stage: their original
+  // invite has usually expired by the time billing lapses, and "Invite link
+  // expired" would otherwise demand another inbound message. Suspended members
+  // still fall through to the blocked stage. Redirecting from here matches the
+  // hosted page-auth snapshot, which owns the same kind of navigation decision.
+  const lapsedMember = authSnapshot.authenticatedMember;
+  if (
+    !launchConsent.gateActive
+    && lapsedMember
+    && !isHostedMemberSuspended(lapsedMember.suspendedAt)
+    && hasHostedRecoverableBilling({
+      billingStatus: lapsedMember.billingStatus,
+      hasExistingSubscription: await readHostedMemberOwnsSubscription({
+        billingStatus: lapsedMember.billingStatus,
+        memberId: lapsedMember.id,
+      }),
+    })
+    && status.session.authenticated
+    && status.session.matchesInvite
+  ) {
+    redirect(HOSTED_APP_SUBSCRIPTION_PATH);
+  }
   const telegramAccountForMessagingSetup =
     !launchConsent.gateActive
     && status.stage === "checkout"

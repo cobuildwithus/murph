@@ -79,6 +79,131 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalized).toContain('the parody collapses into the thing it mocks')
   })
 
+  it('answers a demand made of the referee with an unprompted song', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'When the room demands a real apology, that bit can be a whole sung apology — nobody has to ask for the song',
+    )
+    expect(normalized).toContain(
+      'the group extracts something from you — an apology, a concession, a confession, a defense of a ruling they hated',
+    )
+    expect(normalized).toContain(
+      'Reach for it yourself.** Nobody has to ask for a song and nobody has to name a genre.',
+    )
+    expect(normalized).toContain(
+      'Choosing it unprompted is the whole move; waiting to be commissioned wastes it.',
+    )
+    expect(normalized).toContain(
+      'It extends past apologies to anything the room puts you on the hook for',
+    )
+    expect(normalized).toContain(
+      'a song for someone having a rough week is warmth, never a roast in a nicer key',
+    )
+    expect(normalized).toContain(
+      'a demand made of you keeps, a passing quip does not',
+    )
+    expect(normalized).toContain('Scarcity is the format.')
+    expect(normalized).toContain('The hard limits do not bend for a melody.')
+    expect(normalized).toContain(
+      'text bit → comic → voice memo → song → sportsbook odds → ruling',
+    )
+    expect(normalized).toContain(
+      'short voice memos; a sung apology nobody asked for.',
+    )
+  })
+
+  it('defaults comedy songs to country without freezing the genre', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalizedComedy = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalizedComedy).toContain('Default to country.')
+    expect(normalizedComedy).toContain(
+      'the more heartfelt the delivery, the funnier the trivial offense',
+    )
+    expect(normalizedComedy).toContain(
+      "Go somewhere else when the room's own vibe clearly points there",
+    )
+    expect(normalizedComedy).toContain(
+      'when someone does name a genre, honor it exactly',
+    )
+
+    // The reggae house default must not silently outrank the comedy lane.
+    const music = await readSkill('music-generation')
+    const normalizedMusic = music.replace(/\s+/gu, ' ')
+
+    expect(normalizedMusic).toContain(
+      'a group-chat apology or on-the-hook song defaults to country',
+    )
+    expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
+  })
+
+  it('makes the group photo an unannounced drop with taste rails, not a permission flow', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'The chat avatar is a comedy surface, not a settings field.',
+    )
+    expect(normalized).toContain(
+      'edit yourself into a funny corner of it and make it the group photo',
+    )
+    expect(normalized).toContain(
+      'Nobody asks for this, and you do not ask either. The discovery is the joke.',
+    )
+    expect(normalized).toContain(
+      'Setting it IS the delivery.',
+    )
+    expect(normalized).toContain(
+      'never a heads-up before. Announcing it kills it.',
+    )
+    expect(normalized).toContain('Once is the move.')
+
+    // Scheduled occurrences reject every group mutation except ask_member and
+    // read_current, so the drop can only happen on an ordinary turn.
+    expect(normalized).toContain(
+      'Ordinary group turns only. A scheduled occurrence cannot change an avatar at all',
+    )
+    expect(normalized).not.toContain('the group photo drop below')
+
+    expect(normalized).toContain(
+      'A Telegram group has no way to set a chat photo, so the bit does not exist there',
+    )
+    expect(normalized).toContain(
+      'One call: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the photo plus your character sheet.',
+    )
+    expect(normalized).toContain(
+      'Edit yourself INTO their photo; do not redraw their photo.',
+    )
+    expect(normalized).toContain('It has to read as a thumbnail.')
+    expect(normalized).toContain(
+      'Whatever the human did in that photo stays the joke. You are the second beat, never the replacement punchline.',
+    )
+
+    expect(normalized).toContain(
+      "The room's own joke is the material. If the person in the photo is visibly not in on it, that is not the frame",
+    )
+    expect(normalized).toContain(
+      "The moment is fair game; the person's body is not.",
+    )
+    expect(normalized).toContain(
+      'Say plainly that you cannot put the previous photo back, because you cannot.',
+    )
+
+    // `preflight_set_chat_avatar` is issued by the runtime, not the model: it is
+    // absent from the murph.group action enum, so naming it as a step would send
+    // Murph after an action it cannot call.
+    expect(comedy).not.toContain('preflight_set_chat_avatar')
+    // The drop is unannounced by product decision. No permission prompt, and no
+    // itemized disclosure of processing or hosting: this is the same image path
+    // challenge comics already use, and the group can change the icon back.
+    expect(comedy).not.toContain('image generator')
+    expect(comedy).not.toContain('public link')
+    expect(comedy).not.toContain('want me to put myself')
+    expect(comedy).not.toContain('Silence is a no')
+  })
+
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {
     const challenge = await readSkill('group-challenge')
     const normalized = challenge.replace(/\s+/gu, ' ')
