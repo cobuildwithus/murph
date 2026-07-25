@@ -46,6 +46,11 @@ const WORKER_VERSION_SMOKE_MAX_ATTEMPTS = 5;
 const WORKER_VERSION_SMOKE_RETRY_DELAY_MS = 2_000;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_ATTEMPTS = 120;
 const DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS = 10_000;
+// Cloudflare gives a rolling container 15 minutes after SIGTERM before it is
+// force-killed, so a rollout that has not surfaced the new bundle by then is not
+// going to. Keep this under the deploy job timeout so the gate reports its own
+// failure instead of dying as a cancelled job.
+const DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_WAIT_MS = 20 * 60 * 1000;
 interface SmokeControlRequest {
   authorizationHeader: string;
   boundUserId: string;
@@ -90,6 +95,7 @@ interface SmokeLiveModelTurnResult {
 
 interface SmokeRunnerRetryPolicy {
   maxAttempts: number;
+  maxWaitMs: number;
   retryDelayMs: number;
 }
 
@@ -270,14 +276,23 @@ async function assertRunnerContainerSmoke(input: {
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<void> {
-  const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
+  // Validate retry configuration before touching the filesystem so a bad knob
+  // reports itself rather than surfacing as a missing-manifest error.
   const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
+  const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
   const retryableFailures = input.expectLiveModelTurnModel === null;
+  const startedAtMs = Date.now();
 
   for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
     try {
       assertSmokeRunnerBundleManifest(
-        await readRunnerContainerSmoke(input),
+        // Each attempt addresses its own smoke Durable Object, so a retry gets a
+        // fresh container-provisioning decision instead of re-reading the one
+        // instance this run already pinned. Worker code updates immediately while
+        // containers roll out gradually, so the first instance can legitimately be
+        // pre-rollout, and polling it keeps it below the idle TTL that would
+        // otherwise replace it.
+        await readRunnerContainerSmoke({ ...input, attempt }),
         expectedManifest,
         {
           retryable: retryableFailures,
@@ -285,12 +300,20 @@ async function assertRunnerContainerSmoke(input: {
       );
       return;
     } catch (error) {
+      const elapsedMs = Date.now() - startedAtMs;
       if (
         !retryableFailures ||
         attempt >= retryPolicy.maxAttempts ||
         !(error instanceof RunnerContainerSmokeRetryableError)
       ) {
         throw error;
+      }
+
+      if (elapsedMs + retryPolicy.retryDelayMs >= retryPolicy.maxWaitMs) {
+        throw new Error(
+          `runner container smoke did not converge within ${retryPolicy.maxWaitMs}ms `
+            + `(${attempt} attempts, ${elapsedMs}ms elapsed). Last failure: ${error.message}`,
+        );
       }
 
       input.log(
@@ -303,6 +326,7 @@ async function assertRunnerContainerSmoke(input: {
 }
 
 async function readRunnerContainerSmoke(input: {
+  attempt: number;
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
@@ -311,6 +335,8 @@ async function readRunnerContainerSmoke(input: {
   versionOverrideHeaders: Record<string, string> | undefined;
 }): Promise<SmokeRunnerBundleManifest | null> {
   const url = new URL(input.url);
+  // Set before signing so the attempt is covered by the callback signature.
+  url.searchParams.set("attempt", String(input.attempt));
   const payload = "";
   const signatureHeaders = await createHostedWebCallbackSignatureHeaders({
     environment: readHostedWebCallbackSigningEnvironment(input.source),
@@ -563,6 +589,11 @@ function readRunnerContainerSmokeRetryPolicy(source: EnvSource): SmokeRunnerRetr
     "HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS must be a non-negative integer.",
   ) ?? DEFAULT_RUNNER_CONTAINER_SMOKE_RETRY_DELAY_MS;
 
+  const maxWaitMs = parseOptionalStrictInteger(
+    source.HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS,
+    "HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS must be a non-negative integer.",
+  ) ?? DEFAULT_RUNNER_CONTAINER_SMOKE_MAX_WAIT_MS;
+
   if (maxAttempts < 1) {
     throw new Error("HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS must be a positive integer.");
   }
@@ -571,8 +602,13 @@ function readRunnerContainerSmokeRetryPolicy(source: EnvSource): SmokeRunnerRetr
     throw new Error("HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS must be a non-negative integer.");
   }
 
+  if (maxWaitMs < 0) {
+    throw new Error("HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS must be a non-negative integer.");
+  }
+
   return {
     maxAttempts,
+    maxWaitMs,
     retryDelayMs,
   };
 }

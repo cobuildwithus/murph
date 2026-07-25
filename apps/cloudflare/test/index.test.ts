@@ -27,6 +27,7 @@ import { hostedLocalTestInternalRoutes } from "../src/worker/hosted-local-test-r
 import { workerInternalRoutes } from "../src/worker/internal-routes.ts";
 import { workerPublicRoutes } from "../src/worker/public-routes.ts";
 import {
+  readDeployContainerSmokeAttempt,
   resolveDeployContainerSmokeObjectName,
 } from "../src/worker/route-handlers/deploy-smoke.ts";
 import {
@@ -788,6 +789,38 @@ describe("cloudflare worker routes", () => {
       },
       MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID: "local build/123",
     })).toBe("__deploy-smoke-version-123");
+  });
+
+  it("scopes the deploy smoke Durable Object name to the retry attempt", () => {
+    const env = {
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+    } as const;
+
+    // The worker version is constant for a whole smoke run, so the attempt is the
+    // only thing that moves a retry onto a fresh container instance.
+    expect(resolveDeployContainerSmokeObjectName(env, 1))
+      .toBe("__deploy-smoke-version-123-attempt-1");
+    expect(resolveDeployContainerSmokeObjectName(env, 2))
+      .toBe("__deploy-smoke-version-123-attempt-2");
+    expect(resolveDeployContainerSmokeObjectName(env)).toBe("__deploy-smoke-version-123");
+  });
+
+  it("reads a positive deploy smoke attempt and rejects malformed ones", () => {
+    const read = (search: string) =>
+      readDeployContainerSmokeAttempt(
+        new URL(`https://worker.example.test/internal/deploy/container-smoke${search}`),
+      );
+
+    expect(read("")).toBeNull();
+    expect(read("?attempt=1")).toBe(1);
+    expect(read("?attempt=300")).toBe(300);
+    for (const search of ["?attempt=0", "?attempt=-1", "?attempt=1.5", "?attempt=abc", "?attempt=10000"]) {
+      expect(() => read(search)).toThrow(RangeError);
+    }
   });
 
   it("uses a local-build-specific deploy smoke Durable Object name in hosted-local mode", async () => {
