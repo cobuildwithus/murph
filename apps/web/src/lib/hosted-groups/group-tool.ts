@@ -33,6 +33,7 @@ import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/ho
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
+  getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
@@ -1141,9 +1142,23 @@ async function handleHostedRuntimeGroupSetChatAvatarPreflight(input: {
     };
   }
 
+  // The assistant cannot see the chat icon, so an unprompted drop would have to
+  // guess whether the members chose one. Read the provider's own answer instead
+  // and fail closed when it cannot be read, rather than overwriting an icon
+  // there is no operation to restore.
+  let summary: Awaited<ReturnType<typeof getHostedLinqChatSummary>>;
+  try {
+    summary = await getHostedLinqChatSummary({ chatId: access.chatId });
+  } catch {
+    return {
+      action: "preflight_set_chat_avatar",
+      result: { status: "unavailable", unavailableReason: "chat_icon_state_unavailable" },
+    };
+  }
+
   return {
     action: "preflight_set_chat_avatar",
-    result: { status: "ok" },
+    result: { chatIconPresent: summary.groupChatIcon !== null, status: "ok" },
   };
 }
 

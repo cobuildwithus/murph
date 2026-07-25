@@ -183,6 +183,7 @@ beforeEach(() => {
     mailboxConsumedAt: null,
   });
   vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+    groupChatIcon: null,
     handles: [],
     isGroup: null,
   });
@@ -2649,6 +2650,7 @@ describe("Linq group chat auto-provision", () => {
     vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
       .mockReturnValue(buildLinqMessageReceivedEvent({ isGroup: false }) as never);
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      groupChatIcon: null,
       handles: [],
       isGroup: false,
     });
@@ -2719,6 +2721,7 @@ describe("Linq group chat auto-provision", () => {
     mockSenderLookup(senderCore);
     mockSuccessfulGroupProvision({ prisma, senderCore });
     vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      groupChatIcon: null,
       handles: [],
       isGroup: true,
     });

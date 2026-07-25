@@ -327,6 +327,7 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: {
         action: "set_chat_avatar",
+        replaceExistingChatIcon: false,
         avatar: {
           source: "generate",
           args: {
@@ -350,6 +351,7 @@ describe("murph.group dynamic tool", () => {
       kind: "group",
       request: {
         action: "set_chat_avatar",
+        replaceExistingChatIcon: false,
         avatar: {
           alt: "Group avatar",
           imageRef: "raw/inbox/avatar.png",
@@ -1867,6 +1869,137 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("leaves an occupied chat icon alone unless the group asked for a change", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { chatIconPresent: true, status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        alt: "Our group avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: { status: "unavailable", unavailableReason: "chat_icon_already_set" },
+      });
+      // The occupied slot stops the turn before any upload or provider mutation.
+      expect(uploadGeneratedImage).not.toHaveBeenCalled();
+      expect(groupRequest).toHaveBeenCalledTimes(1);
+      expect(groupRequest).toHaveBeenCalledWith({
+        action: "preflight_set_chat_avatar",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("replaces an occupied chat icon when the group asked for the change", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
+    try {
+      await mkdir(join(vaultRoot, "raw", "inbox"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "raw", "inbox", "avatar.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+          "base64",
+        ),
+      );
+
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { chatIconPresent: true, status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const uploadGeneratedImage = vi.fn(async (
+        input: AssistantHostedGeneratedImageUploadInput,
+      ) => ({
+        alt: input.alt,
+        kind: "image" as const,
+        source: input.source,
+        url: "https://imagedelivery.net/account/avatar/public",
+      }));
+      const request = readMurphDynamicToolRequest(groupToolCall({
+        action: "set_chat_avatar",
+        alt: "Our group avatar",
+        avatarSource: "image_ref",
+        imageRef: "raw/inbox/avatar.png",
+        replaceExistingChatIcon: true,
+      }));
+      if (!request || request.kind !== "group") {
+        throw new Error("Expected group request.");
+      }
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedGeneratedImageUploader: { uploadGeneratedImage },
+        hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+
+      expect(readGroupToolPayload(result)).toEqual({
+        action: "set_chat_avatar",
+        result: { status: "requested" },
+      });
+      expect(groupRequest).toHaveBeenNthCalledWith(2, {
+        action: "set_chat_avatar",
+        groupChatIconUrl: "https://imagedelivery.net/account/avatar/public",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("uploads a user-sent image ref before setting the group avatar", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
     try {
@@ -1883,7 +2016,7 @@ describe("murph.group dynamic tool", () => {
         request.action === "preflight_set_chat_avatar"
           ? {
               action: "preflight_set_chat_avatar",
-              result: { status: "ok" },
+              result: { chatIconPresent: false, status: "ok" },
             }
           : {
               action: "set_chat_avatar",
@@ -1959,7 +2092,7 @@ describe("murph.group dynamic tool", () => {
         request.action === "preflight_set_chat_avatar"
           ? {
               action: "preflight_set_chat_avatar",
-              result: { status: "ok" },
+              result: { chatIconPresent: false, status: "ok" },
             }
           : {
               action: "set_chat_avatar",
@@ -2069,7 +2202,7 @@ describe("murph.group dynamic tool", () => {
         request.action === "preflight_set_chat_avatar"
           ? {
               action: "preflight_set_chat_avatar",
-              result: { status: "ok" },
+              result: { chatIconPresent: false, status: "ok" },
             }
           : {
               action: "set_chat_avatar",

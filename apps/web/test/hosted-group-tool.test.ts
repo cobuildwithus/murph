@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
+  getHostedLinqChatSummary: vi.fn(),
   hasHostedMemberActivationProof: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   hostedMemberFindUnique: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   getHostedLinqChatHandles: mocks.getHostedLinqChatHandles,
+  getHostedLinqChatSummary: mocks.getHostedLinqChatSummary,
   isHostedLinqAttachmentSendPrepareFailure: (error: unknown) =>
     Boolean(
       error
@@ -1546,7 +1548,13 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
-  it("preflights group avatar access without updating Linq", async () => {
+  it("preflights group avatar access and reports an empty chat icon slot", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValue({
+      groupChatIcon: null,
+      handles: [],
+      isGroup: true,
+    });
+
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
       request: {
@@ -1555,12 +1563,51 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       },
     })).resolves.toEqual({
       action: "preflight_set_chat_avatar",
-      result: { status: "ok" },
+      result: { chatIconPresent: false, status: "ok" },
     });
 
     expect(mocks.assertHostedLinqRouteEgressAuthority).toHaveBeenCalledWith(
       expect.objectContaining({ authority: LINQ_THREAD.authority }),
     );
+    expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
+  });
+
+  it("reports an occupied chat icon slot from the provider", async () => {
+    mocks.getHostedLinqChatSummary.mockResolvedValue({
+      groupChatIcon: "https://imagedelivery.net/account/existing/public",
+      handles: [],
+      isGroup: true,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "preflight_set_chat_avatar",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "preflight_set_chat_avatar",
+      result: { chatIconPresent: true, status: "ok" },
+    });
+  });
+
+  it("fails the avatar preflight closed when the chat icon cannot be read", async () => {
+    mocks.getHostedLinqChatSummary.mockRejectedValue(new Error("provider down"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "preflight_set_chat_avatar",
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toEqual({
+      action: "preflight_set_chat_avatar",
+      result: {
+        status: "unavailable",
+        unavailableReason: "chat_icon_state_unavailable",
+      },
+    });
+
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 

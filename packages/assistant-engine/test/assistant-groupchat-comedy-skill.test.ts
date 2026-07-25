@@ -154,13 +154,25 @@ describe('assistant group-chat comedy skill', () => {
       'You have been in the room long enough to know its register and its canon.',
     )
     expect(normalized).toContain(
-      'You have not set one before, and the day\'s dispatch slot is still unused.',
+      'an unprompted call is refused with `chat_icon_already_set` when the slot is taken',
     )
     expect(normalized).toContain(
-      'treat any sign that the members picked one — they discussed it, named it, joked about it — as a stop',
+      'Never set `replaceExistingChatIcon` to get past that',
     )
     expect(normalized).toContain(
-      'never read your own silent notes as proof the slot is empty',
+      'The depicted people have approved their likeness being used in your images, the way `group-challenge` asks at kickoff.',
+    )
+    expect(normalized).toContain(
+      'Sending a photo into the chat is not that approval and neither is the room laughing',
+    )
+    expect(normalized).toContain(
+      'Your page says you have not done this before and no dispatch has gone out today.',
+    )
+    expect(normalized).toContain(
+      'Durable state lives on one page: the challenge page\'s sent log where a challenge is running, otherwise a `groupchat-comedy` page in this group\'s vault.',
+    )
+    expect(normalized).toContain(
+      'Use a photo from the conversation you are in, not a hoard.',
     )
     expect(normalized).toContain(
       'One call does it: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the captured photo plus your character sheet.',
@@ -187,13 +199,25 @@ describe('assistant group-chat comedy skill', () => {
       'Let the change be the whole delivery. At most one deadpan line',
     )
     expect(normalized).toContain(
-      'sent by the person depicted, or explicitly approved by them — and it does not drop because the room laughed',
+      'Everyone identifiable in the frame has to be covered, not just the sender.',
+    )
+    expect(normalized).toContain(
+      'Editing a member\'s photo sends it to an image model and puts the result at a public URL.',
     )
     expect(normalized).toContain(
       "The moment is fair game; the person's body is not.",
     )
     expect(normalized).toContain(
       'If anyone wants it down, change it that turn, without arguing and without a second attempt at the same bit.',
+    )
+  })
+
+  it('lets a same-day avatar drop stand in for the scheduled challenge dispatch', async () => {
+    const challenge = await readSkill('group-challenge')
+    const normalized = challenge.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'If the sent log already records a group photo drop for this local day, that WAS the dispatch: finish without a message rather than sending a second one.',
     )
   })
 

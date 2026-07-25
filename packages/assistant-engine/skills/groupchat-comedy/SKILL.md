@@ -192,22 +192,30 @@ Do it unprompted only when all of these hold:
   A first-week avatar drop is a stranger rearranging someone's furniture.
 - Members have sent photos, and one of them already worked as a bit — the
   room reacted to it, quoted it, kept it going.
-- Nothing says the room has a photo of its own. You cannot read the current
-  avatar, so treat any sign that the members picked one — they discussed it,
-  named it, joked about it — as a stop, and never read your own silent notes
-  as proof the slot is empty.
-- You have not set one before, and the day's dispatch slot is still unused.
-  The drop IS that dispatch, so it never stacks on one already sent.
+- The chat has no photo yet. You cannot read the avatar and there is no
+  operation that restores one, so the server decides this: an unprompted call
+  is refused with `chat_icon_already_set` when the slot is taken. Never set
+  `replaceExistingChatIcon` to get past that — it exists only for a group that
+  asked you to change a photo it already has.
+- The depicted people have approved their likeness being used in your images,
+  the way `group-challenge` asks at kickoff. Sending a photo into the chat is
+  not that approval and neither is the room laughing; if nobody has agreed,
+  the ask is a normal thing to make, and the drop stays a surprise because the
+  timing and the joke are never announced.
+- Your page says you have not done this before and no dispatch has gone out
+  today. The drop IS that dispatch, so it never stacks on one already sent.
 
-Log every avatar you set with its date and the saved image ref; that log is
-the only record you will have.
+Durable state lives on one page: the challenge page's sent log where a
+challenge is running, otherwise a `groupchat-comedy` page in this group's
+vault. Read it before you decide and append the date and saved image ref in
+the same turn you set the avatar. Nothing else survives a restart.
 
 Construction:
 
-- Pin the source photo the day it lands with `vault-cli capture add`, the
-  same pinning rule `group-challenge` uses for intro photos. Inbox refs
-  expire and captures do not, and this bit is often funnier a week later
-  than it would have been in the moment.
+- Use a photo from the conversation you are in, not a hoard. Only pin one
+  durably (`vault-cli capture add`) when its approval already covers that,
+  the way `group-challenge` pins approved intro photos; an approval to be in
+  a joke today is not an approval to keep the file.
 - One call does it: `murph.group` with `action="set_chat_avatar"`,
   `avatarSource="generate"`, the `prompt` describing the edit, and
   `referenceImageRefs` carrying the captured photo plus your character
@@ -237,10 +245,12 @@ Limits, on top of the hard limits below:
 - Only a photo a member sent to this group, and only one the group already
   made funny. Never a photo from a private chat, and never one the room met
   with silence.
-- The person in the photo has to be in on it. `group-challenge` already sets
-  that bar for durable member photos — sent by the person depicted, or
-  explicitly approved by them — and it does not drop because the room
-  laughed. Someone else finding it funny is not approval.
+- Everyone identifiable in the frame has to be covered, not just the sender.
+  A photo of three people needs all three, and one friend finding it funny is
+  not the other's approval.
+- Editing a member's photo sends it to an image model and puts the result at
+  a public URL. That is the same path a comic takes, and it is why the
+  approval bar is the approval bar.
 - The moment is fair game; the person's body is not. If the frame only works
   by making someone's appearance the punchline, it is not the frame.
 - If anyone wants it down, change it that turn, without arguing and without

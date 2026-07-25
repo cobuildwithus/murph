@@ -135,6 +135,7 @@ describe("getHostedLinqChatSummary", () => {
       chatId: "chat_123",
       timeoutMs: 1_500,
     })).resolves.toEqual({
+      groupChatIcon: null,
       handles: [
         {
           handle: "+15550000000",
@@ -187,6 +188,7 @@ describe("getHostedLinqChatSummary", () => {
       chatId: "chat_123",
       timeoutMs: 1_500,
     })).resolves.toEqual({
+      groupChatIcon: null,
       handles: [],
       isGroup: null,
     });
