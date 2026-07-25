@@ -938,6 +938,20 @@ for idle retirement; tune those values only from measured pool and database
 pressure. Connection failure logs expose only a fixed failure category and
 numeric total, idle, and waiting counts.
 
+That module retries only the two failures that prove the database did no work,
+because replaying anything else could duplicate an effect. A `pool_checkout_timeout`
+means the statement never reached Postgres, so the operation is retried; a
+`transaction_start_timeout` is Prisma's `P2028` raised before it invokes the
+transaction callback, so the transaction is retried. Both get three attempts
+spaced 250 ms apart, and every attempt logs its category and pool counts, so an
+exhausted retry leaves one line per attempt. `P2028` also covers transactions
+that opened and later expired, and those are never replayed, so the two cases are
+separated by message rather than by code. Failures that may have reached Postgres,
+such as closed connections, TLS faults, or an unreachable host, are reported and
+rethrown untouched. Retries exist because a primary switchover or a thawed Fluid instance
+with stale pooled sockets produces exactly these two errors; they are not a
+substitute for capacity.
+
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
