@@ -1,4 +1,5 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
 import {
   resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
@@ -754,6 +755,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        askGrokAvailable:
+          resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
         vaultFileSendAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,

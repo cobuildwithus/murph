@@ -70,6 +70,10 @@ import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
+  createAskGrokTurnState,
+  type AskGrokToolRuntime,
+} from './assistant-codex/ask-grok-tool.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -166,6 +170,9 @@ export type { CodexAppServerImageInput } from './assistant-codex/images.js'
 export type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
+export type {
+  AskGrokToolRuntime,
+} from './assistant-codex/ask-grok-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -473,6 +480,7 @@ export interface CodexAppServerTurnInput {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
 }
 
@@ -664,6 +672,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    askGrokRuntime: input.askGrokRuntime ?? null,
     workingDirectory,
   }
 
@@ -2781,6 +2790,9 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
+  // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
+  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  const askGrokTurnState = createAskGrokTurnState()
   const subagentTokenUsageByThread =
     new Map<string, CodexSubagentTokenUsageSample>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
@@ -3896,6 +3908,11 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          askGrokRuntime:
+            dynamicToolRequest.kind === 'ask-grok'
+              ? input.askGrokRuntime ?? null
+              : null,
+          askGrokTurnState,
         })
         return result
       },
