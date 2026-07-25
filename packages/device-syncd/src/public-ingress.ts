@@ -1453,7 +1453,7 @@ export class DeviceSyncPublicIngress {
     // arrival against the source the provider named. Like the receipt stamp,
     // this runs after durable acceptance and never fails the webhook.
     const dataSourceProviderSlug = webhook.dataSourceProviderSlug ?? null;
-    if (dataSourceProviderSlug && this.store.markConnectionSourceDataReceived) {
+    if (dataSourceProviderSlug) {
       try {
         await this.store.markConnectionSourceDataReceived({
           connectionId: account.id,

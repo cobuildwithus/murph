@@ -377,7 +377,12 @@ export interface DeviceSyncPublicIngressStore {
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
   releaseWebhookTrace(provider: string, traceId: string, claimToken: string): void | Promise<void>;
   markWebhookReceived(accountId: string, now: string): void | Promise<void>;
-  markConnectionSourceDataReceived?(input: {
+  /**
+   * Required, not optional: a push-primary stall is only detectable because
+   * this runs, so a store that silently omitted it would leave the whole signal
+   * dead in production while every test against a fake store still passed.
+   */
+  markConnectionSourceDataReceived(input: {
     connectionId: string;
     now: string;
     sourceProviderSlug: string;

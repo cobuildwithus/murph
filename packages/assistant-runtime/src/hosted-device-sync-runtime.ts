@@ -213,6 +213,9 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
         lastErrorMessage: source.lastErrorMessage,
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
+        // Merged monotonically below rather than taken verbatim: Web and the
+        // runner can each have seen an arrival the other has not.
+        lastDataAt: laterIsoTimestamp(source.lastDataAt ?? null, localSource?.lastDataAt ?? null),
       });
       localSourcesByKey.set(sourceInstanceKey, hydratedSource);
     }
@@ -304,7 +307,29 @@ function shouldPreserveLocalHydrationSource(input: {
     return false;
   }
 
+  // An arrival can advance with no other field moving, so a lastSeenAt-only
+  // shortcut would drop the one signal a stall is measured against.
+  if (
+    laterIsoTimestamp(input.source.lastDataAt ?? null, input.localSource.lastDataAt)
+      !== input.localSource.lastDataAt
+  ) {
+    return false;
+  }
+
   return Date.parse(input.localSource.lastSeenAt) >= Date.parse(input.source.lastSeenAt);
+}
+
+/** Returns whichever ISO timestamp is later, treating null as "never". */
+function laterIsoTimestamp(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 export async function reconcileHostedDeviceSyncControlPlaneState(input: {
@@ -1147,6 +1172,7 @@ function buildHostedDeviceSyncRuntimeConnectionSourceUpdates(
         lastErrorMessage: source.lastErrorMessage ?? null,
         firstSeenAt: source.firstSeenAt,
         lastSeenAt: source.lastSeenAt,
+        lastDataAt: source.lastDataAt,
       };
     })
     .filter((source) =>
@@ -1175,7 +1201,8 @@ function hostedDeviceSyncRuntimeSourceUpdateMatchesBaseline(
     && (baseline.lastErrorCode ?? null) === (update.lastErrorCode ?? null)
     && (baseline.lastErrorMessage ?? null) === (update.lastErrorMessage ?? null)
     && baseline.firstSeenAt === (update.firstSeenAt ?? null)
-    && baseline.lastSeenAt === update.lastSeenAt;
+    && baseline.lastSeenAt === update.lastSeenAt
+    && (baseline.lastDataAt ?? null) === (update.lastDataAt ?? null);
 }
 
 function assignHostedDeviceSyncRuntimeCredentialUpdate(

@@ -1472,7 +1472,13 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
-    lastDataAt: readNullableIsoTimestamp(record.lastDataAt, `${label}.lastDataAt`),
+    // Absent means "produced before this field existed", which must stay
+    // parseable: a runner-first deploy would otherwise reject every snapshot
+    // from the older Web producer and stall device sync until Web caught up.
+    // A present-but-malformed value is still rejected.
+    lastDataAt: record.lastDataAt === undefined
+      ? null
+      : readNullableIsoTimestamp(record.lastDataAt, `${label}.lastDataAt`),
     resourceCount,
     ...(record.resourceAvailabilitySummary === undefined
       ? {}

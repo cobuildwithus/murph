@@ -71,6 +71,13 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   tx?: HostedPrismaTransactionClient;
 }
 
+export interface MarkHostedDeviceConnectionSourceDataReceivedInput {
+  connectionId: string;
+  now?: string;
+  sourceProviderSlug: string;
+  tx?: HostedPrismaTransactionClient;
+}
+
 export interface MarkHostedDeviceConnectionSourcesDisconnectedInput {
   connectionId: string;
   now?: string;
@@ -182,6 +189,39 @@ export class PrismaHostedConnectionSourceStore {
     });
 
     return mapHostedConnectionSourceRecord(record);
+  }
+
+  /**
+   * Records that an inbound payload carried this source's data. Matching is by
+   * provider slug because that is what the webhook envelope names, and the
+   * update is forward-only so an out-of-order redelivery cannot rewind the
+   * signal a stall is measured against.
+   *
+   * This never creates a source row: a payload that arrives before the connect
+   * projection recorded the source leaves nothing to stamp, and staleness falls
+   * back to `first_seen_at` for a source that has never delivered.
+   */
+  async markConnectionSourceDataReceived(
+    input: MarkHostedDeviceConnectionSourceDataReceivedInput,
+  ): Promise<number> {
+    const prisma = input.tx ?? this.prisma;
+    const lastDataAt = resolveSourceTimestamp(input.now, new Date());
+    const result = await prisma.deviceConnectionSource.updateMany({
+      where: {
+        connectionId: requireConnectionId(input.connectionId),
+        sourceProviderSlug: normalizeSourceProviderSlug(input.sourceProviderSlug),
+        OR: [
+          { lastDataAt: null },
+          { lastDataAt: { lt: lastDataAt } },
+        ],
+      },
+      data: {
+        lastDataAt,
+        updatedAt: lastDataAt,
+      },
+    });
+
+    return result.count;
   }
 
   async markConnectionSourcesDisconnected(
