@@ -6,7 +6,7 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import { assertHostedTelegramWebhookSecret } from "@/src/lib/hosted-onboarding/telegram";
-import { handleHostedOnboardingTelegramWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { handleHostedOnboardingTelegramWebhookWithVisibleAccess } from "@/src/lib/hosted-onboarding/visible-access-webhooks";
 
 const HOSTED_TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
@@ -20,7 +20,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return jsonOk(
-    await handleHostedOnboardingTelegramWebhook({
+    await handleHostedOnboardingTelegramWebhookWithVisibleAccess({
       rawBody,
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       secretToken,
