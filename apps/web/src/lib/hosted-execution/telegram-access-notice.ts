@@ -149,7 +149,9 @@ export async function sendHostedTelegramAccessNotice(input: {
   if (deliveryResult.status === "failed") {
     if (deliveryResult.retryable) {
       const retryAt = resolveHostedTelegramAccessNoticeRetryAt({
-        retryAfterSeconds: deliveryResult.retryAfterSeconds,
+        ...(deliveryResult.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: deliveryResult.retryAfterSeconds }),
         sentAt: claim.attemptedAt,
       });
       await markHostedLinqDeliverySendFailedTx({
@@ -204,40 +206,42 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
   };
 }): Promise<HostedTelegramAccessNoticeDispatchClaim> {
   const attemptedAt = input.input.sentAt ?? new Date();
-  return await input.input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRoutingStateTx({
-      memberId: input.input.memberId,
-      prisma: tx,
-    });
-    const routing = await readHostedMemberRoutingState({
-      memberId: input.input.memberId,
-      prisma: tx,
-    });
-    if (routing?.telegramThreadId !== input.input.target) {
-      return { status: "not_applicable" };
-    }
+  return await input.input.prisma.$transaction(
+    async (tx): Promise<HostedTelegramAccessNoticeDispatchClaim> => {
+      await lockHostedMemberRoutingStateTx({
+        memberId: input.input.memberId,
+        prisma: tx,
+      });
+      const routing = await readHostedMemberRoutingState({
+        memberId: input.input.memberId,
+        prisma: tx,
+      });
+      if (routing?.telegramThreadId !== input.input.target) {
+        return { status: "not_applicable" };
+      }
 
-    const delivery = await claimHostedLinqDeliveryProviderDispatchTx({
-      attemptedAt,
-      idempotencyKey: input.idempotencyKey,
-      prisma: tx,
-      source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
-      sourceRef: input.input.sourceEventId,
-      status: "provider_dispatch_started",
-      targetKind: "telegram_thread",
-      template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
-    });
-    if (delivery.claimed) {
-      return { attemptedAt, status: "claimed" };
-    }
-    if (delivery.retryAt) {
-      return {
-        retryAt: delivery.retryAt,
-        status: "in_flight",
-      };
-    }
-    return { status: "already_notified" };
-  });
+      const delivery = await claimHostedLinqDeliveryProviderDispatchTx({
+        attemptedAt,
+        idempotencyKey: input.idempotencyKey,
+        prisma: tx,
+        source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
+        sourceRef: input.input.sourceEventId,
+        status: "provider_dispatch_started",
+        targetKind: "telegram_thread",
+        template: HOSTED_TELEGRAM_ACCESS_NOTICE_TEMPLATE,
+      });
+      if (delivery.claimed) {
+        return { attemptedAt, status: "claimed" };
+      }
+      if (delivery.retryAt) {
+        return {
+          retryAt: delivery.retryAt,
+          status: "in_flight",
+        };
+      }
+      return { status: "already_notified" };
+    },
+  );
 }
 
 async function markHostedTelegramAccessNoticeRetryable(input: {
