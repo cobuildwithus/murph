@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   assertParticipantAuthority: vi.fn(),
   claimDelivery: vi.fn(),
+  countHomeBindings: vi.fn(),
   claimLineCapacity: vi.fn(),
   createChat: vi.fn(),
   decideSendWindow: vi.fn(),
@@ -24,6 +25,12 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   claimHostedLinqDeliveryProviderDispatchTx: mocks.claimDelivery,
   markHostedLinqDeliveryAcceptedTx: mocks.markDeliveryAccepted,
   markHostedLinqDeliverySendFailedTx: mocks.markDeliveryFailed,
+}));
+
+// Mock only the home-line load counter; chooseHostedLinqSignupWelcomeLine itself
+// runs for real so these tests exercise the shared selection policy.
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-linq", () => ({
+  countHostedMemberHomeLinqBindingsByRecipientPhone: mocks.countHomeBindings,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-line-store", () => ({
@@ -54,7 +61,9 @@ vi.mock("@/src/lib/hosted-groups/group-join-outreach-window", () => ({
 
 import {
   buildHostedGroupJoinOutreachMessage,
+  drainHostedGroupJoinOutreachSweep,
   drainOneHostedGroupJoinOutreach,
+  readHostedGroupJoinOutreachVariantIndex,
 } from "@/src/lib/hosted-groups/group-join-outreach-drain";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -79,6 +88,7 @@ describe("hosted group join outreach drain", () => {
       id: "hld_opaque",
     });
     mocks.claimLineCapacity.mockResolvedValue(true);
+    mocks.countHomeBindings.mockResolvedValue(new Map());
     mocks.createChat.mockResolvedValue({
       chatId: "chat_direct_opaque",
       messageId: "message_opaque",
@@ -123,7 +133,9 @@ describe("hosted group join outreach drain", () => {
       message: string;
     } | undefined;
     expect(send?.message).toContain("Training circle");
-    expect(send?.message).toMatch(/reply here/iu);
+    // Any bank variant is acceptable here; each one is held to the shared
+    // first-contact rules by the dedicated copy tests below.
+    expect(send?.message).toMatch(/repl(y|ies)|say hi|send me a message/iu);
     expect(send?.message).not.toMatch(/https?:|www\./iu);
   });
 
@@ -338,25 +350,114 @@ describe("hosted group join outreach drain", () => {
     expect(mocks.createChat).not.toHaveBeenCalled();
   });
 
-  it("never lets a URL-shaped group name enter first-contact copy", () => {
-    expect(buildHostedGroupJoinOutreachMessage("https://example.test/join"))
-      .toBe("You liked the invite to this group. Reply here and I'll help you join.");
+  it("defers rather than doubling up when every healthy line sent recently", async () => {
+    // Throughput must come from more lines, never from one line bursting.
+    const { prisma, updateMany } = createPrismaStub({
+      recentLineKeys: ["line_lookup_1"],
+    });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "deferred",
+      outreachId: "hgrpjoa_opaque",
+      reason: "line_pacing",
+    });
+
+    expect(mocks.createChat).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ lastDeferralReason: "line_pacing" }),
+      }),
+    );
   });
 
-  it("keeps forbidden punctuation and links out of first-contact copy", () => {
-    const message = buildHostedGroupJoinOutreachMessage("Sunday Sleep Crew");
-    expect(message).toBe(
-      "You liked the invite to Sunday Sleep Crew. Reply here and I'll help you join.",
-    );
-    expect(message).not.toContain("—");
-    expect(message).not.toMatch(/https?:\/\//u);
+  it("sweeps several due outreaches per invocation and stops on the first refusal", async () => {
+    const { prisma } = createPrismaStub();
+
+    const sweep = await drainHostedGroupJoinOutreachSweep({
+      max: 10,
+      now: NOW,
+      prisma,
+    });
+
+    // The stub always has a due row, so the cap is what bounds the sweep.
+    expect(sweep.attempted).toBe(10);
+    expect(sweep.sent).toBe(10);
+    expect(mocks.createChat).toHaveBeenCalledTimes(10);
   });
+
+  it("stops the sweep as soon as an attempt does not send", async () => {
+    mocks.claimLineCapacity.mockResolvedValue(false);
+    const { prisma } = createPrismaStub();
+
+    const sweep = await drainHostedGroupJoinOutreachSweep({
+      max: 10,
+      now: NOW,
+      prisma,
+    });
+
+    expect(sweep.attempted).toBe(1);
+    expect(sweep.sent).toBe(0);
+    expect(mocks.createChat).not.toHaveBeenCalled();
+  });
+
+  it("never lets a URL-shaped group name enter first-contact copy", () => {
+    for (let variant = 0; variant < 5; variant += 1) {
+      const message = buildHostedGroupJoinOutreachMessage({
+        groupDisplayName: "https://example.test/join",
+        outreachId: `hgrpjoa_variant_${variant}`,
+      });
+      expect(message).toContain("this group");
+      expect(message).not.toMatch(/https?:|www\./iu);
+    }
+  });
+
+  it("keeps every variant link-free, group-specific, and reply-earning", () => {
+    // The bank exists so many recipients do not get byte-identical copy, but each
+    // variant still has to satisfy the same first-contact rules.
+    const messages = new Set<string>();
+    for (let variant = 0; variant < 200; variant += 1) {
+      const message = buildHostedGroupJoinOutreachMessage({
+        groupDisplayName: "Sunday Sleep Crew",
+        outreachId: `hgrpjoa_opaque_${variant}`,
+      });
+      messages.add(message);
+      expect(message).toContain("Sunday Sleep Crew");
+      expect(message).toMatch(/repl(y|ies)|say hi|send me a message/iu);
+      expect(message).not.toMatch(/https?:|www\./iu);
+      expect(message).not.toContain("\u2014");
+    }
+
+    // Real variation, not one template.
+    expect(messages.size).toBeGreaterThan(1);
+  });
+
+  it("composes the identical message for a replayed dispatch", () => {
+    // A retried dispatch reuses the same provider idempotency key, so the body
+    // must not change between attempts.
+    const first = buildHostedGroupJoinOutreachMessage({
+      groupDisplayName: "Sunday Sleep Crew",
+      outreachId: "hgrpjoa_stable",
+    });
+    const second = buildHostedGroupJoinOutreachMessage({
+      groupDisplayName: "Sunday Sleep Crew",
+      outreachId: "hgrpjoa_stable",
+    });
+
+    expect(second).toBe(first);
+    expect(readHostedGroupJoinOutreachVariantIndex("hgrpjoa_stable"))
+      .toBe(readHostedGroupJoinOutreachVariantIndex("hgrpjoa_stable"));
+  });
+
 });
 
 function createPrismaStub(options?: {
   attemptCount?: number;
   due?: null;
   offerRevokedAt?: Date;
+  recentLineKeys?: readonly string[];
 }): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
   updateMany: ReturnType<typeof vi.fn>;
@@ -398,6 +499,9 @@ function createPrismaStub(options?: {
         }
         return null;
       }),
+      findMany: vi.fn(async () => (options?.recentLineKeys ?? []).map(
+        (phoneNumberLookupKey) => ({ phoneNumberLookupKey }),
+      )),
       findUnique: vi.fn(async () => ({
         attemptCount: options?.attemptCount ?? 1,
       })),

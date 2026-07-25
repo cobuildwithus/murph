@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   describeProviders: vi.fn(),
-  drainOneHostedGroupJoinOutreach: vi.fn(),
+  drainHostedGroupJoinOutreachSweep: vi.fn(),
   getPrisma: vi.fn(),
   reconcileDueHostedStripeEvents: vi.fn(),
   requireVercelCronRequest: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock("@/src/lib/hosted-execution/vercel-cron", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-drain", () => ({
-  drainOneHostedGroupJoinOutreach: mocks.drainOneHostedGroupJoinOutreach,
+  drainHostedGroupJoinOutreachSweep: mocks.drainHostedGroupJoinOutreachSweep,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-event-reconciliation", () => ({
@@ -156,7 +156,11 @@ describe("hosted onboarding Stripe cron route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
-    mocks.drainOneHostedGroupJoinOutreach.mockResolvedValue({ kind: "idle" });
+    mocks.drainHostedGroupJoinOutreachSweep.mockResolvedValue({
+      attempted: 0,
+      results: [],
+      sent: 0,
+    });
     mocks.reconcileDueHostedStripeEvents.mockResolvedValue(["evt_paid", "evt_trial"]);
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
   });
@@ -172,7 +176,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.requireVercelCronRequest).toHaveBeenCalledWith(request);
     expect(mocks.getPrisma).toHaveBeenCalledTimes(1);
-    expect(mocks.drainOneHostedGroupJoinOutreach).toHaveBeenCalledWith({
+    expect(mocks.drainHostedGroupJoinOutreachSweep).toHaveBeenCalledWith({
       prisma: { label: "test-prisma" },
       signal: request.signal,
     });
@@ -189,7 +193,7 @@ describe("hosted onboarding Stripe cron route", () => {
         Number.POSITIVE_INFINITY,
     );
     await expect(response.json()).resolves.toEqual({
-      groupJoinOutreach: { kind: "idle" },
+      groupJoinOutreach: { attempted: 0, results: [], sent: 0 },
       reconciledEventIds: ["evt_paid", "evt_trial"],
     });
   });
@@ -197,7 +201,7 @@ describe("hosted onboarding Stripe cron route", () => {
   it("still reports Stripe reconciliation when the outreach drain throws", async () => {
     // Outreach shares this billing-critical cron, so a drain failure must not
     // turn a healthy Stripe reconciliation into a failed cron invocation.
-    mocks.drainOneHostedGroupJoinOutreach.mockRejectedValueOnce(
+    mocks.drainHostedGroupJoinOutreachSweep.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "HOSTED_LINQ_ASSIGNABLE_LINE_LIMIT_EXCEEDED",
         httpStatus: 500,
@@ -232,7 +236,7 @@ describe("hosted onboarding Stripe cron route", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.getPrisma).not.toHaveBeenCalled();
-    expect(mocks.drainOneHostedGroupJoinOutreach).not.toHaveBeenCalled();
+    expect(mocks.drainHostedGroupJoinOutreachSweep).not.toHaveBeenCalled();
     expect(mocks.reconcileDueHostedStripeEvents).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {

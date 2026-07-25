@@ -1,5 +1,5 @@
 import { requireVercelCronRequest } from "@/src/lib/hosted-execution/vercel-cron";
-import { drainOneHostedGroupJoinOutreach } from "@/src/lib/hosted-groups/group-join-outreach-drain";
+import { drainHostedGroupJoinOutreachSweep } from "@/src/lib/hosted-groups/group-join-outreach-drain";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { logHostedOnboardingDiagnostic } from "@/src/lib/hosted-onboarding/logging";
@@ -17,7 +17,7 @@ export const GET = withJsonError(async (request: Request) => {
     // billing-critical cron. The drain owns durable deferral/retry state, so
     // the next invocation retries the same row; swallowing here only keeps
     // Stripe reconciliation's own outcome reportable.
-    drainOneHostedGroupJoinOutreach({
+    drainHostedGroupJoinOutreachSweep({
       prisma,
       signal: request.signal,
     }).catch((error: unknown) => {

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 
+import { sha256Hex } from "../primitives";
 import { createHostedLinqChatLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
@@ -21,7 +22,11 @@ import {
   logHostedOnboardingDiagnostic,
   toHostedOnboardingLogIdSuffix,
 } from "../hosted-onboarding/logging";
-import { resolveHostedLinqSignupWelcomeDailyLimit } from "../hosted-onboarding/linq-routing-policy";
+import {
+  chooseHostedLinqSignupWelcomeLine,
+  resolveHostedLinqSignupWelcomeDailyLimit,
+} from "../hosted-onboarding/linq-routing-policy";
+import { countHostedMemberHomeLinqBindingsByRecipientPhone } from "../hosted-onboarding/hosted-member-routing-linq";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
@@ -34,7 +39,9 @@ export const HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE =
   "hosted_group_join_outreach";
 const HOSTED_GROUP_JOIN_OUTREACH_TEMPLATE = "group_join_outreach";
 const HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX = "group-join-outreach:";
-const HOSTED_GROUP_JOIN_OUTREACH_GLOBAL_PACE_MS = 60_000;
+const HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS = 60_000;
+const HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS = 30_000;
+const HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
@@ -65,11 +72,97 @@ export function buildHostedGroupJoinOutreachIdempotencyKey(
   return `${HOSTED_GROUP_JOIN_OUTREACH_IDEMPOTENCY_PREFIX}${outreachId}`;
 }
 
-export function buildHostedGroupJoinOutreachMessage(
-  groupDisplayName: string | null | undefined,
-): string {
-  const groupName = normalizeHostedGroupJoinOutreachGroupName(groupDisplayName);
-  return `You liked the invite to ${groupName}. Reply here and I'll help you join.`;
+/**
+ * Variants for the one private first-contact text.
+ *
+ * Deliverability requires that many recipients not receive byte-identical copy,
+ * and equally forbids faking variation with padding or synonym churn. So these
+ * are a small set of genuinely different openers that each keep the same
+ * properties: they name the actual group, contain no link, ask for a reply, and
+ * read as one person writing to another.
+ *
+ * Selection is by digest of the outreach id, so a retried or replayed dispatch
+ * always composes the identical message and the provider idempotency key stays
+ * meaningful.
+ */
+const HOSTED_GROUP_JOIN_OUTREACH_MESSAGES: readonly ((groupName: string) => string)[] = [
+  (groupName) => `You liked the invite to ${groupName}. Reply here and I'll help you join.`,
+  (groupName) => `Saw your like on the ${groupName} invite. Say hi here and I'll get you set up.`,
+  (groupName) => `You're in for ${groupName}? Reply here and I'll take it from there.`,
+  (groupName) => `Thanks for the like on ${groupName}. Send me a message here and I'll sort your spot.`,
+  (groupName) => `Got your like on the ${groupName} invite. Reply here whenever and I'll set you up.`,
+];
+
+export function buildHostedGroupJoinOutreachMessage(input: {
+  groupDisplayName: string | null | undefined;
+  outreachId: string;
+}): string {
+  const groupName = normalizeHostedGroupJoinOutreachGroupName(input.groupDisplayName);
+  const variantIndex = readHostedGroupJoinOutreachVariantIndex(input.outreachId);
+
+  return HOSTED_GROUP_JOIN_OUTREACH_MESSAGES[variantIndex]!(groupName);
+}
+
+function readHostedGroupJoinOutreachPaceJitterMs(outreachId: string): number {
+  const digest = sha256Hex(`group-join-outreach-pace:${outreachId}`);
+
+  return Number.parseInt(digest.slice(0, 8), 16)
+    % HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS;
+}
+
+export function readHostedGroupJoinOutreachVariantIndex(outreachId: string): number {
+  // A digest, not the raw id, so the choice does not correlate with id ordering.
+  const digest = sha256Hex(`group-join-outreach-message:${outreachId}`);
+
+  return Number.parseInt(digest.slice(0, 8), 16)
+    % HOSTED_GROUP_JOIN_OUTREACH_MESSAGES.length;
+}
+
+export type HostedGroupJoinOutreachSweepResult = {
+  attempted: number;
+  results: HostedGroupJoinOutreachDrainResult[];
+  sent: number;
+};
+
+/**
+ * Drains up to a bounded number of due outreaches per sweep.
+ *
+ * Throughput comes from using several lines in the same minute, not from one line
+ * sending faster: each attempt re-reads line state, and a line that dispatched
+ * inside its jittered pace window is excluded from selection. So the real ceiling
+ * is the size of the healthy pool, and a small pool naturally paces itself instead
+ * of bursting. Stops early on the first non-sending outcome so a blocked backlog
+ * costs one attempt rather than the whole budget.
+ */
+export async function drainHostedGroupJoinOutreachSweep(input: {
+  max?: number;
+  now?: Date;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<HostedGroupJoinOutreachSweepResult> {
+  const max = Math.max(1, input.max ?? HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP);
+  const results: HostedGroupJoinOutreachDrainResult[] = [];
+
+  for (let attempt = 0; attempt < max; attempt += 1) {
+    if (input.signal?.aborted) {
+      break;
+    }
+    const result = await drainOneHostedGroupJoinOutreach({
+      ...(input.now ? { now: input.now } : {}),
+      prisma: input.prisma,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    results.push(result);
+    if (result.kind !== "sent") {
+      break;
+    }
+  }
+
+  return {
+    attempted: results.length,
+    results,
+    sent: results.filter((result) => result.kind === "sent").length,
+  };
 }
 
 export async function drainOneHostedGroupJoinOutreach(input: {
@@ -319,33 +412,43 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     });
   }
 
-  const latestAttempt = await input.tx.hostedGroupJoinOutreach.findFirst({
-    orderBy: { dispatchStartedAt: "desc" },
-    where: {
-      dispatchStartedAt: { not: null },
-      id: { not: outreach.id },
-    },
-    select: { dispatchStartedAt: true },
+  // Pacing is per line, not global. "No bursts" is a per-line property, so
+  // spacing each line's own sends is what lets several lines dispatch in the same
+  // minute without any one line bursting. Jitter is derived from the row id rather
+  // than a clock or RNG, so a replayed dispatch keeps the same schedule.
+  const linePaceWindowMs = HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS
+    + readHostedGroupJoinOutreachPaceJitterMs(outreach.id);
+  const recentlyUsedLineKeys = new Set(
+    (await input.tx.hostedGroupJoinOutreach.findMany({
+      where: {
+        dispatchStartedAt: {
+          gt: new Date(input.now.getTime() - linePaceWindowMs),
+        },
+        id: { not: outreach.id },
+        phoneNumberLookupKey: { not: null },
+      },
+      select: { phoneNumberLookupKey: true },
+    }))
+      .map((row) => row.phoneNumberLookupKey)
+      .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
+  );
+
+  const allHealthyLines = await listHostedLinqHealthyProactiveLines({
+    prisma: input.tx,
   });
-  const globalPaceAt = latestAttempt?.dispatchStartedAt
-    ? new Date(
-        latestAttempt.dispatchStartedAt.getTime()
-          + HOSTED_GROUP_JOIN_OUTREACH_GLOBAL_PACE_MS,
-      )
-    : null;
-  if (globalPaceAt && globalPaceAt > input.now) {
+  const healthyLines = allHealthyLines.filter(
+    (line) => !recentlyUsedLineKeys.has(line.phoneNumberLookupKey),
+  );
+  if (allHealthyLines.length > 0 && healthyLines.length === 0) {
+    // Every healthy line sent recently. Wait rather than double up on one.
     return deferHostedGroupJoinOutreachTx({
-      nextAttemptAt: globalPaceAt,
+      nextAttemptAt: new Date(input.now.getTime() + linePaceWindowMs),
       now: input.now,
       outreachId: outreach.id,
-      reason: "global_pacing",
+      reason: "line_pacing",
       tx: input.tx,
     });
   }
-
-  const healthyLines = await listHostedLinqHealthyProactiveLines({
-    prisma: input.tx,
-  });
   if (healthyLines.length === 0) {
     return deferHostedGroupJoinOutreachTx({
       nextAttemptAt: new Date(
@@ -439,7 +542,10 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
       attemptedAt: input.now,
       fromPhoneNumber: line.phoneNumber,
       idempotencyKey,
-      message: buildHostedGroupJoinOutreachMessage(offer.group.displayName),
+      message: buildHostedGroupJoinOutreachMessage({
+        groupDisplayName: offer.group.displayName,
+        outreachId: outreach.id,
+      }),
       outreachId: outreach.id,
       participantPhoneNumber,
     },
@@ -451,40 +557,55 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<HostedLinqAssignableHomeLine | null> {
+  // Reuse the shared proactive line policy instead of re-deriving one here. It
+  // balances on both durable home-line load and today's new-conversation count,
+  // and applies the per-line warmup limit itself, so pre-member outreach spreads
+  // across the pool the same way signup welcomes do.
   const dayUtc = startOfUtcDay(input.now);
-  const sortedLines = [...input.lines].sort((left, right) => {
-    const countDifference = readHostedLinqLineDayCount(left, dayUtc)
-      - readHostedLinqLineDayCount(right, dayUtc);
-    if (countDifference !== 0) {
-      return countDifference;
-    }
-    const weightDifference = right.assignmentWeight - left.assignmentWeight;
-    return weightDifference !== 0
-      ? weightDifference
-      : left.phoneNumberLookupKey.localeCompare(right.phoneNumberLookupKey);
-  });
-
-  for (const line of sortedLines) {
-    const claimed = await claimHostedLinqProactiveConversationCapacityTx({
-      dayUtc,
-      limit: resolveHostedLinqSignupWelcomeDailyLimit(line),
-      phoneNumberLookupKey: line.phoneNumberLookupKey,
+  const activeMembersByRecipientPhone =
+    await countHostedMemberHomeLinqBindingsByRecipientPhone({
+      now: input.now,
       prisma: input.tx,
+      recipientPhones: input.lines.map((line) => line.phoneNumber),
     });
-    if (claimed) {
+  const newAssignmentsByRecipientPhone = new Map(
+    input.lines.map((line) => [
+      line.phoneNumber,
+      line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
+        ? line.proactiveConversationCount ?? 0
+        : 0,
+    ]),
+  );
+
+  for (let attempt = 0; attempt < input.lines.length; attempt += 1) {
+    const line = chooseHostedLinqSignupWelcomeLine({
+      activeMembersByRecipientPhone,
+      lines: input.lines,
+      newAssignmentsByRecipientPhone,
+      preferredRecipientPhone: null,
+    });
+    if (!line) {
+      return null;
+    }
+
+    const limit = resolveHostedLinqSignupWelcomeDailyLimit(line);
+    if (
+      await claimHostedLinqProactiveConversationCapacityTx({
+        dayUtc,
+        limit,
+        phoneNumberLookupKey: line.phoneNumberLookupKey,
+        prisma: input.tx,
+      })
+    ) {
       return line;
     }
-  }
-  return null;
-}
 
-function readHostedLinqLineDayCount(
-  line: HostedLinqAssignableHomeLine,
-  dayUtc: Date,
-): number {
-  return line.proactiveConversationDayUtc?.getTime() === dayUtc.getTime()
-    ? line.proactiveConversationCount ?? 0
-    : 0;
+    // Treat the losing line as full for the rest of this selection so the next
+    // pass considers a different one.
+    newAssignmentsByRecipientPhone.set(line.phoneNumber, limit);
+  }
+
+  return null;
 }
 
 function startOfUtcDay(value: Date): Date {
