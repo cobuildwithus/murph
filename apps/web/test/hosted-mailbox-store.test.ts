@@ -49,7 +49,10 @@ import { setHostedSecureBoxStringTestCodecForTests } from "../src/lib/hosted-cry
 
 const FIXED_NOW = new Date("2026-04-26T00:00:00.000Z");
 const DAY_MS = 24 * 60 * 60 * 1000;
-const HOSTED_MAILBOX_TEST_RETENTION_MS = 30 * DAY_MS;
+// Restated independently of the source constant on purpose: the mailbox
+// retention window is a stated privacy policy, so widening it has to fail here
+// rather than silently follow whatever the source says.
+const HOSTED_MAILBOX_TEST_RETENTION_MS = 14 * DAY_MS;
 const MAILBOX_REF_1_PAYLOAD_REF = "hosted-mailbox-payload:mailbox_ref_1";
 
 function requireAssistantInputLookupKey(assistantInputId: string): string {

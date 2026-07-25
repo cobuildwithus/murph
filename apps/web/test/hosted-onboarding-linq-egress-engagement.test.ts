@@ -626,10 +626,13 @@ describe("hosted Linq egress authority", () => {
       createdAt: answeredQuery.where.createdAt,
       OR: answeredQuery.where.OR,
     });
+    // Pinned independently of the source constant: this scan must never reach
+    // past the mailbox retention window, or it would look for rows the
+    // retention sweep has already deleted.
     expect(
       answeredQuery.where.OR[1].expiresAt.gt.getTime()
       - answeredQuery.where.createdAt.gte.getTime(),
-    ).toBe(30 * 24 * 60 * 60 * 1000);
+    ).toBe(14 * 24 * 60 * 60 * 1000);
   });
 
   it("keeps malformed refs outside payload reads and foreign rows outside decrypts", async () => {

@@ -2238,7 +2238,13 @@ export function resolveHostedMailboxPayloadRef(payloadRef: string): string {
 }
 
 const HOSTED_MAILBOX_FETCH_LIMIT_MAX = 100;
-const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+// The read filter below and the retention DELETE in hosted-retention/cleanup.ts
+// must apply the same window: a read that still surfaces rows the sweep has
+// already deleted (or hides rows it has not) desynchronizes the consumed
+// watermark. Exported so cleanup.ts consumes this value rather than restating
+// it. Retention direction is one-way — cleanup depends on the mailbox, never
+// the reverse — so this stays the single definition.
+export const HOSTED_MAILBOX_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function fetchHostedMailboxItemRowsAfterSeq(input: {
   afterSeq: bigint;

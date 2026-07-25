@@ -24,8 +24,10 @@ import {
 } from "@murphai/core";
 import {
   runInboxMediaRetention,
+  runInboxTextRetention,
   type InboxMediaRetentionMaterializeResult,
   type InboxMediaRetentionResult,
+  type InboxTextRetentionResult,
 } from "@murphai/inboxd/retention";
 
 import type { RuntimeWakeSignal } from "./runtime-wake.ts";
@@ -122,8 +124,21 @@ export async function runHostedIdleCheckpointMaintenance(input: {
           vaultRoot: input.vaultRoot,
         });
         retentionWake = resolveInboxMediaRetentionWake(retentionResult);
+        // Text retention runs after the media pass and shares its wake pointer:
+        // both expire inbound content on the same 14-day clock, so a second
+        // pointer would only create two schedules to keep in agreement.
+        const textRetentionResult = await runInboxTextRetention({
+          ...(input.pendingWork ? { maxCaptures: 1 } : {}),
+          protectedCaptureIds: input.protectedCaptureIds,
+          signal: abortController.signal,
+          vaultRoot: input.vaultRoot,
+        });
+        retentionWake = mergeInboxRetentionWakes(
+          retentionWake,
+          resolveInboxTextRetentionWake(textRetentionResult),
+        );
       } catch (error) {
-        if (isInboxMediaRetentionAbortError(error, abortController.signal)) {
+        if (isInboxRetentionAbortError(error, abortController.signal)) {
           return buildInterruptedMaintenanceOutcome({
             shutdownSignal: input.shutdownSignal,
             vaultRoot: input.vaultRoot,
@@ -365,7 +380,7 @@ function emitIntegrationIngestArchiveFailureLog(input: {
   });
 }
 
-function isInboxMediaRetentionAbortError(
+function isInboxRetentionAbortError(
   error: unknown,
   signal: AbortSignal,
 ): boolean {
@@ -376,7 +391,43 @@ function isInboxMediaRetentionAbortError(
     return error === signal.reason;
   }
 
-  return error instanceof Error && error.message === "Inbox media retention aborted.";
+  return error instanceof Error
+    && (
+      error.message === "Inbox media retention aborted."
+      || error.message === "Inbox text retention aborted."
+    );
+}
+
+function resolveInboxTextRetentionWake(
+  result: InboxTextRetentionResult,
+): HostedIdleMaintenanceWake {
+  if (result.hasMoreEligibleCaptures) {
+    return resolveInboxMediaRetentionImmediateWake();
+  }
+
+  if (result.nextEligibleAt) {
+    return {
+      nextWakeAt: result.nextEligibleAt,
+      nextWakeReason: "inbox_media_retention",
+    };
+  }
+
+  return {};
+}
+
+/** Keep the earlier of two retention wakes so neither pass is scheduled late. */
+function mergeInboxRetentionWakes(
+  left: HostedIdleMaintenanceWake,
+  right: HostedIdleMaintenanceWake,
+): HostedIdleMaintenanceWake {
+  if (!left.nextWakeAt) {
+    return right;
+  }
+  if (!right.nextWakeAt) {
+    return left;
+  }
+
+  return Date.parse(right.nextWakeAt) < Date.parse(left.nextWakeAt) ? right : left;
 }
 
 function resolveInboxMediaRetentionFailureWake(): HostedIdleMaintenanceWake {

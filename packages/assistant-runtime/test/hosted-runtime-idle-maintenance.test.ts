@@ -11,8 +11,10 @@ vi.mock("@murphai/assistant-engine/assistant-codex", () => ({
   compactWarmCodexThread: (input: unknown) => compactWarmCodexThread(input),
 }));
 const runInboxMediaRetention = vi.fn();
+const runInboxTextRetention = vi.fn();
 vi.mock("@murphai/inboxd/retention", () => ({
   runInboxMediaRetention: (input: unknown) => runInboxMediaRetention(input),
+  runInboxTextRetention: (input: unknown) => runInboxTextRetention(input),
 }));
 const archiveClosedIntegrationIngestShards = vi.fn();
 vi.mock("@murphai/core", async (importOriginal) => ({
@@ -39,6 +41,15 @@ beforeEach(() => {
     hasMoreEligibleAttachments: false,
     nextEligibleAt: null,
     records: [],
+  });
+  runInboxTextRetention.mockReset();
+  // Idle maintenance runs both retention passes; a quiet text pass keeps these
+  // cases asserting the media wake they were written for.
+  runInboxTextRetention.mockResolvedValue({
+    expiredCaptures: 0,
+    hasMoreEligibleCaptures: false,
+    legacyCapturesSkipped: 0,
+    nextEligibleAt: null,
   });
   archiveClosedIntegrationIngestShards.mockReset();
   archiveClosedIntegrationIngestShards.mockResolvedValue({
@@ -362,6 +373,78 @@ describe("runHostedIdleCheckpointMaintenance", () => {
       signal: expect.any(AbortSignal),
       vaultRoot: "/vault",
     });
+  });
+
+  it("runs inbox text retention and wakes at the earlier of the two retention passes", async () => {
+    runInboxMediaRetention.mockResolvedValue({
+      expiredAttachments: 0,
+      expiredBytes: 0,
+      hasMoreEligibleAttachments: false,
+      nextEligibleAt: "2026-07-20T00:00:00.000Z",
+      records: [],
+    });
+    runInboxTextRetention.mockResolvedValue({
+      expiredCaptures: 3,
+      hasMoreEligibleCaptures: false,
+      legacyCapturesSkipped: 0,
+      nextEligibleAt: "2026-07-12T00:00:00.000Z",
+    });
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    const outcome = await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: false,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxTextRetention).toHaveBeenCalledWith(expect.objectContaining({
+      vaultRoot: "/vault",
+    }));
+    // The text pass expires sooner, so its wake has to win; taking the media
+    // wake would let message content sit past its window.
+    expect(outcome).toEqual({
+      kind: "skipped",
+      nextWakeAt: "2026-07-12T00:00:00.000Z",
+      nextWakeReason: "inbox_media_retention",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+  });
+
+  it("bounds the inbox text retention slice when a checkpoint has pending work", async () => {
+    compactWarmCodexThread.mockResolvedValue({
+      kind: "skipped",
+      reason: "below_threshold",
+      threadContextTokensBefore: 20_000,
+    });
+
+    await runHostedIdleCheckpointMaintenance({
+      credentialSource: "platform",
+      memberId: "member_1",
+      model: "gpt-5.6-terra",
+      providerName: "hosted-openai",
+      pendingWork: true,
+      recordUsage: null,
+      resolveAssistantSessionId: null,
+      shutdownSignal: null,
+      vaultRoot: "/vault",
+      wakeSignal: null,
+    });
+
+    expect(runInboxTextRetention).toHaveBeenCalledWith(expect.objectContaining({
+      maxCaptures: 1,
+    }));
   });
 
   it("returns an immediate retention wake when the retention batch has more eligible work", async () => {

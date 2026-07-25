@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
+import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
@@ -11,7 +12,9 @@ const DAY_MS = 86_400_000;
 
 export const HOSTED_RUN_LOG_RETENTION_MS = 14 * DAY_MS;
 export const HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS = 7 * DAY_MS;
-export const HOSTED_MAILBOX_RETENTION_MS = 30 * DAY_MS;
+// Re-exported for existing importers; the window itself is owned by the mailbox
+// store so the retention DELETE and the live-item read filter cannot drift.
+export { HOSTED_MAILBOX_RETENTION_MS };
 export const HOSTED_WEB_SESSION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
