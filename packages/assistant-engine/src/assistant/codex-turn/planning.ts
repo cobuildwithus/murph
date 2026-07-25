@@ -22,6 +22,10 @@ import {
   readAssistantContextSnapshotPrompt,
 } from '../context-snapshot.js'
 import {
+  assistantRouteSupportsGroupRoomModel,
+  readAssistantGroupRoomModelPrompt,
+} from '../group-room-model.js'
+import {
   normalizeAssistantExecutionContext,
   type AssistantHostedDeviceConnectProvider,
 } from '../execution-context.js'
@@ -442,6 +446,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const privateInteractiveAudience = conversationScope === 'direct'
   const hostedGroupRuntime =
     conversationScope === 'group' && input.executionContext?.hosted != null
+  const authenticatedGroupRoomModelRuntime =
+    hostedGroupRuntime &&
+    assistantRouteSupportsGroupRoomModel({
+      channel: resolvedChannel,
+      threadIsDirect: false,
+    })
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -526,15 +536,26 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.sharedPlan.onboardingGuidanceOpen &&
     privateInteractiveAudience
   const assistantToolNameAliases = null
-  // Maintenance turns consume only the engine-supplied conversation evidence
-  // plus canonical memory; the context snapshot (which carries health
-  // domains) and hosted dynamic context prompts must not reach their system
-  // prompt, or the prompt itself would hand the model forbidden sources.
+  // Maintenance turns consume only their engine-supplied evidence and exact
+  // policy-owned destination. The health context snapshot and hosted dynamic
+  // prompts must not reach them, or prompt construction itself would hand the
+  // model forbidden sources.
   const maintenanceTurn = input.profile.toolProfile === 'maintenance-turn'
   const hostedDynamicContextPrompts =
     maintenanceTurn || outputOnlyTurn
       ? []
       : input.executionContext?.hosted?.dynamicContextPrompts ?? []
+  const groupRoomModelPrompt =
+    authenticatedGroupRoomModelRuntime &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn'
+      ? await readAssistantGroupRoomModelPrompt({
+          vaultRoot: input.input.vault,
+        })
+      : null
+  const assistantDynamicContextPrompts = groupRoomModelPrompt
+    ? [...hostedDynamicContextPrompts, groupRoomModelPrompt]
+    : hostedDynamicContextPrompts
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
@@ -585,9 +606,16 @@ export async function resolveAssistantRouteTurnPlan(input: {
     injectOnboardingGuidance: boolean
   }) => {
     if (input.profile.promptProfile === 'maintenance') {
+      const maintenanceProfile = input.input.maintenanceProfile
+      if (!maintenanceProfile) {
+        throw new Error(
+          'Maintenance turns require an engine-resolved maintenance profile.',
+        )
+      }
       return buildAssistantMaintenanceSystemPromptWithCacheMetadata({
         currentLocalDate: input.promptTimeContext.currentLocalDate,
         currentTimeZone: input.promptTimeContext.currentTimeZone,
+        profile: maintenanceProfile,
       }, {
         toolSchemaHash,
       })
@@ -612,7 +640,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     return buildAssistantSystemPromptWithCacheMetadata({
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
-      assistantDynamicContextPrompts: hostedDynamicContextPrompts,
+      assistantDynamicContextPrompts: assistantDynamicContextPrompts,
       assistantHostedAutomationAvailable:
         input.hostedToolContext?.automationTool != null,
       assistantHostedDeviceConnectAvailable:
@@ -737,6 +765,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.subscriptionTool != null,
         groupAvailable: input.hostedToolContext?.groupTool != null,
+        groupRoomModelAvailable:
+          authenticatedGroupRoomModelRuntime &&
+          userActionAcceptedInputIds.length > 0,
         groupPermissionOfferAvailable:
           hostedGroupRuntime &&
           input.hostedToolContext?.groupPermissionOfferTool != null,

@@ -59,6 +59,7 @@ import {
   executeMurphDynamicToolRequest,
   isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   type AssistantStyleTurnSettingsOverlay,
   type MurphDynamicToolFinalActionPatch,
   type MurphDynamicToolReactionPatch,
@@ -3880,6 +3881,11 @@ async function runCodexAppServerTurnOnProcess(
             (tool) =>
               tool.namespace === MURPH_ASSISTANT_STYLE_TOOL.namespace &&
               tool.name === MURPH_ASSISTANT_STYLE_TOOL.name,
+          ),
+          groupRoomModelAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_GROUP_ROOM_MODEL_TOOL.namespace &&
+              tool.name === MURPH_GROUP_ROOM_MODEL_TOOL.name,
           ),
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])

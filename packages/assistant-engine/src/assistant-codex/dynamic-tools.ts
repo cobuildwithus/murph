@@ -170,6 +170,15 @@ import {
 } from './dynamic-tools/labs.js'
 export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
 import {
+  executeGroupRoomModelDynamicTool,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
+  readGroupRoomModelDynamicToolRequest,
+  type GroupRoomModelDynamicToolRequest,
+} from './dynamic-tools/group-room-model.js'
+export {
+  MURPH_GROUP_ROOM_MODEL_TOOL,
+} from './dynamic-tools/group-room-model.js'
+import {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   readClinicalRecordsConnectLinkDynamicToolRequest,
   type ClinicalRecordsConnectLinkDynamicToolRequest,
@@ -1149,6 +1158,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ASK_GROK_TOOL,
@@ -1198,6 +1208,7 @@ export interface MurphDynamicToolAvailability {
   planUsageAvailable?: boolean | null
   subscriptionAvailable?: boolean | null
   groupAvailable?: boolean | null
+  groupRoomModelAvailable?: boolean | null
   groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
   newsletterAvailable?: boolean | null
@@ -1243,6 +1254,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
+    [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
     [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
@@ -1890,6 +1902,7 @@ export type MurphDynamicToolRequest =
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -2111,6 +2124,14 @@ export function readMurphDynamicToolRequest(
   })
   if (labsRequest) {
     return labsRequest
+  }
+
+  const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (groupRoomModelRequest) {
+    return groupRoomModelRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2536,6 +2557,7 @@ export async function executeMurphDynamicToolRequest(input: {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   assistantStyleSettingsAvailable?: boolean | null
+  groupRoomModelAvailable?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -2573,6 +2595,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-group-room-model-arguments':
+      return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2654,6 +2678,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'group-room-model':
+      return await executeGroupRoomModelDynamicTool({
+        available: input.groupRoomModelAvailable === true,
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'device': {
       const deviceTool = input.hostedToolContext?.deviceTool ?? null
       if (!deviceTool) {

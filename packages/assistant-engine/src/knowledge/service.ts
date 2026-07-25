@@ -36,6 +36,8 @@ import {
   buildKnowledgePageRelativePath,
   deriveKnowledgeTitle,
   extractKnowledgeRelatedSlugsFromBody,
+  GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
+  GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
   normalizeLibrarySlugInputs,
   matchesKnowledgeFilter,
   normalizeKnowledgeBody,
@@ -159,6 +161,10 @@ export async function upsertKnowledgePage(
     title: input.title,
   })
   const slug = normalizeKnowledgeSlug(input.slug ?? initialTitle)
+  assertKnowledgePageBodyWithinLimit({
+    body: normalizedBody,
+    slug,
+  })
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
     initialGraph.graph,
@@ -287,6 +293,26 @@ export async function upsertKnowledgePage(
   })
 }
 
+function assertKnowledgePageBodyWithinLimit(input: {
+  body: string
+  slug: string
+}): void {
+  if (
+    input.slug === GROUP_ROOM_MODEL_KNOWLEDGE_SLUG &&
+    Buffer.byteLength(input.body, 'utf8') >
+      GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES
+  ) {
+    throw new VaultCliError(
+      'knowledge_page_body_too_large',
+      `Knowledge page "${input.slug}" body must not exceed ${GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES} UTF-8 bytes.`,
+      {
+        maxBytes: GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
+        slug: input.slug,
+      },
+    )
+  }
+}
+
 export async function appendKnowledgePageSection(
   input: KnowledgeAppendSectionInput,
   dependencies: KnowledgeServiceDependencies = {},
@@ -354,6 +380,7 @@ export async function appendKnowledgePageSection(
         position,
         sectionBody,
       })
+      assertKnowledgePageBodyWithinLimit({ body, slug })
       const title = deriveKnowledgeTitle({
         existingPage,
         slug,

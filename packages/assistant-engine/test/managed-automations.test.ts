@@ -122,6 +122,8 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -132,6 +134,7 @@ import {
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
+  resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -1033,6 +1036,37 @@ describe('applyMurphManagedAutomations', () => {
     )).toBe('2026-07-06T12:00:00.000Z')
   })
 
+  it('keeps the group room model as a lightweight twice-weekly group-only maintenance seed', () => {
+    const seed = MURPH_MANAGED_AUTOMATIONS.find(
+      (entry) =>
+        entry.automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+    )
+    if (!seed || seed.schedule.kind !== 'cron') {
+      throw new Error('Expected the group room model consolidation cron seed.')
+    }
+
+    expect(seed.ownerScope).toBe('authenticated-group')
+    expect(seed.automationId).toMatch(/^automation_[0-9A-HJKMNP-TV-Z]{26}$/u)
+    expect(seed.schedule.expression).toBe('0 4 * * 2,5')
+    expect(seed.continuityPolicy).toBe('fresh')
+    expect(seed.hostedRuntimeOnly).toBe(true)
+    expect(seed.assistantTargetOverride).toEqual({ reasoningEffort: 'high' })
+    expect(seed.instructions).toContain('lightweight list of likely tips')
+    expect(seed.instructions).toContain('who gets teased about what')
+    expect(seed.instructions).toContain('Raw route-authorized `Sender:` handles')
+    expect(seed.instructions).toContain('Treat the page as advisory')
+    expect(seed.instructions).toContain(
+      `{"kind":"skip","privateSummary":"${MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY}"}`,
+    )
+    expect(resolveMurphManagedMaintenancePolicy(seed.automationId)).toEqual({
+      privateSummary: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_PRIVATE_SUMMARY,
+      profile: 'group-room-model',
+    })
+    expect(
+      resolveMurphManagedMaintenancePolicy('automation_user_runtime_maintenance'),
+    ).toBeNull()
+  })
+
   it('installs the automatic meal closeout idempotently at 9pm local time', async () => {
     const onDiagnosticStage = vi.fn()
     const onboardingFollowup: StoredAutomationRecord = {
@@ -1056,7 +1090,7 @@ describe('applyMurphManagedAutomations', () => {
     )
     expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION).toMatchObject({
       automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-      excludeFromGroupChatRoutes: true,
+      ownerScope: 'member',
       schedule: {
         kind: 'dailyLocal',
         localTime: '21:00',
@@ -1552,7 +1586,7 @@ describe('applyMurphManagedAutomations', () => {
     )
   })
 
-  it('does not create personal managed automations for Linq group chat routes', async () => {
+  it('creates only the group-owned room model automation for group chat routes', async () => {
     const result = await applyMurphManagedAutomations({
       defaultRoute: groupChatRoute,
       now: new Date('2026-07-09T14:00:00.000Z'),
@@ -1564,11 +1598,78 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 0,
-      skipped: 6,
+      created: 1,
+      skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.records.size).toBe(1)
+    expect(
+      managedAutomationMocks.records.get(
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+      ),
+    ).toMatchObject({
+      route: groupChatRoute,
+      schedule: { kind: 'cron', expression: '0 4 * * 2,5' },
+      status: 'active',
+    })
+  })
+
+  it('classifies Telegram groups by audience rather than by channel name', async () => {
+    const telegramGroupRoute = {
+      ...groupChatRoute,
+      channel: 'telegram',
+      deliveryTarget: 'telegram-group-chat',
+      identityId: 'telegram-identity',
+      participantId: 'telegram-participant',
+      threadId: 'telegram-group-thread',
+    }
+
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: telegramGroupRoute,
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 1,
+      skipped: 0,
+      updated: 0,
+    })
+    expect(
+      managedAutomationMocks.records.get(
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+      ),
+    ).toMatchObject({
+      route: telegramGroupRoute,
+      status: 'active',
+    })
+  })
+
+  it('does not install room-model maintenance on spoofable group-email routes', async () => {
+    const result = await applyMurphManagedAutomations({
+      defaultRoute: {
+        ...groupChatRoute,
+        channel: 'email',
+        deliveryTarget: 'group-email-route',
+        threadId: 'group-email-thread',
+      },
+      now: new Date('2026-07-09T14:00:00.000Z'),
+      runtimeEnv: {
+        [HOSTED_RUNTIME_PROCESS_ENV]: '1',
+        EXA_API_KEY: 'fixture-exa-key',
+      },
+      vaultRoot,
+    })
+
+    expect(result).toEqual({
+      created: 0,
+      skipped: 0,
+      updated: 0,
+    })
     expect(managedAutomationMocks.records.size).toBe(0)
   })
 
