@@ -40,6 +40,7 @@ type HostedTelegramAccessNoticeDispatchClaim =
   | { status: "not_applicable" };
 
 export async function sendHostedTelegramAccessNotice(input: {
+  authorizedTelegramUserId?: string;
   memberId: string;
   message: string;
   noticeCode: string;
@@ -198,6 +199,7 @@ export function buildHostedTelegramAccessNoticeIdempotencyKey(input: {
 async function claimHostedTelegramAccessNoticeDispatch(input: {
   idempotencyKey: string;
   input: {
+    authorizedTelegramUserId?: string;
     memberId: string;
     prisma: PrismaClient;
     sentAt?: Date;
@@ -216,7 +218,13 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         memberId: input.input.memberId,
         prisma: tx,
       });
-      if (routing?.telegramThreadId !== input.input.target) {
+      const threadStillAuthorized =
+        routing?.telegramThreadId === input.input.target;
+      const currentInboundSenderStillAuthorized = Boolean(
+        input.input.authorizedTelegramUserId
+        && routing?.telegramUserId === input.input.authorizedTelegramUserId,
+      );
+      if (!threadStillAuthorized && !currentInboundSenderStillAuthorized) {
         return { status: "not_applicable" };
       }
 
@@ -224,6 +232,7 @@ async function claimHostedTelegramAccessNoticeDispatch(input: {
         attemptedAt,
         idempotencyKey: input.idempotencyKey,
         prisma: tx,
+        reclaimStalePreProviderAttempt: true,
         source: HOSTED_TELEGRAM_NOTICE_DELIVERY_SOURCE,
         sourceRef: input.input.sourceEventId,
         status: "provider_dispatch_started",
