@@ -27,15 +27,15 @@ export function SecurityTeaserSection() {
             service.
           </p>
 
-          <ul className="mt-8 grid gap-3 sm:grid-cols-2">
+          <ul className="mt-8 border-t border-[#3a4a1e]/15">
             {PROMISES.map((promise) => (
               <li
-                className="flex items-start gap-3 text-[0.9375rem] leading-[1.5] text-[#2d3436]"
+                className="flex items-start gap-3.5 border-b border-[#3a4a1e]/15 py-3.5 text-[0.9375rem] leading-[1.55] text-[#2d3436]"
                 key={promise}
               >
                 <span
                   aria-hidden="true"
-                  className="mt-[0.4rem] h-1.5 w-1.5 shrink-0 rounded-full bg-[#3a4a1e]"
+                  className="mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full bg-[#3a4a1e]"
                 />
                 {promise}
               </li>
