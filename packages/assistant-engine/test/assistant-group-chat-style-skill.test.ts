@@ -217,6 +217,32 @@ describe('assistant group-chat style guidance', () => {
     }
   })
 
+  it('names the inbound timestamp as the signal for what the room is doing', async () => {
+    const normalized = await readNormalizedGroupChatSkill()
+
+    // buildAssistantAutoReplyContextLines emits ONE `Occurred at:` per turn —
+    // a single time, or a first-to-last range when inputs were grouped. The
+    // guidance must describe that contract and never claim a per-message
+    // timestamp, which the prompt builder does not render.
+    expect(normalized).toContain(
+      'Every turn opens with an `Occurred at:` time — a single timestamp, or a first-to-last range when several messages arrived together — and earlier turns keep theirs above in this conversation.',
+    )
+    expect(normalized).not.toContain('Each inbound message carries an')
+    expect(normalized).toContain(
+      'times a few seconds apart, or a range whose whole span is only a few seconds, mean the room is live and mid-volley.',
+    )
+    // A wide grouped range cannot expose the gap immediately before the newest
+    // message, so it must not be read as evidence either way.
+    expect(normalized).toContain(
+      'A wide range hides the gap that matters, so treat it as ambiguous.',
+    )
+    // A cold thread or a compacted one may not expose earlier times; the safe
+    // default is to answer rather than sit on a reply.
+    expect(normalized).toContain(
+      'When the times are missing or ambiguous, do not wait.',
+    )
+  })
+
   it('carries the catching-up, live-room, and share-of-voice rhythms', async () => {
     const normalized = await readNormalizedGroupChatSkill()
 
