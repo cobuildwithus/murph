@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type {
   AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { ELEVENLABS_TTS_MAX_TEXT_LENGTH } from '@murphai/operator-config/elevenlabs-runtime'
 import type { SafeToolCallValidationDigest } from '../../assistant/tool-validation-digest.js'
 import {
   executeGenerateVoiceMemoTool,
@@ -27,7 +28,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
       text: {
         type: 'string',
         minLength: 1,
-        maxLength: 4000,
+        maxLength: ELEVENLABS_TTS_MAX_TEXT_LENGTH,
         description: 'The exact text to speak in the voice memo.',
       },
       voiceId: {
@@ -45,7 +46,7 @@ export const MURPH_GENERATE_VOICE_MEMO_TOOL = {
 
 const generateVoiceMemoArgumentsSchema = z
   .object({
-    text: z.string().trim().min(1).max(4000),
+    text: z.string().trim().min(1).max(ELEVENLABS_TTS_MAX_TEXT_LENGTH),
     voiceId: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
