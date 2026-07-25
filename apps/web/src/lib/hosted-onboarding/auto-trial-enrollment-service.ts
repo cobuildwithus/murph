@@ -600,8 +600,10 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
 }
 
 /**
- * Finalizes an auto Pulse Trial in three phases so no pooled connection and no
- * member row lock is ever held across a Stripe round trip.
+ * Finalizes an auto Pulse Trial in three phases so the common enrollment path
+ * never holds a pooled connection or member row lock across Stripe. The rare
+ * loser-cleanup phase deliberately retains the lock through cancellation to
+ * protect the ownership decision from concurrent adoption.
  *
  * 1. Read the authoritative provider state and judge it, outside every
  *    transaction and outside the member lock.
