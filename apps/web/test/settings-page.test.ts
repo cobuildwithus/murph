@@ -399,10 +399,12 @@ test("SettingsPage keeps a signed-out Stripe payment return recoverable", async 
     }),
   }));
 
-  // Someone who just saved a card must be told their money is safe and offered
-  // sign-in, not bounced to the marketing homepage with no explanation.
-  assert.match(markup, /Your card is saved/);
+  // Nothing is verified before sign-in: the signature is bound to a member id
+  // absent from the URL, so anyone could craft these parameters. Murph must not
+  // vouch for a payment it has not checked.
   assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your Pulse update\./);
+  assert.doesNotMatch(markup, /card is saved/i);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 

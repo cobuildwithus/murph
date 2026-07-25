@@ -18,7 +18,9 @@ import {
   HOSTED_START_PAID_PULSE_RETURN_VALUE,
 } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import {
+  clearHostedPulseTrialPaymentIntent,
   continueHostedPulseTrialPaidPlan,
+  readHostedPulseTrialPaymentIntentForMember,
   startHostedPulseTrialPaidPlan,
 } from "@/src/lib/hosted-onboarding/billing-start-paid-pulse-service";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -79,6 +81,26 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  // The signed link and cookie prove this return came from Murph and belongs to
+  // this member; they are not a second owner of the billing decision. The
+  // recorded intent decides which action runs, so a superseded handoff cannot
+  // replay an action the member has already changed, and a handoff the webhook
+  // already completed cannot run a second transition.
+  const recorded = await readHostedPulseTrialPaymentIntentForMember({
+    memberId: auth.member.id,
+    now: new Date(),
+    prisma,
+  });
+  if (recorded?.action !== action) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CONTINUATION_SUPERSEDED",
+      httpStatus: 409,
+      message: recorded === undefined || recorded === null
+        ? "This Pulse update is already done. Check your plan in settings."
+        : "You asked for a different Pulse update since this link. Use the latest one.",
+    });
+  }
+
   const result = action === "start_pulse_now"
     ? await startHostedPulseTrialPaidPlan({
         memberId: auth.member.id,
@@ -100,6 +122,14 @@ export const POST = withJsonError(async (request: Request) => {
       : result,
   );
   if (result.status !== "payment_required") {
+    // Consume the same recorded authority the webhook would have used, so a
+    // later attach cannot replay a transition this request already completed.
+    await clearHostedPulseTrialPaymentIntent({
+      memberId: auth.member.id,
+      observedAction: recorded.action,
+      observedExpiresAt: recorded.expiresAt,
+      prisma,
+    });
     response.headers.append(
       "Set-Cookie",
       buildHostedPulseTrialContinuationClearCookie(),

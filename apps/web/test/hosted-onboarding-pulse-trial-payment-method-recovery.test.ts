@@ -3,7 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
-  billingRefUpdate: vi.fn(),
+  billingRefUpdateMany: vi.fn(),
   continuePulse: vi.fn(),
   lookupBillingRef: vi.fn(),
   startPulse: vi.fn(),
@@ -32,7 +32,7 @@ const LIVE_EXPIRY = new Date(NOW.getTime() + 10 * 60_000);
 const STALE_EXPIRY = new Date(NOW.getTime() - 1);
 
 const prisma = {
-  hostedMemberBillingRef: { update: mocks.billingRefUpdate },
+  hostedMemberBillingRef: { updateMany: mocks.billingRefUpdateMany },
 } as never;
 
 function buildPaymentMethod(): Stripe.PaymentMethod {
@@ -62,7 +62,7 @@ let recovery: typeof import(
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  mocks.billingRefUpdate.mockResolvedValue({});
+  mocks.billingRefUpdateMany.mockResolvedValue({});
   mocks.startPulse.mockResolvedValue({ status: "started" });
   mocks.continuePulse.mockResolvedValue({ status: "continuing" });
   recovery = await import(
@@ -75,6 +75,7 @@ test("finishes the start-now switch the browser round trip never completed", asy
 
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
@@ -93,19 +94,24 @@ test("consumes the recorded intent only after the transition lands", async () =>
 
   await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
 
-  expect(mocks.billingRefUpdate).toHaveBeenCalledWith({
-    where: { memberId: "hbm_test_1" },
+  expect(mocks.billingRefUpdateMany).toHaveBeenCalledWith({
+    where: {
+      memberId: "hbm_test_1",
+      pulseTrialPaymentIntentAction: "start_pulse_now",
+      pulseTrialPaymentIntentExpiresAt: LIVE_EXPIRY,
+    },
     data: {
       pulseTrialPaymentIntentAction: null,
       pulseTrialPaymentIntentExpiresAt: null,
     },
   });
   expect(mocks.startPulse.mock.invocationCallOrder[0])
-    .toBeLessThan(mocks.billingRefUpdate.mock.invocationCallOrder[0]);
+    .toBeLessThan(mocks.billingRefUpdateMany.mock.invocationCallOrder[0]);
 });
 
 test("keeps the intent alive when the transition throws so the webhook retry can still recover", async () => {
@@ -116,11 +122,12 @@ test("keeps the intent alive when the transition throws so the webhook retry can
 
   await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   })).rejects.toThrow("Stripe is unavailable.");
 
-  expect(mocks.billingRefUpdate).not.toHaveBeenCalled();
+  expect(mocks.billingRefUpdateMany).not.toHaveBeenCalled();
 });
 
 test("recovers on redelivery after a failed attempt, then consumes the intent once", async () => {
@@ -129,6 +136,7 @@ test("recovers on redelivery after a failed attempt, then consumes the intent on
 
   await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   })).rejects.toThrow();
@@ -136,16 +144,17 @@ test("recovers on redelivery after a failed attempt, then consumes the intent on
   // The intent row is untouched, so the next delivery still sees it.
   const retry = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
 
   expect(retry).toEqual({ memberId: "hbm_test_1" });
   expect(mocks.startPulse).toHaveBeenCalledTimes(2);
-  expect(mocks.billingRefUpdate).toHaveBeenCalledTimes(1);
+  expect(mocks.billingRefUpdateMany).toHaveBeenCalledTimes(1);
 });
 
-test("treats payment_required as no recovery and leaves the intent for the next attach", async () => {
+test("keeps the receipt obligation when Stripe has no usable card yet", async () => {
   stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
   mocks.startPulse.mockResolvedValueOnce({
     billingPlanCode: "launch_monthly",
@@ -153,14 +162,72 @@ test("treats payment_required as no recovery and leaves the intent for the next 
     status: "payment_required",
   });
 
+  // Returning normally here would let the reconciler mark an unfinished
+  // recovery complete and deliver a fresh portal URL to nobody.
+  await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    occurredAt: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  })).rejects.toMatchObject({
+    code: "HOSTED_PULSE_TRIAL_PAYMENT_METHOD_RECOVERY_PENDING",
+  });
+
+  expect(mocks.billingRefUpdateMany).not.toHaveBeenCalled();
+});
+
+test("still executes when a slow retry runs after the intent window closed", async () => {
+  // The receipt retry ladder reaches ~81 minutes, well past the 30-minute
+  // intent lifetime. Judging by the retry clock would silently revoke work the
+  // member authorised and complete the receipt anyway.
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+
+  const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: new Date(LIVE_EXPIRY.getTime() + 71 * 60_000),
+    occurredAt: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  expect(result).toEqual({ memberId: "hbm_test_1" });
+  expect(mocks.startPulse).toHaveBeenCalledTimes(1);
+});
+
+test("stays a terminal no-op when the card was attached after the intent window", async () => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: new Date(LIVE_EXPIRY.getTime() + 1),
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
 
   expect(result).toBeNull();
-  expect(mocks.billingRefUpdate).not.toHaveBeenCalled();
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+  expect(mocks.billingRefUpdateMany).not.toHaveBeenCalled();
+});
+
+test("does not erase a newer intent recorded after the one it acted on", async () => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+
+  await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    occurredAt: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  // The compare-and-set names the exact observed row, so a superseding write
+  // between the read and the clear survives.
+  expect(mocks.billingRefUpdateMany).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        pulseTrialPaymentIntentAction: "start_pulse_now",
+        pulseTrialPaymentIntentExpiresAt: LIVE_EXPIRY,
+      }),
+    }),
+  );
 });
 
 test.each([
@@ -175,12 +242,13 @@ test.each([
 
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
 
   expect(result).toEqual({ memberId: "hbm_test_1" });
-  expect(mocks.billingRefUpdate).toHaveBeenCalledTimes(1);
+  expect(mocks.billingRefUpdateMany).toHaveBeenCalledTimes(1);
 });
 
 test("routes a continue intent to the trial-end path rather than billing now", async () => {
@@ -188,6 +256,7 @@ test("routes a continue intent to the trial-end path rather than billing now", a
 
   await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
@@ -208,6 +277,7 @@ test.each([
 
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
@@ -215,7 +285,7 @@ test.each([
   expect(result).toBeNull();
   expect(mocks.startPulse).not.toHaveBeenCalled();
   expect(mocks.continuePulse).not.toHaveBeenCalled();
-  expect(mocks.billingRefUpdate).not.toHaveBeenCalled();
+  expect(mocks.billingRefUpdateMany).not.toHaveBeenCalled();
 });
 
 test("ignores a payment method that maps to no Murph member", async () => {
@@ -223,6 +293,7 @@ test("ignores a payment method that maps to no Murph member", async () => {
 
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: buildPaymentMethod(),
     prisma,
   });
@@ -234,6 +305,7 @@ test("ignores a payment method that maps to no Murph member", async () => {
 test("ignores a payment method with no customer attached", async () => {
   const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
     now: NOW,
+    occurredAt: NOW,
     paymentMethod: { customer: null, id: "pm_test_1" } as Stripe.PaymentMethod,
     prisma,
   });

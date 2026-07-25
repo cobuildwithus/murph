@@ -10,6 +10,7 @@ import {
   readHostedPulseTrialPaymentIntent,
   startHostedPulseTrialPaidPlan,
 } from "./billing-start-paid-pulse-service";
+import { hostedOnboardingError } from "./errors";
 import { lookupHostedMemberStripeBillingRefByStripeCustomerId } from "./hosted-member-billing-store";
 
 /**
@@ -24,6 +25,7 @@ import { lookupHostedMemberStripeBillingRefByStripeCustomerId } from "./hosted-m
  */
 export async function applyStripePulseTrialPaymentMethodAttached(input: {
   now?: Date;
+  occurredAt: Date;
   paymentMethod: Stripe.PaymentMethod;
   prisma: PrismaClient;
 }): Promise<{ memberId: string } | null> {
@@ -43,13 +45,18 @@ export async function applyStripePulseTrialPaymentMethodAttached(input: {
     return null;
   }
 
+  const observedExpiresAt = lookup.billingRef.pulseTrialPaymentIntentExpiresAt ?? null;
+  // Judge authority against when the card was actually attached, not when this
+  // receipt happens to run. The retry ladder reaches past the intent's own
+  // lifetime, so using the processing clock would silently revoke work the
+  // member had already authorised and complete the receipt anyway.
   const action = readHostedPulseTrialPaymentIntent({
     action: lookup.billingRef.pulseTrialPaymentIntentAction ?? null,
-    expiresAt: lookup.billingRef.pulseTrialPaymentIntentExpiresAt ?? null,
-    now,
+    expiresAt: observedExpiresAt,
+    now: input.occurredAt,
   });
 
-  if (action === null) {
+  if (action === null || observedExpiresAt === null) {
     return null;
   }
 
@@ -73,15 +80,22 @@ export async function applyStripePulseTrialPaymentMethodAttached(input: {
       prisma: input.prisma,
     });
 
-  // Stripe still has no usable card, so nothing moved. Keep the intent live for
-  // whatever attach comes next rather than reporting a recovery that did not
-  // happen. The recorded expiry bounds how long that can repeat.
+  // Stripe has not exposed a usable card yet, so nothing moved. Keep the
+  // receipt's obligation rather than returning normally and letting the
+  // reconciler mark an unfinished recovery complete.
   if (result.status === "payment_required") {
-    return null;
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_PAYMENT_METHOD_RECOVERY_PENDING",
+      httpStatus: 409,
+      message: "The saved card is not usable for billing yet.",
+      retryable: true,
+    });
   }
 
   await clearHostedPulseTrialPaymentIntent({
     memberId,
+    observedAction: action,
+    observedExpiresAt,
     prisma: input.prisma,
   });
 

@@ -485,8 +485,11 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     // Must run with the real client outside the reconciliation transaction:
-    // finishing the plan change makes Stripe calls and takes its own lock.
+    // finishing the plan change makes Stripe calls and takes its own lock. The
+    // event's own occurrence time is passed so a slow retry cannot expire an
+    // intent that was valid when the member saved their card.
     expect(mocks.applyStripePulseTrialPaymentMethodAttached).toHaveBeenCalledWith({
+      occurredAt: new Date(event.created * 1000),
       paymentMethod: event.data.object,
       prisma: prisma.client,
     });

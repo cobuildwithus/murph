@@ -353,7 +353,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
-  test("still returns the payment link when recording the intent fails", async () => {
+  test("issues no payment link when the intent cannot be recorded", async () => {
     mocks.prismaClient.hostedMemberBillingRef.update.mockRejectedValueOnce(
       new Error("database is unavailable"),
     );
@@ -366,13 +366,19 @@ describe("startHostedPulseTrialPaidPlan", () => {
       defaultSource: null,
     }));
 
-    // The browser round trip is still the primary way to finish, so losing the
-    // webhook fallback must not cost the member the link itself.
+    // The recorded row is the only authority for which action a handoff
+    // completes. Handing out a link we cannot resolve later would let the
+    // browser and the webhook run different actions for one card setup.
     await expect(startHostedPulseTrialPaidPlan({
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
       paymentMethodContinuation: "conversation",
-    })).resolves.toMatchObject({ status: "payment_required" });
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_PAYMENT_INTENT_NOT_RECORDED",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
   });
 
   test("returns conversational no-card starts through the signed exact-action bridge", async () => {

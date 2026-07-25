@@ -605,10 +605,12 @@ async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
   });
 }
 
-// Best effort on purpose: failing to record the intent must not cost the member
-// the payment link itself, which is still the primary way they finish. Kept in
-// our own row rather than on the Stripe subscription so that handing out a link
-// never mutates the subscription before a card exists.
+// The recorded row is the single authority for which action a payment handoff
+// completes. Failing to record it must therefore fail the handoff: issuing a
+// link we cannot resolve later would let the browser and the webhook execute
+// different actions for one card setup. Kept in our own row rather than on the
+// Stripe subscription so that handing out a link never mutates the subscription
+// before a card exists.
 async function recordHostedPulseTrialPaymentIntent(input: {
   memberId: string;
   now: Date;
@@ -627,10 +629,13 @@ async function recordHostedPulseTrialPaymentIntent(input: {
       },
     });
   } catch (error) {
-    console.warn(
-      "Pulse trial payment intent was not recorded before the payment-method handoff.",
-      error,
-    );
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_PAYMENT_INTENT_NOT_RECORDED",
+      httpStatus: 503,
+      message: "We could not start your billing update. Try again shortly.",
+      retryable: true,
+      cause: error,
+    });
   }
 }
 
@@ -650,12 +655,50 @@ export function readHostedPulseTrialPaymentIntent(input: {
   return input.action;
 }
 
+export async function readHostedPulseTrialPaymentIntentForMember(input: {
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+}): Promise<
+  { action: HostedPulseTrialContinuationAction; expiresAt: Date } | null
+> {
+  const billingRef = await input.prisma.hostedMemberBillingRef.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      pulseTrialPaymentIntentAction: true,
+      pulseTrialPaymentIntentExpiresAt: true,
+    },
+  });
+
+  const expiresAt = billingRef?.pulseTrialPaymentIntentExpiresAt ?? null;
+  const action = readHostedPulseTrialPaymentIntent({
+    action: billingRef?.pulseTrialPaymentIntentAction ?? null,
+    expiresAt,
+    now: input.now,
+  });
+
+  return action !== null && expiresAt !== null ? { action, expiresAt } : null;
+}
+
+/**
+ * Clears only the exact intent the caller acted on.
+ *
+ * A completion that started from a superseded handoff must not erase a newer
+ * recorded action, so the delete is conditional on the action and expiry the
+ * caller observed.
+ */
 export async function clearHostedPulseTrialPaymentIntent(input: {
   memberId: string;
+  observedAction: HostedPulseTrialContinuationAction;
+  observedExpiresAt: Date;
   prisma: PrismaClient;
 }): Promise<void> {
-  await input.prisma.hostedMemberBillingRef.update({
-    where: { memberId: input.memberId },
+  await input.prisma.hostedMemberBillingRef.updateMany({
+    where: {
+      memberId: input.memberId,
+      pulseTrialPaymentIntentAction: input.observedAction,
+      pulseTrialPaymentIntentExpiresAt: input.observedExpiresAt,
+    },
     data: {
       pulseTrialPaymentIntentAction: null,
       pulseTrialPaymentIntentExpiresAt: null,

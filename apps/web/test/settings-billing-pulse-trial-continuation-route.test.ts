@@ -6,7 +6,9 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   buildClearCookie: vi.fn(),
   buildContinuationCookie: vi.fn(),
+  clearPaymentIntent: vi.fn(),
   continuePulse: vi.fn(),
+  readPaymentIntentForMember: vi.fn(),
   getHostedAppSessionFromRequest: vi.fn(),
   getPrisma: vi.fn(),
   readContinuationRequest: vi.fn(),
@@ -45,9 +47,13 @@ vi.mock(
 );
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-paid-pulse-service", () => ({
+  clearHostedPulseTrialPaymentIntent: mocks.clearPaymentIntent,
   continueHostedPulseTrialPaidPlan: mocks.continuePulse,
+  readHostedPulseTrialPaymentIntentForMember: mocks.readPaymentIntentForMember,
   startHostedPulseTrialPaidPlan: mocks.startPulse,
 }));
+
+const RECORDED_INTENT_EXPIRES_AT = new Date("2026-05-06T00:30:00.000Z");
 
 type PulseTrialContinuationRouteModule =
   typeof import("../app/api/settings/billing/pulse-trial-continuation/route");
@@ -76,6 +82,13 @@ beforeEach(async () => {
   mocks.getHostedAppSessionFromRequest.mockResolvedValue(auth);
   mocks.getPrisma.mockReturnValue({ label: "test-prisma" });
   mocks.readContinuationRequest.mockReturnValue("continue_pulse");
+  mocks.clearPaymentIntent.mockResolvedValue(undefined);
+  // The recorded row is the single authority for which action runs, so the
+  // default fixture agrees with the default signed/cookie action.
+  mocks.readPaymentIntentForMember.mockResolvedValue({
+    action: "continue_pulse",
+    expiresAt: RECORDED_INTENT_EXPIRES_AT,
+  });
   mocks.readPaymentReturnAction.mockReturnValue("continue_pulse");
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue(auth);
   mocks.startPulse.mockResolvedValue({
@@ -130,6 +143,10 @@ test.each([
     mocks.readPaymentReturnAction.mockImplementation(
       actual.readHostedPulseTrialPaymentReturnAction,
     );
+    mocks.readPaymentIntentForMember.mockResolvedValue({
+      action,
+      expiresAt: RECORDED_INTENT_EXPIRES_AT,
+    });
 
     const returnResponse = await route.GET(new Request(
       actual.buildHostedPulseTrialPaymentReturnUrl({
@@ -244,6 +261,10 @@ test("dispatches continue_pulse without ending the trial", async () => {
 
 test("dispatches start_pulse_now through the same canonical service", async () => {
   mocks.readContinuationRequest.mockReturnValueOnce("start_pulse_now");
+  mocks.readPaymentIntentForMember.mockResolvedValueOnce({
+    action: "start_pulse_now",
+    expiresAt: RECORDED_INTENT_EXPIRES_AT,
+  });
   const response = await route.POST(buildPostRequest());
 
   expect(response.status).toBe(200);
@@ -253,6 +274,45 @@ test("dispatches start_pulse_now through the same canonical service", async () =
     prisma: { label: "test-prisma" },
   });
   expect(mocks.continuePulse).not.toHaveBeenCalled();
+});
+
+test("refuses a signed link the member has since superseded", async () => {
+  // Link A said start-now; the member has since asked for continue-at-trial-end.
+  // Both links stay signed and valid, so without deferring to the recorded row
+  // the older link would still bill this member immediately.
+  mocks.readContinuationRequest.mockReturnValueOnce("start_pulse_now");
+  mocks.readPaymentIntentForMember.mockResolvedValueOnce({
+    action: "continue_pulse",
+    expiresAt: RECORDED_INTENT_EXPIRES_AT,
+  });
+
+  const response = await route.POST(buildPostRequest());
+
+  expect(response.status).toBe(409);
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+  expect(mocks.continuePulse).not.toHaveBeenCalled();
+});
+
+test("refuses a replay after the webhook already completed the same handoff", async () => {
+  mocks.readPaymentIntentForMember.mockResolvedValueOnce(null);
+
+  const response = await route.POST(buildPostRequest());
+
+  expect(response.status).toBe(409);
+  expect(mocks.continuePulse).not.toHaveBeenCalled();
+  expect(mocks.startPulse).not.toHaveBeenCalled();
+});
+
+test("consumes the exact recorded intent once the transition lands", async () => {
+  const response = await route.POST(buildPostRequest());
+
+  expect(response.status).toBe(200);
+  expect(mocks.clearPaymentIntent).toHaveBeenCalledWith({
+    memberId: "member_123",
+    observedAction: "continue_pulse",
+    observedExpiresAt: RECORDED_INTENT_EXPIRES_AT,
+    prisma: { label: "test-prisma" },
+  });
 });
 
 test("retains the exact-action claim when Stripe has not exposed the saved method yet", async () => {

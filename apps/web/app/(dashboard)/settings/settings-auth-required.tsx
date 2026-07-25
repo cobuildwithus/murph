@@ -13,12 +13,17 @@ function settingsAuthRequiredProps(resumingPayment: boolean) {
   // A payment link Murph sends over text usually opens in a browser that has
   // never held a Murph session, so this screen is the normal landing for
   // someone returning from Stripe rather than an error state.
+  //
+  // The copy stays neutral because nothing here is verified yet: the return
+  // signature is bound to a member id that is absent from the URL, so anyone
+  // could put these parameters in a link. Claiming a card was saved would make
+  // Murph vouch for a payment it has not checked.
   return resumingPayment
     ? {
-      description: "Your card is saved. Sign in to finish switching to Pulse.",
+      description: "Sign in to verify and finish your Pulse update.",
       eyebrow: "Subscription",
       eyebrowIcon: CreditCard,
-      footer: "You will land back here and we will pick up where you left off.",
+      footer: "We will check this link against your account after you sign in.",
       title: "One more step",
     }
     : {
