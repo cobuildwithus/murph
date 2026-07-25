@@ -1,6 +1,6 @@
 # Android companion backend and emulator bring-up
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -114,3 +114,4 @@ Updated: 2026-07-25
   - All repository and Android checks pass.
   - The emulator reports the Murph Android activity resumed and the first
     member-facing screen is visible without a crash.
+Completed: 2026-07-25
