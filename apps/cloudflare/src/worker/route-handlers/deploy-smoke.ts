@@ -68,8 +68,17 @@ export async function handleDeployContainerSmokeRoute(
       ok: false,
     }, 400);
   }
+  let attempt: number | null;
+  try {
+    attempt = readDeployContainerSmokeAttempt(context.url);
+  } catch {
+    return json({
+      error: "Unsupported deploy container smoke attempt.",
+      ok: false,
+    }, 400);
+  }
   const container = context.env.RUNNER_CONTAINER_SMOKE
-    .getByName(resolveDeployContainerSmokeObjectName(context.env));
+    .getByName(resolveDeployContainerSmokeObjectName(context.env, attempt));
   const directR2Smoke = directR2PresignedPut
     ? await createDeployContainerDirectR2PresignedPutSmoke(context)
     : null;
@@ -228,6 +237,19 @@ export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | n
   return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
 }
 
+// Retry attempt: scopes the smoke Durable Object so each attempt gets its own
+// container instance. Absent means the caller wants the unscoped object name.
+export function readDeployContainerSmokeAttempt(url: URL): number | null {
+  const normalized = normalizeDeployContainerSmokeQueryValue(url.searchParams.get("attempt"));
+  if (!normalized) {
+    return null;
+  }
+  if (!/^[1-9][0-9]{0,3}$/u.test(normalized)) {
+    throw new RangeError("Unsupported deploy container smoke attempt.");
+  }
+  return Number(normalized);
+}
+
 function normalizeDeployContainerSmokeQueryValue(value: string | null): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
@@ -240,15 +262,21 @@ export function resolveDeployContainerSmokeObjectName(
     | "MURPH_HOSTED_LOCAL_DEPLOY_SMOKE_USE_BUILD_ID"
     | "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID"
   >,
+  attempt: number | null = null,
 ): string {
   const hostedLocalObjectIdentity = shouldUseHostedLocalDeploySmokeBuildId(env)
     ? readHostedLocalRunnerBuildIdSegment(env)
     : null;
   const objectIdentity = hostedLocalObjectIdentity
     ?? readWorkerVersionId(env);
-  return objectIdentity
+  const baseName = objectIdentity
     ? `__deploy-smoke-${objectIdentity}`
     : "__deploy-smoke";
+  // The worker version is fixed for a whole smoke run, so without the attempt every
+  // retry would reuse one Durable Object and therefore one container instance. A
+  // container provisioned before the rollout surfaced the new image would then stay
+  // stale for the entire run.
+  return attempt === null ? baseName : `${baseName}-attempt-${attempt}`;
 }
 
 function shouldUseHostedLocalDeploySmokeBuildId(
