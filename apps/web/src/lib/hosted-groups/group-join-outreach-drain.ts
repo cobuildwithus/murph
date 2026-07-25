@@ -43,6 +43,7 @@ const HOSTED_GROUP_JOIN_OUTREACH_LINE_PACE_MS = 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PACE_JITTER_MS = 30_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PER_SWEEP = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_SWEEP_BUDGET_MS = 20_000;
+const HOSTED_GROUP_JOIN_OUTREACH_RESERVED_WELCOME_SLOTS = 10;
 const HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_PROVIDER_RETRY_MS = 15 * 60_000;
 const HOSTED_GROUP_JOIN_OUTREACH_MAX_PROVIDER_ATTEMPTS = 5;
@@ -125,6 +126,16 @@ export function buildHostedGroupJoinOutreachMessage(input: {
   const variantIndex = readHostedGroupJoinOutreachVariantIndex(input.outreachId);
 
   return HOSTED_GROUP_JOIN_OUTREACH_MESSAGES[variantIndex]!(groupName);
+}
+
+export function resolveHostedGroupJoinOutreachDailyLimit(
+  line: Parameters<typeof resolveHostedLinqSignupWelcomeDailyLimit>[0],
+): number {
+  return Math.max(
+    0,
+    resolveHostedLinqSignupWelcomeDailyLimit(line)
+      - HOSTED_GROUP_JOIN_OUTREACH_RESERVED_WELCOME_SLOTS,
+  );
 }
 
 function readHostedGroupJoinOutreachPaceJitterMs(outreachId: string): number {
@@ -495,31 +506,51 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
     });
   }
 
-  const line = outreach.phoneNumberLookupKey
+  // A row keeps the line it was first dispatched from, but only while that line is
+  // still usable. If the pinned line has gone unhealthy or left the pool, the row
+  // is re-assigned instead of waiting on it forever: the provider idempotency key
+  // is derived from the outreach id rather than the line, and the row's selected
+  // line is rewritten below before dispatch, so the egress authority follows it.
+  // A pinned line that is merely inside its pace window is a wait, not a move.
+  const pinnedLine = outreach.phoneNumberLookupKey
     ? healthyLines.find(
         (candidate) =>
           candidate.phoneNumberLookupKey === outreach.phoneNumberLookupKey,
       ) ?? null
-    : await claimHostedGroupJoinOutreachLineCapacityTx({
-        lines: healthyLines,
-        now: input.now,
-        tx: input.tx,
-      });
-  if (!line) {
-    const reason = outreach.phoneNumberLookupKey
-      ? "selected_line_unhealthy"
-      : "line_capacity_exhausted";
-    const nextAttemptAt = outreach.phoneNumberLookupKey
-      ? new Date(input.now.getTime() + HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS)
-      : resolveNextUtcDaySendAttempt({
-          now: input.now,
-          participantPhoneNumber,
-        });
+    : null;
+  const pinnedLineIsPacedOut = Boolean(
+    outreach.phoneNumberLookupKey
+      && !pinnedLine
+      && allHealthyLines.some(
+        (candidate) =>
+          candidate.phoneNumberLookupKey === outreach.phoneNumberLookupKey,
+      ),
+  );
+  if (pinnedLineIsPacedOut) {
     return deferHostedGroupJoinOutreachTx({
-      nextAttemptAt,
+      nextAttemptAt: new Date(input.now.getTime() + linePaceWindowMs),
       now: input.now,
       outreachId: outreach.id,
-      reason,
+      reason: "line_pacing",
+      tx: input.tx,
+    });
+  }
+
+  const line = pinnedLine
+    ?? await claimHostedGroupJoinOutreachLineCapacityTx({
+      lines: healthyLines,
+      now: input.now,
+      tx: input.tx,
+    });
+  if (!line) {
+    return deferHostedGroupJoinOutreachTx({
+      nextAttemptAt: resolveNextUtcDaySendAttempt({
+        now: input.now,
+        participantPhoneNumber,
+      }),
+      now: input.now,
+      outreachId: outreach.id,
+      reason: "line_capacity_exhausted",
       tx: input.tx,
     });
   }
@@ -622,7 +653,10 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
       return null;
     }
 
-    const limit = resolveHostedLinqSignupWelcomeDailyLimit(line);
+    // Signup welcomes answer someone who already joined and is waiting, so they
+    // take priority over proactive outreach on a shared line budget. Outreach
+    // claims against a reduced limit, leaving the remainder for onboarding.
+    const limit = resolveHostedGroupJoinOutreachDailyLimit(line);
     if (
       await claimHostedLinqProactiveConversationCapacityTx({
         dayUtc,

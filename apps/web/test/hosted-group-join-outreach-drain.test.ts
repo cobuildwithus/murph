@@ -62,6 +62,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-outreach-window", () => ({
 import {
   HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT,
   buildHostedGroupJoinOutreachMessage,
+  resolveHostedGroupJoinOutreachDailyLimit,
   drainHostedGroupJoinOutreachSweep,
   drainOneHostedGroupJoinOutreach,
   readHostedGroupJoinOutreachVariantIndex,
@@ -118,7 +119,9 @@ describe("hosted group join outreach drain", () => {
 
     expect(mocks.claimLineCapacity).toHaveBeenCalledWith({
       dayUtc: new Date("2026-07-24T00:00:00.000Z"),
-      limit: 20,
+      // The line's welcome limit is 20; outreach claims against 10 so onboarding
+      // keeps its reserved slots.
+      limit: 10,
       phoneNumberLookupKey: "line_lookup_1",
       prisma: expect.anything(),
     });
@@ -427,6 +430,68 @@ describe("hosted group join outreach drain", () => {
     expect(mocks.createChat).not.toHaveBeenCalled();
   });
 
+  it("leaves onboarding headroom on a shared line budget", () => {
+    // Signup welcomes answer someone already waiting, so outreach must never be
+    // able to consume a line's last welcome slots.
+    expect(resolveHostedGroupJoinOutreachDailyLimit({
+      maxNewConversationsPerDay: null,
+    })).toBe(40);
+    expect(resolveHostedGroupJoinOutreachDailyLimit({
+      maxNewConversationsPerDay: 15,
+    })).toBe(5);
+    // A line still warming up can be reserved entirely for onboarding.
+    expect(resolveHostedGroupJoinOutreachDailyLimit({
+      maxNewConversationsPerDay: 8,
+    })).toBe(0);
+  });
+
+  it("claims capacity against the outreach limit, not the welcome limit", async () => {
+    const { prisma } = createPrismaStub();
+
+    await drainOneHostedGroupJoinOutreach({ now: NOW, prisma });
+
+    expect(mocks.claimLineCapacity).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 10 }),
+    );
+  });
+
+  it("re-assigns a retry whose pinned line left the healthy pool", async () => {
+    // Otherwise the row waits on one unhealthy line forever. The idempotency key
+    // is keyed to the outreach, not the line, so moving it is replay-safe.
+    const { prisma } = createPrismaStub({ pinnedLineKey: "line_lookup_gone" });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({ kind: "sent", outreachId: "hgrpjoa_opaque" });
+
+    expect(mocks.claimLineCapacity).toHaveBeenCalled();
+    expect(mocks.createChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits rather than moving when the pinned line is only inside its pace window", async () => {
+    const { prisma, updateMany } = createPrismaStub({
+      pinnedLineKey: "line_lookup_1",
+      recentLineKeys: ["line_lookup_1"],
+    });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "deferred",
+      outreachId: "hgrpjoa_opaque",
+      reason: "line_pacing",
+    });
+
+    expect(mocks.createChat).not.toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ lastDeferralReason: "line_pacing" }),
+      }),
+    );
+  });
+
   it("never lets a URL-shaped group name enter first-contact copy", () => {
     for (let variant = 0; variant < 5; variant += 1) {
       const message = buildHostedGroupJoinOutreachMessage({
@@ -521,6 +586,7 @@ function createPrismaStub(options?: {
   attemptCount?: number;
   due?: null;
   offerRevokedAt?: Date;
+  pinnedLineKey?: string;
   recentLineKeys?: readonly string[];
 }): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
@@ -535,7 +601,7 @@ function createPrismaStub(options?: {
     offerId: "hgrpjo_opaque",
     participantPhoneEncrypted: "encrypted",
     participantPhoneLookupKey: "participant_lookup_1",
-    phoneNumberLookupKey: null,
+    phoneNumberLookupKey: options?.pinnedLineKey ?? null,
     requestedAt: NOW,
   };
   const tx = {
