@@ -60,6 +60,15 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   if (!wake || !isHostedVisibleDirectConversationWake(wake)) {
     return facts;
   }
+  if (
+    blockedReason === "ai_usage_denied"
+    && isHostedLinqConversationMessageWake(wake)
+  ) {
+    // The canonical reconciliation path already owns Linq usage/trial notices.
+    // This adapter exists only to fill the missing Telegram channel and to
+    // explain access loss that happened after either channel admitted a message.
+    return facts;
+  }
 
   const member = await prisma.hostedMember.findUnique({
     select: {
