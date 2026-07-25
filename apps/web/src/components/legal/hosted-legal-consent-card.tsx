@@ -687,7 +687,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
       actionLabel: "Consent",
       assurances: LAUNCH_CONSENT_ASSURANCES,
       description:
-        "Murph and contracted AI providers use health data you add or connect to personalize your experience.",
+        "Murph and contracted AI providers use your health data to personalize your experience.",
       title: "Use your health data",
     };
   }
@@ -696,7 +696,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
     actionLabel: "Consent",
     assurances: LAUNCH_CONSENT_ASSURANCES,
     description:
-      "By selecting Consent, you agree to the Terms and let Murph and contracted AI providers use health data you add or connect to personalize your experience.",
+      "By consenting, you accept the terms and let Murph and contracted AI providers use your health data to personalize your experience.",
     title: "Use your health data",
   };
 }
