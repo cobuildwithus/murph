@@ -470,12 +470,17 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
   it("never writes trial billing for a provider trial that expired while the finalization lock was contended", async () => {
     const prisma = makePrisma();
-    mocks.lockHostedMemberRow
-      .mockResolvedValueOnce(undefined)
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      // The clock moves from the final locked member re-read, not from the
+      // lock, so the test only passes while the freshness clock is read after
+      // that re-read resolves. The trial ends at 2026-06-28T12:00:00Z, so this
+      // attempt judged it eligible before the lock and only reaches the write
+      // after it expired.
       .mockImplementationOnce(async () => {
-        // The trial ends at 2026-06-28T12:00:00Z, so this attempt judged it
-        // eligible before the lock and only reaches the write after it expired.
         vi.setSystemTime(new Date("2026-06-28T12:00:00.500Z"));
+        return makeBillingSnapshot();
       });
 
     await expect(
@@ -495,6 +500,8 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     });
 
     expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(2);
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(3);
     expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledOnce();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
@@ -2368,6 +2375,51 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 30_000,
       },
     );
+  });
+
+  it("cancels the unreferenced trial and still reports the block when the locked re-read makes the member ineligible", async () => {
+    const prisma = makePrisma();
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      // Billing lapsed between the reservation and the finalization lock, so
+      // enrollment fails on the member's own state. Nothing references the
+      // trial this attempt created, and no sweep will ever see it, so the
+      // ownership recheck must still allow the cancel.
+      .mockResolvedValue(makeBillingSnapshot({
+        billingStatus: HostedBillingStatus.past_due,
+      }));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_BLOCKED",
+      httpStatus: 403,
+    });
+
+    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledOnce();
+    expect(mocks.stripe.subscriptions.cancel).toHaveBeenCalledWith(
+      "sub_auto_trial_123",
+      {},
+      {
+        maxNetworkRetries: 0,
+        timeout: 5_000,
+      },
+    );
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
   it("does not cancel the resolved trial when the final locked re-read is already bound to it", async () => {
