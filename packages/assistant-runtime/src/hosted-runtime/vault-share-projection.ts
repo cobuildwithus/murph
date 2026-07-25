@@ -944,10 +944,12 @@ export function selectProjectableWorkoutsDays(
     }
   }
 
-  const calendarTimeZone = selectWorkoutsCalendarTimeZone(
-    dedupedCandidates,
-    vaultTimeZone,
-  );
+  // The member's own declared timezone anchors the window and settlement. It is
+  // a stable fact, so an ingested workout cannot reclassify an already reported
+  // day the way a calendar derived from the latest candidate could. It is also
+  // the same timezone shared through time-zone.v0, so the group can see which
+  // clock decided a day rather than having to trust an undisclosed one.
+  const calendarTimeZone = normalizeIanaTimeZone(vaultTimeZone);
   if (!calendarTimeZone) {
     return [];
   }
@@ -1005,18 +1007,6 @@ export function selectProjectableWorkoutsDays(
       ),
     };
   });
-}
-
-function selectWorkoutsCalendarTimeZone(
-  candidates: readonly ProjectableWorkoutCandidate[],
-  vaultTimeZone: string | null,
-): string | null {
-  const latestCandidate = [...candidates].sort((left, right) =>
-    right.startedAtMs - left.startedAtMs
-      || left.timeZone.localeCompare(right.timeZone)
-      || left.row.date.localeCompare(right.row.date)
-  )[0];
-  return latestCandidate?.timeZone ?? vaultTimeZone;
 }
 
 function readTimeZoneDate(

@@ -1022,7 +1022,10 @@ describe("selectProjectableWorkoutsDays", () => {
     });
   });
 
-  it("settles a member-ahead date even while a group timezone is still on it", () => {
+  it("settles a date once the member's declared timezone has passed it", () => {
+    // A member far ahead of the group settles promptly on their own declared
+    // clock rather than waiting for the group's, and without the calendar being
+    // inferred from whichever workout happens to be latest.
     const memberNowMs = Date.parse("2026-07-04T11:00:00.000Z");
     expect(
       formatTimeZoneDateTimeParts(memberNowMs, "America/Los_Angeles").dayKey,
@@ -1041,7 +1044,7 @@ describe("selectProjectableWorkoutsDays", () => {
         startedAt: "2026-07-04T05:00:00.000Z",
         timeZone: "Pacific/Kiritimati",
       })],
-      vaultTimeZone: "UTC",
+      vaultTimeZone: "Pacific/Kiritimati",
     });
     expect(findWorkoutsRecord(selected, "2026-07-04")?.data).not
       .toHaveProperty("provisional");
@@ -1056,7 +1059,7 @@ describe("selectProjectableWorkoutsDays", () => {
     });
   });
 
-  it("uses the event timezone for travel finality without disclosing a timezone", () => {
+  it("dates a travelling workout in its event zone but settles it on the declared zone", () => {
     const travelNowMs = Date.parse("2026-07-04T15:30:00.000Z");
     expect(formatTimeZoneDateTimeParts(travelNowMs, "Asia/Tokyo").dayKey)
       .toBe("2026-07-05");
@@ -1077,12 +1080,20 @@ describe("selectProjectableWorkoutsDays", () => {
       })],
       vaultTimeZone: "America/Los_Angeles",
     });
+    // The workout's own clock still comes from where it happened: 13:00Z is
+    // 22:00 in Tokyo.
     expect(findWorkoutsRecord(selected, "2026-07-04")?.data).toMatchObject({
       date: "2026-07-04",
       workouts: [{ startLocalMs: 22 * 60 * 60 * 1_000 }],
     });
-    expect(findWorkoutsRecord(selected, "2026-07-04")?.data).not
-      .toHaveProperty("provisional");
+    // Finality is decided by the member's declared zone, which is still on
+    // 2026-07-04, so the day is not settled yet even though it has ended where
+    // they are travelling. A stable declared clock is what stops a later import
+    // reclassifying a day already reported to the group.
+    expect(findWorkoutsRecord(selected, "2026-07-04")?.data)
+      .toHaveProperty("provisional", true);
+    // The zone itself is still never embedded in a workout record; it is shared
+    // only through the separately granted time-zone.v0 scope.
     expect(JSON.stringify(selected)).not.toMatch(
       /timeZone|Asia\/Tokyo|Los_Angeles/u,
     );
