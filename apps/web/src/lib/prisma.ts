@@ -185,12 +185,16 @@ async function runWithDatabaseRetry<T>(
   run: () => Promise<T>,
   canRetry: () => boolean = () => true,
 ): Promise<T> {
+  let pendingRetryError: unknown = null;
   for (let attempt = 1; ; attempt += 1) {
     const locallyContendedBeforeAttempt = hasLocalDatabasePoolPressure(
       pool,
       poolMax,
     );
     reportDatabasePoolPressure(pool, poolMax);
+    if (attempt > 1 && locallyContendedBeforeAttempt) {
+      throw pendingRetryError;
+    }
     try {
       return await run();
     } catch (error) {
@@ -207,6 +211,7 @@ async function runWithDatabaseRetry<T>(
       ) {
         throw error;
       }
+      pendingRetryError = error;
       await delay(resolveDatabaseRetryDelayMs());
     }
   }

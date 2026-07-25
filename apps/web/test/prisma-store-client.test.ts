@@ -672,6 +672,48 @@ describe("prisma module", () => {
     }]);
   });
 
+  it("does not begin an ambiguous retry after the pool becomes saturated", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const pool = mocks.poolInstances[0];
+    const extension = mocks.extensions[0];
+    if (!pool || !extension) {
+      throw new Error("Expected the Prisma pool and query extension to be captured.");
+    }
+    const failure = Object.assign(new Error("checkout timed out"), {
+      code: "P2024",
+    });
+    const query = vi.fn().mockImplementationOnce(async () => {
+      setTimeout(() => {
+        pool.idleCount = 0;
+        pool.totalCount = 15;
+        pool.waitingCount = 0;
+      }, 0);
+      throw failure;
+    });
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query,
+    })).rejects.toBe(failure);
+
+    expect(query).toHaveBeenCalledOnce();
+    expect(pressureLogs(warn)).toEqual([{
+      idleConnections: 0,
+      totalConnections: 15,
+      waitingRequests: 0,
+    }]);
+  });
+
   it("does not retry operation failures that may have reached Postgres", async () => {
     process.env = {
       ...process.env,
