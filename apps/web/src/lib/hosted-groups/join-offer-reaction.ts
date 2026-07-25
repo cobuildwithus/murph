@@ -9,6 +9,7 @@ import {
   isHostedLinqAffirmativeReaction,
   type ParsedHostedLinqProviderEvent,
 } from "../hosted-onboarding/linq-provider-events";
+import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { normalizePhoneNumber } from "../hosted-onboarding/phone";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -96,13 +97,17 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       reason: "not_a_member",
     });
   }
-  // The link adapter admits any authenticated, non-suspended member, so the
-  // reaction adapter must not additionally require current billing: a lapsed
-  // member who likes the offer would otherwise be denied the action the offer
-  // itself advertises.
+  // Joining and disclosure consent answer different authority questions, so they
+  // do not share one eligibility policy. Joining mirrors the link adapter behind
+  // the same offer, which admits any authenticated, non-suspended member: a
+  // lapsed member who likes the offer would otherwise be denied the action the
+  // offer itself advertises. Disclosure consent creates a durable, future-
+  // effective permission over private data, so it keeps requiring current access.
   if (
     member.suspendedAt
-    || !(await hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma }))
+    || !(await (isDisclosureConsentReaction
+      ? readActiveHostedMemberAccess({ memberId: member.id, prisma: input.prisma })
+      : hasHostedMemberActivationProof({ memberId: member.id, prisma: input.prisma })))
   ) {
     return skipHostedGroupJoinOfferReaction({
       reason: "member_inactive",

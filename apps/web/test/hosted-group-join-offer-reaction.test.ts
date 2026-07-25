@@ -252,7 +252,35 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
 
-  it("accepts a lapsed member's Like, matching the link adapter's admission policy", async () => {
+  it("admits a lapsed member's join reaction, matching the link adapter", async () => {
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }),
+      prisma,
+    })).resolves.toMatchObject({ status: "accepted" });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalledTimes(1);
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+  });
+
+  it("denies a join reaction from someone who never activated Murph", async () => {
+    mocks.hasHostedMemberActivationProof.mockResolvedValue(false);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({ reactionType: "love" }),
+      prisma,
+    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
+
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+  });
+
+  // Disclosure consent creates a durable, future-effective permission over
+  // private data, so it keeps the current-access policy that joining drops.
+  it("denies a lapsed member's disclosure consent Like", async () => {
     mocks.hasHostedMemberActivationProof.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
     const prisma = createPrismaStub();
@@ -260,20 +288,24 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     await expect(handleHostedGroupJoinOfferReaction({
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
-    })).resolves.toMatchObject({ status: "accepted" });
+    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
 
-    expect(mocks.acceptHostedGroupJoinOfferTx).toHaveBeenCalled();
-    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+    expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
+    expect(mocks.hasHostedMemberActivationProof).not.toHaveBeenCalled();
   });
 
-  it("still denies a Like from someone who never activated their own Murph", async () => {
-    mocks.hasHostedMemberActivationProof.mockResolvedValue(false);
+  it("still accepts an active member's disclosure consent Like", async () => {
+    mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValueOnce({
+      kind: "accepted",
+    });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     const prisma = createPrismaStub();
 
     await expect(handleHostedGroupJoinOfferReaction({
       event: parseReactionEvent({ reactionType: "like" }),
       prisma,
-    })).resolves.toEqual({ status: "ignored", reason: "member_inactive" });
+    })).resolves.toEqual({ reason: "accepted", status: "accepted" });
 
     expect(mocks.acceptHostedGroupJoinOfferTx).not.toHaveBeenCalled();
   });
