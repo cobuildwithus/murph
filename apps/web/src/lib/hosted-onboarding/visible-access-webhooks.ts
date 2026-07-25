@@ -123,7 +123,6 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
     noticeCode: readHostedRecognizedInboundNoticeCode(access),
     prisma,
     replyToMessageId: message.messageId,
-    sentAt: new Date(summary.occurredAt),
     sourceEventId: eventId,
     target: message.threadId,
   });
@@ -139,9 +138,9 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
     code: delivery.status === "in_flight"
       ? "HOSTED_TELEGRAM_ACCESS_NOTICE_RETRY"
       : "HOSTED_TELEGRAM_ACCESS_NOTICE_ROUTE_CHANGED",
-    details: delivery.status === "in_flight"
-      ? { retryAt: delivery.retryAt.toISOString() }
-      : undefined,
+    ...(delivery.status === "in_flight"
+      ? { details: { retryAt: delivery.retryAt.toISOString() } }
+      : {}),
     httpStatus: 503,
     message: "Hosted Telegram access notice delivery is not complete.",
     retryable: true,
