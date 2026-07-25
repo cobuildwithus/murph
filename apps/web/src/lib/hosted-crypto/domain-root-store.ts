@@ -46,6 +46,18 @@ export class HostedDomainRootEnvelopeUnavailableError extends Error {
   }
 }
 
+export class HostedCryptoDomainRootCandidateRequiredError extends Error {
+  readonly domain: HostedCryptoDomain;
+
+  constructor(input: { domain: HostedCryptoDomain }) {
+    super(
+      `Prepared hosted ${input.domain} domain root candidate is required.`,
+    );
+    this.name = "HostedCryptoDomainRootCandidateRequiredError";
+    this.domain = input.domain;
+  }
+}
+
 export function isHostedDomainRootEnvelopeUnavailableError(
   error: unknown,
 ): error is HostedDomainRootEnvelopeUnavailableError {
@@ -152,7 +164,7 @@ export async function provisionHostedCryptoDomainRootsForUser(input: {
     userId: input.userId,
   });
   await prisma.$transaction(async (tx) => {
-    await provisionHostedCryptoDomainRootsForUserTx({
+    await provisionPreparedHostedCryptoDomainRootsTx({
       prepared,
       reason: input.reason,
       tx,
@@ -162,30 +174,48 @@ export async function provisionHostedCryptoDomainRootsForUser(input: {
 }
 
 /**
- * Callers that already own a transaction pass `prepared` so the KMS work
- * happens before `BEGIN`. Without it the candidates are still built up front,
- * which keeps KMS out of every per-domain advisory-lock section, but the
- * caller's connection is still held while they are built.
+ * Transaction-only commit phase. This API has no signing fallback: callers
+ * must prepare candidates before opening their transaction. An empty map is
+ * valid when every root already exists.
  */
-export async function provisionHostedCryptoDomainRootsForUserTx(input: {
-  prepared?: PreparedHostedCryptoDomainRootCandidates;
+export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
+  prepared: PreparedHostedCryptoDomainRootCandidates;
   reason?: string;
   tx: HostedCryptoTx;
   userId: string;
 }): Promise<void> {
-  const prepared = input.prepared ?? await prepareHostedCryptoDomainRootCandidates({
-    prisma: input.tx,
-    userId: input.userId,
-  });
   for (const domain of ALL_DOMAINS) {
     await provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
-      candidate: prepared.get(domain),
+      candidate: input.prepared.get(domain),
       domain,
       reason: input.reason ?? "hosted-crypto.provision",
       tx: input.tx,
       userId: input.userId,
     });
   }
+}
+
+/**
+ * Legacy transaction-owned bridge for thread-container creation and inbound
+ * family activation. It keeps KMS outside each advisory-lock section, but
+ * callers still retain their outer connection while candidates are prepared.
+ * New transaction code must use the prepared-only commit API above.
+ */
+export async function provisionHostedCryptoDomainRootsForUserTx(input: {
+  reason?: string;
+  tx: HostedCryptoTx;
+  userId: string;
+}): Promise<void> {
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    prisma: input.tx,
+    userId: input.userId,
+  });
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared,
+    reason: input.reason,
+    tx: input.tx,
+    userId: input.userId,
+  });
 }
 
 export async function hasActiveHostedCryptoDomainRootsForUserTx(input: {
@@ -216,12 +246,12 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
 }): Promise<HostedDomainRootKeyEnvelopeV1> {
   const prisma = input.prisma ?? getPrisma();
   const reason = input.reason ?? "hosted-crypto.provision-domain-root";
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    domains: [input.domain],
+    prisma,
+    userId: input.userId,
+  });
   if (hasPrismaTransactionRoot(prisma)) {
-    const prepared = await prepareHostedCryptoDomainRootCandidates({
-      domains: [input.domain],
-      prisma,
-      userId: input.userId,
-    });
     return prisma.$transaction((tx) =>
       provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
         candidate: prepared.get(input.domain),
@@ -233,6 +263,7 @@ export async function provisionActiveHostedDomainRootEnvelopeForUserOnly(input: 
     );
   }
   return provisionActiveHostedDomainRootEnvelopeForUserOnlyTx({
+    candidate: prepared.get(input.domain),
     domain: input.domain,
     reason,
     tx: prisma,
@@ -436,10 +467,12 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
     return parseAssertAndVerifyEnvelope(existing, input);
   }
 
-  const created = input.candidate ?? await createSignedHostedDomainRootEnvelope({
-    domain: input.domain,
-    userId: input.userId,
-  });
+  if (!input.candidate) {
+    throw new HostedCryptoDomainRootCandidateRequiredError({
+      domain: input.domain,
+    });
+  }
+  const created = input.candidate;
   const id = crypto.randomUUID();
   await input.tx.$executeRaw`
     INSERT INTO hosted_user_crypto_envelope (

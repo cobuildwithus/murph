@@ -7,6 +7,7 @@ const dependencies = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   lookupHostedMemberIdentityByPrivyUserId: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   privyClientConstructor: vi.fn(),
   privyGetByEmailAddress: vi.fn(),
   privySetCustomMetadata: vi.fn(),
@@ -65,6 +66,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
     dependencies.activateHostedMemberForPositiveSourceTx,
 }));
 
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    dependencies.prepareHostedCryptoDomainRootCandidates,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort,
@@ -110,6 +116,7 @@ describe("prepareHostedOpsAppReviewMember", () => {
     dependencies.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(
       undefined,
     );
+    dependencies.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     dependencies.recordHostedLaunchRequiredConsent.mockResolvedValue(undefined);
     dependencies.readHostedConsentStatus.mockResolvedValue({
       launchScopes: [

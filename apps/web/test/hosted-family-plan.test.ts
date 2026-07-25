@@ -18,6 +18,7 @@ const activationMocks = vi.hoisted(() => ({
   buildHostedMemberActivationEventId: vi.fn(),
 }));
 const cryptoRootMocks = vi.hoisted(() => ({
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(),
 }));
 const identityMocks = vi.hoisted(() => ({
@@ -56,6 +57,8 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly:
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly,
 }));
@@ -265,6 +268,7 @@ describe("hosted Family plan", () => {
       "https://local.withmurph.ai:3443",
     );
     cryptoRootMocks.provisionActiveHostedDomainRootEnvelopeForUserOnly.mockResolvedValue(undefined);
+    cryptoRootMocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     identityMocks.ensureHostedMemberForPhoneTx.mockResolvedValue({
       billingStatus: HostedBillingStatus.not_started,
       id: "member_mom",

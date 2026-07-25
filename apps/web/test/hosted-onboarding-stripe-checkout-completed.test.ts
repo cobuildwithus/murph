@@ -351,6 +351,7 @@ describe("applyStripeCheckoutCompleted", () => {
         sourceType: "stripe.checkout.session.completed",
       }),
       memberId: "member_123",
+      preparedCryptoDomainRoots: new Map(),
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });
@@ -489,6 +490,7 @@ describe("applyStripeCheckoutCompleted", () => {
         sourceEventId: "checkout.session:cs_trial_123",
       }),
       memberId: "member_123",
+      preparedCryptoDomainRoots: new Map(),
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });
@@ -531,6 +533,7 @@ describe("applyStripeCheckoutCompleted", () => {
         sourceEventId: "checkout.session:cs_trial_123",
       }),
       memberId: "member_123",
+      preparedCryptoDomainRoots: new Map(),
       prisma: {},
       skipIfBillingAlreadyActive: false,
     });

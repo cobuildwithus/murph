@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedMemberActivationLinqRoute: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
   provisionHostedCryptoDomainRootsForUserTx: vi.fn(),
+  provisionPreparedHostedCryptoDomainRootsTx: vi.fn(),
   unwrapHostedDomainRootForWeb: vi.fn(),
   updateHostedMemberCoreState: vi.fn(),
 }));
@@ -50,6 +51,8 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   hasActiveHostedCryptoDomainRootsForUserTx: mocks.hasActiveHostedCryptoDomainRootsForUserTx,
   provisionHostedCryptoDomainRootsForUserTx:
     mocks.provisionHostedCryptoDomainRootsForUserTx,
+  provisionPreparedHostedCryptoDomainRootsTx:
+    mocks.provisionPreparedHostedCryptoDomainRootsTx,
   unwrapHostedDomainRootForWeb: mocks.unwrapHostedDomainRootForWeb,
 }));
 
@@ -216,6 +219,7 @@ describe("hosted onboarding member activation", () => {
         dedupeKey: "member.activated:stripe.invoice.paid:member_123:evt_123",
       },
     });
+    mocks.provisionPreparedHostedCryptoDomainRootsTx.mockResolvedValue(undefined);
     mocks.provisionHostedCryptoDomainRootsForUserTx.mockResolvedValue(undefined);
     mocks.unwrapHostedDomainRootForWeb.mockImplementation(async () => ({
       envelope: {},
@@ -287,7 +291,8 @@ describe("hosted onboarding member activation", () => {
       member,
       prisma: expect.anything(),
     });
-    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).toHaveBeenCalledWith({
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).toHaveBeenCalledWith({
+      prepared: new Map(),
       reason: "hosted-member.activation",
       tx: expect.anything(),
       userId: "member_123",
@@ -1005,7 +1010,7 @@ describe("hosted onboarding member activation", () => {
     });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
@@ -1050,7 +1055,7 @@ describe("hosted onboarding member activation", () => {
     });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
@@ -1099,7 +1104,7 @@ describe("hosted onboarding member activation", () => {
     });
     expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
-    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+    expect(mocks.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 });

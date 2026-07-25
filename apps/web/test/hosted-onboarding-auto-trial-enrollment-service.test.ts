@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
     assertHostedLaunchRequiredConsentGranted: vi.fn(),
     bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
     lockHostedMemberRow: vi.fn(),
+    prepareHostedCryptoDomainRootCandidates: vi.fn(),
     readHostedMemberBillingSnapshot: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedStripeBillingPlanConfig: vi.fn(),
@@ -36,6 +37,11 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/src/lib/legal/consent", () => ({
   assertHostedLaunchRequiredConsentGranted: mocks.assertHostedLaunchRequiredConsentGranted,
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
@@ -221,6 +227,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       hostedExecutionEventId: "member.activated:auto-trial",
       memberId: "member_123",
     });
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
       accepted: true,
     });

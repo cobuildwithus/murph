@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeInvoice: vi.fn(),
   findMemberForStripeSubscription: vi.fn(),
   listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+  prepareHostedCryptoDomainRootCandidates: vi.fn(),
   prepareHostedLegacySyntheticFamilyCleanupTx: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
   readHostedMemberBillingSnapshot: vi.fn(),
@@ -46,6 +47,11 @@ const mocks = vi.hoisted(() => ({
     },
   },
   writeHostedMemberStripeBillingTx: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
@@ -286,6 +292,7 @@ describe("hosted Stripe event reconciliation", () => {
       core: { id: "member_123" },
     });
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(new Map());
     mocks.prepareHostedLegacySyntheticFamilyCleanupTx.mockResolvedValue(null);
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(null);
@@ -1279,7 +1286,13 @@ describe("hosted Stripe event reconciliation", () => {
   it("defers Pulse Trial provider authority to the locked checkout owner", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makePulseTrialCheckoutCompletedEvent();
+    const preparedCryptoDomainRoots = new Map([
+      ["control", { domain: "control" }],
+    ]);
     mocks.stripe.events.retrieve.mockResolvedValue(event);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValueOnce(
+      preparedCryptoDomainRoots,
+    );
 
     await recordHostedStripeEvent({
       event,
@@ -1298,6 +1311,13 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
     const transactionMock = vi.mocked(prisma.client.$transaction);
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma: prisma.client,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(transactionMock.mock.invocationCallOrder[0] ?? 0);
     expect(transactionMock.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.applyStripeCheckoutCompleted.mock.invocationCallOrder[0] ?? 0);
     expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
@@ -1306,6 +1326,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect.objectContaining({
         sourceType: "stripe.checkout.session.completed",
       }),
+      preparedCryptoDomainRoots,
     );
   });
 
@@ -1820,6 +1841,7 @@ describe("hosted Stripe event reconciliation", () => {
         timeout: 780_000,
       },
     );
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
   });
 
   it("fails closed when canonical subscription ownership changes after the member lock", async () => {

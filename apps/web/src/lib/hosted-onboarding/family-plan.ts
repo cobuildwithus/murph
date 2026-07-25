@@ -112,7 +112,9 @@ import {
 } from "./hosted-member-routing-store";
 import { isHostedStripeLegacyAiUsageMeteredItem } from "./legacy-usage-price";
 import {
+  prepareHostedCryptoDomainRootCandidates,
   provisionActiveHostedDomainRootEnvelopeForUserOnly,
+  type PreparedHostedCryptoDomainRootCandidates,
 } from "../hosted-crypto/domain-root-store";
 import { ensureHostedMemberForPhoneTx } from "./member-identity-service";
 import {
@@ -2913,12 +2915,18 @@ export async function acceptHostedFamilyInvite(input: {
   const activationHolder: { value: HostedMemberActivationResult | null } = {
     value: null,
   };
+  const preparedCryptoDomainRoots =
+    await prepareHostedCryptoDomainRootCandidates({
+      prisma,
+      userId: input.acceptedMemberId,
+    });
 
   const membership = await prisma.$transaction((tx) => acceptHostedFamilyInviteTx({
     ...input,
     onAcceptedMemberActivated: (result) => {
       activationHolder.value = result;
     },
+    preparedCryptoDomainRoots,
     tx,
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const activation = activationHolder.value;
@@ -3300,6 +3308,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   }) => Promise<void>;
   onAcceptedMemberActivated?: (result: HostedMemberActivationResult) => Promise<void> | void;
   phoneNumber?: string | null;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   requirePhoneBinding?: boolean;
   requireWebBinding?: boolean;
   telegramUsername?: string | null;
@@ -3562,6 +3571,7 @@ export async function acceptHostedFamilyInviteTx(input: {
     const activation = await activateHostedMemberForFamilySponsorshipTx({
       memberId: input.acceptedMemberId,
       occurredAt: now,
+      preparedCryptoDomainRoots: input.preparedCryptoDomainRoots ?? new Map(),
       prisma: input.tx,
       sourceEventId: `family-invite:${invite.id}`,
     });

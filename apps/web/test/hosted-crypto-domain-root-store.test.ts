@@ -185,7 +185,7 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
   const {
     hasActiveHostedCryptoDomainRootsForUserTx,
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import(
     "../src/lib/hosted-crypto/domain-root-store"
   );
@@ -231,7 +231,8 @@ test("detects whether all active hosted crypto domain roots exist for a user", a
     userId: "member-test-1",
   });
 
-  await provisionHostedCryptoDomainRootsForUserTx({
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: new Map(),
     reason: "test.activation",
     tx: tx.prisma,
     userId: "member-test-1",
@@ -305,7 +306,7 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
 
   const {
     prepareHostedCryptoDomainRootCandidates,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
   const recorder = createStepRecordingTransaction(steps);
 
@@ -316,7 +317,7 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
   assert.deepEqual([...prepared.keys()].sort(), ["control", "device", "ingress", "runtime"]);
 
   steps.length = 0;
-  await provisionHostedCryptoDomainRootsForUserTx({
+  await provisionPreparedHostedCryptoDomainRootsTx({
     prepared,
     reason: "test.prepared-activation",
     tx: recorder.prisma,
@@ -347,6 +348,47 @@ test("prepared hosted domain root candidates stay behind the advisory lock and r
   );
 });
 
+test("prepared-only provisioning fails closed without signing inside the transaction", async () => {
+  const signer = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const encryptCalls: GcpKmsEncryptInput[] = [];
+  const signCalls: GcpKmsAsymmetricSignInput[] = [];
+  const steps: string[] = [];
+  gcpKmsMock.client = createStepRecordingKmsClient({
+    client: createLocalKmsClient({
+      encryptCalls,
+      signCalls,
+      signer: signer.privateKey,
+    }),
+    steps,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: signer.publicKeyPem,
+  });
+
+  const {
+    HostedCryptoDomainRootCandidateRequiredError,
+    provisionPreparedHostedCryptoDomainRootsTx,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const recorder = createStepRecordingTransaction(steps);
+
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: new Map(),
+    reason: "test.missing-prepared-candidate",
+    tx: recorder.prisma,
+    userId: "member-test-missing-candidate",
+  })).rejects.toBeInstanceOf(HostedCryptoDomainRootCandidateRequiredError);
+
+  assert.deepEqual(steps, [
+    "db.advisory-lock",
+    "db.read-active-envelope",
+  ]);
+  assert.equal(encryptCalls.length, 0);
+  assert.equal(signCalls.length, 0);
+  assert.equal(recorder.persistedEnvelopes.length, 0);
+});
+
 test("discards a prepared hosted domain root candidate when another writer wins the race", async () => {
   const signer = await generateP256SigningKeyPair();
   const cloudflareRecipient = await generateP256EcdhKeyPair();
@@ -364,7 +406,7 @@ test("discards a prepared hosted domain root candidate when another writer wins 
   const {
     prepareHostedCryptoDomainRootCandidates,
     provisionActiveHostedDomainRootEnvelopeForUserOnly,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
   const tx = createCapturingTransaction();
 
@@ -382,7 +424,7 @@ test("discards a prepared hosted domain root candidate when another writer wins 
   });
   assert.notEqual(winner.rootKeyId, prepared.get("control")?.rootKeyId);
 
-  await provisionHostedCryptoDomainRootsForUserTx({
+  await provisionPreparedHostedCryptoDomainRootsTx({
     prepared,
     reason: "test.race",
     tx: tx.prisma,
@@ -426,7 +468,7 @@ test("rejects a prepared hosted domain root candidate bound to another user befo
 
   const {
     prepareHostedCryptoDomainRootCandidates,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
   const recorder = createStepRecordingTransaction(steps);
 
@@ -436,7 +478,7 @@ test("rejects a prepared hosted domain root candidate bound to another user befo
   });
 
   steps.length = 0;
-  await expect(provisionHostedCryptoDomainRootsForUserTx({
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
     prepared,
     reason: "test.mismatched-candidate-user",
     tx: recorder.prisma,
@@ -468,7 +510,7 @@ test("rejects a prepared hosted domain root candidate bound to another domain be
 
   const {
     prepareHostedCryptoDomainRootCandidates,
-    provisionHostedCryptoDomainRootsForUserTx,
+    provisionPreparedHostedCryptoDomainRootsTx,
   } = await import("../src/lib/hosted-crypto/domain-root-store");
   const recorder = createStepRecordingTransaction(steps);
 
@@ -487,7 +529,7 @@ test("rejects a prepared hosted domain root candidate bound to another domain be
   crossedDomains.set("control", deviceCandidate);
 
   steps.length = 0;
-  await expect(provisionHostedCryptoDomainRootsForUserTx({
+  await expect(provisionPreparedHostedCryptoDomainRootsTx({
     prepared: crossedDomains,
     reason: "test.mismatched-candidate-domain",
     tx: recorder.prisma,

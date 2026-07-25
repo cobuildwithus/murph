@@ -5,6 +5,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboardi
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import {
   getHostedDefaultBillingPlanCode,
+  HOSTED_PULSE_TRIAL_OFFER,
   listHostedBillingPlanPresentations,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 
@@ -19,12 +20,14 @@ const mocks = vi.hoisted(() => {
 
   const state = {
     activateHostedMemberForPositiveSourceTx: vi.fn(),
-  applyStripeCheckoutCompleted: vi.fn(),
-  cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
-  cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
+    applyStripeCheckoutCompleted: vi.fn(),
+    cancelHostedFamilySponsoredCheckoutSubscription: vi.fn(),
+    cancelHostedPulseTrialCheckoutLoserSubscription: vi.fn(),
     findMemberForStripeObject: vi.fn(),
     getHostedInviteStatus: vi.fn(),
     listHostedStripeCheckoutSessionMemberIds: vi.fn(),
+    prepareHostedCryptoDomainRootCandidates: vi.fn(),
+    preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
@@ -35,6 +38,11 @@ const mocks = vi.hoisted(() => {
 
   return state;
 });
+
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
+  prepareHostedCryptoDomainRootCandidates:
+    mocks.prepareHostedCryptoDomainRootCandidates,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async () => {
   const actual = await vi.importActual<
@@ -121,6 +129,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(createMemberSnapshot().core);
     mocks.findMemberForStripeObject.mockResolvedValue(createMemberSnapshot());
     mocks.listHostedStripeCheckoutSessionMemberIds.mockResolvedValue(["member_123"]);
+    mocks.prepareHostedCryptoDomainRootCandidates.mockResolvedValue(
+      mocks.preparedCryptoDomainRoots,
+    );
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue({
       client_reference_id: "member_123",
       customer: "cus_123",
@@ -209,11 +220,62 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
         }),
         tx,
       );
+      expect(mocks.prepareHostedCryptoDomainRootCandidates).not.toHaveBeenCalled();
       expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
       expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
     },
   );
+
+  it("prepares Pulse Trial activation roots before opening the checkout transaction", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (innerTx: typeof tx) => Promise<unknown>) =>
+          callback(tx),
+      ),
+    };
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValueOnce({
+      client_reference_id: "member_123",
+      customer: "cus_123",
+      id: "cs_pulse_trial",
+      metadata: {
+        checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+        memberId: "member_123",
+      },
+      status: "complete",
+      subscription: {
+        id: "sub_pulse_trial",
+        status: "trialing",
+      },
+    });
+
+    await reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_pulse_trial",
+    });
+
+    expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledWith({
+      prisma,
+      userId: "member_123",
+    });
+    expect(
+      mocks.prepareHostedCryptoDomainRootCandidates.mock.invocationCallOrder[0],
+    ).toBeLessThan(prisma.$transaction.mock.invocationCallOrder[0] ?? 0);
+    expect(mocks.applyStripeCheckoutCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "cs_pulse_trial",
+      }),
+      tx,
+      undefined,
+      mocks.preparedCryptoDomainRoots,
+    );
+  });
 
   it("does not activate access even when linked accounts are present", async () => {
     const tx = {
