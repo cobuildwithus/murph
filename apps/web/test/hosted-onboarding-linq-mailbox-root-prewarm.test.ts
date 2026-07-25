@@ -8,10 +8,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const calls: string[] = [];
 
+const issuedRootKeys: Uint8Array[] = [];
+
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   unwrapHostedDomainRootForWeb: vi.fn(async () => {
     calls.push("unwrap");
-    return { envelope: { rootKeyId: "rk_1" }, rootKey: new Uint8Array([1, 2, 3]) };
+    const rootKey = new Uint8Array([1, 2, 3, 4]);
+    issuedRootKeys.push(rootKey);
+    return { envelope: { rootKeyId: "rk_1" }, rootKey };
   }),
 }));
 
@@ -31,6 +35,7 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", async (importOriginal) =>
 describe("hosted Linq mailbox payload root prewarm", () => {
   beforeEach(() => {
     calls.length = 0;
+    issuedRootKeys.length = 0;
     vi.clearAllMocks();
     vi.resetModules();
   });
@@ -112,5 +117,46 @@ describe("hosted Linq mailbox payload root prewarm", () => {
     // inbound delivery; the planner still runs and unwraps on its own.
     expect(result).toBe("planned");
     expect(calls).toEqual(["warm-failed", "begin", "plan"]);
+  });
+
+  it("unwraps the ingress root for the routed member and wipes its key copy", async () => {
+    const { warmHostedLinqMailboxPayloadRoot } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    const { unwrapHostedDomainRootForWeb } = await import(
+      "@/src/lib/hosted-crypto/domain-root-store"
+    );
+    const prisma = {} as never;
+
+    await warmHostedLinqMailboxPayloadRoot({
+      prisma,
+      threadRoute: { containerMemberId: "member_prewarm_1" } as never,
+    });
+
+    expect(unwrapHostedDomainRootForWeb).toHaveBeenCalledExactlyOnceWith({
+      domain: "ingress",
+      prisma,
+      userId: "member_prewarm_1",
+    });
+    // The scoped cache hands out a private copy and expects it wiped; warming
+    // needs the unwrap, not the plaintext.
+    expect(issuedRootKeys).toHaveLength(1);
+    expect([...(issuedRootKeys[0] ?? [])]).toEqual([0, 0, 0, 0]);
+  });
+
+  it("does not unwrap when no route is established", async () => {
+    const { warmHostedLinqMailboxPayloadRoot } = await import(
+      "@/src/lib/hosted-onboarding/webhook-service"
+    );
+    const { unwrapHostedDomainRootForWeb } = await import(
+      "@/src/lib/hosted-crypto/domain-root-store"
+    );
+
+    await warmHostedLinqMailboxPayloadRoot({
+      prisma: {} as never,
+      threadRoute: null,
+    });
+
+    expect(unwrapHostedDomainRootForWeb).not.toHaveBeenCalled();
   });
 });

@@ -998,7 +998,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
  * inside the transaction, so only the root is warmed; the payload is still
  * encrypted in place.
  */
-async function warmHostedLinqMailboxPayloadRoot(input: {
+export async function warmHostedLinqMailboxPayloadRoot(input: {
   prisma: PrismaClient;
   threadRoute: HostedThreadRouteSnapshot | null;
 }): Promise<void> {
@@ -1008,11 +1008,15 @@ async function warmHostedLinqMailboxPayloadRoot(input: {
     return;
   }
 
-  await unwrapHostedDomainRootForWeb({
+  const root = await unwrapHostedDomainRootForWeb({
     domain: getHostedCryptoDomainForLane("mailbox-payload"),
     prisma: input.prisma,
     userId: input.threadRoute.containerMemberId,
   });
+  // The scoped cache hands every caller its own copy and expects that copy to
+  // be wiped; the cached master is zeroized separately when the scope closes.
+  // Warming needs the unwrap, not the plaintext, so wipe it immediately.
+  root.rootKey.fill(0);
 }
 
 export async function runHostedOnboardingWebhookTransaction<TResult>(
