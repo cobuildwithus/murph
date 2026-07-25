@@ -1526,7 +1526,6 @@ export async function runHostedWorkspaceAssistantPhase(
           allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
           executionContext,
           input,
-          maxCausalSeq: null,
         })
         : {
             continueAssistantLane: true,
@@ -3782,7 +3781,6 @@ async function runPrePlanningSystemMailboxPhase(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-  maxCausalSeq: string | null;
 }): Promise<{
   continueAssistantLane: boolean;
   result: HostedWorkspaceRunnerAssistantPhaseResult | null;
@@ -3796,7 +3794,6 @@ async function runPrePlanningSystemMailboxPhase(input: {
     const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
     const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
       allowedRouteActions: input.allowedRouteActions,
-      maxCausalSeq: input.maxCausalSeq,
       now: () => now,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -3826,7 +3823,6 @@ async function runPrePlanningSystemMailboxPhase(input: {
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
       allowedRouteActions: input.allowedRouteActions,
       executionContext: input.executionContext,
-      maxCausalSeq: input.maxCausalSeq,
       now: () => now,
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       runtime: input.input.runtime,
@@ -3868,7 +3864,6 @@ async function runPrePlanningSystemMailboxPhase(input: {
   const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
   const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
     allowedRouteActions: input.allowedRouteActions,
-    maxCausalSeq: input.maxCausalSeq,
     now: () => now,
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4161,7 +4156,6 @@ async function runSystemMailboxMaintenancePhase(input: {
         allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
         executionContext: input.executionContext,
         input: phaseInput,
-        maxCausalSeq: null,
       });
   const mergeMemberPreferencesPrePlanningResult = (
     result: HostedWorkspaceRunnerAssistantPhaseResult | null,

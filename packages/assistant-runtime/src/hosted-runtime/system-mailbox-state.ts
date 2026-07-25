@@ -65,7 +65,6 @@ export interface HostedSystemMailboxPendingItem {
   lastErrorMessage: string | null;
   mailboxDedupeKey: string;
   mailboxLaneSeq: string | null;
-  causalSeq?: string | null;
   nextAttemptAt: string | null;
   occurredAt: string;
   postCheckpointRecord: HostedSystemMailboxPostCheckpointRecord | null;
@@ -247,7 +246,6 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
     nextAttemptAt: input.nextWakeAt,
     occurredAt,
     postCheckpointRecord: null,
-    causalSeq: null,
     preferenceCausalSeq: null,
     requestId: null,
     routeAction: "run-device-sync-wake",
@@ -297,7 +295,6 @@ function isHostedDeviceSyncDenseRawRetentionMailboxItem(
 export async function resolveHostedSystemMailboxNextWakeAt(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
-  maxCausalSeq?: string | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<string | null> {
@@ -307,7 +304,6 @@ export async function resolveHostedSystemMailboxNextWakeAt(input: {
 export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   allowedRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
-  maxCausalSeq?: string | null;
   now?: () => string;
   vaultRoot: string;
 }): Promise<HostedRuntimeWakeCandidate> {
@@ -322,7 +318,6 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
       };
   const items = findNextHostedSystemMailboxQueueItemsForWake({
     allowedRouteActions: input.allowedRouteActions ?? null,
-    maxCausalSeq: input.maxCausalSeq ?? null,
     state: selectionState,
   });
   return selectHostedRuntimeWakeCandidate(
@@ -337,7 +332,6 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
 
 export function findNextHostedSystemMailboxQueueItem(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
-  maxCausalSeq?: string | null;
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
@@ -346,7 +340,6 @@ export function findNextHostedSystemMailboxQueueItem(input: {
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
     return item
-      && systemMailboxItemIsCausallyEligible(item, input.maxCausalSeq ?? null)
       && systemMailboxItemIsDue(item, input.now)
       ? item
       : null;
@@ -478,10 +471,6 @@ function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailbo
       || record.postCheckpointRecord === undefined
       ? null
       : parseHostedSystemMailboxRecordRequest(record.postCheckpointRecord),
-    causalSeq: readOptionalPositiveIntegerString(
-      record.causalSeq,
-      "hosted system mailbox causalSeq",
-    ),
     preferenceCausalSeq: readOptionalPositiveIntegerString(
       record.preferenceCausalSeq,
       "hosted system mailbox preferenceCausalSeq",
@@ -657,14 +646,13 @@ function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
 
 function findNextHostedSystemMailboxQueueItemsForWake(input: {
   allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
-  maxCausalSeq: string | null;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem[] {
   if (input.allowedRouteActions) {
     const item = input.state.pending.find((pending) =>
       systemMailboxItemRouteActionAllowed(pending, input.allowedRouteActions)
     ) ?? null;
-    return item && systemMailboxItemIsCausallyEligible(item, input.maxCausalSeq)
+    return item
       ? [item]
       : [];
   }
@@ -679,26 +667,6 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
     items.push(item);
   }
   return items;
-}
-
-function systemMailboxItemIsCausallyEligible(
-  item: HostedSystemMailboxPendingItem,
-  maxCausalSeq: string | null,
-): boolean {
-  if (!maxCausalSeq) {
-    return true;
-  }
-  if (!item.causalSeq) {
-    return false;
-  }
-  return comparePositiveDecimalStrings(item.causalSeq, maxCausalSeq) <= 0;
-}
-
-function comparePositiveDecimalStrings(left: string, right: string): number {
-  if (left.length !== right.length) {
-    return left.length < right.length ? -1 : 1;
-  }
-  return left === right ? 0 : left < right ? -1 : 1;
 }
 
 function systemMailboxItemRouteActionAllowed(
@@ -760,7 +728,6 @@ function hostedSystemMailboxPendingItemsMatch(
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
-    && left.causalSeq === right.causalSeq
     && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt

@@ -2126,7 +2126,6 @@ describe("hosted system mailbox notification execution context", () => {
       });
       await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
         pending: [{
-          causalSeq: null,
           preferenceCausalSeq: "10",
         }],
       });
@@ -2145,7 +2144,6 @@ describe("hosted system mailbox notification execution context", () => {
       const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
         allowedRouteActions: ["apply-member-preferences"],
         executionContext: null,
-        maxCausalSeq: "11",
         now: () => FIXED_NOW,
         runtime: createRuntime({}),
         runtimeEnv: {},

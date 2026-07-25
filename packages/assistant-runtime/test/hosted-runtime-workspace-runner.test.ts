@@ -170,7 +170,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const selectedInputIdsByPass: string[][] = [];
     const selectedContextsByPass: unknown[] = [];
-    const selectedCausalSeqsByPass: Array<string | null | undefined> = [];
     const { mailboxPort } = createMailboxPort({ items: [olderItem, newerItem] });
 
     try {
@@ -229,7 +228,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
             ?? phaseInput.initialMailboxImport.importResult.assistantInputRecords
             ?? [];
           selectedInputIdsByPass.push(selection.inputIds);
-          selectedCausalSeqsByPass.push(phaseInput.acceptedAssistantInputCausalSeq);
           selectedContextsByPass.push(
             records.find((record) =>
               record.assistantInputId === selection.inputIds[0]
@@ -266,7 +264,6 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       });
 
       assert.deepEqual(selectedInputIdsByPass, [[olderInputId], [newerInputId]]);
-      assert.deepEqual(selectedCausalSeqsByPass, ["11", "12"]);
       assert.deepEqual(selectedContextsByPass, [olderContext, newerContext]);
       assert.equal(secondPass.latestAssistantInputBatch, null);
       assert.deepEqual(checkpointRequests, []);

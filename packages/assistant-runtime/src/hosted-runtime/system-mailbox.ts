@@ -206,7 +206,6 @@ export async function enqueueHostedSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
-    causalSeq: null,
     preferenceCausalSeq: routeAction === "apply-member-preferences"
       ? (
         input.wake.kind === "member.preferences.updated"
@@ -234,7 +233,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   allowedWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   assistantAskCompletionOccurredBefore?: string | null;
   executionContext?: AssistantExecutionContext | null;
-  maxCausalSeq?: string | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -278,7 +276,6 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       };
       const pending = findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
-        maxCausalSeq: input.maxCausalSeq ?? null,
         now: startedAt,
         state: selectionState,
       });
@@ -640,7 +637,6 @@ function hostedSystemMailboxPendingItemsMatchForClaim(
     && left.lastAttemptAt === right.lastAttemptAt
     && left.mailboxDedupeKey === right.mailboxDedupeKey
     && left.mailboxLaneSeq === right.mailboxLaneSeq
-    && left.causalSeq === right.causalSeq
     && left.preferenceCausalSeq === right.preferenceCausalSeq
     && left.nextAttemptAt === right.nextAttemptAt
     && left.occurredAt === right.occurredAt

@@ -558,7 +558,6 @@ function buildPendingSystemMailboxItem(input: {
     nextAttemptAt: null,
     occurredAt: "2026-04-27T00:00:00.000Z",
     postCheckpointRecord: null,
-    causalSeq: input.mailboxLaneSeq,
     preferenceCausalSeq: input.mailboxLaneSeq,
     requestId: null,
     routeAction: "apply-member-preferences",
