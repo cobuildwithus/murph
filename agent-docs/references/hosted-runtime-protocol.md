@@ -894,8 +894,8 @@ Settings deltas against conversational preference commands. System pending
 items and durable conversation input records carry it to the canonical
 preference owner, which stores only a per-field applied watermark. Web keeps
 matching nullable per-field projection watermarks for tone, voice, Humor, Push,
-and Detail. The four-case equality-aware rule applies at the canonical owner
-and to Web's Humor, Push, and Detail projection: a newer sequence applies even
+Detail, and the conversational-only Unhinged dial. The four-case equality-aware rule applies at the canonical owner
+and to Web's Humor, Push, Detail, and Unhinged projection: a newer sequence applies even
 when the visible value is unchanged, an older sequence is a field-local stale
 no-op while a fresh sibling still applies, the same sequence and value is an
 idempotent retry, and the same sequence with a different value is a later

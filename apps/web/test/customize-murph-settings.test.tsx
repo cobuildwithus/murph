@@ -133,6 +133,27 @@ describe("CustomizeMurphSettings", () => {
     expect(markup).toContain("Detail 5");
   });
 
+  test("never surfaces the conversational-only Unhinged dial in the summary", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(CustomizeMurphSettings, {
+        assistant: {
+          tone: null,
+          voice: null,
+          // A hostile/legacy payload carrying an unhinged score must not leak it.
+          personality: {
+            humor: 4,
+            push: null,
+            detail: null,
+            unhinged: 9,
+          } as never,
+        },
+      }),
+    );
+
+    expect(markup).toContain("Humor 4 · Push 3 · Detail 5");
+    expect(markup).not.toContain("Unhinged");
+  });
+
   test("keeps the customization rows in their intended order", () => {
     const markup = renderToStaticMarkup(
       React.createElement(CustomizeMurphSettings, {

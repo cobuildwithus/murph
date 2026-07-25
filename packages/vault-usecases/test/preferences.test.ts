@@ -117,6 +117,7 @@ test("assistant personality usecases expose defaults and preserve explicit defau
       humor: { value: 3, source: "default" },
       push: { value: 3, source: "default" },
       detail: { value: 5, source: "default" },
+      unhinged: { value: 0, source: "default" },
     },
   });
 
@@ -160,6 +161,7 @@ test("assistant personality usecases set zero and reset one or all sparse overri
     humor: { value: 0, source: "custom" },
     push: { value: 3, source: "default" },
     detail: { value: 5, source: "default" },
+    unhinged: { value: 0, source: "default" },
   });
 
   const detail = await setAssistantPersonalitySetting({
@@ -172,6 +174,7 @@ test("assistant personality usecases set zero and reset one or all sparse overri
     humor: { value: 0, source: "custom" },
     push: { value: 3, source: "default" },
     detail: { value: 10, source: "custom" },
+    unhinged: { value: 0, source: "default" },
   });
 
   const resetHumor = await resetAssistantPersonalitySetting({
@@ -184,6 +187,7 @@ test("assistant personality usecases set zero and reset one or all sparse overri
     humor: { value: 3, source: "default" },
     push: { value: 3, source: "default" },
     detail: { value: 10, source: "custom" },
+    unhinged: { value: 0, source: "default" },
   });
 
   const resetAll = await resetAllAssistantPersonalitySettings({
@@ -195,6 +199,7 @@ test("assistant personality usecases set zero and reset one or all sparse overri
     humor: { value: 3, source: "default" },
     push: { value: 3, source: "default" },
     detail: { value: 5, source: "default" },
+    unhinged: { value: 0, source: "default" },
   });
 
   const unchanged = await resetAllAssistantPersonalitySettings({

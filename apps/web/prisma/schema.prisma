@@ -509,6 +509,8 @@ model HostedMember {
   assistantPushCausalSeq         BigInt?                         @map("assistant_push_causal_seq")
   assistantDetail                Int?                            @map("assistant_detail")
   assistantDetailCausalSeq       BigInt?                         @map("assistant_detail_causal_seq")
+  assistantUnhinged              Int?                            @map("assistant_unhinged")
+  assistantUnhingedCausalSeq     BigInt?                         @map("assistant_unhinged_causal_seq")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")

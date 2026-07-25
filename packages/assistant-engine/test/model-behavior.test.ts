@@ -440,6 +440,37 @@ describe('assistant execution prompt contract', () => {
       expect(prompt).toContain(expected)
     }
 
+    const unhingedCases = [
+      [0, 'keep the default register'],
+      [1, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [3, 'drop unprompted disclaimers, hedges, and etiquette policing'],
+      [4, "match the room's edge"],
+      [6, "match the room's edge"],
+      [7, 'fully game'],
+      [9, 'fully game'],
+      [10, 'maximum latitude'],
+    ] as const
+    for (const [score, expected] of unhingedCases) {
+      const layers = buildAssistantSystemPromptLayers(
+        createCommonCodexPromptInput({
+          assistantPersonality: { unhinged: score },
+        }),
+      )
+      expect(layers.prompt).toContain(`Unhinged ${score}/10`)
+      expect(layers.prompt).toContain(expected)
+      // Band text is thread-context only; it must never enter the cacheable
+      // stable prefix that participates in the contract fingerprint.
+      expect(layers.staticCacheableCorePrompt).not.toContain(`Unhinged ${score}/10`)
+      expect(layers.stableRouteCapabilityPrompt).not.toContain(`Unhinged ${score}/10`)
+      // Every nonzero score carries the fixed hard-floor sentence; zero does not.
+      const hardFloor = 'no minors, no non-consenting third parties'
+      if (score === 0) {
+        expect(layers.prompt).not.toContain(hardFloor)
+      } else {
+        expect(layers.prompt).toContain(hardFloor)
+      }
+    }
+
     const maximumPrompt = buildAssistantSystemPrompt(
       createCommonCodexPromptInput({
         assistantPersonality: {
@@ -497,6 +528,33 @@ describe('assistant execution prompt contract', () => {
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`jokes`/`funny` = Humor',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`unfiltered`/`filter`/`edge`/`wild` = Unhinged',
+    )
+    // A bare directional request resolves against the score `show` reports in
+    // the same turn (which merges this turn's own pending writes), then moves a
+    // bounded step. It must never jump to an endpoint the member did not ask
+    // for — "be a bit funnier" is not a request for Humor 10.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'A bare directional request',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      '`show` in the same turn, then `set` a bounded step from what it reports',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never jump to an endpoint the member did not ask for',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      '`set` the endpoint for the direction',
+    )
+    // Accepting an offer that named a target uses that exact value.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'accepting an offer uses the level it named',
+    )
+    // The proactive offer is rare and only on obvious dissatisfaction.
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Offer a dial rarely, only on obvious dissatisfaction',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`show`: scores/sources only',
@@ -1481,11 +1539,23 @@ describe('assistant user-facing wording guidance', () => {
 describe('assistant system prompt cache stability', () => {
   it('keeps the always-on kernel and non-CLI route guidance bounded', () => {
     const layers = buildAssistantSystemPromptLayers(
-      createCommonCodexPromptInput({ assistantCliContract: null }),
+      // Pin the product base URL to the production origin so this size bound is
+      // deterministic across local and CI; otherwise the env-resolved URL length
+      // shifts the total and the cap passes locally but fails in CI.
+      createCommonCodexPromptInput({
+        assistantCliContract: null,
+        murphProductBaseUrl: 'https://www.withmurph.ai',
+      }),
     )
 
     expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(68_000)
+    // This layer is resident on every turn for every member, so it is a ratchet,
+    // not a budget: raise it only for guidance that has to be thread-stable.
+    // Main's own bound moved to 68_000 (baseline 67_801) while this branch was
+    // open. The conversational-only Unhinged dial, the rare style-dissatisfaction
+    // offer, and the bounded-step rule for a bare directional request add ~1_040
+    // characters on top of that baseline.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(69_000)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -2331,10 +2401,22 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain(
-      "Tone, Voice, Humor, Push, and Detail belong to this room's synthetic Murph runtime",
+      "Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",
+    )
+    // Unhinged is room-owned with no per-participant authorization, so the
+    // group prompt carries the shared-dial buy-in rule that the private
+    // conversation has no need for.
+    expect(prompt).toContain(
+      'Unhinged is one shared room dial',
+    )
+    expect(prompt).toContain(
+      "Raise it above 0 only when the room's own register already supports it",
+    )
+    expect(prompt).toContain(
+      'never on one member\'s say-so while another is visibly uncomfortable',
     )
     expect(prompt).toContain('`murph.personalization`')
     expect(prompt).toContain('`murph.assistant_style`')
