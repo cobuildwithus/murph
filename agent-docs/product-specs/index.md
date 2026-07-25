@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-07-22
+Last verified: 2026-07-25
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -30,6 +30,7 @@ Last verified: 2026-07-22
 | `agent-docs/product-specs/murph-contact-card-picker.md` | Post-signup add-Murph-to-contacts step where the member picks the avatar on Murph's vCard; picker components live on `/design`. | Implemented |
 | `agent-docs/product-specs/murph-tone-and-voice.md` | Five controls for how Murph talks, owned independently by a person's private Murph or a hosted group's synthetic room runtime. | Implemented |
 | `agent-docs/product-specs/shared-message-targeting.md` | One accepted-message reference and resolver shared by optional native replies and exact-message reactions in private and group conversations. | Implemented |
+| `agent-docs/product-specs/group-room-model.md` | One group-local rough social cheat sheet maintained by the existing silent maintenance lane and read only when a relevant callback or room tip materially improves a reply. | Implemented |
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful partial group-challenge standings plus an explicit bounded device-sync status share for evidence-backed recovery guidance. | Implemented |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
