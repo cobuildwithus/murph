@@ -258,6 +258,13 @@ Attribution therefore remains bound to the scanner-selected durable operation
 contexts, and active steering cannot add a second participant's identity
 authority to the turn.
 
+Deploy Web before Cloudflare and the runner for the channel-qualified sender
+change. Web accepts the legacy Linq-only `linqSenderHandles` key so an older
+runner keeps working, but an older Web rejects the unknown `currentTurnSender`
+key and fails every `read_shared` carrying sender evidence, including existing
+iMessage groups. Remove the legacy alias only after every runner emits
+`currentTurnSender`.
+
 Interactive `read_shared` requests may carry only bounded, deduplicated
 route-authorized sender handles from that operation scope, qualified by the
 sending channel. Web matches Linq handles against current membership phone and

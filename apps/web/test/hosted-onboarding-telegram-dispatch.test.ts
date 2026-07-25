@@ -467,9 +467,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             telegramMessage: expect.objectContaining({
               // Group inbound carries the webhook-authenticated sender so the
               // assistant can tell participants apart. The display-only
-              // username is normalized for consistent addressing.
+              // username keeps the case the room sees; only the separate
+              // lookup key is lowercased for identity matching.
               from: "456",
-              senderUsername: "alice_example",
+              senderUsername: "Alice_Example",
               text: "set up our weekly health newsletter",
               threadId: "-100123",
               threadIsDirect: false,

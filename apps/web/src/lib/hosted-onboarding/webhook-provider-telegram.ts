@@ -243,8 +243,8 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     : {
         ...telegramMessage,
         from: summary.senderTelegramUserId,
-        ...(summary.senderTelegramUsername
-          ? { senderUsername: summary.senderTelegramUsername }
+        ...(summary.senderTelegramDisplayUsername
+          ? { senderUsername: summary.senderTelegramDisplayUsername }
           : {}),
       };
   const mailboxAppend = await appendHostedMailboxEnvelopeTx({
