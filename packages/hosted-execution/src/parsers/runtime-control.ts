@@ -2350,7 +2350,15 @@ export function parseHostedRuntimeGroupToolResponse(
     const status = requireString(result.status, "Hosted runtime group tool update_display_name response status");
     if (status === "ok") {
       assertAllowedObjectKeys(result, new Set(["status", "group"]), "Hosted runtime group tool update_display_name ok response result");
-      return { action, result: { status, group: parseHostedRuntimeGroupSummary(result.group) } };
+      return {
+        action,
+        result: {
+          status,
+          group: result.group === null
+            ? null
+            : parseHostedRuntimeGroupSummary(result.group),
+        },
+      };
     }
     if (status === "unavailable") {
       assertAllowedObjectKeys(result, new Set(["status", "unavailableReason", "group"]), "Hosted runtime group tool update_display_name unavailable response result");
