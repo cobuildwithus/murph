@@ -58,6 +58,7 @@ describe("Telegram access notice delivery", () => {
     mocks.readCloudflareHostedControlHttpError.mockReturnValue(null);
     mocks.readHostedMemberRoutingState.mockResolvedValue({
       telegramThreadId: "456",
+      telegramUserId: "456",
     });
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
@@ -122,6 +123,7 @@ describe("Telegram access notice delivery", () => {
       expect.objectContaining({
         attemptedAt: sentAt,
         prisma: tx,
+        reclaimStalePreProviderAttempt: true,
         source: "hosted_runtime_ai_usage_limit_notice",
         sourceRef: "telegram:update:321",
         status: "provider_dispatch_started",
@@ -146,7 +148,28 @@ describe("Telegram access notice delivery", () => {
     );
   });
 
-  it("does not call the provider when another delivery already owns the event", async () => {
+  it("uses an authenticated direct inbound before its thread is persisted", async () => {
+    mocks.readHostedMemberRoutingState.mockResolvedValue({
+      telegramThreadId: null,
+      telegramUserId: "456",
+    });
+
+    await expect(sendHostedTelegramAccessNotice({
+      authorizedTelegramUserId: "456",
+      memberId: "member_123",
+      message: "Check account settings.",
+      noticeCode: "billing_inactive",
+      prisma: prisma as never,
+      replyToMessageId: "8",
+      sourceEventId: "telegram:update:322",
+      target: "456:business:connection:dm-topic:9",
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledOnce();
+    expect(mocks.markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledOnce();
+  });
+
+  it("does not claim a new attempt when another delivery already owns the event", async () => {
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: false,
       id: "delivery_123",
