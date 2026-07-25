@@ -562,7 +562,7 @@ describe("HostedDataPrivacySettings", () => {
     // arrives from the challenge request, not the deletion request.
     const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
       + "account right now. Nothing has changed and your request was not started. Please try "
-      + "again after Aug 2, 2026, 2:30 PM UTC.";
+      + "again in a few hours.";
     mocks.authorize.mockRejectedValueOnce(
       new HostedOnboardingApiError({
         code: "account_deletion_maintenance",
@@ -600,7 +600,7 @@ describe("HostedDataPrivacySettings", () => {
   test("keeps the maintenance reason readable in the open dialog", async () => {
     const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
       + "account right now. Nothing has changed and your request was not started. Please try "
-      + "again after Aug 2, 2026, 2:30 PM UTC.";
+      + "again in a few hours.";
     mockHostedDataPrivacyDeleteFlowState({ dialogError: maintenanceMessage });
 
     const { document, window } = loadLinkedom().parseHTML(

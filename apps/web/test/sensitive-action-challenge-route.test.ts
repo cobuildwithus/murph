@@ -102,7 +102,6 @@ describe("settings sensitive-action challenge route", () => {
 
     it("declines an account-delete challenge before one is created", async () => {
       vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2099-08-02T14:30:00.000Z");
 
       const response = await route.POST(challengeRequest("account.delete"));
 
@@ -127,16 +126,15 @@ describe("settings sensitive-action challenge route", () => {
       vi.unstubAllEnvs();
     });
 
-    it("never quotes a return time that has already passed", async () => {
+    it("never names a return time that could expire while the window is open", async () => {
       vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2020-01-01T00:00:00.000Z");
 
       const response = await route.POST(challengeRequest("account.delete"));
       const body = await response.json();
 
       expect(response.status).toBe(503);
       expect(body.error.message).toContain("Please try again in a few hours.");
-      expect(body.error.message).not.toContain("2020");
+      expect(body.error.message).not.toMatch(/\d{4}/u);
 
       vi.unstubAllEnvs();
     });

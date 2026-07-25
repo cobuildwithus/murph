@@ -226,7 +226,6 @@ describe("settings privacy delete route", () => {
 
     it("declines with a truthful message and spends nothing", async () => {
       vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2026-08-02T14:30:00.000Z");
 
       const response = await settingsPrivacyDeleteRoute.POST(maintenanceRequest());
 
@@ -235,7 +234,6 @@ describe("settings privacy delete route", () => {
       expect(body.error.code).toBe("account_deletion_maintenance");
       expect(body.error.message).toContain("scheduled maintenance");
       expect(body.error.message).toContain("your request was not started");
-      expect(body.error.message).toContain("Aug 2, 2026");
 
       // The member keeps an unspent authorization and loses no data.
       expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();

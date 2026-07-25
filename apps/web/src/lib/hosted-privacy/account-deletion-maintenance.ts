@@ -9,16 +9,22 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
  * the currently active bucket, so a deletion accepted inside the window could
  * leave data behind in the bucket that later becomes live. Rather than accept
  * a deletion we cannot complete everywhere, we decline it for the length of the
- * window and tell the member exactly when to come back.
+ * window.
  *
- * Delete this module, its env var, and its call site with the runbook once the
- * OC buckets are retired.
+ * The flag is the only authority and it names no return time. A promised time
+ * can expire while the window is still open, which is a worse lie than saying
+ * nothing; the runbook owns opening and closing this window instead.
+ *
+ * Delete this module, its env var, and both call sites with the runbook once
+ * the OC buckets are retired.
  */
 export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_ENV = "HOSTED_ACCOUNT_DELETION_MAINTENANCE";
-export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL_ENV =
-  "HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL";
 
 export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_CODE = "account_deletion_maintenance";
+
+export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
+  "Murph is in scheduled maintenance, so we can't delete your account right now. "
+  + "Nothing has changed and your request was not started. Please try again in a few hours.";
 
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -29,37 +35,7 @@ export function assertHostedAccountDeletionAvailable(
   throw hostedOnboardingError({
     code: HOSTED_ACCOUNT_DELETION_MAINTENANCE_CODE,
     httpStatus: 503,
-    message: buildHostedAccountDeletionMaintenanceMessage(
-      environment[HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL_ENV],
-    ),
+    message: HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE,
     retryable: true,
   });
-}
-
-export function buildHostedAccountDeletionMaintenanceMessage(
-  until: string | undefined,
-  nowMs: number = Date.now(),
-): string {
-  const window = formatMaintenanceWindow(until, nowMs);
-  return "Murph is in scheduled maintenance, so we can't delete your account right now. "
-    + `Nothing has changed and your request was not started. Please try again ${window}.`;
-}
-
-/**
- * A return time is only quoted when it is still in the future. An absent,
- * unparseable, or already-elapsed value falls back to the vaguer sentence,
- * because telling a member to come back at a time that has passed is worse
- * than not naming one. An overdue window is an operator problem to fix in the
- * runbook, never a promise to repeat back.
- */
-function formatMaintenanceWindow(until: string | undefined, nowMs: number): string {
-  const trimmed = until?.trim();
-  if (!trimmed) return "in a few hours";
-  const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= nowMs) return "in a few hours";
-  return `after ${new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-  }).format(new Date(parsed))} UTC`;
 }

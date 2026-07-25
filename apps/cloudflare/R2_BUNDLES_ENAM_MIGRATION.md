@@ -90,17 +90,16 @@ running it, and prove the bucket is gone afterwards.
 Then release the deletion window before reopening anything. Once the
 destination is gone, OC is the sole authoritative bucket again and deletion is
 safe, so leaving the control set would disable a privacy-critical flow for no
-reason and leave members reading a return time that has passed:
+reason:
 
-1. remove both `HOSTED_ACCOUNT_DELETION_MAINTENANCE` and
-   `HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL` from the Vercel production
+1. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
    environment and deploy;
 2. prove an authenticated `account.delete` challenge request succeeds again and
    that the delete route no longer returns `503`; and
 3. only then reopen ordinary writers and rebook.
 
-Do not wait for the advertised return time before doing this. The abandonment
-is what makes deletion safe again, not the clock.
+If the operation aborted before section 5 set the control, there is nothing to
+clear here; confirm it is unset rather than assuming it.
 
 ### Account deletion is deferred for the window
 
@@ -118,46 +117,50 @@ statutory response windows are measured in days, this deferral is measured in
 hours, and the alternative is a privacy failure that cannot be detected or
 repaired after the fact.
 
-Both variables live in the Vercel production environment for the `murph` web
-project. They are not read from a file and a bare shell assignment does nothing:
-setting or clearing them requires a production environment change followed by a
-deployment that picks it up. Treat "set", "cleared", and "proven" as three
-separate steps every time.
+`HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` lives in the Vercel production
+environment for the `murph` web project. It is not read from a file and a bare
+shell assignment does nothing: setting or clearing it requires a production
+environment change followed by a deployment that picks it up.
 
-Set them before the copy starts, as part of the fence in section 4:
+**One rule owns the window.** The control is set only while an ENAM bucket
+holds copies that could still become live, and cleared the moment OC is the
+sole authority again. The cutover owner owns both edges. Deriving every exit
+from that one rule is what keeps the control from outliving the operation:
+
+| Point in the operation | Control |
+| --- | --- |
+| Anything before the copy, including every section 4 abort | Never set. Section 5 sets it immediately before the first object is copied, after the destination bucket exists and every other fence check has passed. |
+| Copy, cutover, proofs, canary | Set. |
+| Any pre-commit abandonment or overrun | Cleared by the abandonment procedure, before writers reopen. |
+| Successful retirement | Cleared in section 8. |
+
+Because activation is the last step before copying, an abort during the fence
+happens while the control is still unset and needs no unwinding at all. There
+is no ordinary exit that leaves it set.
+
+The message names no return time. A promised time can expire while the window
+is still open, and telling a member to come back at a moment that has already
+passed is worse than not naming one, so the copy says "in a few hours" and the
+table above — not a timestamp — is what bounds the window.
+
+Set it as directed in section 5:
 
 ```bash
-vercel env add HOSTED_ACCOUNT_DELETION_MAINTENANCE production        # 1
-vercel env add HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL production  # booked return time, ISO-8601
+vercel env add HOSTED_ACCOUNT_DELETION_MAINTENANCE production   # 1
 ```
 
-Redeploy production, then prove both surfaces before starting the copy:
+Redeploy production, then prove all three checks before copying:
 `POST /api/settings/sensitive-action-challenge` with `account.delete` and
 `POST /api/settings/privacy/delete` must each return `503` with
 `account_deletion_maintenance`, and `vault.export` must still return `200`.
 
-The challenge route is the one members actually hit first. Declining there means
-a member who tries during the window is told before any passkey approval and
+The challenge route is the one members hit first, so declining there means a
+member who tries during the window is told before any passkey approval and
 before any browser-vault teardown, with the dialog still open and an unspent
-authorization. The delete route keeps the same guard as the effect boundary.
+authorization. The delete route keeps the same guard as the effect boundary, so
+a direct request cannot bypass the window.
 
-**Releasing the control.** The flag is the only authority; the timestamp is
-display copy and never releases anything. That is deliberate — an overrunning
-window must not silently reopen deletion while two buckets still exist — so
-every path out of the window has to clear it explicitly:
-
-- Successful retirement clears it in section 8.
-- Any pre-commit abandonment or overrun clears it as part of the abandonment
-  procedure, before writers reopen.
-- If the operation is extended past the advertised return time, update
-  `HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL` to a still-future time and deploy
-  **before** the previous promise expires.
-
-A message never quotes a time that has already passed: an absent, unparseable,
-or elapsed value falls back to "in a few hours". That is a guard against
-misleading a member, not a substitute for clearing the flag on time.
-
-The whole control — module, two variables, and both call sites — is deleted with
+The whole control — module, one variable, and both call sites — is deleted with
 the runbook.
 
 References: [R2 data location][data-location], [R2 consistency][consistency],
@@ -192,19 +195,15 @@ extrapolated copy time plus the fixed cost of section 4's ten-minute PUT drain,
 the cutover deploy, the post-deploy proofs, and both restore canaries. Add
 margin for one prune-and-reprove cycle.
 
-The booked end time is what members are told, and account deletion stays
-declined until section 8 clears the control after OC retirement. Section 8
-cannot retire OC until at least one hour after cutover, so the advertised
-return time must be at least that floor plus margin, not merely the end of the
-copy. Publishing an earlier time guarantees an expired promise even on a
-completely successful run.
+Account deletion stays declined from the start of the copy until section 8
+clears the control after OC retirement, which cannot happen until at least an
+hour after cutover. Size the operation knowing that, but note the member-facing
+copy names no time, so a longer run degrades nothing and needs no correction.
 
 An overrun is not a data risk. If the copy or any proof does not finish inside
 the booked window, take the abandonment path in the safety contract, which
 clears the deletion window before writers reopen, and rebook. Nothing at the
-source has changed. If instead the operation is continuing past the advertised
-time, extend `HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL` and deploy before the
-previous promise expires.
+source has changed.
 
 ## 2. Rehearse the exact copy path on real R2
 
@@ -328,11 +327,9 @@ One cutover owner must prove every item below. Abort if any item is uncertain.
    that can write BUNDLES.
 3. Confirm every runner has no invocation in flight and the mailbox is drained.
 4. Record the last possible presigned PUT time and wait ten full minutes.
-5. Set both deletion-window variables in the Vercel production environment,
-   deploy, and prove all three checks from the deferral section above: the
-   `account.delete` challenge and the delete route each return `503` with
-   `account_deletion_maintenance`, and `vault.export` still returns `200`.
-   The advertised return time must satisfy the floor in section 1.
+5. Do not set the deletion-window control yet. Section 5 sets it immediately
+   before the copy, once the destination exists, so that an abort anywhere in
+   this section leaves nothing to unwind.
 6. Do not claim that `HostedUserRunner` cleanup alarms are stopped. They fire on
    schedule with no invocation, and the platform retries an attempt that failed
    earlier, so one can delete a source object at any point in the window. That
@@ -354,6 +351,11 @@ pnpm --dir apps/cloudflare exec wrangler r2 bucket create "$DESTINATION_BUCKET" 
 pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
 pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$DESTINATION_BUCKET" --json
 ```
+
+Now open the deletion window, as the last step before any object is copied:
+set `HOSTED_ACCOUNT_DELETION_MAINTENANCE=1` in the Vercel production
+environment, deploy, and prove the three checks from the deferral section. Only
+after those pass does anything get copied.
 
 Run the copy, then the read-only proof immediately before editing variables:
 
@@ -507,8 +509,7 @@ empty, and retire only the matching production and preview OC buckets. Then:
    deploy immediately, and require the ENAM direct-R2 smoke;
 3. revoke the transition, old runtime, and production pair-scoped migration
    credentials;
-4. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` and
-   `HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL` from the Vercel production
+4. remove `HOSTED_ACCOUNT_DELETION_MAINTENANCE` from the Vercel production
    environment, deploy, and prove both an `account.delete` challenge request and
    the delete route reach the application again; and
 5. delete this runbook, migration script, tests, package command, and the
