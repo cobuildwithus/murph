@@ -1585,6 +1585,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker: vi.fn(async () => 0),
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce: vi.fn(async () => undefined),
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
@@ -1635,6 +1636,7 @@ describe("runHostedDeviceSyncPass", () => {
         drainWorker: vi.fn(async () => 0),
         getNextWakeAt: () => null,
         listJobFailureDiagnostics: vi.fn(() => []),
+        listAccounts: vi.fn(() => []),
         runSchedulerOnce: vi.fn(async () => undefined),
       };
       mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
@@ -1699,6 +1701,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1775,6 +1778,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1863,6 +1867,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -1901,6 +1906,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValue(
@@ -1938,6 +1944,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -1968,6 +1975,136 @@ describe("runHostedDeviceSyncPass", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("reports a push-primary source that silently stopped delivering", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => [
+        {
+          id: "dsc_stalled",
+          provider: "aggregator",
+          status: "active",
+          sources: [
+            // The aggregator still reports this source connected and every
+            // resource available; only the arrival gap shows it is dead.
+            {
+              displayName: null,
+              firstSeenAt: "2026-04-01T00:00:00.000Z",
+              lastDataAt: "2026-04-01T00:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-08T00:00:00.000Z",
+              resourceCount: 20,
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+            {
+              displayName: null,
+              firstSeenAt: "2026-04-01T00:00:00.000Z",
+              lastDataAt: "2026-04-01T00:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt: "2026-04-08T00:00:00.000Z",
+              resourceCount: 5,
+              sourceProviderSlug: "oura",
+              status: "connected",
+            },
+          ],
+        },
+      ]),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_device_sync_source_stalled",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        45_000,
+        {
+          runtimeLogPlatform: {
+            logPort: {
+              async write(request) {
+                logRequests.push(request);
+                return { loggedCount: request.entries.length };
+              },
+            },
+          },
+        },
+      )
+    );
+
+    const stalledEntries = logRequests
+      .flatMap((request) => request.entries)
+      .filter((entry) => entry.eventCode === "device-sync.source_stalled");
+
+    assert.equal(stalledEntries.length, 1, "only the push-primary source is reported");
+    const entry = stalledEntries[0];
+    assert.ok(entry);
+    assert.equal(entry.component, "device-sync");
+    assert.equal(entry.level, "warn");
+    assert.deepEqual(entry.redactedJson, {
+      lastDataAt: "2026-04-01T00:00:00.000Z",
+      provider: "aggregator",
+      reason: "stopped_delivering",
+      silentHours: 168,
+      silentSinceAt: "2026-04-01T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+      thresholdHours: 36,
+    });
+  });
+
+  it("completes the device-sync pass when source staleness reporting fails", async () => {
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 3),
+      getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => {
+        throw new Error("account projection unavailable");
+      }),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_device_sync_source_stalled_failure",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              return { loggedCount: request.entries.length };
+            },
+          },
+        },
+      },
+    );
+
+    // Observability must never cost the member their sync pass.
+    assert.equal(result.skipped, false);
+    assert.equal(result.processedJobs, 3);
+  });
+
   it("runs bounded dense raw retention after device-sync drains and logs byte counts", async () => {
     const close = vi.fn();
     const logRequests: HostedRuntimeLogRequest[] = [];
@@ -1979,6 +2116,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
@@ -2071,6 +2209,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
@@ -2128,6 +2267,7 @@ describe("runHostedDeviceSyncPass", () => {
         drainWorker: vi.fn(async () => 0),
         getNextWakeAt: () => null,
         listJobFailureDiagnostics: vi.fn(() => []),
+        listAccounts: vi.fn(() => []),
         runSchedulerOnce: vi.fn(async () => undefined),
       });
       mocks.pruneWearableDenseRawTimeseries.mockResolvedValueOnce({
@@ -2197,6 +2337,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockImplementationOnce(async () => {
@@ -2256,6 +2397,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -2297,6 +2439,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.pruneWearableDenseRawTimeseries.mockRejectedValueOnce(
@@ -2363,6 +2506,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -2448,6 +2592,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker: vi.fn(async () => 0),
       getNextWakeAt: () => retryAt,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce: vi.fn(async () => undefined),
     };
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
@@ -2517,6 +2662,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -2565,6 +2711,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -2643,6 +2790,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
     mocks.syncHostedDeviceSyncControlPlaneState.mockResolvedValueOnce({
@@ -2718,6 +2866,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => "2026-04-08T02:00:00.000Z",
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 
@@ -2766,6 +2915,7 @@ describe("runHostedDeviceSyncPass", () => {
       drainWorker,
       getNextWakeAt: () => null,
       listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
       runSchedulerOnce,
     });
 

@@ -407,6 +407,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
               ...(Object.prototype.hasOwnProperty.call(source, "firstSeenAt")
                 ? { firstSeenAt: source.firstSeenAt ?? null }
                 : {}),
+              ...(Object.prototype.hasOwnProperty.call(source, "lastDataAt")
+                ? { lastDataAt: source.lastDataAt ?? null }
+                : {}),
               lastSeenAt: source.lastSeenAt,
               tx,
             });
@@ -684,6 +687,7 @@ function toHostedRuntimeConnectionSourceSnapshot(
     lastErrorCode: source.lastErrorCode,
     lastErrorMessage: source.lastErrorMessage,
     lastSeenAt: source.lastSeenAt,
+    lastDataAt: source.lastDataAt,
     resourceCount: countHostedRuntimeConnectionSourceResources(
       source.resourceAvailabilitySummary,
     ),
@@ -816,6 +820,21 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
     const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
     const currentLastSeenAt = current?.lastSeenAt ?? null;
 
+    // The runner's snapshot can predate an arrival Web already recorded, so an
+    // otherwise valid update must not carry the older value back. Forward-only
+    // is the whole basis of the stall signal: a rewind reopens a silence window
+    // that already closed and can manufacture a false stall alert.
+    if (Object.prototype.hasOwnProperty.call(update, "lastDataAt")) {
+      const mergedLastDataAt = laterHostedRuntimeTimestamp(
+        update.lastDataAt ?? null,
+        current?.lastDataAt ?? null,
+      );
+
+      if (mergedLastDataAt !== (update.lastDataAt ?? null)) {
+        update = { ...update, lastDataAt: mergedLastDataAt };
+      }
+    }
+
     if (
       (historicalResetRequired || !historicalProgressMutable)
       && current
@@ -886,6 +905,22 @@ function normalizeHostedRuntimeSourceUpdateForProvider(input: {
   };
 }
 
+/** Returns whichever ISO timestamp is later, treating null as "never". */
+function laterHostedRuntimeTimestamp(
+  left: string | null,
+  right: string | null,
+): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
 function isHostedRuntimeTimestampOlder(
   candidate: string | null | undefined,
   reference: string | null | undefined,
@@ -915,7 +950,10 @@ function hostedRuntimeSourceUpdateMatchesCurrent(
     && current.lastErrorCode === (update.lastErrorCode ?? null)
     && current.lastErrorMessage === (update.lastErrorMessage ?? null)
     && current.firstSeenAt === (update.firstSeenAt ?? null)
-    && current.lastSeenAt === update.lastSeenAt;
+    && current.lastSeenAt === update.lastSeenAt
+    // A push carrier can deliver without any other field moving, so an
+    // arrival-only update must not be dropped as a no-op.
+    && (update.lastDataAt === undefined || current.lastDataAt === update.lastDataAt);
 }
 
 function equalHostedRuntimeSourceSummaries(

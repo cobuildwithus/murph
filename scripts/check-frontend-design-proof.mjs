@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 
 const DESIGN_CATALOG_PATHS = new Set([
   "apps/web/app/design/components-content.tsx",
+  "apps/web/app/design/consent-content.tsx",
   "apps/web/app/design/sections-content.tsx",
 ]);
 const FRONTEND_ASSET_PATTERN = /\.(?:avif|gif|ico|jpe?g|png|svg|webp)$/iu;
@@ -58,7 +59,7 @@ function validateFrontendDesignProof({ changedPaths, prBodyHtml }) {
   } else {
     if (!hasDesignPageItem(designProof)) {
       errors.push(
-        "The Design proof section must link to `/design?tab=components` or `/design?tab=sections`.",
+        "The Design proof section must link to `/design?tab=components`, `/design?tab=consent`, or `/design?tab=sections`.",
       );
     }
     if (!hasScreenshotItem(designProof, "Desktop screenshot")) {
@@ -126,7 +127,7 @@ function hasDesignPageItem(section) {
   if (!item) {
     return false;
   }
-  const designRoute = /\/design\?tab=(?:components|sections)(?:[#&\s"'<]|$)/iu;
+  const designRoute = /\/design\?tab=(?:components|consent|sections)(?:[#&\s"'<]|$)/iu;
   if (designRoute.test(renderedText(item))) {
     return true;
   }

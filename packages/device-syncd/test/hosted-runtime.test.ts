@@ -846,6 +846,75 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect("buildHostedExecutionUserDeviceSyncRuntimePath" in hostedRuntime).toBe(false);
   });
 
+  it("accepts a source snapshot produced before the arrival signal existed", () => {
+    const buildSnapshot = (source: Record<string, unknown>) => ({
+      connections: [
+        {
+          connection: {
+            accessTokenExpiresAt: null,
+            connectedAt: "2026-07-01T08:00:00+00:00",
+            createdAt: "2026-07-01T07:55:00+00:00",
+            displayName: "Junction",
+            externalAccountId: "junction-user-1",
+            id: "conn_junction",
+            metadata: {},
+            provider: "junction",
+            scopes: [],
+            status: "active",
+            updatedAt: "2026-07-01T08:01:00+00:00",
+          },
+          credential: {
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+          sources: [source],
+        },
+      ],
+      generatedAt: "2026-07-01T08:02:00.000Z",
+      userId: "member_123",
+    });
+    const legacySource = {
+      displayName: null,
+      firstSeenAt: "2026-07-01T08:00:00+00:00",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-01T08:01:00+00:00",
+      resourceCount: 3,
+      sourceInstanceKey: "src_garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    };
+
+    // A runner-first deploy must still consume the older Web producer's
+    // snapshot, or device sync stalls until Web catches up.
+    const parsed = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+      buildSnapshot(legacySource),
+    );
+    expect(parsed.connections[0]?.sources?.[0]?.lastDataAt).toBeNull();
+
+    // A present-but-malformed value is still a contract violation.
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+        buildSnapshot({ ...legacySource, lastDataAt: "not-a-timestamp" }),
+      )
+    ).toThrow();
+
+    const withArrival = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+      buildSnapshot({ ...legacySource, lastDataAt: "2026-07-01T07:59:00+00:00" }),
+    );
+    expect(withArrival.connections[0]?.sources?.[0]?.lastDataAt)
+      .toBe("2026-07-01T07:59:00.000Z");
+  });
+
   it("parses provider-config credential snapshots without token material", () => {
     const parsed = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
       connections: [

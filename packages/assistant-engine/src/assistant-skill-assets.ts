@@ -239,13 +239,13 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-chat',
     name: 'group-chat',
     triggerHint:
-      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Governs when to reply, stay silent, react, or joke, and how to use shared challenge data.',
+      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Owns room psychology, human-owned versus open-ensemble floor, beat-local handoff, adaptive participation, and the decision to reply, react, joke, or stay silent, plus shared challenge-data etiquette.',
   },
   {
     slug: 'groupchat-comedy',
     name: 'groupchat-comedy',
     triggerHint:
-      'Read before composing any group-chat message in a challenge or banter context: kickoffs, daily dispatches, score updates, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
+      'Read alongside group-chat before composing humor in a challenge or banter context: kickoffs, daily dispatches, score updates, spontaneous open-room cameos, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Shapes a turn whose floor group-chat permits; it never overrides a human-owned exchange. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
   },
   {
     slug: 'group-challenge',

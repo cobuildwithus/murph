@@ -43,6 +43,7 @@ test("@murphai/device-syncd package manifest exposes narrow public subpaths", as
     "./registry",
     "./runtime-config",
     "./service",
+    "./source-staleness",
     "./types",
   ]);
   assert.equal(packageManifest.exports?.["./crypto"], undefined);

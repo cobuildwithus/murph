@@ -29,6 +29,7 @@ interface StoredDeviceConnectionSourceRow {
   last_error_message: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  last_data_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -86,6 +87,7 @@ const CONNECTION_SOURCE_ROW_SELECT = `
     last_error_message,
     first_seen_at,
     last_seen_at,
+    last_data_at,
     created_at,
     updated_at
   from device_connection_source
@@ -343,6 +345,7 @@ function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
   lastErrorMessage: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  lastDataAt: string | null | undefined;
 } {
   const lastSeenAt = toIsoTimestamp(input.lastSeenAt);
   const requestedFirstSeenAt = toIsoTimestamp(input.firstSeenAt ?? lastSeenAt);
@@ -391,6 +394,14 @@ function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
       : null,
     firstSeenAt,
     lastSeenAt,
+    // Undefined means "leave the stored arrival signal alone". Only hosted
+    // hydration passes an explicit value; the reconcile projection must never
+    // move it, or it would report a dead push carrier as freshly delivering.
+    lastDataAt: hasOwnInputProperty(input, "lastDataAt")
+      ? input.lastDataAt === null || input.lastDataAt === undefined
+        ? null
+        : toIsoTimestamp(input.lastDataAt)
+      : undefined,
   };
 }
 
@@ -425,6 +436,10 @@ function decodeConnectionSourceRow(row: SqliteRow): StoredDeviceConnectionSource
     ),
     first_seen_at: expectString(row.first_seen_at, "device_connection_source.first_seen_at"),
     last_seen_at: expectString(row.last_seen_at, "device_connection_source.last_seen_at"),
+    last_data_at: expectNullableString(
+      row.last_data_at ?? null,
+      "device_connection_source.last_data_at",
+    ),
     created_at: expectString(row.created_at, "device_connection_source.created_at"),
     updated_at: expectString(row.updated_at, "device_connection_source.updated_at"),
   };
@@ -447,6 +462,7 @@ function mapConnectionSourceRow(
     lastErrorMessage: row.last_error_message,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    lastDataAt: row.last_data_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -509,6 +525,7 @@ export function upsertConnectionSource(
             last_error_message = ?,
             first_seen_at = ?,
             last_seen_at = ?,
+            last_data_at = ?,
             updated_at = ?
         where id = ?
       `).run(
@@ -520,6 +537,7 @@ export function upsertConnectionSource(
         lastErrorMessage,
         firstSeenAt,
         normalized.lastSeenAt,
+        normalized.lastDataAt === undefined ? existing.lastDataAt : normalized.lastDataAt,
         normalized.lastSeenAt,
         existing.id,
       );
@@ -545,9 +563,10 @@ export function upsertConnectionSource(
         last_error_message,
         first_seen_at,
         last_seen_at,
+        last_data_at,
         created_at,
         updated_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       normalized.connectionId,
@@ -560,6 +579,7 @@ export function upsertConnectionSource(
       lastErrorMessage,
       normalized.firstSeenAt,
       normalized.lastSeenAt,
+      normalized.lastDataAt ?? null,
       normalized.firstSeenAt,
       normalized.lastSeenAt,
     );
@@ -570,6 +590,49 @@ export function upsertConnectionSource(
       normalized.sourceInstanceKey,
     )!;
   });
+}
+
+/**
+ * Records that an inbound payload carried data for this source. Matching is by
+ * provider slug because that is what the webhook envelope names; a connection
+ * can hold more than one instance of the same provider, and every one of them
+ * is fed by the same upstream carrier.
+ *
+ * This never creates a source row. A payload that arrives before the connect
+ * projection has recorded the source leaves nothing to stamp, and staleness
+ * evaluation falls back to `first_seen_at` for a source that has never
+ * delivered.
+ */
+export function markConnectionSourceDataReceived(
+  database: DatabaseSync,
+  input: {
+    connectionId: string;
+    now: string;
+    sourceProviderSlug: string;
+  },
+): number {
+  const connectionId = normalizeRequiredBoundedString(
+    input.connectionId,
+    "connectionId",
+    SOURCE_INSTANCE_KEY_MAX_LENGTH,
+  );
+  const sourceProviderSlug = normalizeRequiredSourceSlug(
+    input.sourceProviderSlug,
+    "sourceProviderSlug",
+    SOURCE_PROVIDER_SLUG_MAX_LENGTH,
+  );
+  const now = toIsoTimestamp(input.now);
+
+  const result = database.prepare(`
+    update device_connection_source
+    set last_data_at = ?,
+        updated_at = ?
+    where connection_id = ?
+      and source_provider_slug = ?
+      and (last_data_at is null or last_data_at < ?)
+  `).run(now, now, connectionId, sourceProviderSlug, now);
+
+  return Number(result.changes ?? 0);
 }
 
 export function listConnectionSources(
