@@ -21,6 +21,7 @@ import type {
 } from "@murphai/hosted-execution/vault-share";
 import {
   buildHostedVaultShareProjectionScopeKey,
+  getHostedVaultShareDailyMetricProjectionSpec,
 } from "@murphai/hosted-execution/vault-share";
 
 import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
@@ -1252,7 +1253,22 @@ function renderHostedGroupJoinOfferScopeSentence(
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
     .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
-  return `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  const sentence = `your ${formatHumanList(["Murph profile name", ...labels])}`;
+  // Nutrition labels (e.g. "daily protein") read as a bare number; disclose that
+  // the totals come from the member's meals, connected-app imports included, so a
+  // like-to-consent reaction is not materially narrower than what is exported.
+  return projectionScopes.some(isHostedGroupMealNutritionProjectionScope)
+    ? `${sentence} (nutrition totals come from your meals in Murph, including meals imported from connected apps)`
+    : sentence;
+}
+
+function isHostedGroupMealNutritionProjectionScope(
+  scope: HostedVaultShareProjectionScope,
+): boolean {
+  return (
+    getHostedVaultShareDailyMetricProjectionSpec(scope.projectionKind)?.source.kind
+      === "meal-nutrition-total"
+  );
 }
 
 function formatHostedGroupJoinOfferShareScopeLabel(label: string): string {

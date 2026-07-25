@@ -50,6 +50,10 @@ describe("hosted vault-share supported projection scopes", () => {
     );
     expect(supported).not.toContain("device-sync-status.v0");
     expect(supported).not.toContain("protein-days.v0");
+    expect(supported).not.toContain("calories-days.v0");
+    expect(supported).not.toContain("carbs-days.v0");
+    expect(supported).not.toContain("fat-days.v0");
+    expect(supported).not.toContain("fiber-days.v0");
     expect(supported).not.toContain("sleep-duration-days.v0");
     expect(supported).not.toContain(
       hostedVaultShare.buildHostedVaultShareProjectionScopeKey(FUTURE_MINUTES_SCOPE),

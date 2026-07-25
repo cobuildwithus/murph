@@ -48,6 +48,10 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_KINDS = [
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
   "protein-days.v0",
+  "calories-days.v0",
+  "carbs-days.v0",
+  "fat-days.v0",
+  "fiber-days.v0",
 ] as const;
 
 const HOSTED_VAULT_SHARE_DAY_MAX_MINUTES = 24 * 60;
@@ -101,9 +105,13 @@ export const HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS = [
   { projectionKind: "vo2-max-days.v0", metricKey: "estimated-vo2-max", minValue: 0, maxValue: 100, source: METRIC_SERIES_SOURCE },
   { projectionKind: "resting-heart-rate-days.v0", metricKey: "resting-heart-rate", minValue: 20, maxValue: 250, source: METRIC_SERIES_SOURCE },
   { projectionKind: "hrv-days.v0", metricKey: "hrv-rmssd", minValue: 0, maxValue: 500, source: METRIC_SERIES_SOURCE },
-  // 2,000 g/day is a corruption guard against unit or duplication errors, not a
-  // health target; complete-day totals far above it are skipped, never clamped.
+  // Nutrient bounds are corruption guards against unit or duplication errors, not
+  // health targets; complete-day totals beyond them are skipped, never clamped.
   { projectionKind: "protein-days.v0", metricKey: "protein-grams", expectedUnit: "g", minValue: 0, maxValue: 2_000, source: { kind: "meal-nutrition-total", totalKey: "proteinGrams" } },
+  { projectionKind: "calories-days.v0", metricKey: "dietary-calories", expectedUnit: "kcal", minValue: 0, maxValue: 20_000, source: { kind: "meal-nutrition-total", totalKey: "calories" } },
+  { projectionKind: "carbs-days.v0", metricKey: "carbs-grams", expectedUnit: "g", minValue: 0, maxValue: 2_000, source: { kind: "meal-nutrition-total", totalKey: "carbsGrams" } },
+  { projectionKind: "fat-days.v0", metricKey: "fat-grams", expectedUnit: "g", minValue: 0, maxValue: 2_000, source: { kind: "meal-nutrition-total", totalKey: "fatGrams" } },
+  { projectionKind: "fiber-days.v0", metricKey: "fiber-grams", expectedUnit: "g", minValue: 0, maxValue: 500, source: { kind: "meal-nutrition-total", totalKey: "fiberGrams" } },
 ] as const satisfies readonly HostedVaultShareDailyMetricProjectionSpec[];
 
 export const HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND =
@@ -256,6 +264,10 @@ export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "resting-heart-rate-days.v0",
   "hrv-days.v0",
   "protein-days.v0",
+  "calories-days.v0",
+  "carbs-days.v0",
+  "fat-days.v0",
+  "fiber-days.v0",
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 

@@ -740,6 +740,64 @@ describe("selectProjectableMealNutritionDays", () => {
     ], requireDailyMetricSpec("steps-days.v0"), nowMs)).toEqual([]);
   });
 
+  const NUTRIENT_CASES = [
+    { projectionKind: "calories-days.v0", totalKey: "calories", metricKey: "dietary-calories", unit: "kcal", value: 2_150, overMax: 20_001 },
+    { projectionKind: "carbs-days.v0", totalKey: "carbsGrams", metricKey: "carbs-grams", unit: "g", value: 240, overMax: 2_001 },
+    { projectionKind: "fat-days.v0", totalKey: "fatGrams", metricKey: "fat-grams", unit: "g", value: 71, overMax: 2_001 },
+    { projectionKind: "fiber-days.v0", totalKey: "fiberGrams", metricKey: "fiber-grams", unit: "g", value: 34, overMax: 501 },
+  ] as const;
+
+  for (const nutrient of NUTRIENT_CASES) {
+    const dayForNutrient = (
+      date: string,
+      total: number | null,
+      opts: { metricMealCount?: number; mealCount?: number } = {},
+    ): MealNutritionDayTotal => {
+      const mealCount = opts.mealCount ?? 1;
+      const empty = { mealCount: 0, total: null as number | null };
+      const totals = {
+        calories: { ...empty },
+        carbsGrams: { ...empty },
+        fatGrams: { ...empty },
+        fiberGrams: { ...empty },
+        proteinGrams: { ...empty },
+      };
+      totals[nutrient.totalKey] = { mealCount: opts.metricMealCount ?? mealCount, total };
+      return { date, mealCount, totals };
+    };
+
+    it(`shares complete ${nutrient.projectionKind} days and fails closed otherwise`, () => {
+      const spec = requireDailyMetricSpec(nutrient.projectionKind);
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.value),
+      ], spec, nowMs)).toEqual([{
+        data: {
+          date: "2026-07-03",
+          metricKey: nutrient.metricKey,
+          unit: nutrient.unit,
+          value: nutrient.value,
+        },
+        occurredAt: "2026-07-03T00:00:00.000Z",
+        recordKey: "2026-07-03",
+      }]);
+
+      // Complete true-zero day is data.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", 0),
+      ], spec, nowMs)[0]?.data).toMatchObject({ value: 0 });
+
+      // Incomplete day (a meal lacks the nutrient) is omitted.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.value, { mealCount: 2, metricMealCount: 1 }),
+      ], spec, nowMs)).toEqual([]);
+
+      // Out-of-bounds total is skipped, never clamped.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.overMax),
+      ], spec, nowMs)).toEqual([]);
+    });
+  }
+
   it("reads and offers complete local-day protein totals without exposing meal metadata", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-protein-days-"));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(
