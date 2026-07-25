@@ -56,6 +56,13 @@ export interface HostedMemberBillingEligibilityState {
   hasStripeSubscriptionId: boolean;
 }
 
+export interface HostedMemberPulseTrialCleanupOwnershipState {
+  billingStatus: HostedBillingStatus;
+  currentBillingPhase: string | null;
+  pulseTrialRedeemedAt: Date | null;
+  stripeSubscriptionLookupKey: string | null;
+}
+
 export type HostedMemberStripeBillingLookupMatch =
   | "stripeCustomerId"
   | "stripeSubscriptionId"
@@ -296,6 +303,45 @@ export async function readHostedMemberBillingEligibilityState(input: {
     currentCheckoutOffer: billingRef.currentCheckoutOffer,
     hasStripeCustomerId: Boolean(billingRef.stripeCustomerLookupKey),
     hasStripeSubscriptionId: Boolean(billingRef.stripeSubscriptionLookupKey),
+  };
+}
+
+/**
+ * Reads only the database-owned facts needed to decide whether an unreferenced
+ * Pulse Trial subscription is still safe to cancel. This projection must stay
+ * free of encrypted Stripe columns so callers can use it while holding the
+ * member billing lock without invoking the web encryption/KMS boundary.
+ */
+export async function readHostedMemberPulseTrialCleanupOwnershipState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberPulseTrialCleanupOwnershipState | null> {
+  const member = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+          pulseTrialRedeemedAt: true,
+          stripeSubscriptionLookupKey: true,
+        },
+      },
+      billingStatus: true,
+    },
+  });
+
+  if (!member) {
+    return null;
+  }
+
+  return {
+    billingStatus: member.billingStatus,
+    currentBillingPhase: member.billingRef?.currentBillingPhase ?? null,
+    pulseTrialRedeemedAt: member.billingRef?.pulseTrialRedeemedAt ?? null,
+    stripeSubscriptionLookupKey:
+      member.billingRef?.stripeSubscriptionLookupKey ?? null,
   };
 }
 

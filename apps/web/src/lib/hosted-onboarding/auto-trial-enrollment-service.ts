@@ -23,6 +23,7 @@ import {
 import {
   bindHostedMemberStripeCustomerIdIfMissingTx,
   HostedMemberStripeMutationLockBusyError,
+  readHostedMemberPulseTrialCleanupOwnershipState,
   withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
 import { assertHostedMemberBillingStartMessagingReady } from "./billing-start-preconditions";
@@ -30,11 +31,13 @@ import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
   classifyHostedPulseTrialCandidateDisposition,
+  classifyHostedPulseTrialCandidateLookupDisposition,
   cancelHostedPulseTrialLoserSubscription,
   cancelHostedPulseTrialLoserSubscriptionsForMember,
   isHostedPulseTrialSubscriptionForKnownPolicy,
   type HostedPulseTrialCandidateDisposition,
 } from "./pulse-trial-subscription-cleanup";
+import { createHostedStripeSubscriptionLookupKey } from "./contact-privacy";
 import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
@@ -61,12 +64,14 @@ import {
 const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
 const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
-// The finalization transaction holds a pooled connection and the member row
-// lock, and it now contains database work only: the bounded lock acquisition,
-// one member snapshot read, at most one customer bind, the billing write, and
-// the activation write. The sibling reservation transaction budgets 15 seconds
-// for the lock plus read plus bind subset, so 30 seconds is double that budget
-// for roughly double the statements.
+// The common-path finalization transaction holds a pooled connection and the
+// member row lock, and contains database work only: the bounded lock
+// acquisition, one member snapshot read, at most one customer bind, the billing
+// write, and the activation write. The sibling reservation transaction budgets
+// 15 seconds for the lock plus read plus bind subset, so 30 seconds is double
+// that budget for roughly double the statements. The rare serialized cleanup
+// also uses this ceiling, while its Stripe call has the tighter five-second
+// request timeout below.
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 30_000;
 // Loser cleanup still retrieves and cancels Stripe subscriptions while it holds
 // the member lock, so it keeps the provider-sized budget until it is converted
@@ -602,8 +607,9 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
  *    transaction and outside the member lock.
  * 2. Take the member lock in a short database-only transaction, re-read the
  *    member under that lock, and write only from that revalidated state.
- * 3. After the transaction commits, cancel the subscription this attempt lost
- *    with.
+ * 3. After the transaction commits, reacquire the member lock for the rare
+ *    loser cleanup, recheck only database ownership facts, and keep the lock
+ *    until the bounded Stripe cancellation settles.
  *
  * Serialization is preserved because every Stripe mutation of a member's Pulse
  * Trial subscriptions is decided under this same member lock. Phase 2 therefore
@@ -615,8 +621,8 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
  * Moving the provider read out of the lock makes the phase 1 judgement age
  * while the lock is contended, so both time-sensitive halves are revalidated
  * later: phase 2 rechecks the retrieved trial's own expiry against a clock read
- * under the lock, and phase 3 rechecks under the lock that the subscription it
- * is about to cancel is still not the member's current one.
+ * under the lock, and phase 3 keeps serialization through the irreversible
+ * provider effect so no other billing flow can adopt the loser before cancel.
  */
 async function finalizeHostedAutoPulseTrialEnrollment(input: {
   memberId: string;
@@ -666,13 +672,9 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   // error: that keeps the caller retrying until the subscription is either
   // cancelled here or picked up by the loser sweep on the next enrollment.
   if (outcome.cleanupStripeSubscriptionId) {
-    await assertHostedAutoPulseTrialLoserStillLost({
+    await cancelHostedAutoPulseTrialLoserWhileSerialized({
       memberId: input.memberId,
       prisma: input.prisma,
-      subscriptionId: outcome.cleanupStripeSubscriptionId,
-    });
-    await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
-      requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
       stripe: input.stripe,
       subscriptionId: outcome.cleanupStripeSubscriptionId,
     });
@@ -700,51 +702,76 @@ function buildHostedAutoPulseTrialFinalizationBusyError() {
 }
 
 /**
- * Rechecks, under the member lock, that the subscription this attempt is about
- * to cancel is still not the member's current subscription.
+ * Rechecks that the subscription this attempt is about to cancel is still not
+ * current, then keeps the member lock through the bounded Stripe cancellation.
  *
  * The finalization transaction chose the loser and then released the lock, so
  * another serialized billing flow can bind that same subscription as the
  * member's current one before the post-commit cancel runs. Cancelling then
  * would revoke the member's live trial, so ownership is re-read under the same
- * lock every billing write already takes: a flow that committed the change is
- * always visible here. The read is database-only and the lock is released
- * before the Stripe call, so no provider round trip happens under the lock.
+ * lock every billing write already takes and that serialization is retained
+ * until the irreversible effect settles. The read compares the candidate's
+ * blind lookup key and never loads or decrypts a Stripe identifier.
  *
  * Only the `current` disposition blocks the cancel. An `eligible` member is one
  * whose enrollment failed on its own state (suspended, blocked billing), and
  * that member still owns an unreferenced live trial that must be cancelled
  * rather than leaked.
  */
-async function assertHostedAutoPulseTrialLoserStillLost(input: {
+async function cancelHostedAutoPulseTrialLoserWhileSerialized(input: {
   memberId: string;
   prisma: PrismaClient;
+  stripe: Stripe;
   subscriptionId: string;
 }): Promise<void> {
-  let disposition: HostedPulseTrialCandidateDisposition;
+  const candidateStripeSubscriptionLookupKey =
+    createHostedStripeSubscriptionLookupKey(input.subscriptionId);
+  if (!candidateStripeSubscriptionLookupKey) {
+    throw new Error("Hosted auto Pulse Trial cleanup subscription id is invalid.");
+  }
+
   try {
-    disposition = await withHostedMemberStripeMutationLockForOps({
+    await withHostedMemberStripeMutationLockForOps({
       acquisitionTimeoutMs:
         HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
       memberId: input.memberId,
       prisma: input.prisma,
-      run: (tx): Promise<HostedPulseTrialCandidateDisposition> =>
-        runWithHostedDomainRootUnwrapCache(async () => {
-          const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+      run: async (tx): Promise<void> => {
+        const ownership =
+          await readHostedMemberPulseTrialCleanupOwnershipState({
             memberId: input.memberId,
             prisma: tx,
           });
-          return classifyHostedPulseTrialCandidateDisposition({
-            billingStatus: currentMember.core.billingStatus,
-            currentBillingPhase:
-              currentMember.billingRef?.currentBillingPhase ?? null,
-            currentStripeSubscriptionId:
-              currentMember.billingRef?.stripeSubscriptionId ?? null,
-            pulseTrialRedeemedAt:
-              currentMember.billingRef?.pulseTrialRedeemedAt ?? null,
-            subscriptionId: input.subscriptionId,
+        const disposition = ownership
+          ? classifyHostedPulseTrialCandidateLookupDisposition({
+              billingStatus: ownership.billingStatus,
+              candidateStripeSubscriptionLookupKey,
+              currentBillingPhase: ownership.currentBillingPhase,
+              currentStripeSubscriptionLookupKey:
+                ownership.stripeSubscriptionLookupKey,
+              pulseTrialRedeemedAt: ownership.pulseTrialRedeemedAt,
+            })
+          : "current";
+
+        if (disposition === "current") {
+          // The trial is now owned by another serialized billing flow. Leave it
+          // untouched and make this stale attempt retry instead of cancelling
+          // live access.
+          throw hostedOnboardingError({
+            code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
+            httpStatus: 409,
+            message: "Murph could not confirm the unused Stripe trial. Try again.",
+            retryable: true,
           });
-        }),
+        }
+
+        await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+          requestOptions:
+            HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+          stripe: input.stripe,
+          subscriptionId: input.subscriptionId,
+        });
+      },
       transactionTimeoutMs:
         HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
     });
@@ -753,18 +780,6 @@ async function assertHostedAutoPulseTrialLoserStillLost(input: {
       throw buildHostedAutoPulseTrialFinalizationBusyError();
     }
     throw error;
-  }
-
-  if (disposition === "current") {
-    // The leftover trial is now owned by whoever won the member. Hand it to the
-    // existing loser sweep, which reruns this ownership check under the lock on
-    // the next enrollment attempt instead of cancelling live access here.
-    throw hostedOnboardingError({
-      code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
-      httpStatus: 409,
-      message: "Murph could not confirm the unused Stripe trial. Try again.",
-      retryable: true,
-    });
   }
 }
 

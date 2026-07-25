@@ -2,6 +2,7 @@ import { HostedBillingStatus, Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedStripeSubscriptionLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import type { HostedMemberStripeBillingRefSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { isHostedPulseTrialSubscriptionForKnownPolicy } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => {
     bindHostedMemberStripeCustomerIdIfMissingTx: vi.fn(),
     lockHostedMemberRow: vi.fn(),
     readHostedMemberBillingSnapshot: vi.fn(),
+    readHostedMemberPulseTrialCleanupOwnershipState: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedStripeBillingPlanConfig: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
@@ -91,6 +93,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", async () => {
     ...actual,
     bindHostedMemberStripeCustomerIdIfMissingTx:
       mocks.bindHostedMemberStripeCustomerIdIfMissingTx,
+    readHostedMemberPulseTrialCleanupOwnershipState:
+      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
   };
 });
 
@@ -198,6 +202,12 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
       };
     });
     mocks.readHostedMemberBillingSnapshot.mockResolvedValue(makeBillingSnapshot());
+    mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: null,
+      pulseTrialRedeemedAt: null,
+      stripeSubscriptionLookupKey: null,
+    });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(makeBillingSnapshot({
       billingRef: {
         currentBillingPhase: "trial",
@@ -2268,7 +2278,7 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
   it("cancels the created trial after the transaction commits when the locked re-read sees paid billing", async () => {
     const prisma = makePrisma();
     mocks.stripe.subscriptions.cancel.mockImplementationOnce(async () => {
-      expect(prisma.isTransactionActive()).toBe(false);
+      expect(prisma.isTransactionActive()).toBe(true);
       return {
         id: "sub_auto_trial_123",
         object: "subscription",
@@ -2336,16 +2346,16 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
           stripeSubscriptionId: "sub_other_trial_123",
         }),
         billingStatus: HostedBillingStatus.active,
-      }))
-      // Another serialized billing flow bound this attempt's loser as the
-      // member's current subscription once the finalization lock was released.
-      .mockResolvedValue(makeBillingSnapshot({
-        billingRef: makePulseTrialBillingRef({
-          stripeCustomerId: "cus_auto_trial_123",
-          stripeSubscriptionId: "sub_auto_trial_123",
-        }),
-        billingStatus: HostedBillingStatus.active,
       }));
+    // Another serialized billing flow bound this attempt's loser as the
+    // member's current subscription once the finalization lock was released.
+    mocks.readHostedMemberPulseTrialCleanupOwnershipState.mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: "trial",
+      pulseTrialRedeemedAt: new Date("2026-06-14T12:00:00.000Z"),
+      stripeSubscriptionLookupKey:
+        createHostedStripeSubscriptionLookupKey("sub_auto_trial_123"),
+    });
 
     await expect(
       ensureHostedAutoPulseTrialEnrollment({
@@ -2365,7 +2375,10 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
 
     expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
-    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(3);
+    expect(
+      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
+    ).toHaveBeenCalledOnce();
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
     expect(prisma.$transaction).toHaveBeenNthCalledWith(
       3,
@@ -2414,8 +2427,11 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
         timeout: 5_000,
       },
     );
+    expect(
+      mocks.readHostedMemberPulseTrialCleanupOwnershipState,
+    ).toHaveBeenCalledOnce();
     expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
-    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(3);
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
