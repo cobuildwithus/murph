@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   issueHostedInvite: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn(),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -20,6 +21,10 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", () => ({
   issueHostedInvite: mocks.issueHostedInvite,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({

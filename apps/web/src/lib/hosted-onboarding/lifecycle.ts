@@ -27,10 +27,27 @@ export function isHostedLapsedBillingStatus(
     && !requiresHostedBillingCheckout(billingStatus);
 }
 
+/**
+ * Whether the member is recovering existing billing rather than acquiring it.
+ * `incomplete` cannot be read from status alone: the Stripe status mapper also
+ * writes it while an already-owned subscription settles, including the expired
+ * pulse-trial transition. Owning a subscription is the durable signal, so it
+ * decides, and every surface asks this one question instead of re-deriving it.
+ */
+export function hasHostedRecoverableBilling(input: {
+  billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
+}): boolean {
+  return isHostedLapsedBillingStatus(input.billingStatus)
+    || (input.billingStatus === HostedBillingStatus.incomplete
+      && input.hasExistingSubscription === true);
+}
+
 export function deriveHostedOnboardingStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
+  hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
   now: Date;
   sessionMatchesInvite: boolean;
@@ -62,6 +79,7 @@ export function deriveHostedOnboardingStage(input: {
 export function deriveHostedPostVerificationStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): HostedPostVerificationStage {
@@ -78,6 +96,7 @@ export function deriveHostedPostVerificationStage(input: {
 
 function hasHostedOnboardingRecoverySurfaceAccess(input: {
   billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): boolean {
@@ -89,6 +108,6 @@ function hasHostedOnboardingRecoverySurfaceAccess(input: {
     && (
       hasHostedMemberOwnActiveBilling(input)
       || input.sponsoredAccessActive === true
-      || isHostedLapsedBillingStatus(input.billingStatus)
+      || hasHostedRecoverableBilling(input)
     );
 }

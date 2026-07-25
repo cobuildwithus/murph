@@ -7304,6 +7304,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
     [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
     [HostedBillingStatus.unpaid, "sent-billing-inactive-notice"],
+    // `incomplete` reaches here only because the fixture owns a subscription;
+    // a first-time `incomplete` member has none and stays on the signup path.
+    [HostedBillingStatus.incomplete, "sent-billing-inactive-notice"],
   ] as const)(
     "answers a %s member on their bound home chat instead of dropping the text",
     async (billingStatus, expectedReason) => {
@@ -7423,24 +7426,28 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("ignores a lapsed bound-home message when the access decision has no user notice", async () => {
+  it("leaves a bound-home member with no billing to recover on the acquisition path", async () => {
     const fixture = await buildPausedHostedMemberHomeRouteFixture();
-    const scheduledTasks: Array<() => Promise<void>> = [];
     mocks.readHostedRuntimeAiAccessDecision.mockResolvedValueOnce({
       allowed: false,
-      reason: "trial_expired_pending_billing",
+      reason: "hosted_access_inactive",
       retryAfter: new Date("2026-07-23T12:15:00.000Z"),
       userNotice: null,
     });
     const prisma = asPrismaTransactionClient({
-      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
-      hostedMember: {
-        findUnique: vi.fn().mockResolvedValue(fixture.member),
+      hostedLinqProviderEvent: {
+        createMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
       },
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedMember: { findUnique: vi.fn().mockResolvedValue(fixture.member) },
       hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
     });
 
-    const response = await handleHostedOnboardingLinqWebhook({
+    // No notice means there is no billing to recover, so this member must stay on
+    // the signup journey rather than being answered as a lapsed member. The
+    // permanent-route guard still owns what happens at the storage layer.
+    await expect(handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         createdAt: "2026-07-23T12:00:00.000Z",
@@ -7449,43 +7456,22 @@ describe("handleHostedOnboardingLinqWebhook", () => {
             id: fixture.homeChatId,
             owner_handle: {
               handle: fixture.homeLinePhone,
-              id: "handle_owner_home_without_notice",
+              id: "handle_owner_home",
               is_me: true,
               service: "iMessage",
             },
           },
           sent_at: "2026-07-23T12:00:00.000Z",
         },
-        eventId: "evt_paused_home_without_notice",
+        eventId: "evt_home_without_notice",
         service: "iMessage",
       }),
-      scheduleAfterResponse: (task) => {
-        scheduledTasks.push(task);
-      },
       signature: null,
       timestamp: null,
-    });
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_HOME_ROUTE_CHANGED" });
 
-    for (const task of scheduledTasks) {
-      await task();
-    }
-
-    expect(response).toMatchObject({
-      ignored: true,
-      ok: true,
-      reason: "inactive-member-home-route",
-    });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
-    expect(mocks.readHostedRuntimeAiAccessDecision).toHaveBeenCalledWith({
-      memberId: fixture.member.id,
-      noticeSeed: "evt_paused_home_without_notice",
-      now: new Date("2026-07-23T12:00:00.000Z"),
-      prisma,
-    });
-    expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
-    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("appends active-member Linq input even when the usage gate would deny", async () => {
@@ -9672,6 +9658,7 @@ async function buildPausedHostedMemberHomeRouteFixture(input: {
         currentTrialStartedAt: createdAt,
         pulseTrialPolicyVersion: "pulse-trial-2026-06-30-v2",
         pulseTrialRedeemedAt: createdAt,
+        stripeSubscriptionLookupKey: "hbidx:stripe-subscription:v1:existing",
       },
       billingStatus,
       createdAt,

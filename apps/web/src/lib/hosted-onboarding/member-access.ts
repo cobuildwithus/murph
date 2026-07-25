@@ -21,6 +21,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError } from "./errors";
+import { hasHostedRecoverableBilling } from "./lifecycle";
 import type { HostedOnboardingReadClient } from "./shared";
 
 /**
@@ -61,6 +62,7 @@ const hostedRuntimeAiAccessBillingRefSelect =
     currentTrialStartedAt: true,
     pulseTrialPolicyVersion: true,
     pulseTrialRedeemedAt: true,
+    stripeSubscriptionLookupKey: true,
   });
 
 export const hostedMemberPersonAccessSelect = Prisma.validator<Prisma.HostedMemberSelect>()({
@@ -398,6 +400,14 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
     return { allowed: true };
   }
   const ownBillingActive = hasHostedMemberOwnActiveBilling(input.person);
+  // Only a member who already owns billing can recover it. A genuine first-time
+  // subscriber gets no notice, so the caller leaves them on the signup journey.
+  const recoverable = hasHostedRecoverableBilling({
+    billingStatus: input.person.billingStatus,
+    hasExistingSubscription: Boolean(
+      input.person.billingRef?.stripeSubscriptionLookupKey,
+    ),
+  });
   // Every non-suspended member whose own billing is not active carries a notice,
   // so callers on a member-recognized surface can always answer instead of going
   // silent. Suspended and thread-container denials stay notice-less above.
@@ -418,7 +428,9 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
       }).text,
     });
   if (!ownBillingActive && input.person.billingStatus !== HostedBillingStatus.paused) {
-    return lapsedBillingDecision();
+    return recoverable
+      ? lapsedBillingDecision()
+      : buildHostedRuntimeInactiveAccessDecision(input.now);
   }
 
   const billingRef = input.person.billingRef;

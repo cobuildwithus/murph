@@ -7,7 +7,8 @@ import {
   parseJoinInvitePreviewStage,
 } from "./join-invite-preview";
 import { HOSTED_APP_SUBSCRIPTION_PATH } from "@/src/lib/hosted-onboarding/app-routes";
-import { isHostedLapsedBillingStatus } from "@/src/lib/hosted-onboarding/lifecycle";
+import { hasHostedRecoverableBilling } from "@/src/lib/hosted-onboarding/lifecycle";
+import { readHostedMemberOwnsSubscription } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { isHostedMemberSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { redirect } from "next/navigation";
 import { getHostedInviteStatus } from "@/src/lib/hosted-onboarding/invite-service";
@@ -99,7 +100,13 @@ export async function buildJoinInvitePageModel(input: {
     !launchConsent.gateActive
     && lapsedMember
     && !isHostedMemberSuspended(lapsedMember.suspendedAt)
-    && isHostedLapsedBillingStatus(lapsedMember.billingStatus)
+    && hasHostedRecoverableBilling({
+      billingStatus: lapsedMember.billingStatus,
+      hasExistingSubscription: await readHostedMemberOwnsSubscription({
+        billingStatus: lapsedMember.billingStatus,
+        memberId: lapsedMember.id,
+      }),
+    })
     && status.session.authenticated
     && status.session.matchesInvite
   ) {

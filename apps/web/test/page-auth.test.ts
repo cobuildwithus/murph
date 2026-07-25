@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedAppSession: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn().mockResolvedValue(false),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -13,6 +14,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({

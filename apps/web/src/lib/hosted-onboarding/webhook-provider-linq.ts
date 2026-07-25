@@ -6,7 +6,6 @@ import {
 } from "@murphai/hosted-execution";
 
 import { issueHostedInviteTx } from "./invite-service";
-import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -561,17 +560,15 @@ export async function planHostedOnboardingLinqWebhook(input: {
     });
   }
 
-  // A member whose billing lapsed after activation can never be onboarded as a
-  // first contact on their own bound home chat: the pending-bind write would hit
-  // the home-route race guard and 503 on every retry, forever. Answer from their
-  // access decision and stop here instead. Statuses that still owe checkout stay
-  // on the signup-link and fallback-retry paths below, because checkout is their
-  // real recovery surface and this reply would otherwise route an unfinished
-  // subscriber away from it.
+  // A member who already owns billing can never be onboarded as a first contact
+  // on their own bound home chat: the pending-bind write would hit the home-route
+  // race guard and 503 on every retry, forever. Answer from their access decision
+  // and stop here instead. The decision carries a notice only for a member with
+  // billing to recover, so a genuine first-time subscriber falls through to the
+  // signup-link and fallback-retry paths below rather than being answered here.
   if (
     existingMember
     && !existingMemberEffectiveActive
-    && !requiresHostedBillingCheckout(existingMember.billingStatus)
     && incomingHomeLinqChatOwnerLookup?.routing.memberId === existingMember.id
   ) {
     const accessDecision = await readHostedRuntimeAiAccessDecision({
@@ -610,17 +607,6 @@ export async function planHostedOnboardingLinqWebhook(input: {
         );
       }
 
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildIgnoredLinqWebhookPlan("inactive-member-home-route"),
-        buildHostedLinqWebhookPlannerDetails(input.event, context, {
-          accessReason: accessDecision.reason,
-          existingMemberActive: false,
-          existingMemberMatch,
-          homeRoutePresent: true,
-          reason: "inactive-member-home-route",
-          routeStage: "ignored-inactive-member-home-route",
-        }),
-      );
     }
   }
 
