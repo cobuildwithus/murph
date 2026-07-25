@@ -24,6 +24,7 @@ export const hostedConnectionSourceRecordArgs = {
     lastErrorCode: true,
     lastErrorMessage: true,
     lastSeenAt: true,
+    lastDataAt: true,
     resourceAvailabilitySummaryJson: true,
     sourceInstanceKey: true,
     sourceProviderSlug: true,
@@ -47,6 +48,8 @@ export interface HostedDeviceConnectionSource {
   lastErrorMessage: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** Last inbound payload carrying this source's data; null until one has. */
+  lastDataAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,7 +65,16 @@ export interface UpsertHostedDeviceConnectionSourceInput {
   lastErrorMessage?: string | null;
   firstSeenAt?: string | null;
   lastSeenAt?: string | null;
+  /** Omit to preserve the stored arrival signal; the reconcile projection must. */
+  lastDataAt?: string | null;
   now?: string;
+  tx?: HostedPrismaTransactionClient;
+}
+
+export interface MarkHostedDeviceConnectionSourceDataReceivedInput {
+  connectionId: string;
+  now?: string;
+  sourceProviderSlug: string;
   tx?: HostedPrismaTransactionClient;
 }
 
@@ -106,6 +118,8 @@ export class PrismaHostedConnectionSourceStore {
     const hasResourceAvailabilitySummary = hasOwnInputProperty(input, "resourceAvailabilitySummary");
     const hasLastErrorCode = hasOwnInputProperty(input, "lastErrorCode");
     const hasLastErrorMessage = hasOwnInputProperty(input, "lastErrorMessage");
+    const hasLastDataAt = hasOwnInputProperty(input, "lastDataAt");
+    const lastDataAt = hasLastDataAt ? maybeDate(input.lastDataAt) ?? null : null;
     const displayName = hasDisplayName
       ? sanitizeSourceDisplayName(input.displayName)
       : null;
@@ -142,6 +156,13 @@ export class PrismaHostedConnectionSourceStore {
       update.lastErrorMessage = lastErrorMessage;
     }
 
+    // Only an explicit value moves the arrival signal. The reconcile projection
+    // omits it, so a source the provider still lists but no longer feeds keeps
+    // its real last-delivery instant.
+    if (hasLastDataAt) {
+      update.lastDataAt = lastDataAt;
+    }
+
     const record = await prisma.deviceConnectionSource.upsert({
       where: {
         connectionId_sourceInstanceKey: {
@@ -157,6 +178,7 @@ export class PrismaHostedConnectionSourceStore {
         lastErrorCode,
         lastErrorMessage,
         lastSeenAt,
+        lastDataAt,
         resourceAvailabilitySummaryJson: toNullablePrismaJsonValue(resourceAvailabilitySummary),
         sourceInstanceKey,
         sourceProviderSlug,
@@ -167,6 +189,39 @@ export class PrismaHostedConnectionSourceStore {
     });
 
     return mapHostedConnectionSourceRecord(record);
+  }
+
+  /**
+   * Records that an inbound payload carried this source's data. Matching is by
+   * provider slug because that is what the webhook envelope names, and the
+   * update is forward-only so an out-of-order redelivery cannot rewind the
+   * signal a stall is measured against.
+   *
+   * This never creates a source row: a payload that arrives before the connect
+   * projection recorded the source leaves nothing to stamp, and staleness falls
+   * back to `first_seen_at` for a source that has never delivered.
+   */
+  async markConnectionSourceDataReceived(
+    input: MarkHostedDeviceConnectionSourceDataReceivedInput,
+  ): Promise<number> {
+    const prisma = input.tx ?? this.prisma;
+    const lastDataAt = resolveSourceTimestamp(input.now, new Date());
+    const result = await prisma.deviceConnectionSource.updateMany({
+      where: {
+        connectionId: requireConnectionId(input.connectionId),
+        sourceProviderSlug: normalizeSourceProviderSlug(input.sourceProviderSlug),
+        OR: [
+          { lastDataAt: null },
+          { lastDataAt: { lt: lastDataAt } },
+        ],
+      },
+      data: {
+        lastDataAt,
+        updatedAt: lastDataAt,
+      },
+    });
+
+    return result.count;
   }
 
   async markConnectionSourcesDisconnected(
@@ -290,6 +345,7 @@ export function mapHostedConnectionSourceRecord(
     lastErrorCode: sanitizeSourceErrorCode(record.lastErrorCode),
     lastErrorMessage: omitHostedSqlErrorText(record.lastErrorMessage),
     lastSeenAt: record.lastSeenAt.toISOString(),
+    lastDataAt: record.lastDataAt?.toISOString() ?? null,
     resourceAvailabilitySummary: sanitizeResourceAvailabilitySummary(
       readResourceAvailabilitySummary(record.resourceAvailabilitySummaryJson),
     ),

@@ -1052,7 +1052,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
-        proration_behavior: "none",
       },
       {
         idempotencyKey: expect.stringMatching(
@@ -1415,7 +1414,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
-        proration_behavior: "none",
       },
       {
         idempotencyKey: expect.stringMatching(
@@ -1427,6 +1425,9 @@ describe("startHostedPulseTrialPaidPlan", () => {
       "sub_123",
       {
         billing_cycle_anchor: "now",
+        // The card lives on the customer here, so the resume must carry it onto
+        // the subscription or the cycle invoice it creates cannot be paid.
+        default_payment_method: "pm_123",
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
       },
       {

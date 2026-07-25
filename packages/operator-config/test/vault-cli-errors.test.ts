@@ -48,6 +48,25 @@ describe('describeVaultCliFailure', () => {
     ).toBe('LINQ_API_REQUEST_FAILED (http 404)')
   })
 
+  test('carries the provider code, request id, and message for debugging', () => {
+    const failure = describeVaultCliFailure(
+      new VaultCliError('ELEVENLABS_API_REQUEST_FAILED', 'rejected', {
+        elapsedMs: 41,
+        failureStage: 'http',
+        providerErrorCode: 'voice_not_found',
+        providerErrorMessage:
+          "A voice with voice_id 'voice_probe' was not found.",
+        providerRequestId: 'c080176137ecfe',
+        status: 404,
+      }),
+    )
+
+    expect(failure).toBe(
+      'ELEVENLABS_API_REQUEST_FAILED (http 404, 41ms, voice_not_found, request c080176137ecfe): ' +
+        "A voice with voice_id 'voice_probe' was not found.",
+    )
+  })
+
   test('returns null for errors that carry no provider diagnosis', () => {
     expect(describeVaultCliFailure(new Error('boom'))).toBeNull()
     expect(describeVaultCliFailure('boom')).toBeNull()

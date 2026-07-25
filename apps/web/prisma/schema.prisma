@@ -65,6 +65,7 @@ model DeviceConnectionSource {
   lastErrorMessage                String?          @map("last_error_message")
   firstSeenAt                     DateTime         @map("first_seen_at")
   lastSeenAt                      DateTime         @map("last_seen_at")
+  lastDataAt                      DateTime?        @map("last_data_at")
   createdAt                       DateTime         @default(now()) @map("created_at")
   updatedAt                       DateTime         @updatedAt @map("updated_at")
   connection                      DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)

@@ -49,6 +49,23 @@ describe("resolveSmokeWorkerBaseUrl", () => {
   });
 });
 
+const CONTAINER_SMOKE_PATH = "/internal/deploy/container-smoke";
+
+// The smoke appends a per-attempt query param, so match on pathname rather than
+// suffix.
+function isContainerSmokeRequest(url: string): boolean {
+  return new URL(url).pathname === CONTAINER_SMOKE_PATH;
+}
+
+// The bundle-identity phase carries no feature flags; the direct R2 and live model
+// turn phases are separate later requests that must not be answered by it.
+function isBundleOnlyContainerSmokeRequest(url: string): boolean {
+  const parsed = new URL(url);
+  return parsed.pathname === CONTAINER_SMOKE_PATH
+    && parsed.searchParams.get("directR2PresignedPut") !== "1"
+    && parsed.searchParams.get("liveModelTurn") !== "1";
+}
+
 function createCodexShellSmokeResult() {
   return {
     cliSurfaceContractBytes: 37282,
@@ -439,7 +456,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isBundleOnlyContainerSmokeRequest(String(url))) {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -469,9 +486,7 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    const containerCall = fetchCalls.find((entry) =>
-      entry.url === "https://worker.example.test/internal/deploy/container-smoke"
-    );
+    const containerCall = fetchCalls.find((entry) => isContainerSmokeRequest(entry.url));
     expect(containerCall).toBeDefined();
     expect(containerCall?.method).toBe("POST");
     const headers = new Headers(containerCall?.headers);
@@ -506,7 +521,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke?directR2PresignedPut=1")) {
+      if (new URL(String(url)).searchParams.get("directR2PresignedPut") === "1") {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -543,9 +558,10 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    expect(fetchCalls).toContain(
-      "https://worker.example.test/internal/deploy/container-smoke?directR2PresignedPut=1",
-    );
+    expect(fetchCalls.some((entry) =>
+      isContainerSmokeRequest(entry)
+      && new URL(entry).searchParams.get("directR2PresignedPut") === "1"
+    )).toBe(true);
   });
 
   it("can request the deployed runner live model turn smoke", async () => {
@@ -575,7 +591,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isBundleOnlyContainerSmokeRequest(String(url))) {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -632,9 +648,7 @@ describe("runSmokeHostedDeploy", () => {
       },
     });
 
-    expect(fetchCalls).toContain(
-      "https://worker.example.test/internal/deploy/container-smoke",
-    );
+    expect(fetchCalls.some((entry) => isBundleOnlyContainerSmokeRequest(entry))).toBe(true);
     const liveCall = fetchCalls
       .map((entry) => new URL(entry))
       .find((entry) => entry.searchParams.get("liveModelTurn") === "1");
@@ -667,7 +681,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isBundleOnlyContainerSmokeRequest(String(url))) {
         return new Response(JSON.stringify({
           ok: true,
           runnerContainer: {
@@ -862,6 +876,326 @@ describe("runSmokeHostedDeploy", () => {
     );
   });
 
+  it("scopes each runner container smoke attempt to its own container instance", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-attempt-scope-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const smokeAttempts: (string | null)[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        const attempt = new URL(String(url)).searchParams.get("attempt");
+        smokeAttempts.push(attempt);
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: smokeAttempts.length < 3
+              ? {
+                  buildSkipped: false,
+                  bundleFingerprint: "stale-bundle",
+                  sourceFingerprint: "stale-source",
+                }
+              : {
+                  buildSkipped: false,
+                  bundleFingerprint: "expected-bundle",
+                  sourceFingerprint: "expected-source",
+                },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "3",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    // Distinct attempt values are what give each retry a fresh smoke Durable
+    // Object, so a pre-rollout container cannot be re-read for the whole run.
+    expect(smokeAttempts).toEqual(["1", "2", "3"]);
+  });
+
+  it("runs the live model turn against the container the bundle phase proved current", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-live-after-retry-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    // Attempt 1 is the pre-rollout container. Once the bundle phase converges on
+    // attempt 2, the live model turn must stay on attempt 2: its failures are
+    // non-retryable, so returning to the stale attempt-1 container would hard-fail
+    // the deploy in exactly the rollout window this is meant to survive.
+    const staleAttempts = new Set(["1"]);
+    const liveAttempts: (string | null)[] = [];
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        const parsed = new URL(String(url));
+        const attempt = parsed.searchParams.get("attempt");
+        const liveModelTurn = parsed.searchParams.get("liveModelTurn") === "1";
+        if (liveModelTurn) {
+          liveAttempts.push(attempt);
+        }
+        const stale = attempt !== null && staleAttempts.has(attempt);
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ...(liveModelTurn
+              ? {
+                  liveModelTurn: {
+                    durationMs: 1234,
+                    egressGrantConsumed: true,
+                    model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+                    stdoutBytes: 128,
+                  },
+                }
+              : {}),
+            ok: true,
+            runnerBundle: stale
+              ? {
+                  buildSkipped: false,
+                  bundleFingerprint: "stale-bundle",
+                  sourceFingerprint: "stale-source",
+                }
+              : {
+                  buildSkipped: false,
+                  bundleFingerprint: "expected-bundle",
+                  sourceFingerprint: "expected-source",
+                },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    await runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "3",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    });
+
+    expect(liveAttempts).toEqual(["2"]);
+  });
+
+  it("stops waiting for the runner container rollout once the wall-clock budget is spent", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-max-wait-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    let smokeCalls = 0;
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        smokeCalls += 1;
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "stale-bundle",
+              sourceFingerprint: "stale-source",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    // A zero budget makes the deadline unreachable on the first retry decision, so
+    // the gate reports its own failure instead of outliving the deploy job.
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "0",
+        HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "0",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+        HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+      },
+    })).rejects.toThrow("runner container smoke did not converge within 0ms");
+
+    expect(smokeCalls).toBe(1);
+  });
+
+  it("lets the wall-clock budget preempt a much larger attempt ceiling", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-budget-preempt-"));
+    const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
+    await mkdir(path.dirname(manifestPath), { recursive: true });
+    await writeFile(
+      manifestPath,
+      `${JSON.stringify({
+        buildSkipped: false,
+        bundleFingerprint: "expected-bundle",
+        sourceFingerprint: "expected-source",
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    let smokeCalls = 0;
+    // Drive elapsed time off the smoke-call count rather than real sleeping or a
+    // fixed call sequence, so the assertion does not depend on how many times
+    // Date.now happens to be read. The budget must stop the loop long before the
+    // 300-attempt ceiling, which is the relationship that let a stalled rollout
+    // outlive the deploy job.
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => smokeCalls * 5_000);
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      if (isContainerSmokeRequest(String(url))) {
+        smokeCalls += 1;
+        return new Response(JSON.stringify({
+          ok: true,
+          runnerContainer: {
+            codexShell: createCodexShellSmokeResult(),
+            ok: true,
+            runnerBundle: {
+              buildSkipped: false,
+              bundleFingerprint: "stale-bundle",
+              sourceFingerprint: "stale-source",
+            },
+            service: "cloudflare-hosted-runner-node",
+          },
+        }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected smoke request: ${String(url)}`);
+    };
+
+    try {
+      const error = await runSmokeHostedDeploy({
+        fetchImpl,
+        log() {},
+        source: {
+          HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300",
+          HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "10000",
+          HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1000",
+          HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+          HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
+        },
+      }).then(() => null, (reason: unknown) => reason as Error);
+
+      // One retry is allowed under budget, then the deadline stops the loop and the
+      // failure names attempts, elapsed time, and the underlying mismatch.
+      expect(smokeCalls).toBe(2);
+      expect(error?.message).toContain("runner container smoke did not converge within 10000ms");
+      expect(error?.message).toContain("(2 attempts, 10000ms elapsed)");
+      expect(error?.message).toContain("did not run the expected runner bundle");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("rejects a negative runner container smoke wall-clock budget", async () => {
+    const fetchImpl = async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/")) {
+        return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner" }), {
+          status: 200,
+        });
+      }
+      if (String(url).endsWith("/health")) {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      throw new Error(`Invalid wall-clock budget should fail before ${String(url)}.`);
+    };
+
+    await expect(runSmokeHostedDeploy({
+      fetchImpl,
+      log() {},
+      source: {
+        HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
+        HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "-1",
+        HOSTED_EXECUTION_SMOKE_WORKER_BASE_URL: "https://worker.example.test",
+      },
+    })).rejects.toThrow("HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS must be a non-negative integer.");
+  });
+
   it("retries the deploy-signed runner container smoke until the expected bundle is active", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-smoke-retry-manifest-"));
     const manifestPath = path.join(root, ".deploy", "runner-bundle", ".murph-runner-bundle-manifest.json");
@@ -890,9 +1224,9 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isContainerSmokeRequest(String(url))) {
         const smokeAttempt = fetchCalls.filter((entry) =>
-          entry.endsWith("/internal/deploy/container-smoke")
+          isContainerSmokeRequest(entry)
         ).length;
         return new Response(JSON.stringify({
           ok: true,
@@ -934,7 +1268,7 @@ describe("runSmokeHostedDeploy", () => {
     });
 
     expect(fetchCalls.filter((entry) =>
-      entry.endsWith("/internal/deploy/container-smoke")
+      isContainerSmokeRequest(entry)
     )).toHaveLength(2);
     expect(logs.some((message) =>
       message.startsWith("Runner container smoke attempt 1/2 failed (")
@@ -970,9 +1304,9 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isContainerSmokeRequest(String(url))) {
         const smokeAttempt = fetchCalls.filter((entry) =>
-          entry.endsWith("/internal/deploy/container-smoke")
+          isContainerSmokeRequest(entry)
         ).length;
         if (smokeAttempt === 1) {
           return new Response(JSON.stringify({ error: "Invalid request." }), { status: 400 });
@@ -1010,7 +1344,7 @@ describe("runSmokeHostedDeploy", () => {
     });
 
     expect(fetchCalls.filter((entry) =>
-      entry.endsWith("/internal/deploy/container-smoke")
+      isContainerSmokeRequest(entry)
     )).toHaveLength(2);
   });
 
@@ -1038,7 +1372,7 @@ describe("runSmokeHostedDeploy", () => {
         return new Response(JSON.stringify({ ok: true }), { status: 200 });
       }
 
-      if (String(url).endsWith("/internal/deploy/container-smoke")) {
+      if (isContainerSmokeRequest(String(url))) {
         return new Response(
           JSON.stringify({
             access_key: "fixture-access-value",

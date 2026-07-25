@@ -3,6 +3,8 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 
+import { readHostedMemberOwnsSubscription } from "./hosted-member-billing-store";
+
 import type { HostedAppSession } from "./app-session";
 import { type HostedMemberCoreState } from "./hosted-member-store";
 import {
@@ -114,6 +116,10 @@ export async function redirectHostedDashboardCheckoutIfNeeded(
 
   const stageWithoutSponsoredAccess = deriveHostedPostVerificationStage({
     billingStatus: member.billingStatus,
+    hasExistingSubscription: await readHostedMemberOwnsSubscription({
+      billingStatus: member.billingStatus,
+      memberId: member.id,
+    }),
     suspendedAt: member.suspendedAt,
   });
   if (stageWithoutSponsoredAccess !== "checkout") {

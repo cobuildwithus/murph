@@ -59,6 +59,7 @@ import {
 } from "./store/schema.ts";
 import {
   listConnectionSources as listStoredConnectionSources,
+  markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
   upsertConnectionSource as upsertStoredConnectionSource,
 } from "./store/sources.ts";
 import {
@@ -234,6 +235,7 @@ export class SqliteDeviceSyncStore {
       firstSeenAt: source.firstSeenAt,
       lastErrorCode: source.lastErrorCode,
       lastErrorMessage: source.lastErrorMessage,
+      lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
       resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
       sourceProviderSlug: source.sourceProviderSlug,
@@ -337,6 +339,14 @@ export class SqliteDeviceSyncStore {
 
   markWebhookReceived(accountId: string, now: string): void {
     markStoredWebhookReceived(this.database, accountId, now);
+  }
+
+  markConnectionSourceDataReceived(input: {
+    connectionId: string;
+    now: string;
+    sourceProviderSlug: string;
+  }): number {
+    return markStoredConnectionSourceDataReceived(this.database, input);
   }
 
   markSyncStarted(accountId: string, now: string): void {

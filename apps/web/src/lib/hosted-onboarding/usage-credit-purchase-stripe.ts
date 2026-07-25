@@ -10,6 +10,10 @@ import {
 import { hostedOnboardingError } from "./errors";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  describeHostedStripeError,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
+import {
   HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
 } from "./usage-credit-offers";
@@ -90,8 +94,13 @@ export async function retrieveAndExpireHostedUsageCreditStripeSession(input: {
   } catch (error) {
     session = await retrieveHostedUsageCreditStripeSession(input);
     if (projectHostedUsageCreditStripeSessionState(session) === "checkout_open") {
-      throw buildHostedUsageCreditStripeUnavailableError(error);
+      throw buildHostedUsageCreditStripeUnavailableError(
+        error,
+        "checkout.sessions.expire",
+      );
     }
+    // The re-read already closed the session, so this rejection is absorbed.
+    logHostedStripeFailure({ error, operationName: "checkout.sessions.expire" });
     return session;
   }
 
@@ -111,7 +120,10 @@ async function retrieveHostedUsageCreditStripeSession(input: {
   try {
     session = await input.stripe.checkout.sessions.retrieve(input.sessionId);
   } catch (error) {
-    throw buildHostedUsageCreditStripeUnavailableError(error);
+    throw buildHostedUsageCreditStripeUnavailableError(
+      error,
+      "checkout.sessions.retrieve",
+    );
   }
   assertHostedUsageCreditStripeSessionMatchesPurchase({
     purchase: input.purchase,
@@ -242,7 +254,7 @@ export async function assertHostedUsageCreditStripePriceMatchesPurchase(input: {
       expand: ["currency_options"],
     });
   } catch (error) {
-    throw buildHostedUsageCreditStripeUnavailableError(error);
+    throw buildHostedUsageCreditStripeUnavailableError(error, "prices.retrieve");
   }
 
   if (price.id !== priceId || price.object !== "price") {
@@ -364,7 +376,11 @@ function buildHostedUsageCreditPriceConfigurationError(reason: string) {
   });
 }
 
-export function buildHostedUsageCreditStripeUnavailableError(error: unknown) {
+export function buildHostedUsageCreditStripeUnavailableError(
+  error: unknown,
+  operationName: string,
+) {
+  logHostedStripeFailure({ error, operationName });
   return hostedOnboardingError({
     code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
     details: describeSafeHostedUsageCreditStripeError(error),
@@ -399,21 +415,13 @@ export function isDefinitiveHostedUsageCreditStripeRequestRejection(
 export function describeSafeHostedUsageCreditStripeError(
   error: unknown,
 ): Record<string, unknown> {
-  if (!error || typeof error !== "object") {
-    return {};
-  }
-  const candidate = error as {
-    code?: unknown;
-    rawType?: unknown;
-    requestId?: unknown;
-    statusCode?: unknown;
-    type?: unknown;
-  };
+  const fields = describeHostedStripeError(error);
+  const providerErrorType = fields.type ?? fields.rawType;
+
   return {
-    ...(typeof candidate.code === "string" ? { providerErrorCode: candidate.code } : {}),
-    ...(typeof candidate.rawType === "string" ? { providerErrorType: candidate.rawType } : {}),
-    ...(typeof candidate.type === "string" ? { providerErrorType: candidate.type } : {}),
-    ...(typeof candidate.statusCode === "number" ? { statusCode: candidate.statusCode } : {}),
-    ...(typeof candidate.requestId === "string" ? { providerRequestIdPresent: true } : {}),
+    ...(fields.code ? { providerErrorCode: fields.code } : {}),
+    ...(providerErrorType ? { providerErrorType } : {}),
+    ...(fields.statusCode === null ? {} : { statusCode: fields.statusCode }),
+    ...(fields.requestId ? { providerRequestIdPresent: true } : {}),
   };
 }

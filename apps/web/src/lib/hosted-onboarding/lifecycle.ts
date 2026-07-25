@@ -14,10 +14,40 @@ export function requiresHostedBillingCheckout(
     || billingStatus === HostedBillingStatus.incomplete;
 }
 
+/**
+ * Billing that lapsed after activation (`paused`, `past_due`, `canceled`,
+ * `unpaid`). These members already completed checkout once, so they recover from
+ * the existing billing surface rather than a fresh checkout or a support-only
+ * dead end. Statuses that still owe first-time checkout are excluded.
+ */
+export function isHostedLapsedBillingStatus(
+  billingStatus: HostedBillingStatus,
+): boolean {
+  return billingStatus !== HostedBillingStatus.active
+    && !requiresHostedBillingCheckout(billingStatus);
+}
+
+/**
+ * Whether the member is recovering existing billing rather than acquiring it.
+ * `incomplete` cannot be read from status alone: the Stripe status mapper also
+ * writes it while an already-owned subscription settles, including the expired
+ * pulse-trial transition. Owning a subscription is the durable signal, so it
+ * decides, and every surface asks this one question instead of re-deriving it.
+ */
+export function hasHostedRecoverableBilling(input: {
+  billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
+}): boolean {
+  return isHostedLapsedBillingStatus(input.billingStatus)
+    || (input.billingStatus === HostedBillingStatus.incomplete
+      && input.hasExistingSubscription === true);
+}
+
 export function deriveHostedOnboardingStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
   expiresAt: Date;
+  hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
   now: Date;
   sessionMatchesInvite: boolean;
@@ -35,7 +65,7 @@ export function deriveHostedOnboardingStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
+  if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
@@ -49,6 +79,7 @@ export function deriveHostedOnboardingStage(input: {
 export function deriveHostedPostVerificationStage(input: {
   activationPending?: boolean;
   billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
   sponsoredAccessActive?: boolean;
   suspendedAt?: Date | null;
 }): HostedPostVerificationStage {
@@ -56,9 +87,27 @@ export function deriveHostedPostVerificationStage(input: {
     return "blocked";
   }
 
-  if (hasHostedMemberOwnActiveBilling(input) || input.sponsoredAccessActive === true) {
+  if (hasHostedOnboardingRecoverySurfaceAccess(input)) {
     return resolveHostedAccessibleOnboardingStage(input.activationPending);
   }
 
   return requiresHostedBillingCheckout(input.billingStatus) ? "checkout" : "blocked";
+}
+
+function hasHostedOnboardingRecoverySurfaceAccess(input: {
+  billingStatus: HostedBillingStatus;
+  hasExistingSubscription?: boolean;
+  sponsoredAccessActive?: boolean;
+  suspendedAt?: Date | null;
+}): boolean {
+  // This is a web-navigation decision, not runtime entitlement. Members whose
+  // billing lapsed after activation stay dashboard-accessible so existing
+  // billing can be resumed without entering a fresh checkout or a support-only
+  // dead end.
+  return !isHostedMemberSuspended(input.suspendedAt)
+    && (
+      hasHostedMemberOwnActiveBilling(input)
+      || input.sponsoredAccessActive === true
+      || hasHostedRecoverableBilling(input)
+    );
 }

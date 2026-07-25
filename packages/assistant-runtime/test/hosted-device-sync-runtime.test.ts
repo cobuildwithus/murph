@@ -678,6 +678,94 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("sync carries the source arrival signal and merges it monotonically", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "source-arrival",
+        provider: "demo",
+        state: begin.state,
+      });
+      const buildSnapshotWith = (lastDataAt: string | null, lastSeenAt: string) =>
+        buildRuntimeSnapshot({
+          connectionId: "hosted_conn_source_arrival",
+          externalAccountId: connected.account.externalAccountId,
+          sources: [
+            {
+              displayName: "Garmin",
+              firstSeenAt: "2026-04-01T09:00:00.000Z",
+              lastErrorCode: null,
+              lastErrorMessage: null,
+              lastSeenAt,
+              lastDataAt,
+              resourceCount: 2,
+              sourceInstanceKey: "hosted-source-garmin",
+              sourceProviderSlug: "garmin",
+              status: "connected",
+            },
+          ],
+        });
+      let snapshot = buildSnapshotWith("2026-04-05T09:00:00.000Z", "2026-04-05T09:00:00.000Z");
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during sync");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during sync");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+      const readArrival = () =>
+        getStore(service).listConnectionSources({
+          connectionId: connected.account.id,
+        })[0]?.lastDataAt ?? null;
+
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      // A non-null hosted arrival must reach the runner, or every source looks
+      // like it has never delivered and trips the never-delivered rule.
+      assert.equal(readArrival(), "2026-04-05T09:00:00.000Z");
+
+      // A later hosted arrival advances it even when nothing else changed.
+      snapshot = buildSnapshotWith("2026-04-07T09:00:00.000Z", "2026-04-05T09:00:00.000Z");
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-07T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(readArrival(), "2026-04-07T09:00:00.000Z");
+
+      // An older or absent hosted value must never rewind what the runner saw.
+      snapshot = buildSnapshotWith("2026-04-02T09:00:00.000Z", "2026-04-08T09:00:00.000Z");
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-08T09:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(readArrival(), "2026-04-07T09:00:00.000Z");
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("sync seeds hosted connection sources without overwriting unpublished local state", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -703,6 +791,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-04T09:00:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: {
               activity: true,
@@ -718,6 +807,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-04T09:00:00.000Z",
+            lastDataAt: null,
             resourceCount: 0,
             sourceProviderSlug: "legacy",
             status: "connected",
@@ -788,6 +878,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:12:00.000Z",
+            lastDataAt: null,
             resourceCount: 3,
             resourceAvailabilitySummary: {
               activity: true,
@@ -961,6 +1052,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: "HISTORICAL_DATA_RECONNECT_REQUIRED",
             lastErrorMessage: "Historical data remained incomplete.",
             lastSeenAt: "2026-04-06T09:25:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: { activity: true, sleep: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -1012,6 +1104,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:30:00.000Z",
+            lastDataAt: null,
             resourceCount: 1,
             resourceAvailabilitySummary: { activity: true },
             sourceInstanceKey: hostedSourceInstanceKey,
@@ -1103,6 +1196,7 @@ describe("hosted device-sync runtime", () => {
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: "2026-04-06T09:15:00.000Z",
+            lastDataAt: null,
             resourceCount: 2,
             resourceAvailabilitySummary: {
               activity: true,
@@ -1190,6 +1284,94 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test("reconciliation projects an arrival-only source change", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "source-arrival-projection",
+        provider: "demo",
+        state: begin.state,
+      });
+      const baselineSource = {
+        displayName: null,
+        firstSeenAt: "2026-04-06T09:00:00.000Z",
+        lastDataAt: "2026-04-06T09:30:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:05:00.000Z",
+        resourceCount: 0,
+        sourceInstanceKey: "hosted-source-garmin",
+        sourceProviderSlug: "garmin",
+        status: "connected" as const,
+      };
+      const snapshot = buildRuntimeSnapshot({
+        capabilities: { connectionSourceApply: true },
+        connectionId: "hosted_conn_arrival_projection",
+        externalAccountId: connected.account.externalAccountId,
+        sources: [baselineSource],
+      });
+      const appliedRequests: { updates: { sources?: unknown[] }[] }[] = [];
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates(request) {
+          appliedRequests.push(request);
+          return {
+            appliedAt: "2026-04-06T10:10:01.000Z",
+            updates: [],
+            userId: "member_123",
+          };
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+      const state = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+
+      // Only the arrival advances; everything else matches the baseline. If the
+      // outbound comparator ignored lastDataAt this would be dropped as a no-op
+      // and the hosted row would keep a stale arrival.
+      getStore(service).markConnectionSourceDataReceived({
+        connectionId: connected.account.id,
+        now: "2026-04-06T10:08:00.000Z",
+        sourceProviderSlug: "garmin",
+      });
+
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:10:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state,
+      });
+
+      const projectedSources = appliedRequests
+        .flatMap((request) => request.updates)
+        .flatMap((update) => update.sources ?? []);
+      assert.deepEqual(
+        projectedSources.map((source) => (source as { lastDataAt?: string | null }).lastDataAt),
+        ["2026-04-06T10:08:00.000Z"],
+      );
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
   test("reconciliation projects local connection sources only when hosted supports source apply", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -1266,6 +1448,7 @@ describe("hosted device-sync runtime", () => {
         {
           displayName: null,
           firstSeenAt: "2026-04-06T09:00:00.000Z",
+          lastDataAt: null,
           lastErrorCode: null,
           lastErrorMessage: null,
           lastSeenAt: "2026-04-06T10:05:00.000Z",

@@ -26,6 +26,7 @@ import {
 } from "@/src/components/settings/assistant-model-artwork";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
+import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import { HostedAuthFinishingNotice } from "@/src/components/hosted-onboarding/hosted-auth-shared";
 import { DashboardLegalConsentGate } from "@/src/components/legal/dashboard-legal-consent-gate";
@@ -1322,6 +1323,17 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Section title="Trial Billing Banner">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Shown on Home when a Pulse trial is paused with billing still attached. It is the
+            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
+            to the Subscription controls rather than here.
+          </p>
+          <TrialBillingBanner />
+        </Section>
+
+        <Separator />
 
         <Section title="Active Experiment Banner & Profile Stats">
           <div className="flex items-stretch gap-4">
