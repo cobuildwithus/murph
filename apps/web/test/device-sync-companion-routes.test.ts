@@ -1293,6 +1293,7 @@ describe("device sync companion routes", () => {
         },
       ]);
       mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
         createdAt: "2026-07-25T18:00:00.000Z",
         eventType: "daily.data.workouts.updated",
         sourceProviderSlug: "health_connect",
@@ -1315,6 +1316,136 @@ describe("device sync companion routes", () => {
         sourceProviderSlug: "health_connect",
         userId: "member_1",
       });
+    });
+
+    it("invalidates Health Connect receipts older than a disconnected source", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      mocks.listConnectionSources.mockResolvedValue([
+        {
+          resourceAvailabilitySummary: { sleep: true },
+          sourceProviderSlug: "apple_health_kit",
+          status: "connected",
+          updatedAt: "2026-07-25T17:00:00.000Z",
+        },
+        {
+          resourceAvailabilitySummary: { workouts: true },
+          sourceProviderSlug: "health_connect",
+          status: "disconnected",
+          updatedAt: "2026-07-25T19:00:00.000Z",
+        },
+      ]);
+      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-25T18:00:00.000Z",
+        eventType: "daily.data.workouts.updated",
+        sourceProviderSlug: "health_connect",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "health_connect",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: null,
+        resources: {},
+      });
+    });
+
+    it("accepts a Health Connect receipt newer than a disconnected source projection", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      mocks.listConnectionSources.mockResolvedValue([{
+        resourceAvailabilitySummary: { workouts: true },
+        sourceProviderSlug: "health_connect",
+        status: "disconnected",
+        updatedAt: "2026-07-25T18:00:00.000Z",
+      }]);
+      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-25T19:00:00.000Z",
+        eventType: "daily.data.workouts.updated",
+        sourceProviderSlug: "health_connect",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "health_connect",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: "2026-07-25T19:00:00.000Z",
+        resources: {
+          workouts: { lastReceivedAt: "2026-07-25T19:00:00.000Z" },
+        },
+      });
+    });
+
+    it("accepts the first source-attributed receipt before its source projection exists", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "active",
+      }]);
+      mocks.listConnectionSources.mockResolvedValue([{
+        resourceAvailabilitySummary: { sleep: true },
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+        updatedAt: "2026-07-25T17:00:00.000Z",
+      }]);
+      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-25T18:00:00.000Z",
+        eventType: "daily.data.workouts.updated",
+        sourceProviderSlug: "health_connect",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "health_connect",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: "2026-07-25T18:00:00.000Z",
+        resources: {
+          workouts: { lastReceivedAt: "2026-07-25T18:00:00.000Z" },
+        },
+      });
+    });
+
+    it("does not use scoped receipts from a connection requiring reauthorization", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listConnectionsForUser.mockResolvedValue([{
+        id: "dsc_1",
+        provider: "junction",
+        status: "reauthorization_required",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "health_connect",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: null,
+        resources: {},
+      });
+      expect(mocks.listConnectionSources).not.toHaveBeenCalled();
+      expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();
     });
   });
 

@@ -496,13 +496,40 @@ export async function readCompanionDeviceSyncStatus(input: {
   const connections = (await input.store.listConnectionsForUser(input.memberId)).filter(
     (connection) =>
       connection.provider === COMPANION_DEVICE_SYNC_PROVIDER
-      && connection.status !== "disconnected",
+      && (
+        sourceProviderSlug === null
+          ? connection.status !== "disconnected"
+          : connection.status === "active"
+      ),
   );
 
   const resources: Record<string, CompanionDeviceSyncResourceStatus> = {};
+  const sourceReceiptCutoffs = new Map<string, string | null>();
 
   for (const connection of connections) {
     const sources = await input.store.listConnectionSources(connection.id);
+
+    if (sourceProviderSlug !== null) {
+      const matchingSources = sources.filter(
+        (source) =>
+          normalizeJunctionProviderSlug(source.sourceProviderSlug) === sourceProviderSlug,
+      );
+      const hasConnectedSource = matchingSources.some(
+        (source) => source.status === "connected",
+      );
+      const negativeStateCutoff = hasConnectedSource
+        ? null
+        : matchingSources.reduce<string | null>(
+            (latest, source) => maxIsoTimestamp(latest, source.updatedAt),
+            null,
+          );
+
+      // A source transition is negative authority over older receipts, while
+      // still allowing a newly accepted webhook to lead a lagging source
+      // projection. No matching row is also valid during the first-webhook
+      // path, before Junction's source projection has arrived.
+      sourceReceiptCutoffs.set(connection.id, negativeStateCutoff);
+    }
 
     for (const source of sources) {
       // Only currently connected sources contribute "waiting for first data"
@@ -546,6 +573,21 @@ export async function readCompanionDeviceSyncStatus(input: {
     });
 
     for (const signal of signals) {
+      if (sourceProviderSlug !== null) {
+        const connectionId = signal.connectionId;
+        if (!connectionId || !sourceReceiptCutoffs.has(connectionId)) {
+          continue;
+        }
+
+        const cutoff = sourceReceiptCutoffs.get(connectionId) ?? null;
+        if (
+          cutoff
+          && Date.parse(signal.createdAt) <= Date.parse(cutoff)
+        ) {
+          continue;
+        }
+      }
+
       const resource = signal.eventType
         ? readJunctionWebhookResourceName(signal.eventType)
         : null;
