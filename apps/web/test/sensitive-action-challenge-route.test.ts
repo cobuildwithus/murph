@@ -88,6 +88,60 @@ describe("settings sensitive-action challenge route", () => {
     expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
   });
 
+  describe("bundles migration maintenance window", () => {
+    function challengeRequest(kind: string): Request {
+      return new Request(
+        "https://join.example.test/api/settings/sensitive-action-challenge",
+        {
+          body: JSON.stringify({ kind }),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      );
+    }
+
+    it("declines an account-delete challenge before one is created", async () => {
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2099-08-02T14:30:00.000Z");
+
+      const response = await route.POST(challengeRequest("account.delete"));
+
+      expect(response.status).toBe(503);
+      const body = await response.json();
+      expect(body.error.code).toBe("account_deletion_maintenance");
+      expect(body.error.message).toContain("your request was not started");
+      // Nothing is issued, so the member is never asked to approve anything.
+      expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
+
+      vi.unstubAllEnvs();
+    });
+
+    it("leaves every other sensitive action untouched", async () => {
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
+      const response = await route.POST(challengeRequest("vault.export"));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createSensitiveActionChallenge).toHaveBeenCalled();
+
+      vi.unstubAllEnvs();
+    });
+
+    it("never quotes a return time that has already passed", async () => {
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2020-01-01T00:00:00.000Z");
+
+      const response = await route.POST(challengeRequest("account.delete"));
+      const body = await response.json();
+
+      expect(response.status).toBe(503);
+      expect(body.error.message).toContain("Please try again in a few hours.");
+      expect(body.error.message).not.toContain("2020");
+
+      vi.unstubAllEnvs();
+    });
+  });
+
   it("rejects oversized bodies before creating a challenge", async () => {
     const response = await route.POST(new Request(
       "https://join.example.test/api/settings/sensitive-action-challenge",

@@ -553,9 +553,51 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
-  test("shows the member the maintenance-window reason verbatim", async () => {
-    // Asserted verbatim: this is the exact sentence the member reads when the
-    // bundles-migration window declines an account deletion.
+  test("declines deletion at initiation, before approval or vault teardown", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+    const { HostedOnboardingApiError } = await import(
+      "@/src/components/hosted-onboarding/client-api"
+    );
+    // Asserted verbatim: this is the exact sentence the member reads, and it
+    // arrives from the challenge request, not the deletion request.
+    const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
+      + "account right now. Nothing has changed and your request was not started. Please try "
+      + "again after Aug 2, 2026, 2:30 PM UTC.";
+    mocks.authorize.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: "account_deletion_maintenance",
+        message: maintenanceMessage,
+      }),
+    );
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    // Nothing was started: no deletion request, no vault teardown, no reload.
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionEnding).not.toHaveBeenCalled();
+    expect(mocks.publishBrowserVaultSessionInvalidation).not.toHaveBeenCalled();
+    expect(mocks.reloadCurrentHostedAuthDocument).not.toHaveBeenCalled();
+  });
+
+  test("keeps the maintenance reason readable in the open dialog", async () => {
     const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
       + "account right now. Nothing has changed and your request was not started. Please try "
       + "again after Aug 2, 2026, 2:30 PM UTC.";
@@ -579,7 +621,6 @@ describe("HostedDataPrivacySettings", () => {
       root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
     });
 
-    // The member must read why, not a generic retry line.
     expect(container.textContent).toContain(maintenanceMessage);
     expect(container.textContent).not.toContain("Could not delete your account right now.");
   });

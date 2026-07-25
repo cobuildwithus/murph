@@ -36,17 +36,27 @@ export function assertHostedAccountDeletionAvailable(
   });
 }
 
-export function buildHostedAccountDeletionMaintenanceMessage(until: string | undefined): string {
-  const window = formatMaintenanceWindow(until);
+export function buildHostedAccountDeletionMaintenanceMessage(
+  until: string | undefined,
+  nowMs: number = Date.now(),
+): string {
+  const window = formatMaintenanceWindow(until, nowMs);
   return "Murph is in scheduled maintenance, so we can't delete your account right now. "
     + `Nothing has changed and your request was not started. Please try again ${window}.`;
 }
 
-function formatMaintenanceWindow(until: string | undefined): string {
+/**
+ * A return time is only quoted when it is still in the future. An absent,
+ * unparseable, or already-elapsed value falls back to the vaguer sentence,
+ * because telling a member to come back at a time that has passed is worse
+ * than not naming one. An overdue window is an operator problem to fix in the
+ * runbook, never a promise to repeat back.
+ */
+function formatMaintenanceWindow(until: string | undefined, nowMs: number): string {
   const trimmed = until?.trim();
   if (!trimmed) return "in a few hours";
   const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed)) return "in a few hours";
+  if (!Number.isFinite(parsed) || parsed <= nowMs) return "in a few hours";
   return `after ${new Intl.DateTimeFormat("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
