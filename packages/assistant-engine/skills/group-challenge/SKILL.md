@@ -42,6 +42,15 @@ large, still publish the standings the first read proved and say only that the
 cause of the missing data is unverified. Never discard verified scoring data
 because diagnostics failed.
 
+Permission-offer evidence belongs to the read that proved it, and only the most
+recent read counts. So if the scoring read shows the scoring scope
+`not_granted` for an eligible participant, post that offer immediately from
+that read, before any device-status read. Do not make the diagnostic read first
+and then try to offer the scoring scope: the later read replaces the evidence
+and the offer is refused, leaving that member with no consent card. When the
+scoring read needs no offer, the diagnostic read may prove and post an offer
+for `device-sync-status.v0` on its own evidence. One offer per turn either way.
+
 Do not create a hosted group or post
 a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
@@ -363,7 +372,8 @@ automation action rules with a `dailyLocal` schedule and
    to the challenge.
 
    After the model turn has begun, call `murph.group action="read_shared"`
-   once with the exact scoring scope and `device-sync-status.v0`. Pass the
+   with the exact scoring scope alone, then the conditional device-only read
+   described under Challenge share scopes. Pass the
    full selector object for selector scopes; a projection kind alone is never
    authority for every selector. Do not request `profile-name.v0`; the direct
    Web snapshot returns a name only when that member's current exact name-sharing

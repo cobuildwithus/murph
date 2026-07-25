@@ -944,7 +944,10 @@ describe('assistant skill assets', () => {
     expect(raw).toContain('unsupported instead of')
     expect(raw).toContain('murph.group action="read_shared"')
     expect(raw).toContain('After the model turn has begun')
-    expect(raw).toContain('the exact scoring scope and `device-sync-status.v0`')
+    // The scoring and diagnostic scopes must never be requested in one read:
+    // the combined result is refused whole above the model ceiling.
+    expect(raw).not.toContain('the exact scoring scope and `device-sync-status.v0`')
+    expect(raw).toContain('post that offer immediately from')
     expect(raw).toContain('an explicit `grantStatus`, `dataStatus`')
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)

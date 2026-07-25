@@ -360,8 +360,10 @@ silent member up to find that they were automatically entered either.
 `group-challenge` owns the quick roll call and pending-name update. Once people
 are in, use the shared data playfully.
 
-For challenge standings, call `murph.group action="read_shared"` with the
-exact scoring scope and `device-sync-status.v0` after the turn starts. Start
+For challenge standings, `group-challenge` owns the shared-read sequence: call
+`murph.group action="read_shared"` with the exact scoring scope after the turn
+starts, and follow that skill for when a separate device-status read is
+warranted. Do not request both scopes in one read. Start
 with challenge-page participants recorded as `in`, then left join the tool's
 current member results by exact group-scoped `participantId`, never by display
 name. For every requested scope, treat
