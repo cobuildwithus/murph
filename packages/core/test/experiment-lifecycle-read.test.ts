@@ -78,9 +78,11 @@ test("experiment lifecycle reads skip residue that cannot be a document", async 
     // Residue a synced filesystem adds on its own.
     await fs.writeFile(path.join(experimentRoot, ".DS_Store"), "finder", "utf8");
     await fs.writeFile(path.join(experimentRoot, "scratch.txt"), "notes", "utf8");
-    await fs.symlink(
-      path.join(experimentRoot, "sleep-reset.md"),
-      path.join(experimentRoot, "alias-link.md"),
+    // Un-promoted legacy media is inert for document listing too.
+    await fs.writeFile(
+      path.join(experimentRoot, "media/sleep-reset/2026-06-26/baseline.webp"),
+      "image-bytes",
+      "utf8",
     );
 
     const result = await readExperimentLifecycleFrontmatterDocuments({ vaultRoot });
@@ -110,6 +112,59 @@ test("experiment lifecycle reads still fail closed on a stray Markdown document"
         // The rejected path is what makes this diagnosable in production.
         && (error.details as { relativePath?: string }).relativePath
           === "bank/experiments/Sleep Reset Copy.md",
+    );
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("experiment lifecycle reads never report a document hidden below the root as absent", async () => {
+  for (const hidden of [
+    "recovered/sleep-reset.md",
+    "recovered/deeper/still/sleep-reset.md",
+  ]) {
+    const vaultRoot = await makeVault("murph-experiment-lifecycle-hidden-md");
+    const experimentRoot = path.join(vaultRoot, "bank/experiments");
+
+    try {
+      await createExperiment({ slug: "other", title: "Other", vaultRoot });
+      const hiddenPath = path.join(experimentRoot, hidden);
+      await fs.mkdir(path.dirname(hiddenPath), { recursive: true });
+      await fs.writeFile(hiddenPath, "---\nslug: sleep-reset\n---\n", "utf8");
+
+      // Reporting `other` alone would be authoritative absence for sleep-reset,
+      // and callers archive that experiment's automations from this snapshot.
+      await assert.rejects(
+        readExperimentLifecycleFrontmatterDocuments({ vaultRoot }),
+        (error: unknown) =>
+          error instanceof VaultError
+          && error.code === "EXPERIMENT_STORAGE_INVALID"
+          && (error.details as { relativePath?: string }).relativePath
+            === "bank/experiments/recovered",
+        `hidden document ${hidden}`,
+      );
+    } finally {
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("experiment lifecycle reads fail closed on an entry they cannot prove inert", async () => {
+  const vaultRoot = await makeVault("murph-experiment-lifecycle-symlink");
+  const experimentRoot = path.join(vaultRoot, "bank/experiments");
+
+  try {
+    await createExperiment({ slug: "sleep-reset", title: "Sleep Reset", vaultRoot });
+    // A symlink can stand in for a Markdown document or a directory holding one.
+    await fs.symlink(
+      path.join(experimentRoot, "sleep-reset.md"),
+      path.join(experimentRoot, "alias-link.md"),
+    );
+
+    await assert.rejects(
+      readExperimentLifecycleFrontmatterDocuments({ vaultRoot }),
+      (error: unknown) =>
+        error instanceof VaultError && error.code === "EXPERIMENT_STORAGE_INVALID",
     );
   } finally {
     await fs.rm(vaultRoot, { recursive: true, force: true });

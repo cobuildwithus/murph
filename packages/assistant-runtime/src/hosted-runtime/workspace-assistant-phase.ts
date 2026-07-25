@@ -2333,6 +2333,25 @@ async function applyHostedManagedAutomationsBestEffort(input: {
       },
       platform: input.input.runtime.platform,
     });
+
+    // A transient filesystem or lock failure is still owned by the existing
+    // bounded setup-retry ladder. Degrading the stage must not swallow those
+    // and report a successful pass, or a time-bound experiment seed is never
+    // installed and its one-shot goes stale unrecoverably.
+    if (
+      isHostedManagedAutomationSetupRetryableError(result.experimentLifecycleFailure)
+    ) {
+      return buildHostedManagedAutomationFailureResult({
+        error: result.experimentLifecycleFailure,
+        input: input.input,
+        redactedStatus: {
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationExperimentLifecycleFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      });
+    }
   }
 
   if (result.yielded === true) {
