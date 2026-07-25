@@ -149,6 +149,30 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).not.toContain('run a short shell `sleep`')
   })
 
+  it('keeps the group social role active, low-ego, and human-first', () => {
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        conversationScope: 'group',
+      }),
+    )
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput(),
+    )
+
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'The humans are the protagonists, and Murph is an active, low-ego participant—not a passive help desk.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'Create openings, join clearly open room beats, and yield when a specific human owns the exchange.',
+    )
+    expect(groupLayers.staticCacheableCorePrompt).toContain(
+      'neither a funny line nor a blanket preference for silence overrides the actual conversational floor',
+    )
+    expect(directLayers.staticCacheableCorePrompt).not.toContain(
+      'active, low-ego participant',
+    )
+  })
+
   it('allows a loaded skill to split accepted durable input across bounded children', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
     const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
@@ -2208,6 +2232,7 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Execution/artifacts: computer-use, pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.')
+    expect(prompt).toContain('groupchat-comedy for banter, dispatch voice, or a group photo drop')
     expect(prompt).toContain('Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing;')
     expect(prompt).not.toContain(
       'Before asking any experiment onboarding question, perform a bounded vault-first evidence pass',

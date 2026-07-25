@@ -1,16 +1,9 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { MessageCircle } from "lucide-react";
 import { useState } from "react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/src/components/ui/dialog";
+import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
 import {
   SidebarMenuButton,
   SidebarMenuItem,
@@ -19,14 +12,6 @@ import {
   SIDEBAR_NAV_ICON_CLASS,
   SIDEBAR_NAV_ITEM_CLASS,
 } from "./sidebar-nav-classes";
-
-const HostedAuthPanelIsland = dynamic(
-  () => import("@/src/components/hosted-onboarding/hosted-auth-panel-island").then((mod) => mod.HostedAuthPanelIsland),
-  {
-    ssr: false,
-    loading: () => <div className="text-sm text-muted-foreground">Loading sign in...</div>,
-  },
-);
 
 export function SidebarChatWithMurphAuthGate() {
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
@@ -41,25 +26,11 @@ export function SidebarChatWithMurphAuthGate() {
         <MessageCircle className={SIDEBAR_NAV_ICON_CLASS} />
         Chat with Murph
       </SidebarMenuButton>
-      <Dialog open={authDialogOpen} onOpenChange={setAuthDialogOpen}>
-        <DialogContent className="max-w-md p-6 md:p-7">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="text-xl font-bold tracking-tight text-foreground">
-              Log in or sign up
-            </DialogTitle>
-            <DialogDescription>
-              Murph helps you build healthier habits that fit your life.
-            </DialogDescription>
-          </DialogHeader>
-          {authDialogOpen ? (
-            <HostedAuthPanelIsland
-              methods={["phone", "telegram", "email"]}
-              requireLaunchConsentOnCompletion
-              size="compact"
-            />
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <AuthDialog
+        open={authDialogOpen}
+        onOpenChange={setAuthDialogOpen}
+        requireLaunchConsentOnCompletion
+      />
     </SidebarMenuItem>
   );
 }
