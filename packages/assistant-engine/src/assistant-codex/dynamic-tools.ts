@@ -202,16 +202,16 @@ import {
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
 import {
-  executeXSearchDynamicTool,
-  MURPH_X_SEARCH_TOOL,
-  parseXSearchArguments,
-} from './dynamic-tools/x-search.js'
+  executeAskGrokDynamicTool,
+  MURPH_ASK_GROK_TOOL,
+  parseAskGrokArguments,
+} from './dynamic-tools/ask-grok.js'
 import type {
-  XSearchToolArgs,
-  XSearchToolRuntime,
-  XSearchTurnState,
-} from './x-search-tool.js'
-export { MURPH_X_SEARCH_TOOL } from './dynamic-tools/x-search.js'
+  AskGrokToolArgs,
+  AskGrokToolRuntime,
+  AskGrokTurnState,
+} from './ask-grok-tool.js'
+export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -1149,7 +1149,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_TOOL,
   MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
-  MURPH_X_SEARCH_TOOL,
+  MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
@@ -1206,7 +1206,7 @@ export interface MurphDynamicToolAvailability {
   phoneCallsAvailable?: boolean | null
   voiceMemoGenerationAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
-  xSearchAvailable?: boolean | null
+  askGrokAvailable?: boolean | null
 }
 
 type AvailabilityPredicate = (
@@ -1245,7 +1245,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
-    [MURPH_X_SEARCH_TOOL, defaultOff((a) => a.xSearchAvailable)],
+    [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
     ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
@@ -1907,8 +1907,8 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
-      kind: 'x-search'
-      args: XSearchToolArgs
+      kind: 'ask-grok'
+      args: AskGrokToolArgs
     }
   | {
       kind: 'computer-open'
@@ -1958,7 +1958,7 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | {
-      kind: 'invalid-x-search-arguments'
+      kind: 'invalid-ask-grok-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -2216,17 +2216,17 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
-    case MURPH_X_SEARCH_TOOL.name: {
-      const parsed = parseXSearchArguments(request.arguments)
+    case MURPH_ASK_GROK_TOOL.name: {
+      const parsed = parseAskGrokArguments(request.arguments)
       if (!parsed.ok) {
         return {
-          kind: 'invalid-x-search-arguments',
+          kind: 'invalid-ask-grok-arguments',
           validationDigest: parsed.validationDigest,
         }
       }
 
       return {
-        kind: 'x-search',
+        kind: 'ask-grok',
         args: parsed.args,
       }
     }
@@ -2551,8 +2551,8 @@ export async function executeMurphDynamicToolRequest(input: {
   requireHostedGeneratedImageUploader?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
-  xSearchRuntime?: XSearchToolRuntime | null
-  xSearchTurnState?: XSearchTurnState | null
+  askGrokRuntime?: AskGrokToolRuntime | null
+  askGrokTurnState?: AskGrokTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -2583,8 +2583,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid voice memo generation arguments')
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
-    case 'invalid-x-search-arguments':
-      return toolTextResult(false, 'invalid X search arguments')
+    case 'invalid-ask-grok-arguments':
+      return toolTextResult(false, 'invalid ask_grok arguments')
     case 'invalid-progress-arguments':
       return toolTextResult(false, 'invalid progress update arguments')
     case 'invalid-reaction-arguments':
@@ -3009,12 +3009,12 @@ export async function executeMurphDynamicToolRequest(input: {
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
-    case 'x-search': {
-      return await executeXSearchDynamicTool({
+    case 'ask-grok': {
+      return await executeAskGrokDynamicTool({
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
-        xSearchRuntime: input.xSearchRuntime ?? null,
-        xSearchTurnState: input.xSearchTurnState ?? null,
+        askGrokRuntime: input.askGrokRuntime ?? null,
+        askGrokTurnState: input.askGrokTurnState ?? null,
       })
     }
     case 'connected-apps-manage':

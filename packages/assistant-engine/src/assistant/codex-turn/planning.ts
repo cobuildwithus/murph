@@ -744,7 +744,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
-        xSearchAvailable:
+        askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
         vaultFileSendAvailable:
           privateInteractiveAudience &&

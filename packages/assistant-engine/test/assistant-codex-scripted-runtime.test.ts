@@ -23,8 +23,8 @@ import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
 import {
-  createXSearchToolRuntimeFromEnv,
-} from '../src/assistant-codex/x-search-tool.ts'
+  createAskGrokToolRuntimeFromEnv,
+} from '../src/assistant-codex/ask-grok-tool.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -703,7 +703,7 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('enforces the murph.x_search per-turn provider-call ceiling through the real tool loop', {
+  it('enforces the murph.ask_grok per-turn provider-call ceiling through the real tool loop', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -727,25 +727,8 @@ describe('real codex app-server with scripted provider', () => {
               role: 'assistant',
               content: [
                 {
-                  annotations: [
-                    {
-                      end_index: 0,
-                      start_index: 0,
-                      title: 'X post',
-                      type: 'url_citation',
-                      url: 'https://x.com/i/status/1947000000000000001',
-                    },
-                  ],
                   type: 'output_text',
-                  text: JSON.stringify({
-                    posts: [
-                      {
-                        createdAt: '2026-07-21T09:30:00Z',
-                        excerpt: 'Creatine timing does not matter much.',
-                        url: 'https://x.com/i/status/1947000000000000001',
-                      },
-                    ],
-                  }),
+                  text: 'People mostly say creatine timing does not matter much.',
                 },
               ],
             },
@@ -754,18 +737,18 @@ describe('real codex app-server with scripted provider', () => {
         { headers: { 'content-type': 'application/json' } },
       )
     }
-    const xSearchCall = {
+    const askGrokCall = {
       functionCall: {
-        arguments: { action: 'search_posts', query: 'creatine' },
-        name: 'x_search',
+        arguments: { question: 'what are people saying about creatine?' },
+        name: 'ask_grok',
         namespace: 'murph',
       },
     } as const
     scenario.stub.queue(
-      xSearchCall,
-      xSearchCall,
-      xSearchCall,
-      xSearchCall,
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
       { text: 'X_SEARCH_CEILING_OK' },
     )
 
@@ -773,10 +756,10 @@ describe('real codex app-server with scripted provider', () => {
       ...scenario.turnInput,
       dynamicTools: resolveMurphDynamicTools({
         progressUpdatesAvailable: false,
-        xSearchAvailable: true,
+        askGrokAvailable: true,
       }),
       prompt: 'Search X four times, then reply exactly X_SEARCH_CEILING_OK.',
-      xSearchRuntime: createXSearchToolRuntimeFromEnv({
+      askGrokRuntime: createAskGrokToolRuntimeFromEnv({
         env: { XAI_API_KEY: 'xai-sentinel-key' },
         fetchImpl: xaiFetch,
       }),
@@ -790,7 +773,7 @@ describe('real codex app-server with scripted provider', () => {
     const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.functionCallOutputs ?? [])
     expect(functionCallOutputs).toEqual(expect.arrayContaining([
-      expect.stringContaining('untrusted content from X'),
+      expect.stringContaining('untrusted third-party content'),
       expect.stringContaining(
         'X search limit of 3 searches reached for this turn; no search ran',
       ),

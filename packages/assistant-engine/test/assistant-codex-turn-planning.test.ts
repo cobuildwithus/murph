@@ -1454,7 +1454,7 @@ describe('assistant Codex turn planning', () => {
     expect(outputOnly.systemPrompt).not.toContain('Lab test discovery:')
   })
 
-  it('plans murph.x_search only when the turn env carries an xAI API key', async () => {
+  it('plans murph.ask_grok only when the turn env carries an xAI API key', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
@@ -1488,10 +1488,10 @@ describe('assistant Codex turn planning', () => {
       return plan.dynamicTools.map((tool) => tool.name)
     }
 
-    expect(await planToolNamesFor({})).not.toContain('x_search')
-    expect(await planToolNamesFor({ XAI_API_KEY: '   ' })).not.toContain('x_search')
+    expect(await planToolNamesFor({})).not.toContain('ask_grok')
+    expect(await planToolNamesFor({ XAI_API_KEY: '   ' })).not.toContain('ask_grok')
     expect(await planToolNamesFor({ XAI_API_KEY: 'xai-sentinel-key' }))
-      .toContain('x_search')
+      .toContain('ask_grok')
   })
 
   it('co-gates message-target tools from route capability instead of the latest message', async () => {

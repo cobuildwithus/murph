@@ -9,8 +9,8 @@ import {
   createVoiceMemoToolRuntimeFromEnv,
 } from '../../assistant-codex/generate-voice-memo-tool.js'
 import {
-  createXSearchToolRuntimeFromEnv,
-} from '../../assistant-codex/x-search-tool.js'
+  createAskGrokToolRuntimeFromEnv,
+} from '../../assistant-codex/ask-grok-tool.js'
 import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
@@ -192,7 +192,7 @@ export async function executeCodexAssistantTurnAttempt(
   })
   // Null when XAI_API_KEY is absent; the executor then fails closed with a
   // not-configured result instead of attempting a provider call.
-  const xSearchRuntime = createXSearchToolRuntimeFromEnv({
+  const askGrokRuntime = createAskGrokToolRuntimeFromEnv({
     env: input.env ?? process.env,
     fetchImpl: input.providerFetch ?? fetch,
   })
@@ -275,7 +275,7 @@ export async function executeCodexAssistantTurnAttempt(
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
-    xSearchRuntime,
+    askGrokRuntime,
     workingDirectory: input.workingDirectory,
   } as const
 

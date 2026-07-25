@@ -1,9 +1,10 @@
-# murph.x_search: X (Twitter) search tool with pass-through per-call billing
+# murph.ask_grok: ask Grok about X (Twitter), with pass-through per-call billing
 
 ## Outcome
 
-Murph can search X for posts by query and fetch a profile's recent posts, through a
-new `murph.x_search` dynamic tool. On the normal path, every completed provider call
+Murph can ask Grok anything about X (Twitter) — what an account is posting, what
+people are saying about a topic, or what a shared post says — through a new
+`murph.ask_grok` dynamic tool that relays Grok's answer. On the normal path, every completed provider call
 books the provider's exact reported USD cost against the member's existing hosted AI
 usage allowance. Recording is best-effort and post-hoc: a Murph-side accounting
 outage can leave a completed call unbilled, while failed provider calls are never
@@ -27,31 +28,31 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
 
 ## Design decisions (settled; do not re-litigate in implementation)
 
-1. **One tool, `murph.x_search`**, discriminated `action`: `search_posts`
-   (`query` 1–256 chars, required) and `profile_posts` (`username` matching
-   `^@?[A-Za-z0-9_]{1,15}$`, required). Shared optional fields: `lookbackDays`
-   (int 1–30, default 7), `maxResults` (int 1–8, default 5). No pagination/cursors.
-2. **Provider request is fixed-shape, not model-forwarded.** The executor builds a fixed
-   developer prompt from validated input asking for strict JSON
-   (`{"posts":[{"url","createdAt","excerpt"}]}`), pinned model, only the
-   `x_search` tool (with `allowed_x_handles=[username]` for `profile_posts`,
-   `from_date`/`to_date` from `lookbackDays`), bounded `max_output_tokens`, `store: false`.
-   Parse fail-closed: a completed `output[].type="custom_tool_call"` item with an
-   `x_`-prefixed `name` (observed `x_keyword_search`) or a canonical
-   `output[].type="message"` → `content[].type="output_text"` →
-   `annotations[].type="url_citation"` establishes same-response x_search evidence,
-   and every relayed post's globally unique numeric status id must match a
-   `url_citation.url` in that response. xAI citations use
-   `https://x.com/i/status/<id>`. **Attribution scope:** the citation proves post identity only — xAI
-   supplies no attribution metadata (the annotation `title` is the URL repeated),
-   so no model-authored handle is trusted or relayed. Accepted results are
-   normalized to the provider-evidenced handle-less `https://x.com/i/status/<id>`
-   form and carry no author field; `profile_posts` scope is owned solely by the
-   request's `allowed_x_handles`, which the provider enforces. The product
-   promises post-level citation, not account attribution.
-   Invalid JSON fails; a post whose URL is not a
-   canonical X status URL keeps the existing drop behavior; zero valid
-   posts with completed x_search evidence returns an explicit no-results failure.
+1. **One tool, `murph.ask_grok`**, one required field: `question` (a free-text
+   string, 1–500 chars, carrying any post URL or @handle the user mentioned).
+   No actions, no date window, no result count, no pagination. Grok's own
+   x_search handles interpretation, including resolving a pasted post URL.
+2. **One question in, Grok's answer out — no response parsing.** The tool is
+   `murph.ask_grok` with a single `question` string (1–500 chars). The executor
+   sends one fixed-shape request: pinned model, `tools: [{type: "x_search"}]`
+   with no filters, bounded `max_output_tokens`, `store: false`, and a fixed
+   developer instruction to use x_search, include the URL of every post relied
+   on, and never invent posts. The response handling is deliberately minimal:
+   concatenate the assistant `output_text`, strip control/bidi characters,
+   bound the length, and relay it behind an explicit provenance line. No JSON
+   contract, no citation join, no URL validation, no handle logic, no dedupe.
+
+   **Why the earlier evidence-binding design was deleted (2026-07-25).** It
+   demanded strict JSON and admitted a post only if its status id appeared in a
+   same-response `url_citation`. Live testing showed xAI annotates only the
+   posts it quotes inline, so a legitimate answer citing 1 of 3 listed posts was
+   rejected outright: the member got "unusable response" while the call was
+   still billed. Rather than keep tuning a fragile join, the trust model moved
+   from parsing to framing — the answer is labeled untrusted, unverified,
+   third-party prose, and the tool description requires Murph to attribute what
+   it reports to a live X search instead of asserting it as fact. Accepted
+   trade-off, on record: fabricated claims are no longer mechanically filtered.
+
 3. **Billing follows the existing egress pattern exactly** (`runner-egress-intercept.ts`,
    like ElevenLabs/transcription): the interceptor injects the credential, buffers the
    completed response, builds a usage record via a new `buildHostedXaiSearchUsageRecord`
@@ -75,7 +76,7 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    reserve/settle endpoints, no remainder ledgers — post-hoc accrual into
    `HostedAiUsagePeriod` with existing `blockedAt` semantics, same as every other feature.
 5. **Abuse bound = per-turn ceiling in trusted executor state + normal-path real billing.**
-   Max 3 `murph.x_search` provider calls per assistant turn, counted in turn-scoped
+   Max 3 `murph.ask_grok` provider calls per assistant turn, counted in turn-scoped
    executor state (not prompt text). Exceeding returns an explicit
    `x_search_call_limit` failure. Over-allowance members are blocked at the next turn
    admission by the existing gate; worst-case in-turn overshoot (3 × ~$0.01–0.05) is far
@@ -89,11 +90,12 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
    provider fails, the tool returns `success: false` with a specific error code and
    message; the tool description must instruct the model to relay failures plainly and
    never claim a search happened. No silent failure.
-7. **Result hygiene:** at most 8 posts, excerpts ≤ 600 chars, serialized result ≤ 12 KiB
-   (shorten excerpts first, then drop tail posts and mark `partial: true`). Strip control
-   characters and bidi overrides; excerpts are framed in the result as untrusted quoted
-   content, not instructions. Persist nothing beyond the normal thread transcript; no
-   query text or post text in usage rows or structured logs.
+7. **Result hygiene:** the relayed answer is length-bounded so one call cannot
+   flood resident thread context, control and bidi characters are stripped
+   (newlines preserved), and the text is framed as untrusted quoted content
+   rather than instructions. Persist nothing beyond the normal thread
+   transcript; no question text or answer text in usage rows or structured logs.
+
 8. **Config/secrets:** `XAI_API_KEY` plus optional `XAI_X_SEARCH_MODEL` via
    `packages/operator-config/src/xai-runtime.ts`. The Responses URL is pinned to
    `https://api.x.ai/v1/responses`; there is no production base-URL override to forward,
@@ -102,7 +104,7 @@ xAI Responses API (`POST /v1/responses` on `https://api.x.ai`) with the server-s
 
 ## Touch set (expected)
 
-- `packages/assistant-engine/src/assistant-codex/dynamic-tools/x-search.ts` (new) + registration in `dynamic-tools.ts`; availability/capability wiring; per-turn counter in turn state.
+- `packages/assistant-engine/src/assistant-codex/{ask-grok-tool.ts,dynamic-tools/ask-grok.ts}` (new) + registration in `dynamic-tools.ts`; availability/capability wiring; per-turn counter in turn state. The billing record keeps `featureKey: "x-search"` and `triggerKind: "x-search"` deliberately: the usage/pricing layer describes the underlying xAI X search and is independent of the tool's name, so renaming it would churn the verified billing seam for no behavior gain.
 - `packages/hosted-execution/src/assistant-usage.ts` (usage-record builder).
 - `apps/cloudflare/src/runtime-platform/provider-fetch.ts`, `apps/cloudflare/src/runner-egress-intercept.ts` (egress + usage recording), env policy/worker contracts.
 - `apps/web/src/lib/hosted-execution/usage-allowance.ts` (pricing branch).
