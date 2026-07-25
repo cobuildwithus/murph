@@ -344,6 +344,20 @@ class InMemoryPublicIngressStore implements DeviceSyncPublicIngressStore {
     });
   }
 
+  readonly recordedSourceDataArrivals: { connectionId: string; sourceProviderSlug: string }[] = [];
+
+  markConnectionSourceDataReceived(input: {
+    connectionId: string;
+    now: string;
+    sourceProviderSlug: string;
+  }): number {
+    this.recordedSourceDataArrivals.push({
+      connectionId: input.connectionId,
+      sourceProviderSlug: input.sourceProviderSlug,
+    });
+    return 1;
+  }
+
   patchAccountStatus(accountId: string, status: PublicDeviceSyncAccount["status"]): void {
     const account = this.accounts.get(accountId);
 
@@ -2667,6 +2681,48 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
 });
 
+test("public ingress records no source arrival when durable acceptance fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            dataSourceProviderSlug: "garmin",
+            externalAccountId: "demo-abc",
+            eventType: "daily.data.sleep.created",
+            traceId: "trace-acceptance-failure",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted() {
+        throw new Error("durable acceptance failed");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    /durable acceptance failed/u,
+  );
+
+  // Stamping an arrival for a payload that was never durably accepted would
+  // report a stalled carrier as healthy.
+  assert.deepEqual(store.recordedSourceDataArrivals, []);
+});
+
 test("public ingress does not use already-satisfied coalescing for durable webhook work", async () => {
   const store = new InMemoryPublicIngressStore();
   let alreadySatisfiedCalls = 0;
@@ -2971,6 +3027,103 @@ test("public ingress keeps accepted webhook traces when only receipt timestamp p
     store.lastRecordedWebhookTrace?.traceId,
     scopeWebhookTraceId("demo", "demo-abc", "trace-mark-failure"),
   );
+  assert.equal(store.completedWebhookTraceCalls, 1);
+  assert.equal(warn.mock.calls.length, 1);
+});
+
+test("public ingress records source data arrival only for payloads that carried data", async () => {
+  async function handleWebhookWith(parsed: {
+    dataSourceProviderSlug?: string | null;
+    eventType: string;
+    traceId: string;
+  }) {
+    const store = new InMemoryPublicIngressStore();
+    const ingress = createDeviceSyncPublicIngress({
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      registry: createDeviceSyncRegistry([
+        createFakeProvider({
+          async verifyAndParseWebhook() {
+            return {
+              externalAccountId: "demo-abc",
+              jobs: [],
+              ...parsed,
+            };
+          },
+        }),
+      ]),
+      store,
+    });
+
+    const begin = await ingress.startConnection({ provider: "demo" });
+    const connected = await ingress.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "abc",
+    });
+
+    await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+    return { connected, store };
+  }
+
+  const delivered = await handleWebhookWith({
+    dataSourceProviderSlug: "garmin",
+    eventType: "daily.data.sleep.created",
+    traceId: "trace-source-data",
+  });
+  assert.deepEqual(delivered.store.recordedSourceDataArrivals, [
+    {
+      connectionId: delivered.connected.account.id,
+      sourceProviderSlug: "garmin",
+    },
+  ]);
+
+  // A connection lifecycle event proves nothing about the data carrier, so it
+  // must not refresh the arrival signal a stalled source is measured against.
+  const lifecycle = await handleWebhookWith({
+    dataSourceProviderSlug: null,
+    eventType: "provider.connection.created",
+    traceId: "trace-source-lifecycle",
+  });
+  assert.deepEqual(lifecycle.store.recordedSourceDataArrivals, []);
+});
+
+test("public ingress keeps accepted webhooks when only source arrival persistence fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const warn = vi.fn();
+  store.markConnectionSourceDataReceived = () => {
+    throw new Error("arrival write failed");
+  };
+
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            dataSourceProviderSlug: "garmin",
+            externalAccountId: "demo-abc",
+            eventType: "daily.data.sleep.created",
+            traceId: "trace-arrival-failure",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    log: { warn },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
   assert.equal(store.completedWebhookTraceCalls, 1);
   assert.equal(warn.mock.calls.length, 1);
 });
