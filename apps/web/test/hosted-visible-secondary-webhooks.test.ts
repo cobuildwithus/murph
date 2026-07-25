@@ -30,18 +30,25 @@ describe("visible secondary webhook outcomes", () => {
   ] as const)("maps Linq %s to a visible reply", (reason, expectedText) => {
     expect(resolveHostedLinqVisibleSecondaryReply({
       reason,
-      recognizedGroupSender: false,
+      recognizedSender: reason === "family-invite-not-accepted"
+        || reason === "signup-link-already-sent"
+        ? false
+        : true,
     })).toContain(expectedText);
   });
 
-  it("keeps unknown Linq group senders silent but replies to recognized members", () => {
+  it("keeps operational Linq replies limited to recognized members", () => {
     expect(resolveHostedLinqVisibleSecondaryReply({
-      reason: "group-chat",
-      recognizedGroupSender: false,
+      reason: "unattested-direct-chat",
+      recognizedSender: false,
     })).toBeNull();
     expect(resolveHostedLinqVisibleSecondaryReply({
       reason: "group-chat",
-      recognizedGroupSender: true,
+      recognizedSender: false,
+    })).toBeNull();
+    expect(resolveHostedLinqVisibleSecondaryReply({
+      reason: "group-chat",
+      recognizedSender: true,
     })).toContain("group chat");
   });
 
