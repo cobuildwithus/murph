@@ -376,7 +376,7 @@ export function HostedLaunchConsentPrompt({
   const introduction = (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2.5">
-        <p className="max-w-sm font-serif text-2xl font-semibold leading-[1.15] tracking-tight text-balance text-foreground">
+        <p className="font-serif text-2xl font-semibold leading-[1.15] tracking-tight text-foreground">
           {copy.title}
         </p>
         <p className="max-w-[40rem] text-[15px] leading-6 text-pretty text-muted-foreground">
@@ -388,17 +388,17 @@ export function HostedLaunchConsentPrompt({
   );
   const error = errorMessage ? (
     <Alert
-      className="rounded-lg border-destructive/30 bg-destructive/10 px-3.5 py-3 before:hidden"
+      className="rounded-lg border-destructive/25 bg-destructive/[0.07] px-3.5 py-2.5 before:hidden"
       variant="destructive"
     >
-      <AlertTitle>Unable to record consent</AlertTitle>
-      <AlertDescription>{errorMessage}</AlertDescription>
+      <AlertTitle className="sr-only">Unable to record consent</AlertTitle>
+      <AlertDescription className="text-[13px] leading-5">{errorMessage}</AlertDescription>
     </Alert>
   ) : null;
   const primaryButton = (
     <Button
       aria-busy={accepting}
-      className="min-w-0 flex-1"
+      className="min-w-0 flex-1 sm:max-w-[13rem]"
       disabled={actionPending}
       onClick={onContinue}
       size="lg"
@@ -414,7 +414,7 @@ export function HostedLaunchConsentPrompt({
   const actions = (
     <div
       className={cn(
-        "flex items-center gap-3 border-t border-border/70 pt-4",
+        "flex items-center gap-3",
         onDecline ? "justify-between" : "justify-end",
       )}
     >
@@ -509,12 +509,11 @@ function LaunchDocumentLinks({
   return (
     <nav
       aria-label="Consent documents"
-      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs leading-5 text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px] leading-5 text-muted-foreground"
     >
-      <span className="mr-1">Review</span>
       {documents.map((document) => (
         <a
-          className="font-medium text-foreground underline decoration-border underline-offset-4 hover:decoration-foreground"
+          className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
           href={document.href}
           key={document.id}
           rel="noreferrer"

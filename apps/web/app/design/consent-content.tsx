@@ -66,7 +66,7 @@ export function ConsentContent() {
         <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">
           Launch consent
         </h2>
-        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
+        <div className="grid items-start gap-8 lg:grid-cols-2">
           <PreviewFrame label="Onboarding dialog">
             <HostedLaunchConsentPrompt
               documents={DESIGN_LAUNCH_DOCUMENTS}
