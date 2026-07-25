@@ -21,11 +21,11 @@ export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 // transaction against the production pool.
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
-export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 25;
-export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY = 5;
+export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE = 5;
 export const HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS = 10_000;
 
 type HostedRuntimeRecheckSignal = (input: {
+  abortSignal?: AbortSignal;
   userId: string;
 }) => Promise<unknown>;
 
@@ -133,29 +133,19 @@ async function signalDueInboxMediaRetentionRuntimes(input: {
 
   let failures = 0;
   let sent = 0;
-  let nextIndex = 0;
-  const workerCount = Math.min(
-    HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_CONCURRENCY,
-    workspaces.length,
-  );
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const workspace = workspaces[nextIndex];
-      nextIndex += 1;
-      if (!workspace) {
-        return;
-      }
-      const ok = await signalRuntimeRecheckWithDeadline({
-        signalRuntimeRecheck,
-        userId: workspace.userId,
-      });
-      if (ok) {
-        sent += 1;
-      } else {
-        failures += 1;
-      }
+  const results = await Promise.all(workspaces.map(
+    (workspace) => signalRuntimeRecheckWithDeadline({
+      signalRuntimeRecheck,
+      userId: workspace.userId,
+    }),
+  ));
+  for (const ok of results) {
+    if (ok) {
+      sent += 1;
+    } else {
+      failures += 1;
     }
-  }));
+  }
 
   return { failures, sent };
 }
@@ -187,16 +177,25 @@ async function signalRuntimeRecheckWithDeadline(input: {
   signalRuntimeRecheck: HostedRuntimeRecheckSignal;
   userId: string;
 }): Promise<boolean> {
+  const abortController = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<"timeout">((resolve) => {
     timeout = setTimeout(
-      () => resolve("timeout"),
+      () => {
+        abortController.abort(
+          new Error("Hosted inbox media retention runtime signal timed out."),
+        );
+        resolve("timeout");
+      },
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
     );
   });
-  const signalPromise = input.signalRuntimeRecheck({
-    userId: input.userId,
-  }).then(
+  const signalPromise = Promise.resolve().then(() =>
+    input.signalRuntimeRecheck({
+      abortSignal: abortController.signal,
+      userId: input.userId,
+    })
+  ).then(
     () => "sent" as const,
     (error: unknown) => {
       console.error("Hosted inbox media retention runtime signal failed.", {
@@ -224,11 +223,31 @@ async function deleteExpiredMailboxItems(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  return await input.prisma.$executeRaw`
-    DELETE FROM "hosted_mailbox_item"
-    WHERE "expires_at" <= ${input.now}
-       OR "created_at" < ${cutoff}
-  `;
+  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_mailbox_item"
+      WHERE "expires_at" <= ${input.now}
+      ORDER BY "expires_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_mailbox_item" AS mailbox_item
+    USING doomed
+    WHERE mailbox_item."id" = doomed."id"
+  `);
+  const aged = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_mailbox_item"
+      WHERE "created_at" < ${cutoff}
+      ORDER BY "created_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_mailbox_item" AS mailbox_item
+    USING doomed
+    WHERE mailbox_item."id" = doomed."id"
+  `);
+  return expired + aged;
 }
 
 // Verbose levels are the overwhelming majority of the table and are only ever
@@ -378,24 +397,31 @@ async function deleteStaleHostedWebSessions(input: {
   prisma: PrismaClient;
 }): Promise<number> {
   const cutoff = new Date(input.now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS);
-  const result = await input.prisma.hostedWebSession.deleteMany({
-    where: {
-      OR: [
-        {
-          expiresAt: {
-            lt: cutoff,
-          },
-        },
-        {
-          revokedAt: {
-            lt: cutoff,
-          },
-        },
-      ],
-    },
-  });
-
-  return result.count;
+  const expired = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "expires_at" < ${cutoff}
+      ORDER BY "expires_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_web_session" AS web_session
+    USING doomed
+    WHERE web_session."id" = doomed."id"
+  `);
+  const revoked = await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS (
+      SELECT "id"
+      FROM "hosted_web_session"
+      WHERE "revoked_at" < ${cutoff}
+      ORDER BY "revoked_at" ASC, "id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+    )
+    DELETE FROM "hosted_web_session" AS web_session
+    USING doomed
+    WHERE web_session."id" = doomed."id"
+  `);
+  return expired + revoked;
 }
 
 function normalizeRetentionDate(value: Date | string): Date {

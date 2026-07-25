@@ -7,11 +7,23 @@ ADD COLUMN "accepted_attempt_failure_recheck_claimed_at" TIMESTAMP(3);
 -- `device_webhook_trace` already has (received_at) and
 -- `hosted_assistant_runtime_issue` already has (expires_at), so those need no
 -- new index.
-CREATE INDEX "hosted_runtime_log_at_id_idx"
+CREATE INDEX CONCURRENTLY "hosted_runtime_log_at_id_idx"
 ON "hosted_runtime_log"("at", "id");
 
-CREATE INDEX "hosted_ingress_latency_trace_accepted_at_id_idx"
+CREATE INDEX CONCURRENTLY "hosted_ingress_latency_trace_accepted_at_id_idx"
 ON "hosted_ingress_latency_trace"("accepted_at", "id");
 
-CREATE INDEX "hosted_linq_provider_event_received_at_event_id_idx"
+CREATE INDEX CONCURRENTLY "hosted_linq_provider_event_received_at_event_id_idx"
 ON "hosted_linq_provider_event"("received_at", "event_id");
+
+CREATE INDEX CONCURRENTLY "hosted_mailbox_item_expires_at_id_idx"
+ON "hosted_mailbox_item"("expires_at", "id");
+
+CREATE INDEX CONCURRENTLY "hosted_mailbox_item_created_at_id_idx"
+ON "hosted_mailbox_item"("created_at", "id");
+
+CREATE INDEX CONCURRENTLY "hosted_web_session_expires_at_id_idx"
+ON "hosted_web_session"("expires_at", "id");
+
+CREATE INDEX CONCURRENTLY "hosted_web_session_revoked_at_id_idx"
+ON "hosted_web_session"("revoked_at", "id");

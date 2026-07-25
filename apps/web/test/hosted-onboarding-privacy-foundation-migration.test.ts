@@ -773,6 +773,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedObservabilityRetentionMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260725120000_hosted_observability_retention/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     expect(migrationEntries).toEqual([
       "2026040600_init",
       "20260425000000_drop_legacy_linq_control_plane",
@@ -901,6 +908,22 @@ describe("hosted Prisma baseline migration", () => {
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ALTER TABLE "hosted_mailbox_item"',
+    );
+    for (const indexName of [
+      "hosted_runtime_log_at_id_idx",
+      "hosted_ingress_latency_trace_accepted_at_id_idx",
+      "hosted_linq_provider_event_received_at_event_id_idx",
+      "hosted_mailbox_item_expires_at_id_idx",
+      "hosted_mailbox_item_created_at_id_idx",
+      "hosted_web_session_expires_at_id_idx",
+      "hosted_web_session_revoked_at_id_idx",
+    ]) {
+      expect(hostedObservabilityRetentionMigrationSql).toContain(
+        `CREATE INDEX CONCURRENTLY "${indexName}"`,
+      );
+    }
+    expect(hostedObservabilityRetentionMigrationSql).not.toMatch(
+      /CREATE INDEX "(?:hosted_runtime_log|hosted_ingress_latency_trace|hosted_linq_provider_event|hosted_mailbox_item|hosted_web_session)/u,
     );
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
       'ADD COLUMN "subscription_action_claim" TEXT',

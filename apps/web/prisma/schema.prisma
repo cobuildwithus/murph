@@ -619,6 +619,8 @@ model HostedWebSession {
   @@index([privyUserId])
   @@index([expiresAt])
   @@index([revokedAt])
+  @@index([expiresAt, id])
+  @@index([revokedAt, id])
   @@map("hosted_web_session")
 }
 
@@ -910,6 +912,8 @@ model HostedMailboxItem {
   @@index([userId, lane, laneSeq])
   @@index([userId, kind, createdAt])
   @@index([userId, expiresAt])
+  @@index([expiresAt, id])
+  @@index([createdAt, id])
   @@map("hosted_mailbox_item")
 }
 

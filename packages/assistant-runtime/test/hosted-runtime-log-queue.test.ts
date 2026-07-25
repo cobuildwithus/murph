@@ -75,34 +75,37 @@ describe("hosted runtime log write queue", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns info writes immediately while the port write is still pending", async () => {
-    const { port, writes } = createControlledLogPort();
+  it.each(["debug", "info"] as const)(
+    "returns %s writes immediately while the port write is still pending",
+    async (level) => {
+      const { port, writes } = createControlledLogPort();
 
-    await expect(writeHostedRuntimeLogBestEffort({
-      entry: buildQueueLogEntry("info"),
-      now: () => "2026-06-12T00:00:00.000Z",
-      platform: { logPort: port },
-    })).resolves.toBeUndefined();
+      await expect(writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry(level),
+        now: () => "2026-06-12T00:00:00.000Z",
+        platform: { logPort: port },
+      })).resolves.toBeUndefined();
 
-    // The caller already returned, but the durable write has not settled.
-    await flushMicrotasks();
-    expect(writes).toHaveLength(1);
-    // `at` is stamped at enqueue time, not at flush time.
-    expect(writes[0]!.entries).toEqual([
-      expect.objectContaining({
-        at: "2026-06-12T00:00:00.000Z",
-        eventCode: "runner.started",
-        level: "info",
-      }),
-    ]);
+      // The caller already returned, but the durable write has not settled.
+      await flushMicrotasks();
+      expect(writes).toHaveLength(1);
+      // `at` is stamped at enqueue time, not at flush time.
+      expect(writes[0]!.entries).toEqual([
+        expect.objectContaining({
+          at: "2026-06-12T00:00:00.000Z",
+          eventCode: "runner.started",
+          level,
+        }),
+      ]);
 
-    const drainSettled = trackSettled(drainHostedRuntimeLogWritesBestEffort());
-    await flushMicrotasks();
-    expect(drainSettled()).toBe(false);
-    writes[0]!.resolve();
-    await flushMicrotasks();
-    expect(drainSettled()).toBe(true);
-  });
+      const drainSettled = trackSettled(drainHostedRuntimeLogWritesBestEffort());
+      await flushMicrotasks();
+      expect(drainSettled()).toBe(false);
+      writes[0]!.resolve();
+      await flushMicrotasks();
+      expect(drainSettled()).toBe(true);
+    },
+  );
 
   it("writes warn and error directly, never waiting behind a queued info backlog", async () => {
     const { port, writes } = createControlledLogPort();
@@ -296,7 +299,7 @@ describe("hosted runtime log write queue", () => {
     }
 
     expect(consoleWarn).toHaveBeenCalledWith(
-      "Hosted runtime log queue is full; dropping info diagnostics.",
+      "Hosted runtime log queue is full; dropping verbose diagnostics.",
       {
         droppedEntryCount: 1,
         maxQueuedEntries: HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,

@@ -33,11 +33,19 @@ function findRetentionCall(
   return call;
 }
 
+function findRetentionCalls(
+  executeRaw: ReturnType<typeof vi.fn>,
+  fragment: string,
+): unknown[][] {
+  return executeRaw.mock.calls.filter((candidate) =>
+    sqlOf(candidate).includes(fragment)
+  );
+}
+
 /** Every retention statement resolves to `0`, so each category runs one batch. */
 function createRetentionPrisma(input?: {
   executeRaw?: ReturnType<typeof vi.fn>;
   queryRaw?: ReturnType<typeof vi.fn>;
-  webSessionsDeleted?: number;
 }) {
   return {
     $executeRaw: input?.executeRaw ?? vi.fn().mockResolvedValue(0),
@@ -45,19 +53,13 @@ function createRetentionPrisma(input?: {
     hostedComputerRun: {
       findMany: vi.fn().mockResolvedValue([]),
     },
-    hostedWebSession: {
-      deleteMany: vi.fn().mockResolvedValue({
-        count: input?.webSessionsDeleted ?? 0,
-      }),
-    },
   };
 }
 
 describe("hosted retention cleanup", () => {
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
-    const countsByTable = new Map<string, number>([
-      ['DELETE FROM "hosted_mailbox_item"', 7],
+    const countsByStatement = new Map<string, number>([
       ['DELETE FROM "hosted_runtime_log"', 8],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
@@ -66,7 +68,14 @@ describe("hosted retention cleanup", () => {
     ]);
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join("?");
-      return [...countsByTable].find(([fragment]) => sql.includes(fragment))?.[1] ?? 0;
+      if (sql.includes('FROM "hosted_mailbox_item"')) {
+        return sql.includes('"expires_at" <=') ? 3 : 4;
+      }
+      if (sql.includes('FROM "hosted_web_session"')) {
+        return sql.includes('"expires_at" <') ? 4 : 5;
+      }
+      return [...countsByStatement]
+        .find(([fragment]) => sql.includes(fragment))?.[1] ?? 0;
     });
     const queryRaw = vi.fn().mockResolvedValue([
       { userId: "member_due_1" },
@@ -78,7 +87,6 @@ describe("hosted retention cleanup", () => {
     const prisma = createRetentionPrisma({
       executeRaw,
       queryRaw,
-      webSessionsDeleted: 9,
     });
 
     await expect(runHostedRetentionCleanup({
@@ -99,17 +107,25 @@ describe("hosted retention cleanup", () => {
     });
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(countsByTable.size);
+    expect(executeRaw).toHaveBeenCalledTimes(9);
 
-    const mailboxCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_mailbox_item"');
-    expect(sqlOf(mailboxCall)).toContain('"expires_at" <=');
-    expect(sqlOf(mailboxCall)).toContain('"created_at" <');
-    expect(sqlOf(mailboxCall)).not.toContain("consumed_seq");
-    expect(sqlOf(mailboxCall)).not.toContain("tombstoned");
-    expect(mailboxCall.slice(1)).toEqual([
+    const mailboxCalls = findRetentionCalls(
+      executeRaw,
+      'DELETE FROM "hosted_mailbox_item"',
+    );
+    expect(mailboxCalls).toHaveLength(2);
+    expect(sqlOf(mailboxCalls[0]!)).toContain('"expires_at" <=');
+    expect(mailboxCalls[0]!.slice(1)).toEqual([
       now,
-      new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
     ]);
+    expect(sqlOf(mailboxCalls[1]!)).toContain('"created_at" <');
+    expect(mailboxCalls[1]!.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+    expect(sqlOf(mailboxCalls[0]!)).not.toContain("consumed_seq");
+    expect(sqlOf(mailboxCalls[1]!)).not.toContain("tombstoned");
 
     // Verbose levels expire first; warn and error keep the longer window.
     const runtimeLogCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_log"');
@@ -161,22 +177,19 @@ describe("hosted retention cleanup", () => {
       ),
     ).toBe(false);
 
-    expect(prisma.hostedWebSession.deleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          {
-            expiresAt: {
-              lt: new Date(now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS),
-            },
-          },
-          {
-            revokedAt: {
-              lt: new Date(now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS),
-            },
-          },
-        ],
-      },
-    });
+    const webSessionCalls = findRetentionCalls(
+      executeRaw,
+      'DELETE FROM "hosted_web_session"',
+    );
+    expect(webSessionCalls).toHaveLength(2);
+    expect(sqlOf(webSessionCalls[0]!)).toContain('"expires_at" <');
+    expect(sqlOf(webSessionCalls[1]!)).toContain('"revoked_at" <');
+    for (const call of webSessionCalls) {
+      expect(call.slice(1)).toEqual([
+        new Date(now.getTime() - HOSTED_WEB_SESSION_RETENTION_MS),
+        HOSTED_RETENTION_BATCH_SIZE,
+      ]);
+    }
     expect(queryRaw).toHaveBeenCalledTimes(1);
     const dueSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
     expect(dueSql).toContain("WITH due AS");
@@ -201,16 +214,15 @@ describe("hosted retention cleanup", () => {
       queryRaw.mock.invocationCallOrder[0]!,
     );
     expect(
-      prisma.hostedWebSession.deleteMany.mock.invocationCallOrder[0],
-    ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
-    expect(
       prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
     ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
     expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
+      abortSignal: expect.anything(),
       userId: "member_due_1",
     });
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(2, {
+      abortSignal: expect.anything(),
       userId: "member_due_2",
     });
     expect(prisma.hostedComputerRun.findMany).toHaveBeenCalledWith({
@@ -314,11 +326,19 @@ describe("hosted retention cleanup", () => {
       const now = new Date("2026-04-25T12:00:00.000Z");
       const executeRaw = vi.fn().mockResolvedValue(1);
       const queryRaw = vi.fn().mockResolvedValue([{ userId: "member_due_stuck" }]);
-      const signalRuntimeRecheck = vi.fn(() => new Promise(() => undefined));
+      const observedAbortSignals: AbortSignal[] = [];
+      const signalRuntimeRecheck = vi.fn((input: {
+        abortSignal?: AbortSignal;
+        userId: string;
+      }) => {
+        if (input.abortSignal) {
+          observedAbortSignals.push(input.abortSignal);
+        }
+        return new Promise(() => undefined);
+      });
       const prisma = createRetentionPrisma({
         executeRaw,
         queryRaw,
-        webSessionsDeleted: 3,
       });
 
       const cleanup = runHostedRetentionCleanup({
@@ -338,24 +358,23 @@ describe("hosted retention cleanup", () => {
         expiredComputerRunsCleanedUp: 0,
         expiredDeviceWebhookTracesDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
-        expiredMailboxItemsDeleted: 1,
+        expiredMailboxItemsDeleted: 2,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 1,
-        staleWebSessionsDeleted: 3,
+        staleWebSessionsDeleted: 2,
       });
       expect(executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
         queryRaw.mock.invocationCallOrder[0]!,
       );
       expect(
-        prisma.hostedWebSession.deleteMany.mock.invocationCallOrder[0],
-      ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
-      expect(
         prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
       ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
       expect(signalRuntimeRecheck).toHaveBeenCalledWith({
+        abortSignal: expect.anything(),
         userId: "member_due_stuck",
       });
+      expect(observedAbortSignals[0]?.aborted).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -425,8 +444,11 @@ describe("hosted retention cleanup", () => {
     const secondRunUserIds = signalRuntimeRecheck.mock.calls
       .slice(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE)
       .map(([input]) => input.userId);
-    expect(firstRunUserIds).not.toContain("member_due_26");
-    expect(secondRunUserIds).toContain("member_due_26");
+    const deferredUserId =
+      `member_due_${String(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE + 1)
+        .padStart(2, "0")}`;
+    expect(firstRunUserIds).not.toContain(deferredUserId);
+    expect(secondRunUserIds).toContain(deferredUserId);
     expect(queryRaw).toHaveBeenCalledTimes(2);
   });
 });

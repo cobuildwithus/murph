@@ -33,16 +33,16 @@ export function buildHostedRuntimeLogContextFields(
 // between mailbox import and the local Codex `turn/start` request write (see
 // the "observability writes are never user latency" invariant in
 // docs/contracts/00-invariants.md).
-// Info-level entries are durable diagnostics, not control flow: buffer them so
+// Debug/info entries are verbose diagnostics, not control flow: buffer them so
 // the caller returns immediately while one background writer drains the buffer
 // in enqueue order. The writer is self-clocking — everything logged while a
 // request is in flight coalesces into the next request — so a busy invocation
 // sends far fewer round trips without any entry waiting on a timer.
 // warn/error entries still write directly and block only on their own write:
 // the crash-diagnostic tail must be durable before the runtime proceeds, and
-// must not wait behind queued info. `at` is stamped at enqueue, so persisted
-// ordering still reflects logical time even when a direct warn write lands
-// before older queued info entries. The chain never rejects (each write
+// must not wait behind queued verbose entries. `at` is stamped at enqueue, so
+// persisted ordering still reflects logical time even when a direct warn write
+// lands before older queued info entries. The chain never rejects (each write
 // swallows its own failure).
 //
 // One process-global FIFO carries each entry with the port it was logged
@@ -59,7 +59,7 @@ const HOSTED_RUNTIME_LOG_BATCH_MAX_ENTRIES = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTR
 const HOSTED_RUNTIME_LOG_BATCH_MAX_JSON_LENGTH = 64 * 1024;
 // A stalled log endpoint must not retain unbounded diagnostics in a warm
 // runner process. This bounds the whole queue, across invocations and ports.
-// Only info entries are ever dropped here.
+// Only debug/info entries are ever dropped here.
 export const HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES = 500;
 
 type HostedRuntimeLogPort = NonNullable<HostedRuntimePlatform["logPort"]>;
@@ -87,7 +87,7 @@ export async function writeHostedRuntimeLogBestEffort(input: {
     ...input.entry,
   };
 
-  if (entry.level !== "info") {
+  if (entry.level === "warn" || entry.level === "error") {
     await writeHostedRuntimeLogEntries(logPort, [entry]);
     return;
   }
@@ -98,7 +98,7 @@ export async function writeHostedRuntimeLogBestEffort(input: {
       0,
       queuedHostedRuntimeLogEntries.length - HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
     );
-    console.warn("Hosted runtime log queue is full; dropping info diagnostics.", {
+    console.warn("Hosted runtime log queue is full; dropping verbose diagnostics.", {
       droppedEntryCount: dropped.length,
       maxQueuedEntries: HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
     });
