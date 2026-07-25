@@ -53,6 +53,10 @@ const JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
   ROUTING_INDEX_KEY,
   "dsc_junction_123",
 );
+const OTHER_JUNCTION_PUBLIC_CONNECTION_ID = createHostedBrowserConnectionId(
+  ROUTING_INDEX_KEY,
+  "dsc_junction_456",
+);
 
 const originalHostedOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 const originalDeviceSyncBackfillDiagnosticEnabled =
@@ -906,6 +910,97 @@ describe("hosted ops Junction diagnostics", () => {
     });
   });
 
+  it("binds a recovery action to the requested member and connection", async () => {
+    // A second active Junction connection makes misrouting observable: with one
+    // connection any resolution bug still lands on the right account.
+    mocks.createBrowserConnectionId.mockImplementation((connectionId: string) =>
+      connectionId === "dsc_junction_123"
+        ? "dspc_junction_123"
+        : connectionId === "dsc_junction_456"
+          ? "dspc_junction_456"
+          : connectionId
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-06-27T18:49:38.000Z",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-raw-id",
+        id: "dsc_junction_123",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-06-28T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-06-28T08:51:00.000Z",
+      },
+      {
+        accessTokenExpiresAt: null,
+        connectedAt: "2026-06-27T18:49:38.000Z",
+        createdAt: "2026-06-27T18:49:38.000Z",
+        displayName: "Junction",
+        externalAccountId: "junction-user-other-id",
+        id: "dsc_junction_456",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSyncCompletedAt: "2026-06-28T08:51:00.000Z",
+        lastSyncErrorAt: null,
+        lastSyncStartedAt: "2026-06-28T08:50:54.000Z",
+        lastWebhookAt: null,
+        metadata: {},
+        nextReconcileAt: "2026-06-28T16:00:00.000Z",
+        provider: "junction",
+        scopes: [],
+        setupPhase: "source_confirmed",
+        status: "active",
+        updatedAt: "2026-06-28T08:51:00.000Z",
+      },
+    ]);
+    mocks.probeRest.mockResolvedValue({
+      generatedAt: "2026-07-24T00:00:00.000Z",
+      provider: "junction",
+      result: {
+        request: { endpoint: "trigger_historical_pull" },
+        response: { accepted: true, endpointUnavailable: false, ok: true },
+      },
+    });
+
+    const response = await hostedOpsJunctionRecoveryRoute.POST(
+      createJsonPostRequest(
+        "https://join.example.test/api/ops/device-sync/junction-recovery",
+        {
+          action: "trigger_historical_pull",
+          connectionId: OTHER_JUNCTION_PUBLIC_CONNECTION_ID,
+          memberId: "member_target",
+          sourceProvider: SELECTED_SOURCE_PROVIDER,
+        },
+        { headers: { origin: "https://join.example.test" } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.listConnectionsForUser).toHaveBeenCalledWith("member_target");
+    expect(mocks.getStoredConnectionAccountForUser).toHaveBeenCalledWith(
+      "member_target",
+      "dsc_junction_456",
+    );
+    // The mutation must target the requested connection's Junction account.
+    expect(mocks.probeRest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        account: expect.objectContaining({ externalAccountId: "junction-user-other-id" }),
+        endpoint: "trigger_historical_pull",
+      }),
+    );
+  });
+
   it("rejects an unsupported Junction recovery action before touching the provider", async () => {
     const response = await hostedOpsJunctionRecoveryRoute.POST(
       createJsonPostRequest(
@@ -921,8 +1016,11 @@ describe("hosted ops Junction diagnostics", () => {
     );
 
     expect(response.status).toBe(400);
+    // These are the seams this route actually reaches, so they are what proves
+    // an unsupported action stopped before any provider work.
     expect(mocks.probeRest).not.toHaveBeenCalled();
-    expect(mocks.listConnections).not.toHaveBeenCalled();
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+    expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "HOSTED_OPS_JUNCTION_RECOVERY_ACTION_INVALID" },
     });
