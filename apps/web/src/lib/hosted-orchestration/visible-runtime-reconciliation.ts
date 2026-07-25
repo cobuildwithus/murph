@@ -121,6 +121,10 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     return facts;
   }
 
+  if (!isHostedTelegramConversationMessageWake(wake)) {
+    return facts;
+  }
+
   const delivery = await sendHostedTelegramAccessNotice({
     memberId: input.userId,
     message: access.message,
