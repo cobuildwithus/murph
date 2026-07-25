@@ -254,13 +254,15 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
     return null;
   }
 
-  const outreach = await input.tx.hostedGroupJoinOutreach.findFirst({
+  const outreaches = await input.tx.hostedGroupJoinOutreach.findMany({
     orderBy: [
-      { requestedAt: "asc" },
-      { id: "asc" },
+      { sentAt: "desc" },
+      { requestedAt: "desc" },
+      { id: "desc" },
     ],
     where: {
       participantPhoneLookupKey: { in: participantPhoneLookupKeys },
+      repliedAt: null,
       sentAt: { not: null },
       skippedAt: null,
       OR: [
@@ -275,13 +277,47 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
       offerId: true,
     },
   });
+  if (outreaches.length === 0) {
+    return null;
+  }
+
+  const offers = await input.tx.hostedGroupJoinOffer.findMany({
+    where: {
+      id: { in: outreaches.map((outreach) => outreach.offerId) },
+      revokedAt: null,
+    },
+    select: {
+      groupId: true,
+      id: true,
+      group: {
+        select: {
+          joinCode: true,
+          runtimeMemberId: true,
+        },
+      },
+    },
+  });
+  const validOfferByOutreachKey = new Map(
+    offers.flatMap((offer) => {
+      const joinCode = offer.group.runtimeMemberId
+        ? offer.group.joinCode?.trim() ?? null
+        : null;
+      return joinCode
+        ? [[`${offer.id}\0${offer.groupId}`, joinCode] as const]
+        : [];
+    }),
+  );
+  const outreach = outreaches.find((candidate) =>
+    validOfferByOutreachKey.has(`${candidate.offerId}\0${candidate.groupId}`),
+  );
   if (!outreach) {
     return null;
   }
 
-  await input.tx.hostedGroupJoinOutreach.updateMany({
+  const claimed = await input.tx.hostedGroupJoinOutreach.updateMany({
     where: {
       id: outreach.id,
+      repliedAt: null,
       skippedAt: null,
     },
     data: {
@@ -291,24 +327,12 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
       repliedAt: input.now,
     },
   });
+  if (claimed.count !== 1) {
+    return null;
+  }
 
-  const offer = await input.tx.hostedGroupJoinOffer.findFirst({
-    where: {
-      groupId: outreach.groupId,
-      id: outreach.offerId,
-      revokedAt: null,
-    },
-    select: {
-      group: {
-        select: {
-          joinCode: true,
-          runtimeMemberId: true,
-        },
-      },
-    },
-  });
-  const joinCode = offer?.group?.runtimeMemberId
-    ? offer.group.joinCode?.trim() ?? null
-    : null;
+  const joinCode = validOfferByOutreachKey.get(
+    `${outreach.offerId}\0${outreach.groupId}`,
+  );
   return joinCode ? { joinCode } : null;
 }

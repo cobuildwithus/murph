@@ -86,36 +86,46 @@ describe("hosted group join outreach store", () => {
   // "this reply belongs to that group offer". Proving it here keeps the group
   // handoff from depending only on a URL builder called with a hand-fed code.
   function createReplyContextTx(options?: {
-    offer?: {
-      group: { joinCode: string | null; runtimeMemberId: string | null } | null;
-    } | null;
-    outreach?: {
+    offers?: {
+      groupId: string;
+      id: string;
+      group: { joinCode: string | null; runtimeMemberId: string | null };
+    }[];
+    outreaches?: {
       groupId: string;
       id: string;
       linqChatLookupKey: string | null;
       offerId: string;
-    } | null;
+    }[];
   }) {
     const updateMany = vi.fn(async () => ({ count: 1 }));
-    const outreach = options?.outreach === undefined
-      ? {
-          groupId: "hgrp_opaque",
-          id: "hgrpjoa_opaque",
-          linqChatLookupKey: null,
-          offerId: "hgrpjo_opaque",
-        }
-      : options.outreach;
-    const offer = options?.offer === undefined
-      ? { group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" } }
-      : options.offer;
+    const outreaches = options?.outreaches ?? [
+      {
+        groupId: "hgrp_opaque",
+        id: "hgrpjoa_opaque",
+        linqChatLookupKey: null,
+        offerId: "hgrpjo_opaque",
+      },
+    ];
+    const offers = options?.offers ?? [
+      {
+        groupId: "hgrp_opaque",
+        id: "hgrpjo_opaque",
+        group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" },
+      },
+    ];
+    const findManyOutreaches = vi.fn(async () => outreaches);
+    const findManyOffers = vi.fn(async () => offers);
     return {
       tx: {
-        hostedGroupJoinOffer: { findFirst: vi.fn(async () => offer) },
+        hostedGroupJoinOffer: { findMany: findManyOffers },
         hostedGroupJoinOutreach: {
-          findFirst: vi.fn(async () => outreach),
+          findMany: findManyOutreaches,
           updateMany,
         },
       } as never,
+      findManyOffers,
+      findManyOutreaches,
       updateMany,
     };
   }
@@ -279,7 +289,7 @@ describe("hosted group join outreach store", () => {
   });
 
   it("claims nothing when no pending outreach matches the sender", async () => {
-    const { tx, updateMany } = createReplyContextTx({ outreach: null });
+    const { tx, updateMany } = createReplyContextTx({ outreaches: [] });
 
     await expect(claimHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_unrelated",
@@ -292,7 +302,7 @@ describe("hosted group join outreach store", () => {
   });
 
   it("falls back to the generic link when the offer no longer resolves", async () => {
-    const { tx } = createReplyContextTx({ offer: null });
+    const { tx } = createReplyContextTx({ offers: [] });
 
     await expect(claimHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
@@ -313,6 +323,105 @@ describe("hosted group join outreach store", () => {
     })).resolves.toBeNull();
 
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("claims the newest outstanding offer when one direct chat has several", async () => {
+    const now = new Date("2026-07-24T20:00:00.000Z");
+    const { findManyOutreaches, tx, updateMany } = createReplyContextTx({
+      outreaches: [
+        {
+          groupId: "hgrp_new",
+          id: "hgrpjoa_new",
+          linqChatLookupKey: "chat_lookup",
+          offerId: "hgrpjo_new",
+        },
+        {
+          groupId: "hgrp_old",
+          id: "hgrpjoa_old",
+          linqChatLookupKey: "chat_lookup",
+          offerId: "hgrpjo_old",
+        },
+      ],
+      offers: [
+        {
+          groupId: "hgrp_old",
+          id: "hgrpjo_old",
+          group: { joinCode: "join_old", runtimeMemberId: "hbm_old" },
+        },
+        {
+          groupId: "hgrp_new",
+          id: "hgrpjo_new",
+          group: { joinCode: "join_new", runtimeMemberId: "hbm_new" },
+        },
+      ],
+    });
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      now,
+      participantPhoneNumber: "+15551234567",
+      tx,
+    })).resolves.toEqual({ joinCode: "join_new" });
+
+    expect(findManyOutreaches).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [
+        { sentAt: "desc" },
+        { requestedAt: "desc" },
+        { id: "desc" },
+      ],
+      where: expect.objectContaining({ repliedAt: null }),
+    }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: "hgrpjoa_new",
+        repliedAt: null,
+      }),
+    }));
+  });
+
+  it("does not let an older revoked offer shadow a newer valid offer", async () => {
+    const { findManyOffers, tx, updateMany } = createReplyContextTx({
+      outreaches: [
+        {
+          groupId: "hgrp_new",
+          id: "hgrpjoa_new",
+          linqChatLookupKey: "chat_lookup",
+          offerId: "hgrpjo_new",
+        },
+        {
+          groupId: "hgrp_old",
+          id: "hgrpjoa_old",
+          linqChatLookupKey: "chat_lookup",
+          offerId: "hgrpjo_old",
+        },
+      ],
+      // The store query excludes revoked offers, so only the newer valid offer
+      // reaches this result set.
+      offers: [
+        {
+          groupId: "hgrp_new",
+          id: "hgrpjo_new",
+          group: { joinCode: "join_new", runtimeMemberId: "hbm_new" },
+        },
+      ],
+    });
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      now: new Date("2026-07-24T20:00:00.000Z"),
+      participantPhoneNumber: "+15551234567",
+      tx,
+    })).resolves.toEqual({ joinCode: "join_new" });
+
+    expect(findManyOffers).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        id: { in: ["hgrpjo_new", "hgrpjo_old"] },
+        revokedAt: null,
+      }),
+    }));
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id: "hgrpjoa_new" }),
+    }));
   });
 });
 
