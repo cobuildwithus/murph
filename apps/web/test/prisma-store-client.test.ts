@@ -646,11 +646,23 @@ describe("prisma module", () => {
     pool.totalCount = 15;
     pool.waitingCount = 4;
 
+    const order: string[] = [];
+    warn.mockImplementation((message: unknown) => {
+      if (message === "Hosted web database pool pressure.") {
+        order.push("sampled");
+      }
+    });
     const run = () => extension.query.$allOperations({
       args: {},
       operation: "queryRaw",
-      query: async () => "rows",
+      query: async () => {
+        order.push("attempted");
+        return "rows";
+      },
     });
+
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(1_000_000);
     await run();
     await run();
     await run();
@@ -662,6 +674,55 @@ describe("prisma module", () => {
       totalConnections: 15,
       waitingRequests: 4,
     }]);
+    // Sampling must precede the attempt, otherwise the warning only appears
+    // after the very checkout it exists to pre-empt.
+    expect(order[0]).toBe("sampled");
+    expect(order[1]).toBe("attempted");
+
+    // Sustained pressure must report again once the interval elapses; a
+    // one-shot latch would go quiet exactly when the pool is worst.
+    nowSpy.mockReturnValue(1_000_000 + 10_000);
+    await run();
+    expect(pressureLogs(warn)).toHaveLength(2);
+
+    nowSpy.mockRestore();
+  });
+
+  it("throttles each pool independently", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "test",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { createPrismaClient } = await import("@/src/lib/prisma");
+
+    createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/first?sslmode=require",
+      poolMax: 1,
+    });
+    createPrismaClient({
+      databaseUrl: "postgresql://example.invalid/second?sslmode=require",
+      poolMax: 1,
+    });
+    const [poolA, poolB] = mocks.poolInstances;
+    const [extensionA, extensionB] = mocks.extensions;
+    if (!poolA || !poolB || !extensionA || !extensionB) {
+      throw new Error("Expected two pools and two query extensions to be captured.");
+    }
+    for (const pool of [poolA, poolB]) {
+      pool.idleCount = 0;
+      pool.totalCount = 1;
+      pool.waitingCount = 2;
+    }
+
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+    const query = async () => "rows";
+    await extensionA.query.$allOperations({ args: {}, operation: "queryRaw", query });
+    await extensionB.query.$allOperations({ args: {}, operation: "queryRaw", query });
+
+    // Same instant, two pools: one pool's sample must not silence the other.
+    expect(pressureLogs(warn)).toHaveLength(2);
+    nowSpy.mockRestore();
   });
 
   it("stays silent while no caller is waiting for a connection", async () => {
@@ -761,8 +822,12 @@ describe("prisma module", () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const { getPrisma } = await import("@/src/lib/prisma");
 
-    getPrisma();
+    const first = getPrisma();
+    const second = getPrisma();
 
+    // The shared client is built once, so this stays a boot diagnostic; moving
+    // it into the lookup would turn it into request-path log volume.
+    expect(second).toBe(first);
     expect(info).toHaveBeenCalledExactlyOnceWith(
       "Hosted web database pool configured.",
       { maxConnections: 15, source: "default" },
