@@ -794,6 +794,20 @@ describe("device sync companion routes", () => {
       );
     });
 
+    it("requires Android companion requests to declare their lifecycle intent", async () => {
+      mockVerifiedPrivyUser();
+
+      const response = await signInTokenRoute.POST(signInTokenRequest({
+        platform: "android",
+      }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: { code: "COMPANION_REQUEST_INVALID" },
+      });
+      expect(mocks.createSdkSignInSession).not.toHaveBeenCalled();
+    });
+
     it("rejects unsupported companion platform metadata without reaching Junction", async () => {
       mockVerifiedPrivyUser();
 

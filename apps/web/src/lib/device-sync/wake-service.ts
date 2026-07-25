@@ -565,7 +565,9 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     occurredAt: input.webhook.occurredAt ?? input.now,
     provider: input.account.provider,
     resourceCategory,
-    sourceProviderSlug: readSingleSourceProviderSlug(dirtyResources),
+    sourceProviderSlug: normalizeJunctionProviderSlug(
+      input.webhook.dataSourceProviderSlug,
+    ),
     store: input.store,
     claimToken: input.claimToken,
     traceId,
@@ -1259,25 +1261,6 @@ function buildHostedWebhookDirtyResources(input: {
   }
 
   return resources;
-}
-
-function readSingleSourceProviderSlug(
-  resources: readonly HostedDeviceSyncDirtyResource[],
-): string | null {
-  let sourceProviderSlug: string | null = null;
-
-  for (const resource of resources) {
-    const candidate = normalizeJunctionProviderSlug(resource.sourceProviderSlug);
-    if (!candidate) {
-      continue;
-    }
-    if (sourceProviderSlug !== null && sourceProviderSlug !== candidate) {
-      return null;
-    }
-    sourceProviderSlug = candidate;
-  }
-
-  return sourceProviderSlug;
 }
 
 function readHostedDirtyResourceString(value: unknown): string | null {

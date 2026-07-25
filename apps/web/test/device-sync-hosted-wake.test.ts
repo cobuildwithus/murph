@@ -938,6 +938,7 @@ describe("hosted device-sync wakes", () => {
       traceId: "trace_123",
       webhook: {
         acceptanceMode: "level_dirty_hint",
+        dataSourceProviderSlug: "health-connect",
         eventType: "daily.data.sleep.updated",
         jobs: [{
           kind: "resource",
@@ -966,7 +967,7 @@ describe("hosted device-sync wakes", () => {
     }));
   });
 
-  it("omits source attribution when one webhook carries multiple Junction sources", async () => {
+  it("omits source attribution for a data-less historical completion", async () => {
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
         id: "dsc_123",
@@ -980,23 +981,15 @@ describe("hosted device-sync wakes", () => {
       traceId: "trace_123",
       webhook: {
         acceptanceMode: "level_dirty_hint",
-        eventType: "daily.data.sleep.updated",
-        jobs: [
-          {
-            kind: "resource",
-            payload: {
-              resource: "sleep",
-              sourceProviderSlug: "apple-health-kit",
-            },
+        dataSourceProviderSlug: null,
+        eventType: "historical.data.sleep.created",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "sleep",
+            sourceProviderSlug: "health-connect",
           },
-          {
-            kind: "resource",
-            payload: {
-              resource: "sleep",
-              sourceProviderSlug: "health-connect",
-            },
-          },
-        ],
+        }],
         occurredAt: "2026-03-26T11:59:00.000Z",
       },
     });

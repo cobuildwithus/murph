@@ -180,7 +180,12 @@ export function validateCompanionSignInRequestBody(
     throw companionRequestInvalid("connectionIntent must be connect or resume when provided.");
   }
 
-  readOptionalCompanionPlatform(body);
+  const platform = readOptionalCompanionPlatform(body);
+  if (platform === "android" && connectionIntent === undefined) {
+    throw companionRequestInvalid(
+      "Android companion requests must provide connectionIntent.",
+    );
+  }
   readOptionalBoundedString(body, "appInstallationId");
   readOptionalBoundedString(body, "appVersion");
 
