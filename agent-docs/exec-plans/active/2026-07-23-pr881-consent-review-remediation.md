@@ -30,8 +30,8 @@ Updated: 2026-07-23
 
 1. Risk: a partial two-scope write could cause duplicate legal acceptance on retry.
    Mitigation: retain the latest returned status locally and cover the exact retry sequence.
-2. Risk: decline or completion state could leave the dialog visually or behaviorally stuck.
-   Mitigation: make pending states mutually disabling, clear pending auth only after authoritative logout, and cover decline failure, retry, and view transitions.
+2. Risk: decline or completion state could leave the dialog visually or behaviorally stuck, or let two outcomes race for the same transition.
+   Mitigation: Decline stays available during status work — including an unresolved retry — and holds terminal priority once selected. Availability and priority are both required; disabling the exit to avoid the race is not an acceptable trade, because the dialog cannot be dismissed. `HostedAuthPanel` is the single owner of the terminal transition: after Decline, a later status, acceptance, or completion result cannot advance the journey. Clear pending auth only after authoritative logout, and cover decline failure, retry, and view transitions.
 3. Risk: compact dialog actions or document links could overflow narrow screens.
    Mitigation: keep the left-secondary/right-primary action row min-width safe and refresh desktop/mobile design proof.
 

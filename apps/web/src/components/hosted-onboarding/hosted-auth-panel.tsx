@@ -67,6 +67,9 @@ export function HostedAuthPanel({
     useState<HostedAuthCompletionResult | null>(null);
   const [consentDeclinePending, setConsentDeclinePending] = useState(false);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
+  // Decline is terminal. A status read or acceptance that resolves after it must
+  // not advance the journey the member just refused.
+  const consentDeclinedRef = useRef(false);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
   const completion = useHostedAuthCompletion({ onCompleted: handleAuthCompleted });
@@ -114,6 +117,8 @@ export function HostedAuthPanel({
   }
 
   async function handleConsentSatisfied() {
+    if (consentDeclinedRef.current) return;
+
     const result = pendingAuthCompletionRef.current;
     if (!result) return;
 
@@ -131,6 +136,7 @@ export function HostedAuthPanel({
   async function handleConsentDeclined() {
     if (consentDeclinePending) return;
 
+    consentDeclinedRef.current = true;
     setConsentDeclinePending(true);
     try {
       await logoutHostedAppSession({ logoutPrivy: logout });
@@ -138,6 +144,8 @@ export function HostedAuthPanel({
       // logoutHostedAppSession owns recovery: it revalidates authority by
       // reloading the document, and the fail-closed gate reappears if the
       // session survived. Nothing rendered here would outlive that reload.
+      // The decline did not take effect, so it does not keep terminal priority.
+      consentDeclinedRef.current = false;
       setConsentDeclinePending(false);
       return;
     }

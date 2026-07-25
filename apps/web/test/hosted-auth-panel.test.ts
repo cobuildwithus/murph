@@ -754,3 +754,65 @@ function setInputValue(
   descriptor?.set?.call(input, value);
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 }
+
+test("HostedAuthPanel keeps Decline terminal when a late status result says consent is no longer required", async () => {
+  const onCompleted = vi.fn();
+  let releaseLogout: (() => void) | null = null;
+  mocks.logoutHostedAppSession.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        releaseLogout = () => resolve();
+      }),
+  );
+
+  const { assign, cleanup, container, window } = await renderClientComponent(
+    createElement(HostedAuthPanel, {
+      methods: ["phone", "telegram", "email"],
+      onCompleted,
+      requireLaunchConsentOnCompletion: true,
+    }),
+  );
+  cleanupRender = cleanup;
+
+  await act(async () => {
+    await mocks.hostedPhoneAuthProps?.onAuthCompleted?.({
+      payload: {
+        activationPending: false,
+        inviteCode: "invite-code",
+        joinUrl: "/join/invite-code",
+        stage: "active",
+      },
+      redirectUrl: "/home",
+    });
+  });
+
+  expect(container.textContent).toContain("Hosted legal consent card");
+
+  const declineButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Decline",
+  );
+  await act(async () => {
+    declineButton?.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(mocks.logoutHostedAppSession).toHaveBeenCalledTimes(1);
+
+  // The status retry the member started before declining now resolves to a
+  // fully granted status while the authoritative logout is still in flight.
+  await act(async () => {
+    mocks.legalConsentCardProps?.onRequirementChange?.(false);
+  });
+
+  expect(onCompleted).not.toHaveBeenCalled();
+  expect(assign).not.toHaveBeenCalled();
+
+  await act(async () => {
+    releaseLogout?.();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  expect(onCompleted).not.toHaveBeenCalled();
+  expect(assign).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain("Hosted legal consent card");
+});
