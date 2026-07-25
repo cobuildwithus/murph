@@ -41,16 +41,29 @@ function isMacroPermission(permission: GroupJoinPermissionDisplay): boolean {
  * Collapse the gram-macro nutrition permissions into a single "Daily macros" group,
  * preserving the original order (the group takes the position of the first macro) and
  * leaving every other permission as its own single-scope group.
+ *
+ * Grouping only happens when the initial macro selection is uniform — every macro
+ * on, or every macro off. A mixed initial state (e.g. an existing member sharing only
+ * protein while the group also requests carbs/fat/fiber) renders the macros as
+ * individual cards instead, so an unchecked grouped control can never hide an active
+ * grant and every active nutrient stays directly visible and revocable.
  */
 export function groupJoinPermissionsForDisplay(
   permissions: readonly GroupJoinPermissionDisplay[],
+  initiallySelectedScopeKeys: ReadonlySet<string>,
 ): GroupJoinPermissionGroup[] {
   const macroPermissions = permissions.filter(isMacroPermission);
+  const shouldGroupMacros =
+    macroPermissions.length >= 2 &&
+    (macroPermissions.every((macro) =>
+      initiallySelectedScopeKeys.has(macro.projectionScopeKey)) ||
+      macroPermissions.every((macro) =>
+        !initiallySelectedScopeKeys.has(macro.projectionScopeKey)));
   const groups: GroupJoinPermissionGroup[] = [];
   let macrosInserted = false;
 
   for (const permission of permissions) {
-    if (isMacroPermission(permission)) {
+    if (shouldGroupMacros && isMacroPermission(permission)) {
       if (macrosInserted) continue;
       macrosInserted = true;
       const nutrientList = formatNutrientList(

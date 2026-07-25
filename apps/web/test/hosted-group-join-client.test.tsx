@@ -134,11 +134,11 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
     projectionScopeKey: projectionKind,
   });
 
-  const groups = groupJoinPermissionsForDisplay([
+  const permissions = [
     {
       description: "Shares your last 7 days of steps.",
       label: "Steps",
-      projectionScope: { projectionKind: "steps-days.v0" },
+      projectionScope: { projectionKind: "steps-days.v0" as const },
       projectionScopeKey: "steps-days.v0",
     },
     nutrientPermission("protein-days.v0", "protein"),
@@ -149,10 +149,14 @@ test("groups the four macro nutrients into one Daily macros card, calories separ
       description:
         "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
       label: "Daily calories",
-      projectionScope: { projectionKind: "calories-days.v0" },
+      projectionScope: { projectionKind: "calories-days.v0" as const },
       projectionScopeKey: "calories-days.v0",
     },
-  ]);
+  ];
+  const groups = groupJoinPermissionsForDisplay(
+    permissions,
+    new Set(permissions.map((permission) => permission.projectionScopeKey)),
+  );
 
   expect(groups).toEqual([
     {
@@ -246,6 +250,91 @@ test("renders one Daily macros card that toggles every macro scope together", as
         { projectionKind: "fiber-days.v0" },
         { projectionKind: "calories-days.v0" },
       ],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
+});
+
+test("keeps macros as individual cards when the initial macro selection is mixed", async () => {
+  const { groupJoinPermissionsForDisplay } = await import(
+    "@/src/components/hosted-groups/group-join-permission-groups"
+  );
+  const macro = (projectionKind: HostedVaultShareFixedProjectionKind, label: string) => ({
+    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    label: `Daily ${label}`,
+    projectionScope: { projectionKind },
+    projectionScopeKey: projectionKind,
+  });
+  const permissions = [
+    macro("protein-days.v0", "protein"),
+    macro("carbs-days.v0", "carbs"),
+    macro("fat-days.v0", "fat"),
+    macro("fiber-days.v0", "fiber"),
+  ];
+
+  // Only protein is currently active: an unchecked grouped card would hide it, so the
+  // helper must fall back to individual cards.
+  const groups = groupJoinPermissionsForDisplay(
+    permissions,
+    new Set(["protein-days.v0"]),
+  );
+
+  expect(groups.map((group) => group.label)).toEqual([
+    "Daily protein",
+    "Daily carbs",
+    "Daily fat",
+    "Daily fiber",
+  ]);
+  expect(groups.every((group) => group.scopeKeys.length === 1)).toBe(true);
+});
+
+test("shows revocable individual macro cards for an existing mixed macro grant", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const macro = (projectionKind: HostedVaultShareFixedProjectionKind, label: string) => ({
+    description: `Shares your last 7 days of daily ${label} totals from meals in Murph, including meals imported from connected apps.`,
+    label: `Daily ${label}`,
+    projectionScope: { projectionKind },
+    projectionScopeKey: projectionKind,
+  });
+  const { button, cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [{ projectionKind: "protein-days.v0" }],
+      alreadyActiveMember: true,
+      expectedMembershipId: "membership_existing",
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: [
+        macro("protein-days.v0", "protein"),
+        macro("carbs-days.v0", "carbohydrate"),
+        macro("fat-days.v0", "fat"),
+        macro("fiber-days.v0", "fiber"),
+      ],
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  // A mixed grant must not collapse into one grouped card; each macro is its own row.
+  const checkboxes = Array.from(container.querySelectorAll('input[type="checkbox"]'));
+  expect(checkboxes).toHaveLength(4);
+  expect(container.textContent).toContain("Daily protein");
+  expect(container.textContent).not.toContain("Daily macros");
+
+  // Saving without touching anything preserves exactly the active protein grant and
+  // never silently broadens sharing to the other macros.
+  await act(async () => {
+    button.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: "membership_existing",
+      selectedVaultShareProjectionScopes: [{ projectionKind: "protein-days.v0" }],
     },
     url: "/api/groups/join/JOIN123/accept",
   });

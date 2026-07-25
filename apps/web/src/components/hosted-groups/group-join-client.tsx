@@ -104,12 +104,15 @@ export function GroupJoinAcceptForm(props: {
   postJoinDestination: GroupJoinPostJoinDestination;
 }) {
   const router = useRouter();
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(
+  const initialSelectedScopeKeys = useMemo(
+    () =>
       props.alreadyActiveMember
         ? props.activeVaultShareProjectionScopes.map(buildHostedVaultShareProjectionScopeKey)
         : props.permissions.map((permission) => permission.projectionScopeKey),
-    ),
+    [props.alreadyActiveMember, props.activeVaultShareProjectionScopes, props.permissions],
+  );
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(initialSelectedScopeKeys),
   );
   const [status, setStatus] = useState<"idle" | "submitting" | "joined">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -121,8 +124,11 @@ export function GroupJoinAcceptForm(props: {
   );
 
   const permissionGroups = useMemo(
-    () => groupJoinPermissionsForDisplay(props.permissions),
-    [props.permissions],
+    () => groupJoinPermissionsForDisplay(
+      props.permissions,
+      new Set(initialSelectedScopeKeys),
+    ),
+    [props.permissions, initialSelectedScopeKeys],
   );
 
   function togglePermissionGroup(scopeKeys: readonly string[]) {

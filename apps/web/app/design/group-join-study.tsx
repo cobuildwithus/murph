@@ -118,6 +118,28 @@ export function GroupJoinStudy() {
           <GroupJoinHomeLink label="Not now" />
         </GroupJoinPageMock>
       </GroupJoinVariant>
+
+      <GroupJoinVariant
+        caption="Existing member sharing only protein while the group also requests carbs, fat, and fiber. A mixed macro grant expands to per-nutrient rows so the active grant stays visible and revocable instead of hiding behind an unchecked group."
+        title="Existing member · mixed macros"
+      >
+        <GroupJoinPageMock alreadyActiveMember>
+          <GroupJoinAcceptForm
+            activeVaultShareProjectionScopes={[
+              DESIGN_ACTIVITY_SCOPE,
+              { projectionKind: "protein-days.v0" },
+            ]}
+            alreadyActiveMember
+            expectedMembershipId="membership_design"
+            groupName={DESIGN_GROUP_NAME}
+            joinCode={DESIGN_JOIN_CODE}
+            permissions={DESIGN_PERMISSIONS}
+            postJoinDestination="/home"
+          />
+          <GroupJoinLeaveButton groupName={DESIGN_GROUP_NAME} joinCode={DESIGN_JOIN_CODE} />
+          <GroupJoinHomeLink label="Back to Murph" />
+        </GroupJoinPageMock>
+      </GroupJoinVariant>
     </div>
   );
 }
