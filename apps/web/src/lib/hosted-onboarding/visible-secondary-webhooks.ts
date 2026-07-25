@@ -81,6 +81,14 @@ const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
   "unknown-home-line",
 ]);
 
+const HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER = new Set([
+  "group-chat",
+  "home-line-capacity-exhausted",
+  "unassignable-home-line",
+  "unattested-direct-chat",
+  "unknown-home-line",
+]);
+
 const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "ambiguous-telegram-binding",
   "family-invite-not-accepted",
@@ -108,8 +116,8 @@ export function withHostedVisibleSecondaryLinqOutcomes(
     }
 
     const context = resolveHostedOnboardingLinqMessageContext(event);
-    const recognizedGroupSender = reason === "group-chat"
-      ? await readHostedLinqGroupSenderRecognized({
+    const recognizedSender = HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
+      ? await readHostedLinqSenderRecognized({
           participantContact: context.participantContact,
           prisma: input.prisma ?? dependencies.getPrisma(),
           dependencies,
@@ -117,7 +125,7 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       : false;
     const message = resolveHostedLinqVisibleSecondaryReply({
       reason,
-      recognizedGroupSender,
+      recognizedSender,
     });
     if (!message) {
       return response;
@@ -180,7 +188,7 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
 
 export function resolveHostedLinqVisibleSecondaryReply(input: {
   reason: string;
-  recognizedGroupSender: boolean;
+  recognizedSender: boolean;
 }): string | null {
   switch (input.reason) {
     case "family-invite-not-accepted":
@@ -189,12 +197,12 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
       return HOSTED_SIGNUP_LINK_REMINDER_REPLY;
     case "home-line-capacity-exhausted":
     case "unassignable-home-line":
-      return HOSTED_LINQ_CHAT_UNAVAILABLE_REPLY;
+      return input.recognizedSender ? HOSTED_LINQ_CHAT_UNAVAILABLE_REPLY : null;
     case "unattested-direct-chat":
     case "unknown-home-line":
-      return HOSTED_LINQ_CHAT_UNVERIFIED_REPLY;
+      return input.recognizedSender ? HOSTED_LINQ_CHAT_UNVERIFIED_REPLY : null;
     case "group-chat":
-      return input.recognizedGroupSender ? HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY : null;
+      return input.recognizedSender ? HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY : null;
     default:
       return null;
   }
@@ -222,7 +230,7 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
   }
 }
 
-async function readHostedLinqGroupSenderRecognized(input: {
+async function readHostedLinqSenderRecognized(input: {
   participantContact: ReturnType<
     typeof resolveHostedOnboardingLinqMessageContext
   >["participantContact"];
