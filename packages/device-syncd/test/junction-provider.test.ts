@@ -1792,6 +1792,57 @@ test("Junction REST diagnostic probes a compact resource without returning raw r
   );
 });
 
+test("Junction REST diagnostics dispatch a scoped historical pull trigger", async () => {
+  const requests: { body: unknown; method: string; url: string }[] = [];
+  const runTrigger = async (respond: () => Response) => {
+    const provider = createJunctionProvider(async (input, init) => {
+      requests.push({
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+        method: String(init?.method ?? "GET"),
+        url: readUrl(input),
+      });
+      return respond();
+    });
+    const probeRest = provider.diagnostics?.probeRest;
+    assert.ok(probeRest);
+
+    return probeRest({
+      account: createAccount(),
+      endpoint: "trigger_historical_pull",
+      now: "2026-07-24T12:00:00.000Z",
+      resource: null,
+      sourceProviderSlug: "Garmin",
+    });
+  };
+  const readResponse = (result: Awaited<ReturnType<typeof runTrigger>>) =>
+    (result.result as { response?: Record<string, unknown> }).response ?? {};
+
+  const accepted = await runTrigger(() => createJsonResponse({ success: true }, 202));
+  assert.equal(readResponse(accepted).ok, true);
+  assert.equal(readResponse(accepted).accepted, true);
+  assert.equal(readResponse(accepted).endpointUnavailable, false);
+  assert.deepEqual(requests, [
+    {
+      body: { provider: "garmin", user_ids: ["junction-user-1"] },
+      method: "POST",
+      url: "https://api.sandbox.us.junction.com/v2/link/bulk_trigger_historical_pull",
+    },
+  ]);
+  // The operator response must never carry the raw Junction user id.
+  assert.doesNotMatch(JSON.stringify(accepted), /junction-user-1/u);
+
+  requests.length = 0;
+  const gated = await runTrigger(() => createJsonResponse({ detail: "not enabled" }, 403));
+  assert.equal(readResponse(gated).ok, true);
+  assert.equal(readResponse(gated).accepted, false);
+  assert.equal(readResponse(gated).endpointUnavailable, true);
+
+  requests.length = 0;
+  const failed = await runTrigger(() => createJsonResponse({ detail: "boom" }, 500));
+  assert.equal(readResponse(failed).ok, false);
+  assert.equal(readResponse(failed).responseStatus, 500);
+});
+
 test("Junction REST diagnostics use date params for date-only summary resources", async () => {
   const seenUrls: string[] = [];
   const provider = createJunctionProvider(async (input) => {
