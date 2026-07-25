@@ -8,6 +8,7 @@ import {
   buildHostedAppSessionClearCookie,
   requireHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedAccountDeletionAvailable } from "@/src/lib/hosted-privacy/account-deletion-maintenance";
 import { HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES } from "@/src/lib/hosted-privacy/account-data-shared";
 import { getPrisma } from "@/src/lib/prisma";
 import {
@@ -17,6 +18,9 @@ import {
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
+  // Declined before the sensitive-action challenge is consumed, so a member who
+  // retries after the window still holds an unspent authorization.
+  assertHostedAccountDeletionAvailable();
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request, {

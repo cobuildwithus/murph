@@ -48,6 +48,9 @@ mirror.
 Options:
   --apply                       Copy missing objects, then verify.
   --confirm-destination <name>  Repeat the destination name for --apply.
+  --prune <count>               Delete exactly <count> destination objects the
+                                source no longer has. The count must match what
+                                the read-only gate reported. Requires --apply.
   --source-frozen               Assert every producer is paused and issued
                                 upload URLs have expired. Always required.
   --help                        Show this help.
@@ -65,6 +68,7 @@ export interface R2BundlesMigrationOptions {
   apply: boolean;
   confirmDestination: string | null;
   destination: string;
+  prune: number | null;
   source: string;
   sourceFrozen: boolean;
 }
@@ -150,6 +154,7 @@ export function parseR2BundlesMigrationArgs(
       "confirm-destination": { type: "string" },
       destination: { type: "string" },
       help: { short: "h", type: "boolean" },
+      prune: { type: "string" },
       source: { type: "string" },
       "source-frozen": { type: "boolean" },
     },
@@ -169,6 +174,7 @@ export function parseR2BundlesMigrationArgs(
       ? null
       : normalizeBucketName(values["confirm-destination"], "confirmed destination"),
     destination,
+    prune: parsePruneCount(values.prune),
     source,
     sourceFrozen: values["source-frozen"] ?? false,
   };
@@ -449,13 +455,76 @@ async function copyFrozenSource(input: {
     await readInventory(context, context.options.destination),
     markerKey,
   );
-  assertNoDestinationOnly(compareR2ObjectInventories(before.source, destination));
-  const copyEntries = findSourceEntriesNeedingCopy(before.source, destination);
+  const remaining = await pruneStaleDestinationEntries({
+    context,
+    destination,
+    log,
+    source: before.source,
+  });
+  const copyEntries = findSourceEntriesNeedingCopy(before.source, remaining);
   logCopyPlan(log, before.source, copyEntries);
   await copySourceEntries(context, copyEntries);
   if (copyEntries.length > 0) {
     log(`Copied ${copyEntries.length.toLocaleString("en-US")} object(s).`);
   }
+}
+
+/**
+ * Ordinary snapshot cleanup can delete a source object at any time, including
+ * a platform retry of an attempt that failed before the fence. That leaves a
+ * copy in the destination with nothing to mirror. Removing exactly those
+ * objects is what lets the migration converge instead of forcing an abandon;
+ * it is bounded by the pair marker (which proves this destination was created
+ * by this exact source/destination pair and is writer-exclusive), by an exact
+ * operator-supplied count, and by a second source observation per key.
+ */
+async function pruneStaleDestinationEntries(input: {
+  context: MigrationContext;
+  destination: readonly R2ObjectInventoryEntry[];
+  log: (message: string) => void;
+  source: readonly R2ObjectInventoryEntry[];
+}): Promise<R2ObjectInventoryEntry[]> {
+  const { context, destination, log, source } = input;
+  const sourceKeys = new Set(source.map((entry) => entry.key));
+  const stale = destination.filter((entry) => !sourceKeys.has(entry.key));
+  if (stale.length === 0) {
+    if (context.options.prune !== null) {
+      throw new Error("No destination object is missing from the source; --prune is not needed.");
+    }
+    return [...destination];
+  }
+  if (context.options.prune === null) {
+    throw new Error(
+      `Destination has ${stale.length.toLocaleString("en-US")} unexpected object(s).`,
+    );
+  }
+  if (context.options.prune !== stale.length) {
+    throw new Error(
+      `--prune ${context.options.prune.toLocaleString("en-US")} does not match the `
+      + `${stale.length.toLocaleString("en-US")} destination object(s) missing from the source.`,
+    );
+  }
+
+  // Re-read the source so a single truncated or stale listing cannot authorize
+  // a delete. Every key must still be absent.
+  const confirmed = new Set((await readInventory(context, context.options.source))
+    .map((entry) => entry.key));
+  const reappeared = stale.filter((entry) => confirmed.has(entry.key)).map((entry) => entry.key);
+  if (reappeared.length > 0) {
+    throw new Error(formatFingerprintFailure(
+      `${reappeared.length} object(s) proposed for pruning are still in the source`,
+      reappeared,
+    ));
+  }
+
+  for (const entry of stale) {
+    await deleteDestinationEntry(context, entry.key);
+  }
+  log(formatFingerprintFailure(
+    `Pruned ${stale.length.toLocaleString("en-US")} destination object(s) the source no longer has`,
+    stale.map((entry) => entry.key),
+  ));
+  return destination.filter((entry) => sourceKeys.has(entry.key));
 }
 
 async function verifyFrozenMirror(input: {
@@ -475,11 +544,28 @@ async function verifyFrozenMirror(input: {
 
   const destination = withoutExpectedMarker(second.destination, input.markerKey);
   const comparison = compareR2ObjectInventories(second.source, destination);
-  assertNoFailures(
-    comparison.failures,
-    "Destination is not a complete copy of the frozen source; rerun with --apply inside the write fence",
-  );
-  assertNoDestinationOnly(comparison);
+  // Report both directions together. The two shapes have different causes and
+  // the runbook's recovery decision depends on seeing every one that applies,
+  // so a mixed divergence must never present as a pure one.
+  const divergence: string[] = [];
+  if (comparison.failures.length > 0) {
+    divergence.push(
+      `${comparison.failures.length.toLocaleString("en-US")} object(s) not copied from the source `
+      + `(${comparison.failures.slice(0, MAX_REPORTED_FINGERPRINTS).join(", ")}`
+      + `${comparison.failures.length > MAX_REPORTED_FINGERPRINTS ? ", ..." : ""})`,
+    );
+  }
+  if (comparison.destinationOnlyCount > 0) {
+    divergence.push(
+      `${comparison.destinationOnlyCount.toLocaleString("en-US")} unexpected destination object(s) `
+      + "the source no longer has",
+    );
+  }
+  if (divergence.length > 0) {
+    throw new Error(
+      `Destination is not an exact mirror of the frozen source: ${divergence.join("; ")}.`,
+    );
+  }
   return { sourceCount: second.source.length };
 }
 
@@ -494,6 +580,9 @@ function assertOptionAcknowledgements(options: R2BundlesMigrationOptions): void 
   }
   if (!options.apply && options.confirmDestination !== null) {
     throw new TypeError("The read-only mirror gate does not accept --confirm-destination.");
+  }
+  if (!options.apply && options.prune !== null) {
+    throw new TypeError("The read-only mirror gate never deletes; --prune requires --apply.");
   }
   if (options.apply && options.confirmDestination !== options.destination) {
     throw new TypeError(
@@ -640,14 +729,6 @@ function assertNoLifecycleObjects(
   }
 }
 
-function assertNoDestinationOnly(comparison: R2InventoryComparison): void {
-  if (comparison.destinationOnlyCount > 0) {
-    throw new Error(
-      `Destination has ${comparison.destinationOnlyCount.toLocaleString("en-US")} unexpected object(s).`,
-    );
-  }
-}
-
 function assertNoFailures(failures: readonly string[], message: string): void {
   if (failures.length === 0) return;
   const reported = failures.slice(0, MAX_REPORTED_FINGERPRINTS).join(", ");
@@ -715,6 +796,15 @@ function findSourceEntriesNeedingCopy(
 function requireFlag(value: string | undefined, flag: string): string {
   if (!value) throw new TypeError(`${flag} is required.`);
   return value;
+}
+
+function parsePruneCount(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const parsed = Number(value.trim());
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new TypeError("--prune must be the exact positive object count the gate reported.");
+  }
+  return parsed;
 }
 
 function normalizeBucketName(value: string, label: string): string {
@@ -868,6 +958,30 @@ async function copySourceEntry(
     ], true);
   } catch {
     throw new Error("R2 deterministic object copy failed.");
+  }
+}
+
+async function deleteDestinationEntry(
+  context: MigrationContext,
+  key: string,
+): Promise<void> {
+  // The only delete this tool can issue, and it can only ever name the
+  // destination bucket.
+  const bucket = context.options.destination;
+  if (bucket === context.options.source) {
+    throw new Error("Refusing to delete from the migration source bucket.");
+  }
+  try {
+    await runChild(context, "R2 stale destination object delete", "aws", [
+      "s3api", "delete-object",
+      "--bucket", bucket,
+      "--key", key,
+      "--endpoint-url", context.environment.endpoint,
+      "--region", "auto",
+      "--no-cli-pager",
+    ], true);
+  } catch {
+    throw new Error("R2 stale destination object delete failed.");
   }
 }
 

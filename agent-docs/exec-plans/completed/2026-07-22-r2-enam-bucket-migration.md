@@ -122,6 +122,20 @@ Updated: 2026-07-25
   reflexive rollback could republish an accepted account deletion, so the
   recovery direction is now chosen from the proof's failure shape, which the
   tool already reports distinguishably.
-- The focused migration suite passes all 35 cases, Cloudflare typecheck passes,
-  and the canonical `test:diff apps/cloudflare` lane passes.
+- Round 3 rejected the frozen-source premise outright and required two
+  requirement-level decisions. `cleanupOrphanCandidates` rethrows so Cloudflare
+  retries a failed attempt later, proven by the committed
+  `rethrows alarm cleanup failures so Cloudflare can retry`, so no elapsed-age
+  drain can bound when a cleanup lands; and while two buckets can each still
+  become active, an accepted account deletion cannot be honoured in both.
+- The chosen decisions: defer account deletion for the window behind a truthful
+  application response, and stop requiring an immutable source. The copy is now
+  mutation-aware — it removes destination objects the source no longer has under
+  an exact operator-supplied `--prune` count, the pair marker, and a confirming
+  second source read — so ordinary cleanup converges instead of costing the
+  window. Rollback became unconditionally safe again, so the failure-shape
+  recovery branch was deleted, and the verification now reports both divergence
+  directions together instead of short-circuiting on the first.
+- The focused migration suite passes all 40 cases, both app typechecks pass, and
+  the canonical `test:diff` lane passes.
 Completed: 2026-07-25

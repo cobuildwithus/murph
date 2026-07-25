@@ -553,6 +553,37 @@ describe("HostedDataPrivacySettings", () => {
     expect(mocks.reloadCurrentHostedAuthDocument).toHaveBeenCalledTimes(1);
   });
 
+  test("shows the member the maintenance-window reason verbatim", async () => {
+    // Asserted verbatim: this is the exact sentence the member reads when the
+    // bundles-migration window declines an account deletion.
+    const maintenanceMessage = "Murph is in scheduled maintenance, so we can't delete your "
+      + "account right now. Nothing has changed and your request was not started. Please try "
+      + "again after Aug 2, 2026, 2:30 PM UTC.";
+    mockHostedDataPrivacyDeleteFlowState({ dialogError: maintenanceMessage });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    // The member must read why, not a generic retry line.
+    expect(container.textContent).toContain(maintenanceMessage);
+    expect(container.textContent).not.toContain("Could not delete your account right now.");
+  });
+
   test("an authorization failure does not invalidate an unchanged session", async () => {
     mockHostedDataPrivacyDeleteFlowState();
     mocks.authorize.mockRejectedValueOnce(new Error("authorization unavailable"));
@@ -667,6 +698,7 @@ function mockHostedVaultExportFlowState(input: {
 
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
+  dialogError?: string | null;
 } = {}) {
   mocks.useStateValues = [
     false,
@@ -677,7 +709,7 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     false,
     true,
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
-    null,
+    input.dialogError ?? null,
     false,
     false,
     false,

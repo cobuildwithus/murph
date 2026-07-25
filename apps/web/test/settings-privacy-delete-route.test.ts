@@ -51,6 +51,10 @@ describe("settings privacy delete route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    applyRouteDefaults();
+  });
+
+  function applyRouteDefaults(): void {
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.parseHostedAccountDeletionRequest.mockReturnValue({
@@ -75,7 +79,7 @@ describe("settings privacy delete route", () => {
       memberId: "member_123",
       schema: HOSTED_ACCOUNT_DATA_DELETION_SCHEMA,
     });
-  });
+  }
 
   it("uses member auth, not active-member auth, before deleting account data", async () => {
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
@@ -200,5 +204,59 @@ describe("settings privacy delete route", () => {
     });
     expect(mocks.parseHostedAccountDeletionRequest).not.toHaveBeenCalled();
     expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
+  });
+
+  describe("bundles migration maintenance window", () => {
+    function maintenanceRequest(): Request {
+      return new Request("https://join.example.test/api/settings/privacy/delete", {
+        body: JSON.stringify({
+          authorization: {
+            signature: `0x${"11".repeat(65)}`,
+            token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+          },
+          confirmationPhrase: "DELETE MY ACCOUNT",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      });
+    }
+
+    it("declines with a truthful message and spends nothing", async () => {
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE_UNTIL", "2026-08-02T14:30:00.000Z");
+
+      const response = await settingsPrivacyDeleteRoute.POST(maintenanceRequest());
+
+      expect(response.status).toBe(503);
+      const body = await response.json();
+      expect(body.error.code).toBe("account_deletion_maintenance");
+      expect(body.error.message).toContain("scheduled maintenance");
+      expect(body.error.message).toContain("your request was not started");
+      expect(body.error.message).toContain("Aug 2, 2026");
+
+      // The member keeps an unspent authorization and loses no data.
+      expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
+      expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
+      expect(mocks.buildHostedAppSessionClearCookie).not.toHaveBeenCalled();
+
+      vi.unstubAllEnvs();
+    });
+
+    it("stays available whenever the window flag is not exactly set", async () => {
+      for (const value of ["", "0", "true", "yes"]) {
+        vi.clearAllMocks();
+        applyRouteDefaults();
+        vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", value);
+
+        const response = await settingsPrivacyDeleteRoute.POST(maintenanceRequest());
+
+        expect(response.status).toBe(200);
+        expect(mocks.deleteHostedAccountData).toHaveBeenCalled();
+      }
+      vi.unstubAllEnvs();
+    });
   });
 });

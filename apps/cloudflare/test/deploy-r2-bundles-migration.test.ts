@@ -71,6 +71,7 @@ function options(overrides: Partial<R2BundlesMigrationOptions> = {}): R2BundlesM
     apply: false,
     confirmDestination: null,
     destination: DESTINATION_BUCKET,
+    prune: null,
     source: SOURCE_BUCKET,
     sourceFrozen: true,
     ...overrides,
@@ -156,6 +157,16 @@ function createMockRunner(input: MockRunnerOptions = {}): {
         }
         if (call.command === "aws" && call.args[0] === "s3api" && call.args[1] === "put-object") {
           replaceDestinationEntry(markerEntry());
+          return { stderr: "", stdout: "" };
+        }
+        if (call.command === "aws" && call.args[0] === "s3api"
+          && call.args[1] === "delete-object") {
+          const bucket = call.args[call.args.indexOf("--bucket") + 1];
+          if (bucket !== DESTINATION_BUCKET) {
+            throw new Error("Mock delete-object targeted a bucket other than the destination.");
+          }
+          const key = call.args[call.args.indexOf("--key") + 1];
+          destinationInventory = destinationInventory.filter((entry) => entry.key !== key);
           return { stderr: "", stdout: "" };
         }
         if (call.command === "aws" && call.args[0] === "s3api" && call.args[1] === "copy-object") {
@@ -544,7 +555,7 @@ describe("R2 migration orchestration", () => {
     await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
       log: () => undefined,
       runner,
-    })).rejects.toThrow("Destination is not a complete copy of the frozen source");
+    })).rejects.toThrow("not copied from the source");
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
@@ -584,7 +595,7 @@ describe("R2 migration orchestration", () => {
     await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
       log: () => undefined,
       runner: rejected.runner,
-    })).rejects.toThrow("unexpected object");
+    })).rejects.toThrow("unexpected destination object");
     expect(mutationCalls(rejected.calls)).toHaveLength(0);
     expect(rejected.calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
@@ -617,7 +628,7 @@ describe("R2 migration orchestration", () => {
       apply: true,
       confirmDestination: DESTINATION_BUCKET,
     }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "unexpected object",
+      "unexpected destination object",
     );
     expect(calls.some((call) => call.args[1] === "copy-object")).toBe(true);
     expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
@@ -646,9 +657,9 @@ describe("R2 migration orchestration", () => {
     expect(mutationCalls(calls)).toHaveLength(0);
   });
 
-  it("reports opposite recovery directions distinguishably", async () => {
-    // The runbook picks rollback or forward from these two shapes, so they must
-    // never collapse into one message.
+  it("reports both divergence directions instead of collapsing them", async () => {
+    // A mixed divergence must show both directions; reporting only one would
+    // hide half of what the operator has to act on.
     const stale = createMockRunner({
       destinationInventory: [inventoryEntry(), inventoryEntry({ key: "stale-copy" }), markerEntry()],
     });
@@ -670,12 +681,101 @@ describe("R2 migration orchestration", () => {
 
     const staleMessage = await read(stale);
     const incompleteMessage = await read(incomplete);
-    expect(staleMessage).toContain("unexpected object");
-    expect(staleMessage).not.toContain("not a complete copy");
-    expect(incompleteMessage).toContain("not a complete copy of the frozen source");
-    expect(incompleteMessage).not.toContain("unexpected object");
+    expect(staleMessage).toContain("unexpected destination object");
+    expect(staleMessage).not.toContain("not copied from the source");
+    expect(incompleteMessage).toContain("not copied from the source");
+    expect(incompleteMessage).not.toContain("unexpected destination object");
     expect(mutationCalls(stale.calls)).toHaveLength(0);
     expect(mutationCalls(incomplete.calls)).toHaveLength(0);
+  });
+
+  it("prunes exactly the objects the source no longer has, then converges", async () => {
+    const stale = inventoryEntry({
+      etag: '"22222222222222222222222222222222"',
+      key: `${PRIVATE_KEY}-superseded`,
+    });
+    const logs: string[] = [];
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), stale, markerEntry()],
+      sourceInventory: [inventoryEntry()],
+    });
+    await runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+      prune: 1,
+    }), migrationEnvironment(), { log: (message) => logs.push(message), runner });
+
+    const deletes = calls.filter((call) => call.args[1] === "delete-object");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0]?.args[deletes[0].args.indexOf("--key") + 1]).toBe(stale.key);
+    expect(deletes[0]?.args[deletes[0].args.indexOf("--bucket") + 1]).toBe(DESTINATION_BUCKET);
+    expect(logs.join("\n")).toContain("Pruned 1 destination object(s)");
+    expect(logs.join("\n")).not.toContain(stale.key);
+    expect(logs.join("\n")).toContain("Verified the exact mirror");
+  });
+
+  it("never issues a delete against the source bucket", async () => {
+    const stale = inventoryEntry({ key: `${PRIVATE_KEY}-superseded` });
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), stale, markerEntry()],
+      sourceInventory: [inventoryEntry()],
+    });
+    await runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+      prune: 1,
+    }), migrationEnvironment(), { log: () => undefined, runner });
+    for (const call of calls.filter((entry) => entry.args[1] === "delete-object")) {
+      expect(call.args).not.toContain(SOURCE_BUCKET);
+    }
+  });
+
+  it("refuses a prune count that does not match the observed drift", async () => {
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [
+        inventoryEntry(),
+        inventoryEntry({ key: `${PRIVATE_KEY}-a` }),
+        markerEntry(),
+      ],
+      sourceInventory: [inventoryEntry()],
+    });
+    await expect(runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+      prune: 2,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "does not match",
+    );
+    expect(calls.some((call) => call.args[1] === "delete-object")).toBe(false);
+  });
+
+  it("refuses to prune a key the second source read still reports", async () => {
+    const contested = inventoryEntry({ key: `${PRIVATE_KEY}-contested` });
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), contested, markerEntry()],
+      sourceInventory: [inventoryEntry()],
+      // The confirming read sees the object again, so the delete is not authorized.
+      sourceInventoryReadHook: ({ inventory, readCount }) => readCount === 2
+        ? [...inventory, contested]
+        : inventory,
+    });
+    await expect(runR2BundlesMigration(options({
+      apply: true,
+      confirmDestination: DESTINATION_BUCKET,
+      prune: 1,
+    }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
+      "still in the source",
+    );
+    expect(calls.some((call) => call.args[1] === "delete-object")).toBe(false);
+  });
+
+  it("keeps the read-only gate incapable of deleting", () => {
+    expect(() => parseR2BundlesMigrationArgs([
+      "--source", SOURCE_BUCKET,
+      "--destination", DESTINATION_BUCKET,
+      "--source-frozen",
+      "--prune", "1",
+    ])).toThrow("--prune requires --apply");
   });
 
   it("blocks the read-only gate while a lifecycle-managed source object remains", async () => {
@@ -707,7 +807,7 @@ describe("R2 migration orchestration", () => {
       apply: true,
       confirmDestination: DESTINATION_BUCKET,
     }), migrationEnvironment(), { log: () => undefined, runner })).rejects.toThrow(
-      "unexpected object",
+      "unexpected destination object",
     );
     expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
