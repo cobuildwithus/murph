@@ -468,6 +468,40 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     expect(lockedMemberReadOrder).toBeLessThan(billingWriteOrder as number);
   });
 
+  it("never writes trial billing for a provider trial that expired while the finalization lock was contended", async () => {
+    const prisma = makePrisma();
+    mocks.lockHostedMemberRow
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(async () => {
+        // The trial ends at 2026-06-28T12:00:00Z, so this attempt judged it
+        // eligible before the lock and only reaches the write after it expired.
+        vi.setSystemTime(new Date("2026-06-28T12:00:00.500Z"));
+      });
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).toHaveBeenCalledOnce();
+    expect(mocks.bindHostedMemberStripeCustomerIdIfMissingTx).toHaveBeenCalledOnce();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
+  });
+
   it("maps reservation lock contention to the retryable setup disposition before subscription work", async () => {
     const prisma = makePrisma();
     mocks.lockHostedMemberRow.mockRejectedValueOnce(
@@ -2282,6 +2316,58 @@ describe("ensureHostedAutoPulseTrialEnrollment", () => {
     );
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+  });
+
+  it("never cancels the losing trial that became current after the finalization transaction committed", async () => {
+    const prisma = makePrisma();
+    mocks.readHostedMemberBillingSnapshot
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot())
+      .mockResolvedValueOnce(makeBillingSnapshot({
+        billingRef: makePulseTrialBillingRef({
+          stripeCustomerId: "cus_auto_trial_123",
+          stripeSubscriptionId: "sub_other_trial_123",
+        }),
+        billingStatus: HostedBillingStatus.active,
+      }))
+      // Another serialized billing flow bound this attempt's loser as the
+      // member's current subscription once the finalization lock was released.
+      .mockResolvedValue(makeBillingSnapshot({
+        billingRef: makePulseTrialBillingRef({
+          stripeCustomerId: "cus_auto_trial_123",
+          stripeSubscriptionId: "sub_auto_trial_123",
+        }),
+        billingStatus: HostedBillingStatus.active,
+      }));
+
+    await expect(
+      ensureHostedAutoPulseTrialEnrollment({
+        inviteCode: "invite-code",
+        member: {
+          id: "member_123",
+          suspendedAt: null,
+        },
+        now: new Date("2026-06-14T12:00:05.000Z"),
+        prisma: prisma as never,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingSnapshot).toHaveBeenCalledTimes(4);
+    expect(mocks.lockHostedMemberRow).toHaveBeenCalledTimes(3);
+    expect(prisma.$transaction).toHaveBeenNthCalledWith(
+      3,
+      expect.any(Function),
+      {
+        maxWait: 5_000,
+        timeout: 30_000,
+      },
+    );
   });
 
   it("does not cancel the resolved trial when the final locked re-read is already bound to it", async () => {

@@ -33,6 +33,7 @@ import {
   cancelHostedPulseTrialLoserSubscription,
   cancelHostedPulseTrialLoserSubscriptionsForMember,
   isHostedPulseTrialSubscriptionForKnownPolicy,
+  type HostedPulseTrialCandidateDisposition,
 } from "./pulse-trial-subscription-cleanup";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -496,6 +497,10 @@ export async function applyHostedAutoPulseTrialCampaignDispositionTx(input: {
 
   const outcome = await finalizeHostedAutoPulseTrialEnrollmentTx({
     currentMember: input.currentMember,
+    // The campaign owner already holds the member lock for this transaction and
+    // asserts the trial runway against this same clock just above, so it is the
+    // locked freshness clock for this caller.
+    lockedNow: input.now,
     memberId: input.currentMember.core.id,
     now: input.now,
     stripeCustomerId: input.stripeCustomerId,
@@ -601,11 +606,17 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
  *    with.
  *
  * Serialization is preserved because every Stripe mutation of a member's Pulse
- * Trial subscriptions runs under this same member lock. Phase 2 therefore
+ * Trial subscriptions is decided under this same member lock. Phase 2 therefore
  * cannot interleave with another flow's write, and the locked re-read in
  * {@link finalizeHostedAutoPulseTrialEnrollmentTx} still decides the outcome
  * against the member state that exists at write time, not the state that
  * existed when phase 1 read Stripe.
+ *
+ * Moving the provider read out of the lock makes the phase 1 judgement age
+ * while the lock is contended, so both time-sensitive halves are revalidated
+ * later: phase 2 rechecks the retrieved trial's own expiry against a clock read
+ * under the lock, and phase 3 rechecks under the lock that the subscription it
+ * is about to cancel is still not the member's current one.
  */
 async function finalizeHostedAutoPulseTrialEnrollment(input: {
   memberId: string;
@@ -654,11 +665,18 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   // behind a rolled-back write. A cleanup failure still surfaces as a retryable
   // error: that keeps the caller retrying until the subscription is either
   // cancelled here or picked up by the loser sweep on the next enrollment.
-  await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
-    requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-    stripe: input.stripe,
-    subscriptionId: outcome.cleanupStripeSubscriptionId,
-  });
+  if (outcome.cleanupStripeSubscriptionId) {
+    await assertHostedAutoPulseTrialLoserStillLost({
+      memberId: input.memberId,
+      prisma: input.prisma,
+      subscriptionId: outcome.cleanupStripeSubscriptionId,
+    });
+    await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+      requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+      stripe: input.stripe,
+      subscriptionId: outcome.cleanupStripeSubscriptionId,
+    });
+  }
 
   if (outcome.kind === "failed") {
     throw outcome.error;
@@ -679,6 +697,75 @@ function buildHostedAutoPulseTrialFinalizationBusyError() {
     message: "Murph is still finishing this trial setup. Try again.",
     retryable: true,
   });
+}
+
+/**
+ * Rechecks, under the member lock, that the subscription this attempt is about
+ * to cancel is still not the member's current subscription.
+ *
+ * The finalization transaction chose the loser and then released the lock, so
+ * another serialized billing flow can bind that same subscription as the
+ * member's current one before the post-commit cancel runs. Cancelling then
+ * would revoke the member's live trial, so ownership is re-read under the same
+ * lock every billing write already takes: a flow that committed the change is
+ * always visible here. The read is database-only and the lock is released
+ * before the Stripe call, so no provider round trip happens under the lock.
+ *
+ * Only the `current` disposition blocks the cancel. An `eligible` member is one
+ * whose enrollment failed on its own state (suspended, blocked billing), and
+ * that member still owns an unreferenced live trial that must be cancelled
+ * rather than leaked.
+ */
+async function assertHostedAutoPulseTrialLoserStillLost(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  subscriptionId: string;
+}): Promise<void> {
+  let disposition: HostedPulseTrialCandidateDisposition;
+  try {
+    disposition = await withHostedMemberStripeMutationLockForOps({
+      acquisitionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      run: (tx): Promise<HostedPulseTrialCandidateDisposition> =>
+        runWithHostedDomainRootUnwrapCache(async () => {
+          const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
+            memberId: input.memberId,
+            prisma: tx,
+          });
+          return classifyHostedPulseTrialCandidateDisposition({
+            billingStatus: currentMember.core.billingStatus,
+            currentBillingPhase:
+              currentMember.billingRef?.currentBillingPhase ?? null,
+            currentStripeSubscriptionId:
+              currentMember.billingRef?.stripeSubscriptionId ?? null,
+            pulseTrialRedeemedAt:
+              currentMember.billingRef?.pulseTrialRedeemedAt ?? null,
+            subscriptionId: input.subscriptionId,
+          });
+        }),
+      transactionTimeoutMs:
+        HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (error instanceof HostedMemberStripeMutationLockBusyError) {
+      throw buildHostedAutoPulseTrialFinalizationBusyError();
+    }
+    throw error;
+  }
+
+  if (disposition === "current") {
+    // The leftover trial is now owned by whoever won the member. Hand it to the
+    // existing loser sweep, which reruns this ownership check under the lock on
+    // the next enrollment attempt instead of cancelling live access here.
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_CLEANUP_OWNER_CHANGED",
+      httpStatus: 409,
+      message: "Murph could not confirm the unused Stripe trial. Try again.",
+      retryable: true,
+    });
+  }
 }
 
 async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
@@ -708,6 +795,10 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
             });
             return finalizeHostedAutoPulseTrialEnrollmentTx({
               currentMember,
+              // Read after the lock and the locked member re-read, so the
+              // phase 1 provider judgement is measured against the instant the
+              // write can actually happen.
+              lockedNow: new Date(),
               memberId: input.memberId,
               now: input.now,
               stripeCustomerId: input.stripeCustomerId,
@@ -844,6 +935,7 @@ function assertHostedAutoPulseTrialFinalizationSubscriptionEligible(input: {
 
 async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
   currentMember: HostedMemberBillingSnapshot;
+  lockedNow: Date;
   memberId: string;
   now: Date;
   stripeCustomerId: string;
@@ -888,6 +980,11 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
       error: eligibilityError,
     };
   }
+
+  assertHostedAutoPulseTrialSnapshotStillFresh({
+    lockedNow: input.lockedNow,
+    trialSnapshot: input.trialSnapshot,
+  });
 
   const finalBillingRef = input.currentMember.billingRef?.stripeCustomerId
     ? input.currentMember.billingRef
@@ -963,6 +1060,38 @@ async function finalizeHostedAutoPulseTrialEnrollmentTx(input: {
     },
     result: buildHostedAutoPulseTrialEnrollmentResult("enrolled"),
   };
+}
+
+/**
+ * Rejects a provider judgement that has aged out before the locked write.
+ *
+ * The subscription was retrieved and judged eligible outside the lock, so an
+ * almost-expired trial can pass that judgement and then expire while this
+ * attempt waits for the member row. Every other field of the retrieved
+ * subscription is frozen at retrieval time and cannot change without another
+ * provider read, which must not happen under the lock; the trial's own expiry
+ * is the part of that judgement that decays on its own, so it is recomputed
+ * against the locked clock. Persisting past it would mark the member active on
+ * a trial that has already ended.
+ *
+ * The failure is the same retryable disposition the pre-lock eligibility check
+ * raises, so the caller's retry reruns phase 1 against fresh provider state
+ * rather than skipping the write and reporting success.
+ */
+function assertHostedAutoPulseTrialSnapshotStillFresh(input: {
+  lockedNow: Date;
+  trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
+}): void {
+  if (input.trialSnapshot.trialEndsAt.getTime() > input.lockedNow.getTime()) {
+    return;
+  }
+
+  throw hostedOnboardingError({
+    code: "HOSTED_AUTO_PULSE_TRIAL_SUBSCRIPTION_CHANGED",
+    httpStatus: 409,
+    message: "Stripe trial state changed before activation. Try again.",
+    retryable: true,
+  });
 }
 
 async function readHostedAutoPulseTrialEnrollmentMember(input: {
