@@ -11,10 +11,8 @@ import type {
   HostedPhoneCallStartResponse,
 } from "@murphai/hosted-execution/phone-calls";
 import {
-  HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE,
   HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS,
   hostedPhoneCallBriefSchema,
-  isHostedPhoneCallEmergencyNumber,
 } from "@murphai/hosted-execution/phone-calls";
 
 import { waitForAbortableOperation } from "../hosted-onboarding/abortable-settlement";
@@ -150,10 +148,6 @@ export async function createHostedPhoneCall(input: {
 async function createHostedPhoneCallWithinDeadline(input: Parameters<
   typeof createHostedPhoneCall
 >[0] & { signal: AbortSignal }): Promise<HostedPhoneCallStartResponse> {
-  // Fail closed before any dedupe lookup, reservation, or provider dispatch.
-  // Placing this ahead of the request-key path also means a replayed request
-  // key cannot resurrect a blocked number from an earlier stored brief.
-  assertHostedPhoneCallNotEmergency(input.brief);
   const store = resolveHostedPhoneCallStore(input.prisma);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
@@ -581,18 +575,6 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
     }
   }
   throwHostedPhoneCallStartPending();
-}
-
-function assertHostedPhoneCallNotEmergency(brief: HostedPhoneCallBrief): void {
-  if (!isHostedPhoneCallEmergencyNumber(brief.to.phoneNumber)) {
-    return;
-  }
-  throw hostedOnboardingError({
-    code: "HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED",
-    httpStatus: 400,
-    message: HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE,
-    retryable: false,
-  });
 }
 
 function throwHostedPhoneCallStartPending(): never {

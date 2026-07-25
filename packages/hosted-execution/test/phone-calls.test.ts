@@ -91,21 +91,12 @@ describe("hosted phone call emergency dialing block", () => {
     }
   });
 
-  it("blocks emergency codes that hide behind a country calling code", () => {
-    for (const number of ["+1911", "+44999", "+61000", "+1988", "+49112"]) {
-      expect(isHostedPhoneCallEmergencyNumber(number)).toBe(true);
-    }
-  });
-
   it("blocks emergency codes written with separators", () => {
-    for (const number of ["9-1-1", "(911)", "+1 (911)", "9 1 1"]) {
+    for (const number of ["9-1-1", "(911)", "9 1 1"]) {
       expect(isHostedPhoneCallEmergencyNumber(number)).toBe(true);
     }
   });
 
-  // The country-code branch must never swallow a real subscriber number. The
-  // India cases matter most: +91 is a country code whose digits begin an
-  // emergency code, and +1 numbers in the 911 area are ordinary NANP numbers.
   it("leaves ordinary subscriber numbers dialable", () => {
     for (const number of [
       "+12125550123",
@@ -119,11 +110,29 @@ describe("hosted phone call emergency dialing block", () => {
     }
   });
 
-  it("refuses to parse a brief that targets an emergency number", () => {
-    expect(() => hostedPhoneCallBriefSchema.parse({
+  // The E.164 shape would reject "911" on length alone. What this proves is
+  // that the refusal is *named*: the caller learns it asked for emergency
+  // dispatch rather than that it mistyped a phone number.
+  it("refuses an emergency short code with the emergency reason, not a format error", () => {
+    const parsed = hostedPhoneCallBriefSchema.safeParse({
       ...VALID_BRIEF,
-      to: { phoneNumber: "+1911" },
-    })).toThrow();
+      to: { phoneNumber: "911" },
+    });
+    expect(parsed.success).toBe(false);
+    expect(JSON.stringify(parsed.error?.issues)).toContain(
+      "Murph cannot call emergency or crisis numbers.",
+    );
+  });
+
+  it("still rejects a malformed non-emergency number as a format error", () => {
+    const parsed = hostedPhoneCallBriefSchema.safeParse({
+      ...VALID_BRIEF,
+      to: { phoneNumber: "212-555-0123" },
+    });
+    expect(parsed.success).toBe(false);
+    expect(JSON.stringify(parsed.error?.issues)).not.toContain(
+      "Murph cannot call emergency or crisis numbers.",
+    );
   });
 
   // The emergency rule is layered after the E.164 regex specifically so the

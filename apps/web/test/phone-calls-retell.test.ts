@@ -832,6 +832,14 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.route).toEqual(route);
     expect(wake.notification.route.actorId).toBeNull();
     expect(wake.notification.route.threadIsDirect).toBe(false);
+    // The room asked collectively, so it must always hear how the call ended.
+    // allow_send_or_skip here would let a completed, paid, externally visible
+    // call produce no group message at all.
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(wake.notification.instructions).toContain("this group chat");
+    expect(wake.notification.instructions).not.toContain(
+      "you may skip sending a message",
+    );
   });
 
   it("updates call_ended once with provider id and end timestamp", async () => {

@@ -19,6 +19,7 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -318,11 +319,22 @@ export function buildPhoneCallResultNotificationWake(input: {
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
+        requireSend: isHostedThreadContainerNotificationDestination(
+          input.destination,
+        ),
         result: input.result,
       }),
-      responsePolicy: {
-        kind: "allow_send_or_skip",
-      },
+      // A room asked for this call collectively, so the room must always hear
+      // how it ended. Skipping is only tolerable for a direct 1:1 result, where
+      // the single recipient already knows they asked and silence is recoverable
+      // by asking again. In a group the paid, externally visible call has
+      // already happened, so an omitted result is an unrecoverable silent
+      // failure for every other participant.
+      responsePolicy: isHostedThreadContainerNotificationDestination(
+        input.destination,
+      )
+        ? { kind: "require_send" }
+        : { kind: "allow_send_or_skip" },
       route: input.destination.route,
     },
     occurredAt: new Date().toISOString(),
@@ -434,12 +446,17 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
 
 export function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
+  requireSend?: boolean;
   result: HostedPhoneCallResult;
 }): string {
   const target = input.brief.to.label?.trim() || "the requested phone number";
   const lines = [
-    "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
-    "If there is nothing meaningful to report, you may skip sending a message.",
+    input.requireSend
+      ? "The Murph phone call has finished. Report the final result to this group chat."
+      : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
+    input.requireSend
+      ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
+      : "If there is nothing meaningful to report, you may skip sending a message.",
     "Use normal Murph wording; do not send a hard-coded template.",
     "Do not claim a new call was made. This is the result of a call Murph already placed.",
     "Only notify the user about this completed call. Do not perform private reads, writes, tool calls, calendar updates, follow-up outreach, or unrelated actions in this notification turn.",

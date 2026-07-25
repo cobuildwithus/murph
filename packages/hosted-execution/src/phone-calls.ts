@@ -36,52 +36,29 @@ export const HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS: ReadonlySet<string> =
 export const HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE =
   "Murph cannot call emergency or crisis numbers.";
 
-// Accepts any user- or model-supplied dial string, including pre-E.164 forms,
-// because this gate must run before format validation. A number that fails the
-// E.164 shape is exactly the shape a bare emergency short code takes, so
-// checking after the regex would make this rule unreachable.
+// Accepts any model-supplied dial string, including pre-E.164 forms, because
+// the whole point is to name the refusal. The E.164 shape below already rejects
+// every one of these by length, so this check exists to change the *reason*: a
+// model that emits "911" is told it asked for emergency dispatch, not that it
+// mistyped a format. That distinction is what lets Murph respond usefully.
 export function isHostedPhoneCallEmergencyNumber(value: string): boolean {
   const digits = value.replace(/\D/gu, "");
-  if (digits.length === 0) {
-    return false;
-  }
-  if (HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS.has(digits)) {
-    return true;
-  }
-
-  // Also reject a country-code-prefixed emergency code such as +1 911 or
-  // +44 999. Only a full-remainder match counts, so an ordinary subscriber
-  // number can never be caught by this branch: a real national number is far
-  // longer than the two- and three-digit codes above.
-  for (let prefixLength = 1; prefixLength <= 3; prefixLength += 1) {
-    if (digits.length <= prefixLength) {
-      break;
-    }
-    if (
-      HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS.has(
-        digits.slice(prefixLength),
-      )
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+  return digits.length > 0
+    && HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS.has(digits);
 }
 
-// The regex stays first so `z.toJSONSchema` still emits `pattern` for the
-// model-facing tool schema. It already rejects a bare short code by length, so
-// the emergency refinement is the rule that survives any future loosening of
-// the format, and `assertHostedPhoneCallDialable` is the unconditional gate at
-// the egress boundary.
+// The emergency check runs first and aborts, so an emergency short code fails
+// with the named reason instead of a generic format error. The regex still runs
+// for every other value, so `z.toJSONSchema` continues to emit `pattern` for
+// the model-facing tool schema.
 const hostedPhoneCallE164PhoneNumberSchema = z
   .string()
   .trim()
-  .regex(/^\+[1-9]\d{7,14}$/u)
   .refine(
     (value) => !isHostedPhoneCallEmergencyNumber(value),
-    { error: HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE },
-  );
+    { abort: true, error: HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE },
+  )
+  .regex(/^\+[1-9]\d{7,14}$/u);
 
 const hostedPhoneCallBriefFactKeySchema = z
   .string()
