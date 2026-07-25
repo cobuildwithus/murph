@@ -59,6 +59,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-outreach-window", () => ({
   decideHostedGroupJoinOutreachSendWindow: mocks.decideSendWindow,
 }));
 
+import { resolveHostedLinqSignupWelcomeDailyLimit } from "@/src/lib/hosted-onboarding/linq-routing-policy";
 import {
   HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT,
   buildHostedGroupJoinOutreachMessage,
@@ -490,6 +491,85 @@ describe("hosted group join outreach drain", () => {
         data: expect.objectContaining({ lastDeferralReason: "line_pacing" }),
       }),
     );
+  });
+
+  it("moves to a line with outreach capacity when the lowest-count line is capped", async () => {
+    // Line A has the lower shared count so the real chooser prefers it, but its
+    // reduced outreach cap is already spent. B must be tried, not A again.
+    const lineA = {
+      ...LINE,
+      maxNewConversationsPerDay: 20,
+      phoneNumber: "+15550000001",
+      phoneNumberLookupKey: "line_lookup_a",
+      proactiveConversationCount: 10,
+    };
+    const lineB = {
+      ...LINE,
+      maxNewConversationsPerDay: 50,
+      phoneNumber: "+15550000002",
+      phoneNumberLookupKey: "line_lookup_b",
+      proactiveConversationCount: 11,
+    };
+    mocks.listHealthyLines.mockResolvedValue([lineA, lineB]);
+    mocks.claimLineCapacity.mockImplementation(
+      async (input: { phoneNumberLookupKey: string }) =>
+        input.phoneNumberLookupKey === "line_lookup_b",
+    );
+    const { prisma } = createPrismaStub();
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({ kind: "sent", outreachId: "hgrpjoa_opaque" });
+
+    const send = mocks.createChat.mock.calls[0]?.[0] as { from: string } | undefined;
+    expect(send?.from).toBe("+15550000002");
+    // A is tried once and then dropped from the candidate set, never retried.
+    const attemptedKeys = mocks.claimLineCapacity.mock.calls.map(
+      ([call]) => (call as { phoneNumberLookupKey: string }).phoneNumberLookupKey,
+    );
+    expect(attemptedKeys.filter((key) => key === "line_lookup_a")).toHaveLength(1);
+  });
+
+  it("retries soon, not next day, when a pinned line leaves the pool and no replacement is free", async () => {
+    // The pinned line can return within minutes, so a transient health event must
+    // not push the only private join path past the UTC-day boundary.
+    mocks.claimLineCapacity.mockResolvedValue(false);
+    const { prisma, updateMany } = createPrismaStub({
+      pinnedLineKey: "line_lookup_gone",
+    });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "deferred",
+      outreachId: "hgrpjoa_opaque",
+      reason: "pinned_line_unavailable",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastDeferralReason: "pinned_line_unavailable",
+          nextAttemptAt: new Date(NOW.getTime() + 15 * 60_000),
+        }),
+      }),
+    );
+  });
+
+  it("reserves a finite number of welcome slots, not absolute priority", () => {
+    // Truthful statement of the policy: the reserve guarantees this many later
+    // welcome claims per line, and enough activations can still exhaust the line.
+    for (const maxNewConversationsPerDay of [50, 20, 15, null]) {
+      const welcome = resolveHostedLinqSignupWelcomeDailyLimit({
+        maxNewConversationsPerDay,
+      });
+      const outreach = resolveHostedGroupJoinOutreachDailyLimit({
+        maxNewConversationsPerDay,
+      });
+      expect(welcome - outreach).toBe(Math.min(10, welcome));
+    }
   });
 
   it("never lets a URL-shaped group name enter first-contact copy", () => {

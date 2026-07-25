@@ -543,14 +543,24 @@ async function claimOneHostedGroupJoinOutreachTx(input: {
       tx: input.tx,
     });
   if (!line) {
+    // Losing a pinned line is a health transition, not proof the pool is spent for
+    // the rest of the day, so it keeps the short retry. Only a row that was never
+    // pinned and found no capacity waits for the next day's window.
+    const lostPinnedLine = Boolean(outreach.phoneNumberLookupKey);
     return deferHostedGroupJoinOutreachTx({
-      nextAttemptAt: resolveNextUtcDaySendAttempt({
-        now: input.now,
-        participantPhoneNumber,
-      }),
+      nextAttemptAt: lostPinnedLine
+        ? new Date(
+            input.now.getTime() + HOSTED_GROUP_JOIN_OUTREACH_NO_LINE_RETRY_MS,
+          )
+        : resolveNextUtcDaySendAttempt({
+            now: input.now,
+            participantPhoneNumber,
+          }),
       now: input.now,
       outreachId: outreach.id,
-      reason: "line_capacity_exhausted",
+      reason: lostPinnedLine
+        ? "pinned_line_unavailable"
+        : "line_capacity_exhausted",
       tx: input.tx,
     });
   }
@@ -642,10 +652,15 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
     ]),
   );
 
-  for (let attempt = 0; attempt < input.lines.length; attempt += 1) {
+  // Drop a losing line from the candidate set rather than marking it full in the
+  // count map. The shared chooser filters against the full signup-welcome limit, so
+  // recording the lower outreach limit would leave that line eligible and it could
+  // win every iteration while another line still had outreach capacity.
+  let candidates = [...input.lines];
+  while (candidates.length > 0) {
     const line = chooseHostedLinqSignupWelcomeLine({
       activeMembersByRecipientPhone,
-      lines: input.lines,
+      lines: candidates,
       newAssignmentsByRecipientPhone,
       preferredRecipientPhone: null,
     });
@@ -654,13 +669,12 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
     }
 
     // Signup welcomes answer someone who already joined and is waiting, so they
-    // take priority over proactive outreach on a shared line budget. Outreach
-    // claims against a reduced limit, leaving the remainder for onboarding.
-    const limit = resolveHostedGroupJoinOutreachDailyLimit(line);
+    // keep a reserved share of a line's daily budget: outreach claims against a
+    // reduced limit.
     if (
       await claimHostedLinqProactiveConversationCapacityTx({
         dayUtc,
-        limit,
+        limit: resolveHostedGroupJoinOutreachDailyLimit(line),
         phoneNumberLookupKey: line.phoneNumberLookupKey,
         prisma: input.tx,
       })
@@ -668,9 +682,9 @@ async function claimHostedGroupJoinOutreachLineCapacityTx(input: {
       return line;
     }
 
-    // Treat the losing line as full for the rest of this selection so the next
-    // pass considers a different one.
-    newAssignmentsByRecipientPhone.set(line.phoneNumber, limit);
+    candidates = candidates.filter(
+      (candidate) => candidate.phoneNumberLookupKey !== line.phoneNumberLookupKey,
+    );
   }
 
   return null;
