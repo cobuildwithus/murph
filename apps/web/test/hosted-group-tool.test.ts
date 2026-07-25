@@ -1724,7 +1724,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
       permissionText: "Recent sleep timing and duration",
       postedAt: expect.any(Date),
@@ -1795,7 +1795,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
@@ -1837,7 +1837,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: diagnosticScopes,
       tx: fakeTx,
@@ -1968,14 +1968,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(1, {
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(2, {
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
@@ -2036,7 +2036,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: canonicalScopes,
       tx: fakeTx,
@@ -2073,7 +2073,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: canonicalScopes,
       tx: fakeTx,
@@ -2241,7 +2241,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: [],
       tx: fakeTx,
