@@ -64,6 +64,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
     apiBaseUrl: "https://linq.example.test/api/partner/v3",
     apiToken: "linq-token",
   })),
+  requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://join.test"),
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
@@ -266,9 +267,57 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("consumes group reply context only after invite delivery is accepted", async () => {
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-1",
+      inviteId: "invite-1",
+      memberId: "member-1",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      service: "sms",
+      sourceEventId: "event-group-reply",
+      threadIsDirect: true,
+      template: "invite_signup",
+    });
+    const prisma = createInviteSignupPrismaFixture();
+    const scheduledTasks: Array<() => Promise<void>> = [];
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: prisma as never,
+        scheduleAfterResponse: (task) => {
+          scheduledTasks.push(task);
+        },
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(scheduledTasks).toHaveLength(1);
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
+
+    await scheduledTasks[0]?.();
+
+    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOutreach.updateMany).toHaveBeenCalledWith({
+      data: {
+        repliedAt: new Date("2026-03-26T12:00:00.000Z"),
+      },
+      where: {
+        id: "hgrpjoa-1",
+        repliedAt: null,
+        sentAt: { not: null },
+        skippedAt: null,
+      },
+    });
+  });
+
   it("does not dispatch a signup link when its exact active invite is absent", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
+      groupJoinCode: "join-group",
+      groupJoinOutreachId: "hgrpjoa-1",
       inviteId: "invite-1",
       memberId: "member-1",
       occurredAt: "2026-03-26T12:00:00.000Z",
@@ -305,6 +354,7 @@ describe("hosted Linq webhook transport", () => {
       .toBeLessThan(prisma.hostedInvite.findUnique.mock.invocationCallOrder[0] ?? 0);
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupJoinOutreach.updateMany).not.toHaveBeenCalled();
   });
 
   it("does not create a fallback signup chat when its exact active invite is absent", async () => {
@@ -458,7 +508,7 @@ describe("hosted Linq webhook transport", () => {
         channel: "linq",
         prisma: transactionClient,
         threadId: "chat-1",
-      });
+    });
     expect(claimHostedLinqDeliveryProviderDispatchTx).not.toHaveBeenCalled();
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -1903,6 +1953,9 @@ function createInviteSignupPrismaFixture(
           : { inviteCode: "invite-code" }
       ),
       update: vi.fn().mockResolvedValue({}),
+    },
+    hostedGroupJoinOutreach: {
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
   };
   return {

@@ -4,7 +4,6 @@ import type { Prisma } from "@prisma/client";
 
 import { sha256Hex } from "../primitives";
 import {
-  createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedPhoneLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
@@ -228,12 +227,12 @@ export function readHostedGroupJoinOutreachParticipantPhone(input: {
   }
 }
 
-export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
+export async function readHostedGroupJoinOutreachReplyContextTx(input: {
   linqChatId: string;
-  now: Date;
   participantPhoneNumber: string;
+  recipientPhoneNumber: string | null;
   tx: Prisma.TransactionClient;
-}): Promise<{ joinCode: string } | null> {
+}): Promise<{ joinCode: string; outreachId: string } | null> {
   const participantPhoneNumber = normalizePhoneNumber(
     input.participantPhoneNumber,
   );
@@ -246,6 +245,9 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
   );
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
     input.linqChatId,
+  );
+  const recipientPhoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+    input.recipientPhoneNumber,
   );
   if (
     participantPhoneLookupKeys.length === 0
@@ -267,7 +269,12 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
       skippedAt: null,
       OR: [
         { linqChatLookupKey: { in: linqChatLookupKeys } },
-        { linqChatLookupKey: null },
+        ...(recipientPhoneLookupKeys.length > 0
+          ? [{
+              linqChatLookupKey: null,
+              phoneNumberLookupKey: { in: recipientPhoneLookupKeys },
+            }]
+          : []),
       ],
     },
     select: {
@@ -307,32 +314,44 @@ export async function claimHostedGroupJoinOutreachReplyContextTx(input: {
         : [];
     }),
   );
-  const outreach = outreaches.find((candidate) =>
-    validOfferByOutreachKey.has(`${candidate.offerId}\0${candidate.groupId}`),
-  );
+  const isValid = (candidate: (typeof outreaches)[number]) =>
+    validOfferByOutreachKey.has(`${candidate.offerId}\0${candidate.groupId}`);
+  const outreach =
+    outreaches.find((candidate) =>
+      candidate.linqChatLookupKey !== null
+      && linqChatLookupKeys.includes(candidate.linqChatLookupKey)
+      && isValid(candidate)
+    )
+    ?? outreaches.find((candidate) =>
+      candidate.linqChatLookupKey === null && isValid(candidate)
+    );
   if (!outreach) {
-    return null;
-  }
-
-  const claimed = await input.tx.hostedGroupJoinOutreach.updateMany({
-    where: {
-      id: outreach.id,
-      repliedAt: null,
-      skippedAt: null,
-    },
-    data: {
-      ...(outreach.linqChatLookupKey
-        ? {}
-        : { linqChatLookupKey: createHostedLinqChatLookupKey(input.linqChatId) }),
-      repliedAt: input.now,
-    },
-  });
-  if (claimed.count !== 1) {
     return null;
   }
 
   const joinCode = validOfferByOutreachKey.get(
     `${outreach.offerId}\0${outreach.groupId}`,
   );
-  return joinCode ? { joinCode } : null;
+  return joinCode
+    ? { joinCode, outreachId: outreach.id }
+    : null;
+}
+
+export async function consumeHostedGroupJoinOutreachReplyContextTx(input: {
+  outreachId: string;
+  repliedAt: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const consumed = await input.tx.hostedGroupJoinOutreach.updateMany({
+    where: {
+      id: input.outreachId,
+      repliedAt: null,
+      sentAt: { not: null },
+      skippedAt: null,
+    },
+    data: {
+      repliedAt: input.repliedAt,
+    },
+  });
+  return consumed.count === 1;
 }

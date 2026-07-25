@@ -18,6 +18,7 @@ describe("hosted group join outreach inbound handoff", () => {
     const plan = buildSignupLinkResponse({
       chatId: "chat_group_join_reply",
       groupJoinCode: "join_group_opaque",
+      groupJoinOutreachId: "hgrpjoa_opaque",
       inviteCode: "invite_opaque",
       inviteId: "hbi_opaque",
       memberId: "hbm_opaque",
@@ -37,6 +38,7 @@ describe("hosted group join outreach inbound handoff", () => {
       expect.objectContaining({
         payload: expect.objectContaining({
           groupJoinCode: "join_group_opaque",
+          groupJoinOutreachId: "hgrpjoa_opaque",
           inviteId: "hbi_opaque",
           template: "invite_signup",
         }),

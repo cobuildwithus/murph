@@ -54,6 +54,9 @@ import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
 import {
+  consumeHostedGroupJoinOutreachReplyContextTx,
+} from "../hosted-groups/group-join-outreach-store";
+import {
   sanitizeHostedOnboardingStructuredLogDetails,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -123,6 +126,7 @@ export type HostedLinqAiUsageQuotaPayload =
 export type HostedLinqInviteSignupMessagePayload = {
   chatId: string;
   groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteId: string;
   memberId: string;
   occurredAt: string;
@@ -136,6 +140,7 @@ export type HostedLinqInviteSignupFallbackMessagePayload = {
   assignedRecipientPhone: string;
   chatId: null;
   groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteId: string;
   memberId: string;
   memberPhone: string;
@@ -235,6 +240,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       assignedRecipientPhone: string;
       groupJoinCode?: string | null;
+      groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
       memberPhone: string;
@@ -245,6 +251,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
   | {
       chatId: string;
       groupJoinCode?: string | null;
+      groupJoinOutreachId?: string | null;
       inviteId: string;
       memberId: string;
       occurredAt: string;
@@ -804,6 +811,20 @@ async function markHostedLinqDeliveryAcceptedBestEffort(input: {
           prisma,
         });
       }
+      const payload = input.effect.payload;
+      if (
+        (
+          payload.template === "invite_signup"
+          || payload.template === "invite_signup_fallback"
+        )
+        && payload.groupJoinOutreachId?.trim()
+      ) {
+        await consumeHostedGroupJoinOutreachReplyContextTx({
+          outreachId: payload.groupJoinOutreachId.trim(),
+          repliedAt: new Date(payload.occurredAt),
+          tx: prisma,
+        });
+      }
     });
   } catch (error) {
     console.warn("Hosted Linq delivery accepted recording failed.", {
@@ -1094,6 +1115,9 @@ function buildHostedWebhookLinqMessagePayload(
         ...(input.groupJoinCode
           ? { groupJoinCode: input.groupJoinCode }
           : {}),
+        ...(input.groupJoinOutreachId
+          ? { groupJoinOutreachId: input.groupJoinOutreachId }
+          : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
@@ -1108,6 +1132,9 @@ function buildHostedWebhookLinqMessagePayload(
         chatId: null,
         ...(input.groupJoinCode
           ? { groupJoinCode: input.groupJoinCode }
+          : {}),
+        ...(input.groupJoinOutreachId
+          ? { groupJoinOutreachId: input.groupJoinOutreachId }
           : {}),
         inviteId: input.inviteId,
         memberId: input.memberId,

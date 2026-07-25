@@ -100,7 +100,7 @@ import type {
 } from "./linq-first-contact-admission";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
-  claimHostedGroupJoinOutreachReplyContextTx,
+  readHostedGroupJoinOutreachReplyContextTx,
 } from "../hosted-groups/group-join-outreach-store";
 import {
   consumeHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -821,13 +821,13 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  const groupJoinCode = participantPhoneNumber
-    ? (await claimHostedGroupJoinOutreachReplyContextTx({
+  const groupJoinContext = participantPhoneNumber
+    ? await readHostedGroupJoinOutreachReplyContextTx({
         linqChatId: summary.chatId,
-        now: new Date(occurredAt),
         participantPhoneNumber,
+        recipientPhoneNumber,
         tx: input.prisma,
-      }))?.joinCode ?? null
+      })
     : null;
 
   const existingDailyState = existingMember
@@ -890,7 +890,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFallbackSignupLinkResponse({
         assignedPhone: retryableFallbackRecipientPhone,
-        groupJoinCode,
+        groupJoinCode: groupJoinContext?.joinCode,
+        groupJoinOutreachId: groupJoinContext?.outreachId,
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: existingMember.id,
@@ -999,7 +1000,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildFallbackSignupLinkResponse({
         assignedPhone,
-        groupJoinCode,
+        groupJoinCode: groupJoinContext?.joinCode,
+        groupJoinOutreachId: groupJoinContext?.outreachId,
         inviteCode: invite.inviteCode,
         inviteId: invite.id,
         memberId: member.id,
@@ -1051,7 +1053,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
   return logHostedLinqWebhookPlannerDecisionAndReturn(
     buildSignupLinkResponse({
       chatId: summary.chatId,
-      groupJoinCode,
+      groupJoinCode: groupJoinContext?.joinCode,
+      groupJoinOutreachId: groupJoinContext?.outreachId,
       inviteCode: invite.inviteCode,
       inviteId: invite.id,
       memberId: member.id,

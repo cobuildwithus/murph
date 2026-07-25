@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  claimHostedGroupJoinOutreachReplyContextTx,
+  consumeHostedGroupJoinOutreachReplyContextTx,
   enqueueHostedGroupJoinOutreachTx,
+  readHostedGroupJoinOutreachReplyContextTx,
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "@/src/lib/hosted-groups/group-join-outreach-store";
+import {
+  createHostedLinqChatLookupKey,
+  createHostedPhoneLookupKey,
+} from "@/src/lib/hosted-onboarding/contact-privacy";
 
 const TEST_CONTACT_PRIVACY_KEY =
   "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
@@ -82,9 +87,9 @@ describe("hosted group join outreach store", () => {
       .not.toContain("+15551234567");
   });
 
-  // The reply-context claim is the owner that turns "someone texted back" into
-  // "this reply belongs to that group offer". Proving it here keeps the group
-  // handoff from depending only on a URL builder called with a hand-fed code.
+  // Reply-context selection turns "someone texted back" into "this reply belongs
+  // to that group offer". It stays nonterminal until accepted delivery consumes
+  // it, so a temporary no-send result can recover on a later reply.
   function createReplyContextTx(options?: {
     offers?: {
       groupId: string;
@@ -96,6 +101,7 @@ describe("hosted group join outreach store", () => {
       id: string;
       linqChatLookupKey: string | null;
       offerId: string;
+      phoneNumberLookupKey?: string | null;
     }[];
   }) {
     const updateMany = vi.fn(async () => ({ count: 1 }));
@@ -103,8 +109,9 @@ describe("hosted group join outreach store", () => {
       {
         groupId: "hgrp_opaque",
         id: "hgrpjoa_opaque",
-        linqChatLookupKey: null,
+        linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
         offerId: "hgrpjo_opaque",
+        phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
       },
     ];
     const offers = options?.offers ?? [
@@ -267,34 +274,29 @@ describe("hosted group join outreach store", () => {
     expect(updateMany).toHaveBeenCalled();
   });
 
-  it("recovers the originating group and records the reply", async () => {
+  it("reads the originating group without consuming the reply context", async () => {
     const { tx, updateMany } = createReplyContextTx();
-    const now = new Date("2026-07-24T20:00:00.000Z");
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
-      now,
       participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
       tx,
-    })).resolves.toEqual({ joinCode: "join_opaque" });
+    })).resolves.toEqual({
+      joinCode: "join_opaque",
+      outreachId: "hgrpjoa_opaque",
+    });
 
-    // A reply is the only engagement signal a cold outreach earns, and the
-    // thread it arrived on binds the row when dispatch never recorded one.
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({
-        linqChatLookupKey: expect.any(String),
-        repliedAt: now,
-      }),
-    }));
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("claims nothing when no pending outreach matches the sender", async () => {
+  it("reads nothing when no pending outreach matches the sender", async () => {
     const { tx, updateMany } = createReplyContextTx({ outreaches: [] });
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_unrelated",
-      now: new Date("2026-07-24T20:00:00.000Z"),
       participantPhoneNumber: "+15559876543",
+      recipientPhoneNumber: "+15550000000",
       tx,
     })).resolves.toBeNull();
 
@@ -304,10 +306,10 @@ describe("hosted group join outreach store", () => {
   it("falls back to the generic link when the offer no longer resolves", async () => {
     const { tx } = createReplyContextTx({ offers: [] });
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
-      now: new Date("2026-07-24T20:00:00.000Z"),
       participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
       tx,
     })).resolves.toBeNull();
   });
@@ -315,30 +317,29 @@ describe("hosted group join outreach store", () => {
   it("does not treat a non-phone sender as a reply", async () => {
     const { tx, updateMany } = createReplyContextTx();
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
-      now: new Date("2026-07-24T20:00:00.000Z"),
       participantPhoneNumber: "not-a-phone",
+      recipientPhoneNumber: "+15550000000",
       tx,
     })).resolves.toBeNull();
 
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  it("claims the newest outstanding offer when one direct chat has several", async () => {
-    const now = new Date("2026-07-24T20:00:00.000Z");
+  it("reads the newest outstanding offer when one direct chat has several", async () => {
     const { findManyOutreaches, tx, updateMany } = createReplyContextTx({
       outreaches: [
         {
           groupId: "hgrp_new",
           id: "hgrpjoa_new",
-          linqChatLookupKey: "chat_lookup",
+          linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
           offerId: "hgrpjo_new",
         },
         {
           groupId: "hgrp_old",
           id: "hgrpjoa_old",
-          linqChatLookupKey: "chat_lookup",
+          linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
           offerId: "hgrpjo_old",
         },
       ],
@@ -356,12 +357,15 @@ describe("hosted group join outreach store", () => {
       ],
     });
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
-      now,
       participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
       tx,
-    })).resolves.toEqual({ joinCode: "join_new" });
+    })).resolves.toEqual({
+      joinCode: "join_new",
+      outreachId: "hgrpjoa_new",
+    });
 
     expect(findManyOutreaches).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: [
@@ -369,14 +373,14 @@ describe("hosted group join outreach store", () => {
         { requestedAt: "desc" },
         { id: "desc" },
       ],
-      where: expect.objectContaining({ repliedAt: null }),
-    }));
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
-        id: "hgrpjoa_new",
+        OR: expect.arrayContaining([
+          { linqChatLookupKey: { in: expect.any(Array) } },
+        ]),
         repliedAt: null,
       }),
     }));
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("does not let an older revoked offer shadow a newer valid offer", async () => {
@@ -385,13 +389,13 @@ describe("hosted group join outreach store", () => {
         {
           groupId: "hgrp_new",
           id: "hgrpjoa_new",
-          linqChatLookupKey: "chat_lookup",
+          linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
           offerId: "hgrpjo_new",
         },
         {
           groupId: "hgrp_old",
           id: "hgrpjoa_old",
-          linqChatLookupKey: "chat_lookup",
+          linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
           offerId: "hgrpjo_old",
         },
       ],
@@ -406,12 +410,15 @@ describe("hosted group join outreach store", () => {
       ],
     });
 
-    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
       linqChatId: "chat_direct_opaque",
-      now: new Date("2026-07-24T20:00:00.000Z"),
       participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
       tx,
-    })).resolves.toEqual({ joinCode: "join_new" });
+    })).resolves.toEqual({
+      joinCode: "join_new",
+      outreachId: "hgrpjoa_new",
+    });
 
     expect(findManyOffers).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
@@ -419,9 +426,115 @@ describe("hosted group join outreach store", () => {
         revokedAt: null,
       }),
     }));
-    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ id: "hgrpjoa_new" }),
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the sending line when chat creation returned no id", async () => {
+    const sendingLineLookupKey = createHostedPhoneLookupKey("+15550000000");
+    const { findManyOutreaches, tx } = createReplyContextTx({
+      outreaches: [{
+        groupId: "hgrp_opaque",
+        id: "hgrpjoa_opaque",
+        linqChatLookupKey: null,
+        offerId: "hgrpjo_opaque",
+        phoneNumberLookupKey: sendingLineLookupKey,
+      }],
+    });
+
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_created_without_response_id",
+      participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_opaque",
+      outreachId: "hgrpjoa_opaque",
+    });
+
+    expect(findManyOutreaches).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([{
+          linqChatLookupKey: null,
+          phoneNumberLookupKey: { in: expect.any(Array) },
+        }]),
+      }),
     }));
+  });
+
+  it("prefers an exact chat over a newer sending-line fallback", async () => {
+    const { tx } = createReplyContextTx({
+      outreaches: [
+        {
+          groupId: "hgrp_fallback",
+          id: "hgrpjoa_fallback",
+          linqChatLookupKey: null,
+          offerId: "hgrpjo_fallback",
+          phoneNumberLookupKey: createHostedPhoneLookupKey("+15550000000"),
+        },
+        {
+          groupId: "hgrp_exact",
+          id: "hgrpjoa_exact",
+          linqChatLookupKey: requireChatLookupKey("chat_direct_opaque"),
+          offerId: "hgrpjo_exact",
+        },
+      ],
+      offers: [
+        {
+          groupId: "hgrp_fallback",
+          id: "hgrpjo_fallback",
+          group: {
+            joinCode: "join_fallback",
+            runtimeMemberId: "hbm_fallback",
+          },
+        },
+        {
+          groupId: "hgrp_exact",
+          id: "hgrpjo_exact",
+          group: { joinCode: "join_exact", runtimeMemberId: "hbm_exact" },
+        },
+      ],
+    });
+
+    await expect(readHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      participantPhoneNumber: "+15551234567",
+      recipientPhoneNumber: "+15550000000",
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_exact",
+      outreachId: "hgrpjoa_exact",
+    });
+  });
+
+  it("consumes reply context only after a sent outreach reaches its outcome", async () => {
+    const repliedAt = new Date("2026-07-24T20:00:00.000Z");
+    const updateMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const tx = {
+      hostedGroupJoinOutreach: { updateMany },
+    } as never;
+
+    await expect(consumeHostedGroupJoinOutreachReplyContextTx({
+      outreachId: "hgrpjoa_opaque",
+      repliedAt,
+      tx,
+    })).resolves.toBe(true);
+    await expect(consumeHostedGroupJoinOutreachReplyContextTx({
+      outreachId: "hgrpjoa_opaque",
+      repliedAt,
+      tx,
+    })).resolves.toBe(false);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { repliedAt },
+      where: {
+        id: "hgrpjoa_opaque",
+        repliedAt: null,
+        sentAt: { not: null },
+        skippedAt: null,
+      },
+    });
   });
 });
 
@@ -450,6 +563,14 @@ function clearHostedOnboardingEnvCache(): void {
       __murphHostedOnboardingEnv?: unknown;
     }
   ).__murphHostedOnboardingEnv;
+}
+
+function requireChatLookupKey(chatId: string): string {
+  const lookupKey = createHostedLinqChatLookupKey(chatId);
+  if (!lookupKey) {
+    throw new Error("Expected a valid test chat lookup key.");
+  }
+  return lookupKey;
 }
 
 function restoreEnv(key: string, value: string | undefined): void {

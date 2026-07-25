@@ -130,6 +130,7 @@ export function buildIgnoredLinqWebhookPlan(
 export function buildSignupLinkResponse(input: {
   chatId: string;
   groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -149,6 +150,7 @@ export function buildSignupLinkResponse(input: {
       createHostedWebhookLinqMessageSideEffect({
         chatId: input.chatId,
         groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         occurredAt: input.occurredAt,
@@ -171,6 +173,7 @@ export function buildSignupLinkResponse(input: {
 export function buildFallbackSignupLinkResponse(input: {
   assignedPhone: string;
   groupJoinCode?: string | null;
+  groupJoinOutreachId?: string | null;
   inviteCode: string;
   inviteId: string;
   memberId: string;
@@ -188,6 +191,7 @@ export function buildFallbackSignupLinkResponse(input: {
       createHostedWebhookLinqMessageSideEffect({
         assignedRecipientPhone: input.assignedPhone,
         groupJoinCode: input.groupJoinCode ?? null,
+        groupJoinOutreachId: input.groupJoinOutreachId ?? null,
         inviteId: input.inviteId,
         memberId: input.memberId,
         memberPhone: input.memberPhone,
