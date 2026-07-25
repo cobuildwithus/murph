@@ -63,11 +63,236 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-07-25",
+    publishedOn: "2026-07-25",
+    title: "A Murph that knows when to speak",
+    summary:
+      "Group Murph reads the floor, gets more creative, and handles Telegram one-tap joins. Murph can also check X through Grok, adapt outdoor reminders to the weather, and close billing and phone-call loops that used to strand people.",
+    items: [
+      {
+        id: "ask-grok-live-x-search",
+        kind: "feature",
+        priority: 5,
+        title: "Ask Grok what people are saying on X",
+        summary:
+          "Murph can now ask Grok about an account, a topic, or a post you share and bring the live X search answer back into your conversation.",
+        details:
+          "Murph labels the answer as Grok's report, treats posts as unverified third-party content, and never invents links or authors that the search did not return. The exact provider cost for the call counts toward your Murph usage with no markup.",
+        relevanceTags: ["assistant", "search", "x", "research"],
+        sourcePullRequests: [911],
+        tryIt: {
+          label: "Ask about X",
+          prompt: "What are people on X saying about zone 2 training this week?",
+        },
+      },
+      {
+        id: "unhinged-style-dial",
+        kind: "feature",
+        priority: 5,
+        title: "Ask Murph to loosen up",
+        summary:
+          "A new conversation-only Unhinged dial from 0 to 10 controls how restrained Murph keeps its wording, without changing safety, truth, privacy, consent, tool access, or reminder frequency.",
+        details:
+          "It works in private conversations and group chats with verified members, stays out of onboarding and web Settings, and moves in a small step when you ask for a little more or less. In a group, Murph raises it only when the room's own tone supports it.",
+        relevanceTags: ["assistant", "personalization", "groups", "messaging"],
+        sourcePullRequests: [916],
+        tryIt: {
+          label: "Turn it up",
+          prompt: "Turn up my Unhinged setting a little.",
+        },
+      },
+      {
+        id: "group-chat-creative-formats",
+        kind: "feature",
+        priority: 4,
+        title: "Group Murph has more ways to land the bit",
+        summary:
+          "When the room earns it, Murph can turn a shared photo into a new chat icon or over-deliver an apology as a song instead of waiting for someone to commission the joke.",
+        details:
+          "The room's own joke is the material. Murph keeps bodies and anyone visibly not in on it out of the bit, changes the icon if someone objects, and stays quiet when the complaint is that Murph spoke at all.",
+        relevanceTags: ["groups", "assistant", "images", "music"],
+        sourcePullRequests: [938],
+      },
+      {
+        id: "telegram-group-identity-and-one-tap-joins",
+        kind: "feature",
+        priority: 4,
+        title: "Telegram groups know who said yes",
+        summary:
+          "Murph can now attribute a Telegram group message to the linked member who sent it, and a member can accept a group offer from its one-tap Telegram button.",
+        details:
+          "The button stays bound to the offer and the person who received it. Telegram acknowledges every tap so the loading spinner stops, gives a short next step when the person needs to link Telegram, join the group, or accept terms, and explains when a sharing limit blocks the action.",
+        relevanceTags: ["telegram", "groups", "challenges", "messaging"],
+        sourcePullRequests: [924, 927],
+      },
+      {
+        id: "weather-aware-outdoor-reminders",
+        kind: "feature",
+        priority: 4,
+        title: "Outdoor reminders check the weather first",
+        summary:
+          "A reminder that tells you to go outside can now check current conditions and adapt the wording instead of sending you into the rain.",
+        details:
+          "Murph uses only a city or region you already shared, or offers once to save one. Declining does not block the reminder, and a failed weather read never prevents it from going out.",
+        relevanceTags: ["reminders", "weather", "privacy", "automation"],
+        sourcePullRequests: [934],
+      },
+      {
+        id: "group-murph-reads-the-floor",
+        kind: "improvement",
+        priority: 5,
+        title: "Group Murph knows when the floor belongs to someone else",
+        summary:
+          "Murph now distinguishes a live volley from catch-up, a joke from a plausible emergency, and a human-to-human beat from an opening that actually wants Murph.",
+        details:
+          "It may wait a few seconds while people are mid-burst, gives human punchlines more stage, and asks one short question when the health context is genuinely unclear. Timing never overrides the room's silence, reaction, or not-for-you rules.",
+        relevanceTags: ["groups", "assistant", "messaging", "safety"],
+        sourcePullRequests: [906, 928],
+      },
+      {
+        id: "phone-call-results-return-to-chat",
+        kind: "improvement",
+        priority: 5,
+        title: "Phone-call results come back to you",
+        summary:
+          "When a call Murph started finishes, Murph now sends the meaningful result back through the chat where it can reach you, in its own voice.",
+        details:
+          "The result is encrypted at rest, Murph treats the call transcript as untrusted, and a replay cannot send the same outcome twice.",
+        relevanceTags: ["phone-calls", "assistant", "messaging", "reliability"],
+        sourcePullRequests: [857],
+      },
+      {
+        id: "billing-recovery-finishes",
+        kind: "improvement",
+        priority: 5,
+        title: "Subscription recovery now has a way through",
+        summary:
+          "If your subscription lapses, Murph answers on your home line and points you to Subscription controls instead of dropping the text or sending you to a blocked signup wall.",
+        details:
+          "Resuming a paused subscription now carries the saved card onto the invoice, avoids an update the provider rejects while paused, and offers the billing page when the provider is still finishing.",
+        relevanceTags: ["billing", "messaging", "subscriptions", "reliability"],
+        sourcePullRequests: [925],
+      },
+      {
+        id: "one-click-launch-consent",
+        kind: "improvement",
+        priority: 4,
+        title: "Launch consent is one clear choice",
+        summary:
+          "After sign-in, accepting Murph's terms and health-data notices now takes one affirmative action instead of a row of checkboxes, with an equally clear Decline path.",
+        details:
+          "The prompt states that Murph does not sell your health data or train general-purpose AI models on Murph-managed health data. After repeated save failures, it offers a support route instead of trapping you in retries.",
+        relevanceTags: ["onboarding", "consent", "privacy", "auth"],
+        sourcePullRequests: [881],
+      },
+      {
+        id: "group-usage-pause-in-murphs-voice",
+        kind: "improvement",
+        priority: 4,
+        title: "A paused group hears from Murph, not a billing system",
+        summary:
+          "When a group runs out of included usage, Murph now explains the pause in its own voice and, when funding is available, gives the whole room a clear way to bring it back.",
+        relevanceTags: ["groups", "billing", "messaging", "copy"],
+        sourcePullRequests: [933],
+      },
+      {
+        id: "contact-card-in-app-browser-handoff",
+        kind: "improvement",
+        priority: 4,
+        title: "Contact cards escape in-app browsers",
+        summary:
+          "On iPhone, Add Murph to Contacts now hands off from an in-app browser to Safari instead of letting the embedded window swallow the contact-card download.",
+        details:
+          "The short-lived handoff stays bound to your account and chosen avatar. Setup completes only after Safari actually opens; if the launch is blocked, the picker stays open with a retry.",
+        relevanceTags: ["onboarding", "contacts", "iphone", "reliability"],
+        sourcePullRequests: [917],
+      },
+      {
+        id: "experiment-check-ins-survive-stray-files",
+        kind: "improvement",
+        priority: 4,
+        title: "Experiment check-ins survive stray files",
+        summary:
+          "A leftover folder in experiment storage can no longer disable every managed automation or archive active experiment check-ins. Unrelated reminders keep running while Murph retries a temporary experiment scan failure.",
+        relevanceTags: ["experiments", "reminders", "automation", "reliability"],
+        sourcePullRequests: [943],
+      },
+      {
+        id: "group-chat-renames-without-a-hosted-record",
+        kind: "improvement",
+        priority: 3,
+        title: "Even a lightweight group chat can be renamed",
+        summary:
+          "Murph can now rename the chat it is already in even when the group has not started a challenge or created a shared workspace. Updating Murph's own label follows when possible.",
+        relevanceTags: ["groups", "messaging", "tools", "reliability"],
+        sourcePullRequests: [939],
+      },
+      {
+        id: "voice-memo-failures-have-a-reason",
+        kind: "improvement",
+        priority: 3,
+        title: "Voice-memo failures are no longer a mystery",
+        summary:
+          "Murph now receives a safe description of why voice generation failed, while the maximum script length and generation timeout share one limit so overlong memos do not fail by design.",
+        details:
+          "Provider status and request identifiers reach secret-safe logs, giving Murph and support enough information to distinguish a timeout from a quota or request error.",
+        relevanceTags: ["voice", "assistant", "reliability", "support"],
+        sourcePullRequests: [935, 937],
+      },
+      {
+        id: "safe-database-start-retries",
+        kind: "improvement",
+        priority: 3,
+        title: "Brief database connection failures get a safe retry",
+        summary:
+          "If a database timeout proves that no query or transaction started, Murph's web service now retries it briefly instead of failing the request.",
+        details:
+          "A failure that may have reached the database is never replayed, so the retry cannot duplicate a completed action.",
+        relevanceTags: ["web", "database", "reliability", "retries"],
+        sourcePullRequests: [940],
+      },
+      {
+        id: "group-roster-durable-murph-activation",
+        kind: "improvement",
+        priority: 3,
+        title: "Group Murph knows who already set up Murph",
+        summary:
+          "The iMessage roster now separates people who completed Murph setup from people who never activated, without treating current plan status as identity. A paused or lapsed member is no longer mistaken for a stranger.",
+        relevanceTags: ["groups", "imessage", "onboarding", "privacy"],
+        sourcePullRequests: [929],
+      },
+      {
+        id: "silent-device-source-stalls-are-visible",
+        kind: "improvement",
+        priority: 3,
+        title: "Silent device stalls now leave a signal",
+        summary:
+          "If a push-based device source still looks connected but stops delivering data, Murph now records the silence as a source-stalled signal instead of treating every empty sync as a normal empty day.",
+        details:
+          "The check is observation only: it does not disconnect the source, block ingestion, or launch a recovery on its own.",
+        relevanceTags: ["devices", "sync", "reliability", "monitoring"],
+        sourcePullRequests: [930],
+      },
+      {
+        id: "homepage-group-challenge-story",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage gets to the group challenge faster",
+        summary:
+          "The hero now tells one story from the start: friends enter the chat, the challenge begins, and Murph carries it through standings, a roast voice memo, and the Sunday recap.",
+        details:
+          "The separate solo-demo act and its decorative controls are gone, and the security promises now read in one clean column.",
+        relevanceTags: ["homepage", "groups", "design", "polish"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-07-24",
     publishedOn: "2026-07-24",
     title: "Group chats that read the room",
     summary:
-      "Group replies stay as short as the question allows, Murph resends its contact card when someone missed it, and every group now has a working way to add usage before the conversation stops.",
+      "Group replies stay as short as the question allows, Home points Telegram members to the first message Murph needs, and you can ask Murph what changed in the product.",
     items: [
       {
         id: "group-replies-stay-short",
@@ -141,9 +366,37 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 3,
         title: "Linking Telegram finishes the signup step",
         summary:
-          "A linked Telegram account now completes messaging setup at join instead of asking again how Murph should reach you.",
+          "A linked Telegram account now completes messaging setup at join instead of asking again how Murph should reach you. Until you send the first message Telegram requires, Home puts Message Murph first and links straight to the chat.",
         relevanceTags: ["telegram", "onboarding", "auth"],
         sourcePullRequests: [],
+      },
+      {
+        id: "ask-murph-whats-new",
+        kind: "feature",
+        priority: 4,
+        title: "Ask Murph what changed",
+        summary:
+          "In an ordinary conversation, Murph can now read the public changelog and feature catalog to answer what is new or whether a capability has shipped, instead of answering from memory.",
+        details:
+          "Those two public feeds are the source of truth. If either feed is unavailable, Murph says so rather than guessing.",
+        relevanceTags: ["assistant", "changelog", "search", "messaging"],
+        sourcePullRequests: [],
+        tryIt: {
+          label: "Ask what's new",
+          prompt: "What changed in Murph this week?",
+        },
+      },
+      {
+        id: "account-deletion-exit-feedback",
+        kind: "improvement",
+        priority: 3,
+        title: "Account deletion asks one optional why",
+        summary:
+          "Before the final delete confirmation, you can pick a reason for leaving and add a note, or skip the question in one tap. The answer never gates deletion.",
+        details:
+          "If you answer, Murph keeps the optional feedback only after account deletion finishes and stores it without your member id.",
+        relevanceTags: ["settings", "privacy", "feedback", "account"],
+        sourcePullRequests: [926],
       },
     ],
   },

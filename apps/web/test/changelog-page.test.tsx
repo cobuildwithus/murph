@@ -52,6 +52,7 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("A Murph that knows when to speak");
     expect(markup).toContain("Group chats that read the room");
     expect(markup).toContain(
       "Updated documents, honest reactions, usage you can see",
@@ -62,7 +63,7 @@ describe("ChangelogPage", () => {
       "Standings that explain themselves, payments that finish",
     );
     expect(markup).toContain("Medical records, without the integration jargon");
-    expect(markup).toContain("Replies that know what they are answering");
+    expect(markup).not.toContain("Replies that know what they are answering");
     expect(markup).toContain("Improvements");
     expect(markup).not.toContain("Under the hood");
     expect(markup).not.toContain("Your records and measurements, in one place");
@@ -70,7 +71,7 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-17"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-18"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-07-19#medical-records-plain-language"',
     );
@@ -105,7 +106,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).not.toContain("The latest seven days");
     expect(markup).toContain('href="/changelog"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-02"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-03"');
     expect(markup).toContain("Newer");
     expect(markup).toContain("Older");
   });
@@ -145,7 +146,7 @@ describe("ChangelogPage", () => {
 
     expect(metadata).toEqual(
       expect.objectContaining({
-        alternates: { canonical: "/changelog?edition=2026-07-10" },
+        alternates: { canonical: "/changelog?edition=2026-07-11" },
         openGraph: expect.objectContaining({
           images: [expect.objectContaining({ url: pageThreeCardUrl })],
         }),
