@@ -42,6 +42,7 @@ import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeCheckoutConfig,
 } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -199,25 +200,28 @@ export async function createHostedBillingCheckout(
       stripeCustomerId: customerId,
       verifiedEmail,
     });
-    const checkoutSession = await stripe.checkout.sessions.create({
-      cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
-      client_reference_id: invite.member.id,
-      ...(customerId ? { customer: customerId } : {}),
-      ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
-      line_items: buildHostedBillingCheckoutLineItems(priceId),
-      metadata: checkoutMetadata,
-      mode: "subscription",
-      payment_method_types: ["card"],
-      subscription_data: {
+    const checkoutSession = await withHostedStripeFailureLog(
+      "checkout.sessions.create.billing-start",
+      () => stripe.checkout.sessions.create({
+        cancel_url: buildStripeCancelUrl(publicBaseUrl, invite.inviteCode),
+        client_reference_id: invite.member.id,
+        ...(customerId ? { customer: customerId } : {}),
+        ...(verifiedEmail ? { customer_email: verifiedEmail } : {}),
+        line_items: buildHostedBillingCheckoutLineItems(priceId),
         metadata: checkoutMetadata,
-        ...(resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
-          ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
-          : {}),
-      },
-      success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
-    }, {
-      idempotencyKey: checkoutIdempotencyKey,
-    });
+        mode: "subscription",
+        payment_method_types: ["card"],
+        subscription_data: {
+          metadata: checkoutMetadata,
+          ...(resolvedOffer === HOSTED_PULSE_TRIAL_OFFER
+            ? { trial_period_days: HOSTED_PULSE_TRIAL_DAYS }
+            : {}),
+        },
+        success_url: buildStripeSuccessUrl(publicBaseUrl, invite.inviteCode),
+      }, {
+        idempotencyKey: checkoutIdempotencyKey,
+      }),
+    );
 
     if (!checkoutSession.url) {
       throw hostedOnboardingError({

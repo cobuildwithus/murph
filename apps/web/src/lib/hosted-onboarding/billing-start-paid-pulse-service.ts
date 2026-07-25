@@ -50,6 +50,10 @@ import {
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
 const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings#subscription";
@@ -1156,39 +1160,15 @@ async function callHostedStripeStartPaidPulseOperation<T>(
   try {
     return await operation();
   } catch (error) {
+    logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
       code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
-      details: {
-        operationName,
-        ...describeSafeStripeStartPaidPulseError(error),
-      },
+      details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,
       message: "Stripe billing is unavailable for starting Pulse right now. Try again shortly.",
       retryable: true,
     });
   }
-}
-
-function describeSafeStripeStartPaidPulseError(error: unknown): Record<string, unknown> {
-  if (!error || typeof error !== "object") {
-    return {};
-  }
-
-  const candidate = error as {
-    code?: unknown;
-    rawType?: unknown;
-    requestId?: unknown;
-    statusCode?: unknown;
-    type?: unknown;
-  };
-
-  return {
-    ...(typeof candidate.code === "string" ? { code: candidate.code } : {}),
-    ...(typeof candidate.rawType === "string" ? { type: candidate.rawType } : {}),
-    ...(typeof candidate.type === "string" ? { type: candidate.type } : {}),
-    ...(typeof candidate.statusCode === "number" ? { statusCode: candidate.statusCode } : {}),
-    ...(typeof candidate.requestId === "string" ? { requestIdPresent: true } : {}),
-  };
 }
 
 function isHostedPulseTrialStartPaidStripeUnavailableError(error: unknown): error is HostedOnboardingError {
