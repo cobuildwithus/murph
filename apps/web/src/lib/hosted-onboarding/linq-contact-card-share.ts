@@ -298,6 +298,23 @@ export type MurphHostedLinqNativeContactCardShareOutcome =
  * and the single native provider POST. Unverifiable cards skip fail-soft. Any
  * native provider failure is ambiguous, so the reservation stays in place to
  * avoid a blind duplicate.
+ *
+ * This is a deliberately simple, best-effort guard, not an authoritative proof.
+ * Native `share_contact_card` is a bodyless POST, so Linq chooses which card to
+ * push and our preflight GET cannot be atomically bound to that effect; on an
+ * ambiguous roster the wrong self line could be read. We accept that residual
+ * risk in exchange for minimal complexity, because the real fix is Linq
+ * exposing a provider-enforced image-free share (in progress) plus operators
+ * clearing existing line-card images (the hourly reconcile normalizes the name
+ * but never clears images, and the API cannot clear them).
+ *
+ * When the line card has an image or cannot be verified, this share is skipped
+ * for that delivery by explicit product decision, not a silent drop: the
+ * text-first member still received the signup reply and can add Murph via the
+ * web contact-card picker, and the automatic native share self-heals for future
+ * contacts once the line-card image is removed. The skip is logged by the
+ * caller. This trade favors a simple, maintainable path over guaranteeing an
+ * automatic card for every member during the image-cleanup window.
  */
 export async function shareMurphHostedLinqNativeContactCardToChat(input: {
   chatId: string;
