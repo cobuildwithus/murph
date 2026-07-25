@@ -60,6 +60,7 @@ vi.mock("@/src/lib/hosted-groups/group-join-outreach-window", () => ({
 }));
 
 import {
+  HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT,
   buildHostedGroupJoinOutreachMessage,
   drainHostedGroupJoinOutreachSweep,
   drainOneHostedGroupJoinOutreach,
@@ -416,22 +417,62 @@ describe("hosted group join outreach drain", () => {
 
   it("keeps every variant link-free, group-specific, and reply-earning", () => {
     // The bank exists so many recipients do not get byte-identical copy, but each
-    // variant still has to satisfy the same first-contact rules.
+    // variant is held to the same first-contact rules.
     const messages = new Set<string>();
-    for (let variant = 0; variant < 200; variant += 1) {
+    for (let variant = 0; variant < 600; variant += 1) {
       const message = buildHostedGroupJoinOutreachMessage({
         groupDisplayName: "Sunday Sleep Crew",
         outreachId: `hgrpjoa_opaque_${variant}`,
       });
       messages.add(message);
       expect(message).toContain("Sunday Sleep Crew");
-      expect(message).toMatch(/repl(y|ies)|say hi|send me a message/iu);
+      expect(message).toMatch(
+        /repl(y|ies)|say hi|message me|send me a message|drop me a line|tell me here/iu,
+      );
       expect(message).not.toMatch(/https?:|www\./iu);
       expect(message).not.toContain("\u2014");
+      // Acquisition framing is forbidden in outbound copy.
+      expect(message).not.toMatch(/sign ?up|get started|welcome|verify|account/iu);
     }
 
-    // Real variation, not one template.
-    expect(messages.size).toBeGreaterThan(1);
+    // Real spread, not one template with a rotating word.
+    expect(messages.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
+  });
+
+  it("reads correctly for every variant when the group name falls back", () => {
+    // A blank or URL-shaped display name becomes "this group", so no variant may
+    // depend on the name being a proper noun.
+    const seen = new Set<string>();
+    for (let variant = 0; variant < 600; variant += 1) {
+      const message = buildHostedGroupJoinOutreachMessage({
+        groupDisplayName: "",
+        outreachId: `hgrpjoa_fallback_${variant}`,
+      });
+      seen.add(message);
+      expect(message).toContain("this group");
+      // Catches article-plus-fallback collisions such as "the this group invite".
+      expect(message).not.toMatch(/\b(the|a|an)\s+this group\b/iu);
+    }
+
+    expect(seen.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
+  });
+
+  it("spreads selection across the whole bank", () => {
+    const counts = new Map<number, number>();
+    for (let variant = 0; variant < 2500; variant += 1) {
+      const index = readHostedGroupJoinOutreachVariantIndex(
+        `hgrpjoa_spread_${variant}`,
+      );
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(index).toBeLessThan(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
+      counts.set(index, (counts.get(index) ?? 0) + 1);
+    }
+
+    // Every variant is reachable, and none dominates the bank.
+    expect(counts.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT);
+    for (const count of counts.values()) {
+      expect(count).toBeGreaterThan(2500 / HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT / 3);
+    }
   });
 
   it("composes the identical message for a replayed dispatch", () => {

@@ -86,12 +86,35 @@ export function buildHostedGroupJoinOutreachIdempotencyKey(
  * meaningful.
  */
 const HOSTED_GROUP_JOIN_OUTREACH_MESSAGES: readonly ((groupName: string) => string)[] = [
-  (groupName) => `You liked the invite to ${groupName}. Reply here and I'll help you join.`,
-  (groupName) => `Saw your like on the ${groupName} invite. Say hi here and I'll get you set up.`,
-  (groupName) => `You're in for ${groupName}? Reply here and I'll take it from there.`,
-  (groupName) => `Thanks for the like on ${groupName}. Send me a message here and I'll sort your spot.`,
-  (groupName) => `Got your like on the ${groupName} invite. Reply here whenever and I'll set you up.`,
+  (g) => `You liked the invite to ${g}. Reply here and I'll help you join.`,
+  (g) => `Your like on the invite to ${g} came through. Reply here and I'll get you set up.`,
+  (g) => `You're in for ${g}? Reply here and I'll take it from there.`,
+  (g) => `Thanks for the like on the invite to ${g}. Send me a message here and I'll sort your spot.`,
+  (g) => `Got your like on the invite to ${g}. Reply here whenever and I'll set you up.`,
+  (g) => `That was you liking the invite to ${g}, right? Reply here and I'll finish it off.`,
+  (g) => `I saw your like on the invite to ${g}. Say hi here and I'll walk you in.`,
+  (g) => `You hearted the invite to ${g}. Reply here and I'll handle the rest.`,
+  (g) => `Noticed your like on the invite to ${g}. Message me here and I'll get you in.`,
+  (g) => `You liked the invite to ${g}. Say hi here and I'll sort the rest.`,
+  (g) => `Your like came through on the invite to ${g}. Reply here and I'll set it up.`,
+  (g) => `Looks like you want in on ${g}. Reply here and I'll make it happen.`,
+  (g) => `You're keen on ${g} by the look of it. Reply here and I'll get you added.`,
+  (g) => `You liked the invite to ${g}. Message me here and I'll do the rest.`,
+  (g) => `Saw the like on your end for ${g}. Reply here and I'll take care of it.`,
+  (g) => `You tapped like on the invite to ${g}. Reply here and I'll get you joined.`,
+  (g) => `Your like on ${g} landed with me. Say hi here and I'll set you up.`,
+  (g) => `You liked the invite to ${g}. Drop me a line here and I'll get you in.`,
+  (g) => `Getting you into ${g} takes one message. Reply here and I'll start it.`,
+  (g) => `You liked the invite to ${g}. Tell me here and I'll get it moving.`,
+  (g) => `Happy to get you into ${g}. Reply here and I'll set it up.`,
+  (g) => `You liked the invite to ${g}. Reply here and I'll get you in.`,
+  (g) => `Your like on the invite to ${g} reached me. Message me here and I'll finish it.`,
+  (g) => `You liked the invite to ${g}. A quick reply here is all I need.`,
+  (g) => `One reply and you're into ${g}. Send me a message here whenever.`,
 ];
+
+export const HOSTED_GROUP_JOIN_OUTREACH_VARIANT_COUNT =
+  HOSTED_GROUP_JOIN_OUTREACH_MESSAGES.length;
 
 export function buildHostedGroupJoinOutreachMessage(input: {
   groupDisplayName: string | null | undefined;
