@@ -45,6 +45,11 @@ const HOSTED_VAULT_SHARE_PROJECTION_DISPLAY: Record<HostedVaultShareSelectablePr
   description: string;
   label: string;
 }> = {
+  "time-zone.v0": {
+    label: "Time zone",
+    description:
+      "Shares your time zone so the group knows which day your data belongs to. No location.",
+  },
   "group-email.v0": {
     label: "Email address",
     description:

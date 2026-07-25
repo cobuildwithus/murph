@@ -1,6 +1,7 @@
 import {
   activityKindAliasGroups,
   isStrictIsoDate,
+  normalizeIanaTimeZone,
   isStrictIsoDateTime,
   normalizeActivityKindToken,
 } from "@murphai/contracts";
@@ -194,6 +195,7 @@ export const HOSTED_VAULT_SHARE_FIXED_PROJECTION_KINDS = [
   "group-email.v0",
   "profile-name.v0",
   "sleep-times.v0",
+  "time-zone.v0",
   "workout-days.v0",
   "workouts.v0",
   "heart-rate-zones-days.v0",
@@ -217,6 +219,7 @@ export const HOSTED_VAULT_SHARE_PROJECTION_KINDS = [
  */
 export const HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS = [
   "group-email.v0",
+  "time-zone.v0",
   "sleep-times.v0",
   "sleep-duration-days.v0",
   "deep-sleep-days.v0",
@@ -255,6 +258,7 @@ export type HostedVaultShareSelectableProjectionKind =
  */
 export const HOSTED_VAULT_SHARE_CURRENT_STATE_PROJECTION_KINDS = [
   "profile-name.v0",
+  "time-zone.v0",
 ] as const satisfies readonly HostedVaultShareProjectionKind[];
 
 export function isHostedVaultShareCurrentStateProjectionKind(
@@ -486,6 +490,17 @@ export interface HostedVaultShareProfileNameData {
   displayName: string;
 }
 
+/**
+ * The member's own IANA timezone, so a group can tell which calendar day a
+ * shared daily fact belongs to and when that day has finished for them.
+ * Without it a consumer must either guess from the data, which lets a late
+ * import reclassify an already-published day, or wait for the day to end in
+ * the last timezone on earth.
+ */
+export interface HostedVaultShareTimeZoneData {
+  timeZone: string;
+}
+
 export type HostedVaultShareDeviceSyncSourceStatus =
   | "connected"
   | "disconnected"
@@ -513,6 +528,7 @@ export type HostedVaultShareDeliveryRecordData =
   | HostedVaultShareDeviceSyncStatusData
   | HostedVaultShareHeartRateZoneDayData
   | HostedVaultShareProfileNameData
+  | HostedVaultShareTimeZoneData
   | HostedVaultShareSleepTimesData
   | HostedVaultShareWorkoutDayData
   | HostedVaultShareWorkoutsDayData;
@@ -987,6 +1003,8 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareHeartRateZoneDayData(value, context);
     case "profile-name.v0":
       return parseHostedVaultShareProfileNameData(value, context);
+    case "time-zone.v0":
+      return parseHostedVaultShareTimeZoneData(value, context);
     case "sleep-times.v0":
       return parseHostedVaultShareSleepTimesData(value, context);
     case "workout-days.v0":
@@ -1001,6 +1019,7 @@ function parseHostedVaultShareDeliveryRecordData(
 }
 
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY = "profile-name";
+export const HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY = "time-zone";
 export const HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH = 120;
 
 export const HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY =
@@ -1135,6 +1154,30 @@ function requireHostedVaultShareNonFutureTimestamp(
     throw new TypeError(`${label} must not be in the future.`);
   }
   return timestamp;
+}
+
+function parseHostedVaultShareTimeZoneData(
+  value: unknown,
+  context: { recordKey: string },
+): HostedVaultShareTimeZoneData {
+  const data = requireObject(value, "Vault share time-zone data");
+
+  // One logical record per grantor, so a delivery replaces the previous
+  // timezone rather than accumulating a travel history.
+  if (context.recordKey !== HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY) {
+    throw new TypeError(
+      'Vault share time-zone recordKey must be "time-zone".',
+    );
+  }
+
+  const timeZone = normalizeIanaTimeZone(
+    requireString(data.timeZone, "Vault share time-zone data timeZone"),
+  );
+  if (!timeZone) {
+    throw new TypeError("Vault share time-zone data timeZone is invalid.");
+  }
+
+  return { timeZone };
 }
 
 function parseHostedVaultShareProfileNameData(

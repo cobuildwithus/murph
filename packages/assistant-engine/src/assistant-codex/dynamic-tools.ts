@@ -3371,7 +3371,8 @@ function groupSharedWorkoutsModelProjection(
     grantStatus: projection.grantStatus,
     // Each workout's `kindIndex` points into this list.
     ...(kinds.length === 0 ? {} : { kinds }),
-    projectionScope: projection.projectionScope,
+    // projectionScopeKey already encodes the scope; carrying the object too
+    // repeated the same value on every member and projection.
     projectionScopeKey: projection.projectionScopeKey,
     // Dates whose member-local day is still open, so scoring them would settle
     // a result that a later workout can still change.
@@ -3398,8 +3399,14 @@ function groupSharedModelResult(
   }
   return {
     members: result.members.map((member) => ({
-      currentTurnHandles: member.currentTurnHandles,
-      displayName: member.displayName,
+      // Empty handles and a null name carried no information but were
+      // serialized for every member on every read.
+      ...(member.currentTurnHandles.length === 0
+        ? {}
+        : { currentTurnHandles: member.currentTurnHandles }),
+      ...(member.displayName === null
+        ? {}
+        : { displayName: member.displayName }),
       participantId: member.participantId,
       projections: member.projections.map((projection) =>
         // Only workouts.v0 gets a derived view; every other scope passes through.
@@ -3409,6 +3416,51 @@ function groupSharedModelResult(
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
     status: result.status,
   }
+}
+
+/**
+ * One read returns every member, so a large roster can outgrow the model result
+ * ceiling. Refusing the whole response loses standings for everyone, so instead
+ * whole members are dropped from the tail until it fits.
+ *
+ * The omission is always explicit. A member who silently vanished would be
+ * indistinguishable from one with no data, and the challenge would score them
+ * as missing — or worse, chase them with device diagnostics or a permission
+ * card for data they had actually shared. `omittedParticipantIds` names exactly
+ * who was left out so the referee can say so instead of guessing about them.
+ * Members are never partially truncated: a member is present in full or named
+ * as omitted.
+ */
+function groupSharedModelResultText(
+  modelResult: ReturnType<typeof groupSharedModelResult>,
+): string {
+  const serialize = (value: unknown): string =>
+    JSON.stringify({ action: 'read_shared', result: value })
+  let text = serialize(modelResult)
+  if (
+    text.length <= ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS
+    || !('members' in modelResult)
+    || !Array.isArray(modelResult.members)
+  ) {
+    return text
+  }
+
+  const members = [...modelResult.members]
+  const omittedParticipantIds: string[] = []
+  while (
+    members.length > 0
+    && text.length > ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS
+  ) {
+    const dropped = members.pop()
+    const participantId = dropped === undefined
+      ? undefined
+      : Object.entries(dropped).find(([key]) => key === 'participantId')?.[1]
+    if (typeof participantId === 'string') {
+      omittedParticipantIds.unshift(participantId)
+    }
+    text = serialize({ ...modelResult, members, omittedParticipantIds })
+  }
+  return text
 }
 
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
@@ -3458,14 +3510,10 @@ async function executeGroupSharedRead(input: {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
     })
-    const text = JSON.stringify({
-      action: 'read_shared',
-      result: groupSharedModelResult(result),
-    })
-    if (text.length > ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS) {
-      return groupSharedUnavailableToolResult('group_shared_result_too_large')
-    }
-    return toolTextResult(true, text)
+    return toolTextResult(
+      true,
+      groupSharedModelResultText(groupSharedModelResult(result)),
+    )
   } catch {
     return groupSharedUnavailableToolResult('group_shared_read_failed')
   }

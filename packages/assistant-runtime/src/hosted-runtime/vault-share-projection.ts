@@ -28,6 +28,7 @@ import {
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
   HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH,
   HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
+  HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
   HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
   HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH,
   HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS,
@@ -250,6 +251,8 @@ function resolveProjectableRecordReader(
       return ({ vaultRoot }) => readProjectableHeartRateZoneDays(vaultRoot);
     case "profile-name.v0":
       return ({ vaultRoot }) => readProjectableProfileName(vaultRoot);
+    case "time-zone.v0":
+      return ({ vaultRoot }) => readProjectableTimeZone(vaultRoot);
     case "sleep-times.v0":
       return ({ vaultRoot }) => readProjectableSleepNights(vaultRoot);
     case "workout-days.v0":
@@ -439,6 +442,23 @@ async function readProjectableLegacyProfileName(
       recordKey: HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY,
     }),
   };
+}
+
+export async function readProjectableTimeZone(
+  vaultRoot: string,
+): Promise<HostedVaultShareDeliveryRecord[]> {
+  // Reuses the existing validated vault timezone; there is no second source of
+  // truth for it. A vault with no valid timezone shares nothing rather than
+  // guessing one.
+  const timeZone = await readProjectableVaultTimeZone(vaultRoot);
+  if (!timeZone) {
+    return [];
+  }
+  return [{
+    data: { timeZone },
+    occurredAt: new Date(Date.now()).toISOString(),
+    recordKey: HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY,
+  }];
 }
 
 export async function readProjectableSleepNights(

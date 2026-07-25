@@ -192,6 +192,7 @@ describe("vault-share contracts", () => {
   it("exposes email and challenge health projections as selectable scopes", () => {
     expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS).toEqual([
       "group-email.v0",
+      "time-zone.v0",
       "sleep-times.v0",
       "sleep-duration-days.v0",
       "deep-sleep-days.v0",

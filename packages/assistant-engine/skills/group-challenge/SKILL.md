@@ -124,6 +124,11 @@ with no card at all.
 - REM sleep minutes: `rem-sleep-days.v0`
 - Sleep timing: `sleep-times.v0`
 - Every workout's local start time, duration, and type by day: `workouts.v0`
+- The member's own time zone: `time-zone.v0`. Not a scoring metric — it tells
+  you which calendar day a member's daily facts belong to and when that day has
+  finished for them, so a challenge can settle their day on their own clock
+  instead of waiting for it to end everywhere on earth. It shares a time zone,
+  never a location.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
 

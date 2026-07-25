@@ -1061,21 +1061,25 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
-  it("fails the whole shared read closed when its bounded result is too large", async () => {
+  it("names omitted members instead of failing an oversized shared read", async () => {
+    // A big roster must not cost everyone their standings, but a member who
+    // silently disappeared would be indistinguishable from one with no data and
+    // could be chased with diagnostics or a permission card for data they did
+    // share. Dropped members are therefore named, never quietly removed.
     const groupSharedReadRequest = vi.fn<GroupSharedReadRequest>(async () => ({
-      members: [{
+      members: Array.from({ length: 3 }, (_unused, index) => ({
         currentTurnHandles: [],
-        displayName: `Member ${"x".repeat(49_000)}`,
-        memberId: "member_oversized",
-        participantId: "participant_oversized",
+        displayName: `Member ${"x".repeat(30_000)}`,
+        memberId: `member_oversized_${index}`,
+        participantId: `participant_oversized_${index}`,
         projections: [{
-          dataStatus: "missing",
-          grantStatus: "granted",
-          projectionScope: { projectionKind: "steps-days.v0" },
+          dataStatus: "missing" as const,
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "steps-days.v0" as const },
           projectionScopeKey: "steps-days.v0",
           records: [],
         }],
-      }],
+      })),
       requestedProjectionScopeKeys: ["steps-days.v0"],
       status: "ok",
     }));
@@ -1100,13 +1104,23 @@ describe("murph.group dynamic tool", () => {
       vaultRoot: null,
     });
 
-    expect(readGroupToolPayload(result)).toEqual({
-      action: "read_shared",
-      result: {
-        status: "unavailable",
-        unavailableReason: "group_shared_result_too_large",
-      },
-    });
+    const payload = JSON.parse(JSON.stringify(readGroupToolPayload(result)));
+    // Still a usable result rather than a refusal.
+    expect(payload.result.status).toBe("ok");
+    // Whole members only: whoever remains is complete.
+    expect(payload.result.members.length).toBeGreaterThan(0);
+    expect(payload.result.members.length).toBeLessThan(3);
+    for (const member of payload.result.members) {
+      expect(member.projections[0].projectionScopeKey).toBe("steps-days.v0");
+    }
+    // Everyone dropped is named, so the referee can say so rather than treat
+    // them as missing data.
+    expect(payload.result.omittedParticipantIds.length)
+      .toBe(3 - payload.result.members.length);
+    for (const omitted of payload.result.omittedParticipantIds) {
+      expect(omitted).toMatch(/^participant_oversized_\d$/u);
+    }
+    expect(JSON.stringify(payload).length).toBeLessThanOrEqual(64_000);
   });
 
   it("parses one bounded group ask without accepting model-supplied authority", () => {
