@@ -7,7 +7,7 @@ import {
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
   ASSISTANT_GROUP_ROOM_MODEL_SLUG,
-  readAssistantGroupRoomModelBody,
+  readAssistantGroupRoomModelState,
 } from '../../assistant/group-room-model.js'
 import type {
   SafeToolCallValidationDigest,
@@ -39,7 +39,7 @@ export const MURPH_GROUP_ROOM_MODEL_TOOL = {
   namespace: 'murph',
   name: 'group_room_model',
   description:
-    'Read or fully replace the one advisory room-model page for the current authenticated group chat. Use only for an explicit current-room request to remember, correct, retire, or forget social context. Show first, then upsert the complete compact Markdown page. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
+    'Read or fully replace the one advisory room-model page for the current authenticated group chat. Use only for an explicit current-room request to remember, correct, retire, or forget social context. Show first, then upsert the complete compact Markdown page. If show fails, stop and do not upsert. This tool is unavailable in group email and never changes participant identity, permissions, health sharing, or personal memory.',
   inputSchema: z.toJSONSchema(groupRoomModelArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -88,6 +88,7 @@ export async function executeGroupRoomModelDynamicTool(input: {
   >
   userActionScope: AssistantHostedUserActionScope | null
   vaultRoot: string | null
+  readGroupRoomModelState?: typeof readAssistantGroupRoomModelState
 }): Promise<{
   rpcResult: {
     contentItems: Array<{ text: string; type: 'inputText' }>
@@ -112,15 +113,24 @@ export async function executeGroupRoomModelDynamicTool(input: {
   }
 
   try {
+    const state = await (
+      input.readGroupRoomModelState ?? readAssistantGroupRoomModelState
+    )({
+      vaultRoot: input.vaultRoot,
+    })
+    if (state.kind === 'unavailable') {
+      return groupRoomModelTextResult(
+        false,
+        'group room-model state could not be read; no update was made',
+      )
+    }
+
     if (input.request.args.action === 'show') {
-      const body = await readAssistantGroupRoomModelBody({
-        vaultRoot: input.vaultRoot,
-      })
       return groupRoomModelTextResult(
         true,
         JSON.stringify(
-          body
-            ? { body, status: 'active' }
+          state.kind === 'present'
+            ? { body: state.body, status: state.status }
             : { body: null, status: 'missing' },
         ),
       )

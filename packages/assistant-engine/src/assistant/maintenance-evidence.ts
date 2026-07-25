@@ -24,6 +24,7 @@ interface AssistantMaintenanceEvidenceLimits {
   maxEntries: number
   maxEntryBytes: number
   maxSessions: number
+  maxSessionScan: number
   maxTotalBytes: number
   preserveStructure: boolean
   requireGroupSession: boolean
@@ -35,6 +36,7 @@ const MEMBER_MEMORY_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
   maxEntries: 400,
   maxEntryBytes: 2_000,
   maxSessions: 16,
+  maxSessionScan: 16,
   maxTotalBytes: 96_000,
   preserveStructure: false,
   requireGroupSession: false,
@@ -46,6 +48,7 @@ const GROUP_ROOM_MODEL_EVIDENCE_LIMITS: AssistantMaintenanceEvidenceLimits = {
   maxEntries: 800,
   maxEntryBytes: 32_000,
   maxSessions: 24,
+  maxSessionScan: 192,
   maxTotalBytes: 256_000,
   preserveStructure: true,
   requireGroupSession: true,
@@ -129,9 +132,10 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
   vault: string
 }): Promise<AssistantMaintenanceEvidenceMessage[]> {
   const sessions = await listAssistantSessions(input.vault, {
-    limit: input.limits.maxSessions,
+    limit: input.limits.maxSessionScan,
   })
   const messages: AssistantMaintenanceEvidenceMessage[] = []
+  let selectedSessionCount = 0
 
   for (const session of sessions) {
     if (
@@ -149,6 +153,10 @@ async function collectAssistantMaintenanceEvidenceMessages(input: {
     if (Number.isNaN(lastActivityAt) || lastActivityAt < input.since) {
       continue
     }
+    if (selectedSessionCount >= input.limits.maxSessions) {
+      break
+    }
+    selectedSessionCount += 1
 
     let entries: Awaited<ReturnType<typeof listAssistantTranscriptTailEntries>>
     try {

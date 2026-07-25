@@ -37,6 +37,7 @@ import {
   deriveKnowledgeTitle,
   extractKnowledgeRelatedSlugsFromBody,
   GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
+  GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE,
   GROUP_ROOM_MODEL_KNOWLEDGE_SLUG,
   normalizeLibrarySlugInputs,
   matchesKnowledgeFilter,
@@ -165,6 +166,10 @@ export async function upsertKnowledgePage(
     body: normalizedBody,
     slug,
   })
+  assertGroupRoomModelKnowledgePageType({
+    pageType: input.pageType,
+    slug,
+  })
   const initialGraph = await readDerivedKnowledgeGraphWithIssues(input.vault)
   const initialPage = requireUniqueKnowledgePageBySlug(
     initialGraph.graph,
@@ -178,6 +183,11 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
+      await assertGroupRoomModelKnowledgePageIsWritable({
+        existingPage,
+        slug,
+        vault: input.vault,
+      })
       const title = deriveKnowledgeTitle({
         body: input.body,
         existingPage,
@@ -309,6 +319,51 @@ function assertKnowledgePageBodyWithinLimit(input: {
         maxBytes: GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES,
         slug: input.slug,
       },
+    )
+  }
+}
+
+function assertGroupRoomModelKnowledgePageType(input: {
+  pageType: string | null | undefined
+  slug: string
+}): void {
+  if (
+    input.slug === GROUP_ROOM_MODEL_KNOWLEDGE_SLUG &&
+    normalizeKnowledgeTag(input.pageType ?? '') !==
+      GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE
+  ) {
+    throw new VaultCliError(
+      'knowledge_page_conflict',
+      `Knowledge page "${input.slug}" requires page type "${GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE}".`,
+      { slug: input.slug },
+    )
+  }
+}
+
+async function assertGroupRoomModelKnowledgePageIsWritable(input: {
+  existingPage: DerivedKnowledgeNode | null
+  slug: string
+  vault: string
+}): Promise<void> {
+  if (input.slug !== GROUP_ROOM_MODEL_KNOWLEDGE_SLUG) {
+    return
+  }
+  if (
+    input.existingPage?.pageType === GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE
+  ) {
+    return
+  }
+  if (
+    input.existingPage ||
+    await knowledgeReadableFileExists(
+      input.vault,
+      buildKnowledgePageRelativePath(input.slug),
+    )
+  ) {
+    throw new VaultCliError(
+      'knowledge_page_conflict',
+      `Knowledge page "${input.slug}" exists with incompatible or unreadable state.`,
+      { slug: input.slug },
     )
   }
 }

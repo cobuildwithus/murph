@@ -59,6 +59,7 @@ vi.mock('../src/assistant/group-room-model.js', () => ({
     ['linq', 'telegram'].includes(input.channel?.trim().toLowerCase() ?? ''),
   readAssistantGroupRoomModelPrompt:
     planningMocks.readAssistantGroupRoomModelPrompt,
+  readAssistantGroupRoomModelState: async () => ({ kind: 'missing' }),
 }))
 
 import {

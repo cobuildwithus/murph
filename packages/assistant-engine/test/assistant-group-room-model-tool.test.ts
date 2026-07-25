@@ -1,7 +1,8 @@
-import { rm } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { initializeVault } from '@murphai/core'
+import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vault-paths'
 
 import {
   executeMurphDynamicToolRequest,
@@ -9,15 +10,26 @@ import {
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
+import {
+  executeGroupRoomModelDynamicTool,
+  readGroupRoomModelDynamicToolRequest,
+} from '../src/assistant-codex/dynamic-tools/group-room-model.js'
 import type {
   AssistantHostedToolContext,
   AssistantHostedUserActionScope,
 } from '../src/assistant/hosted-tool-context.js'
 import {
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
+  ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+  ASSISTANT_GROUP_ROOM_MODEL_SLUG,
   assistantRouteSupportsGroupRoomModel,
   readAssistantGroupRoomModelBody,
 } from '../src/assistant/group-room-model.js'
+import {
+  buildKnowledgeMarkdown,
+  buildKnowledgePageRelativePath,
+} from '../src/knowledge/documents.js'
+import { upsertKnowledgePage } from '../src/knowledge/service.js'
 import { createTempVaultContext } from './test-helpers.js'
 
 const cleanupPaths: string[] = []
@@ -140,8 +152,127 @@ describe('authenticated group room-model tool', () => {
       action: 'show',
       participantId: 'participant:other',
     })?.kind).toBe('invalid-group-room-model-arguments')
+    expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
+      'If show fails, stop and do not upsert.',
+    )
+  })
+
+  it('fails closed on malformed or conflicting fixed-page state', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-group-room-model-tool-conflict-',
+    )
+    cleanupPaths.push(parentRoot)
+    await initializeVault({ vaultRoot })
+
+    const pagePath = await resolveAssistantVaultPath(
+      vaultRoot,
+      buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
+      'file path',
+    )
+    await executeRequest({
+      args: { action: 'upsert', body: '## Tips\n- prior valid tip' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+
+    for (const conflictingFile of [
+      '---\nslug: group-room-model\npageType: [broken\n---\n\nprior bytes',
+      buildKnowledgeMarkdown({
+        body: '## Tips\n- conflicting concept page',
+        compiledAt: '2026-07-25T00:00:00.000Z',
+        librarySlugs: [],
+        pageType: 'concept',
+        relatedSlugs: [],
+        slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+        sourcePaths: [],
+        status: 'active',
+        summary: 'conflicting concept page',
+        title: 'Group room model',
+      }),
+    ]) {
+      await writeFile(pagePath, conflictingFile, 'utf8')
+      const priorFile = await readFile(pagePath)
+
+      const show = await executeRequest({
+        args: { action: 'show' },
+        available: true,
+        scope: createUserActionScope('group'),
+        vaultRoot,
+      })
+      const replacement = await executeRequest({
+        args: { action: 'upsert', body: '## Tips\n- replacement' },
+        available: true,
+        scope: createUserActionScope('group'),
+        vaultRoot,
+      })
+
+      expect(show.rpcResult.success).toBe(false)
+      expect(replacement.rpcResult.success).toBe(false)
+      await expect(readFile(pagePath)).resolves.toEqual(priorFile)
+      await expect(upsertKnowledgePage({
+        body: '## Tips\n- direct replacement',
+        pageType: ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
+        slug: ASSISTANT_GROUP_ROOM_MODEL_SLUG,
+        status: 'active',
+        title: 'Group room model',
+        vault: vaultRoot,
+      })).rejects.toMatchObject({
+        code: 'knowledge_page_conflict',
+      })
+      await expect(readFile(pagePath)).resolves.toEqual(priorFile)
+    }
+  })
+
+  it('does not replace the page when its strict read fails', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-group-room-model-tool-read-failure-',
+    )
+    cleanupPaths.push(parentRoot)
+    await initializeVault({ vaultRoot })
+    await executeRequest({
+      args: { action: 'upsert', body: '## Tips\n- prior valid tip' },
+      available: true,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    const pagePath = await resolveAssistantVaultPath(
+      vaultRoot,
+      buildKnowledgePageRelativePath(ASSISTANT_GROUP_ROOM_MODEL_SLUG),
+      'file path',
+    )
+    const priorFile = await readFile(pagePath)
+    const readFailure = async () => {
+      throw new Error('injected room-model read failure')
+    }
+
+    for (const args of [
+      { action: 'show' },
+      { action: 'upsert', body: '## Tips\n- replacement' },
+    ] as const) {
+      const result = await executeGroupRoomModelDynamicTool({
+        available: true,
+        readGroupRoomModelState: readFailure,
+        request: requireGroupRoomModelRequest(args),
+        userActionScope: createUserActionScope('group'),
+        vaultRoot,
+      })
+      expect(result.rpcResult.success).toBe(false)
+    }
+    await expect(readFile(pagePath)).resolves.toEqual(priorFile)
   })
 })
+
+function requireGroupRoomModelRequest(args: unknown) {
+  const request = readGroupRoomModelDynamicToolRequest({
+    arguments: args,
+    tool: 'group_room_model',
+  })
+  if (!request || request.kind !== 'group-room-model') {
+    throw new Error('Expected valid group room-model arguments.')
+  }
+  return request
+}
 
 function readRequest(args: unknown) {
   return readMurphDynamicToolRequest({

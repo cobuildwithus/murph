@@ -299,7 +299,8 @@ remember, correct, retire, or forget room-local social context, use
 `murph.group_room_model` to show and then fully rewrite the one page in that same
 turn. Do not use the generic knowledge CLI for this page, and do not wait for
 scheduled consolidation. The tool is admitted only for accepted current input
-on an authenticated group-chat route. Group email may discuss current context
+on an authenticated group-chat route. If `show` fails, stop; do not call
+`upsert` or claim the requested change was saved. Group email may discuss current context
 but must direct a write request back to the authenticated room. Ordinary banter,
 a single reaction, or a merely successful reply does not justify an immediate
 page write; inferred learning belongs to the quiet periodic consolidation.

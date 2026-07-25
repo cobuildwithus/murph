@@ -90,7 +90,10 @@ context. An explicit current-room remember, correction, retirement, or forget
 request may fully rewrite the page only through a dynamic tool admitted for
 current accepted input on that authenticated route. Group email neither receives
 the page nor contributes maintenance evidence, and its spoofable sender cannot
-receive the mutation tool. The rendering is quoted as fallible data and
+receive the mutation tool. Ordinary prompt reads fail open, but mutation reads
+distinguish a genuinely missing page from malformed, unreadable, or wrong-type
+fixed-slug state; conflicts stop both explicit and scheduled replacement. The
+rendering is quoted as fallible data and
 explicitly tells the model to skim it lightly: most turns should use none of it,
 and at most one naturally relevant tip should shape a reply. Current
 conversation, safety rules, authoritative tool results, and explicit canonical

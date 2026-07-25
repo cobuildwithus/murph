@@ -435,6 +435,9 @@ describe('assistant group-chat style guidance', () => {
       'When the authenticated Linq/iMessage or Telegram room explicitly asks Murph to remember, correct, retire, or forget room-local social context, use `murph.group_room_model`',
     )
     expect(normalized).toContain(
+      'If `show` fails, stop; do not call `upsert` or claim the requested change was saved.',
+    )
+    expect(normalized).toContain(
       'Group email may discuss current context but must direct a write request back to the authenticated room.',
     )
     expect(normalized).toContain(

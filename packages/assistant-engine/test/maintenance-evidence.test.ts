@@ -417,6 +417,69 @@ test('builds structured group evidence only from group-bound sessions', async ()
   })
 })
 
+test('applies the group session cap after route filtering', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-maintenance-evidence-group-session-cap-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  await saveAssistantSession(
+    vaultRoot,
+    createEvidenceTestSession({
+      lastTurnAt: '2026-06-29T21:00:00.000Z',
+      channel: 'telegram',
+      sessionId: 'session-eligible-behind-cap',
+      threadIsDirect: false,
+    }),
+  )
+  await appendAssistantTranscriptEntries(
+    vaultRoot,
+    'session-eligible-behind-cap',
+    [
+      {
+        createdAt: '2026-06-29T21:00:00.000Z',
+        kind: 'user',
+        text: [
+          'Input 1:',
+          'Sender: telegram:participant-alpha',
+          '',
+          'Message text:',
+          'retire the old nickname',
+        ].join('\n'),
+      },
+      {
+        createdAt: '2026-06-29T21:00:01.000Z',
+        kind: 'assistant',
+        text: 'Got it — that nickname is retired.',
+      },
+    ],
+  )
+
+  for (let index = 0; index < 24; index += 1) {
+    await saveAssistantSession(
+      vaultRoot,
+      createEvidenceTestSession({
+        lastTurnAt: `2026-06-29T23:${String(index).padStart(2, '0')}:00.000Z`,
+        channel: index % 2 === 0 ? 'linq' : 'email',
+        sessionId: `session-excluded-${String(index).padStart(2, '0')}`,
+        threadIsDirect: index % 2 === 0,
+      }),
+    )
+  }
+
+  const evidence = await buildAssistantMaintenanceConversationEvidence({
+    now: new Date('2026-06-30T03:00:00.000Z'),
+    profile: 'group-room-model',
+    vault: vaultRoot,
+  })
+
+  expect(evidence).toContain(
+    'Input 1:\\nSender: telegram:participant-alpha',
+  )
+  expect(evidence).toContain('retire the old nickname')
+  expect(evidence).toContain('Got it — that nickname is retired.')
+})
+
 test('returns an explicit empty group evidence section without group sessions', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-maintenance-evidence-group-empty-',

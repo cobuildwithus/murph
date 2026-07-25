@@ -33,6 +33,23 @@ const ASSISTANT_GROUP_ROOM_MODEL_PROMPT_FOOTER = [
   'Do not force a callback merely because it appears here, and never expose an internal participant handle or mention this page unless the room asks what Murph remembers.',
 ].join(' ')
 
+export type AssistantGroupRoomModelReadState =
+  | { kind: 'missing' }
+  | {
+      body: string
+      kind: 'present'
+      status: string
+    }
+  | { kind: 'unavailable' }
+
+interface AssistantGroupRoomModelReadDependencies {
+  readTextFile?: (filePath: string) => Promise<string>
+  statPath?: (filePath: string) => Promise<{
+    isFile(): boolean
+    size: number
+  }>
+}
+
 /**
  * Reads the one fixed group-local advisory page without walking the full derived
  * knowledge graph on every chat turn. Missing, inactive, malformed, or oversized
@@ -48,38 +65,65 @@ export async function readAssistantGroupRoomModelPrompt(input: {
 export async function readAssistantGroupRoomModelBody(input: {
   vaultRoot: string
 }): Promise<string | null> {
+  const state = await readAssistantGroupRoomModelState(input)
+  return state.kind === 'present' && state.status === 'active'
+    ? state.body
+    : null
+}
+
+/**
+ * Keeps mutation callers from treating corrupt, conflicting, or transiently
+ * unreadable reserved-page state as genuine absence.
+ */
+export async function readAssistantGroupRoomModelState(
+  input: { vaultRoot: string },
+  dependencies: AssistantGroupRoomModelReadDependencies = {},
+): Promise<AssistantGroupRoomModelReadState> {
+  const readTextFile = dependencies.readTextFile ?? ((filePath) =>
+    readFile(filePath, 'utf8'))
+  const statPath = dependencies.statPath ?? stat
+  let absolutePath: string
   try {
     const relativePath = buildKnowledgePageRelativePath(
       ASSISTANT_GROUP_ROOM_MODEL_SLUG,
     )
-    const absolutePath = await resolveAssistantVaultPath(
+    absolutePath = await resolveAssistantVaultPath(
       input.vaultRoot,
       relativePath,
       'file path',
     )
-    const fileStats = await stat(absolutePath)
-    if (!fileStats.isFile() || fileStats.size > ASSISTANT_GROUP_ROOM_MODEL_FILE_MAX_BYTES) {
-      return null
+    const fileStats = await statPath(absolutePath)
+    if (
+      !fileStats.isFile() ||
+      fileStats.size > ASSISTANT_GROUP_ROOM_MODEL_FILE_MAX_BYTES
+    ) {
+      return { kind: 'unavailable' }
     }
+  } catch (error) {
+    return isMissingFileError(error)
+      ? { kind: 'missing' }
+      : { kind: 'unavailable' }
+  }
 
-    const document = parseFrontmatterDocument(await readFile(absolutePath, 'utf8'))
+  try {
+    const document = parseFrontmatterDocument(await readTextFile(absolutePath))
     if (
       readKnowledgeAttribute(document.attributes, 'slug') !==
         ASSISTANT_GROUP_ROOM_MODEL_SLUG ||
       readKnowledgeAttribute(document.attributes, 'pageType') !==
-        ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE ||
-      readKnowledgeAttribute(document.attributes, 'status') !== 'active'
+        ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE
     ) {
-      return null
+      return { kind: 'unavailable' }
     }
 
+    const status = readKnowledgeAttribute(document.attributes, 'status')
     const body = normalizeNullableString(normalizeKnowledgeBody(document.body))
-    if (!body) {
-      return null
+    if (!body || !status) {
+      return { kind: 'unavailable' }
     }
-    return body
+    return { body, kind: 'present', status }
   } catch {
-    return null
+    return { kind: 'unavailable' }
   }
 }
 
@@ -137,4 +181,12 @@ function readKnowledgeAttribute(
 ): string | null {
   const value = attributes[key]
   return typeof value === 'string' ? normalizeNullableString(value) : null
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  )
 }

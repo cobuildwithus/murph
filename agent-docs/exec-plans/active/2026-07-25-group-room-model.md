@@ -41,6 +41,8 @@ Updated: 2026-07-25
     guidance, and focused tests.
   - Durable architecture, security, reliability, index, and testing claims
     required to describe, deploy, and verify the changed boundary.
+  - The stale CLI release-audit expectation that still asserted the previous
+    ReviewGPT invalidity contract and blocked the canonical acceptance lane.
   - PR #950 metadata, ReviewGPT rounds, CI remediation, merge, and worktree
     retirement.
 - Out of scope:
@@ -101,6 +103,11 @@ Updated: 2026-07-25
    id causes an old bundle to treat silent maintenance as ordinary delivery.
    Mitigation: require immediate runner rollout and exact-fingerprint smoke,
    then hold that bundle as the rollback floor and forward-fix.
+8. Risk: Corrupt fixed-slug state is mistaken for absence, or newer ineligible
+   sessions consume the group evidence cap.
+   Mitigation: keep ordinary reads fail-open but make mutation reads and writes
+   conflict-safe, and select 24 eligible group sessions from a bounded
+   192-session recent scan.
 
 ## Tasks
 
