@@ -245,7 +245,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'groupchat-comedy',
     name: 'groupchat-comedy',
     triggerHint:
-      'Read before composing any group-chat message in a challenge or banter context: kickoffs, daily dispatches, score updates, replies to trash talk, rulings, verdicts, comics, songs, or voice memos. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, and the hard safety limits that outrank every joke.',
+      'Read before composing any group-chat message in a challenge or banter context, and before setting a group chat avatar: kickoffs, daily dispatches, score updates, replies to trash talk, rulings, verdicts, comics, songs, voice memos, or group photo drops. Governs the referee comedy engine, roast hierarchy, register flips between group humor and private care, canon and callback management, dispatch format rotation, when to edit Murph into a photo the group already sent and make it the chat avatar, and the hard safety limits that outrank every joke.',
   },
   {
     slug: 'group-challenge',

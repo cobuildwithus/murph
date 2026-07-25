@@ -110,7 +110,7 @@ describe('assistant group-chat comedy skill', () => {
       'text bit → comic → voice memo → song → sportsbook odds → ruling',
     )
     expect(normalized).toContain(
-      'short voice memos; a sung apology nobody asked for.',
+      'short voice memos; a sung apology nobody asked for; the group photo drop below.',
     )
   })
 
@@ -137,6 +137,53 @@ describe('assistant group-chat comedy skill', () => {
       'a group-chat apology or on-the-hook song defaults to country',
     )
     expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
+  })
+
+  it('makes the group chat avatar a proactive comedy format with consent and restraint rails', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'The chat avatar is a comedy surface, not a settings field.',
+    )
+    expect(normalized).toContain(
+      'take a photo the group already sent and already laughed at, edit yourself into a funny corner of it, and make that the group photo',
+    )
+    expect(normalized).toContain('Nobody requests this. The discovery is the joke.')
+    expect(normalized).toContain(
+      'You have been in the room long enough to know its register and its canon.',
+    )
+    expect(normalized).toContain(
+      'You have not set one before. The first drop is the free hit',
+    )
+    expect(normalized).toContain(
+      'Run `preflight_set_chat_avatar` before generating anything.',
+    )
+    expect(normalized).toContain(
+      'No join link, membership, or challenge has to exist first — the preflight is the whole check, so never propose group setup as a step toward a photo.',
+    )
+    expect(normalized).toContain(
+      '`avatarSource="generate"`, and `referenceImageRefs` carrying the captured photo plus your character sheet',
+    )
+    expect(normalized).toContain(
+      'Edit yourself INTO their photo; do not redraw their photo.',
+    )
+    expect(normalized).toContain('It has to read as a thumbnail.')
+    expect(normalized).toContain(
+      'Whatever the human did in that photo stays the joke. You are the second beat, never the replacement punchline.',
+    )
+    expect(normalized).toContain(
+      'Let the change be the whole delivery. At most one deadpan line',
+    )
+    expect(normalized).toContain(
+      'The person in the photo has to be in on it: they sent it themselves, or they played along in the room.',
+    )
+    expect(normalized).toContain(
+      "The moment is fair game; the person's body is not.",
+    )
+    expect(normalized).toContain(
+      'If anyone wants it down, change it that turn, without arguing and without a second attempt at the same bit.',
+    )
   })
 
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {
