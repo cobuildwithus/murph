@@ -149,9 +149,11 @@ and missing-consent states render distinct recovery guidance.
 The Android home screen treats
 `GET /api/device-sync/companion/status?sourceProviderSlug=health_connect` as
 sync truth. Webhook receipt rows retain a normalized source slug only when the
-accepted Junction work identifies one unambiguous source. Source-scoped status
-filters both connected-source availability and receipt timestamps; legacy
-rows without a source slug intentionally do not satisfy Android status.
+provider-owned webhook parser identifies the source of an actual data-bearing
+event. Data-less historical completions, lifecycle events, and legacy rows keep
+that field null. Source-scoped status filters both connected-source availability
+and receipt timestamps, so those null-source rows intentionally do not satisfy
+Android status.
 
 The client keeps its Junction resource request centralized and starts with four
 minimum-necessary groups: sleep, workouts, steps, and active calories. The
