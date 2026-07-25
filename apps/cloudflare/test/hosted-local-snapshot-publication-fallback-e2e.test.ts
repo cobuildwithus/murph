@@ -204,9 +204,11 @@ describe("hosted local snapshot publication fallback e2e", () => {
       baselineInvokeFailureDestroyCount,
     });
 
-    requireScenario().queueAssistantResponses([firstReplyText], {
-      matchInputContains: firstInboundText,
-    });
+    if (!recoveryCompletedBeforeFaultObservation) {
+      requireScenario().queueAssistantResponses([firstReplyText], {
+        matchInputContains: firstInboundText,
+      });
+    }
     const restoredStatus = recoveryCompletedBeforeFaultObservation
       ? rejectedPublicationStatus
       : await waitForCleanSnapshotPublication(baselineSnapshotRef);
