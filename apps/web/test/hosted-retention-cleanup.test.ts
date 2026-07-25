@@ -258,6 +258,38 @@ describe("hosted retention cleanup", () => {
     expect(deviceSignalBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
+  it("runs retention categories one at a time", async () => {
+    // Serial database use is the protection this job owes the primary pool.
+    // Immediately-resolving mocks would keep passing after a parallel fan-out
+    // regression, so hold the first statement open and prove nothing else runs.
+    let releaseFirstStatement: () => void = () => undefined;
+    const firstStatementHeld = new Promise<void>((resolve) => {
+      releaseFirstStatement = resolve;
+    });
+    let startedStatements = 0;
+    const executeRaw = vi.fn(async () => {
+      startedStatements += 1;
+      if (startedStatements === 1) {
+        await firstStatementHeld;
+      }
+      return 0;
+    });
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    const cleanup = runHostedRetentionCleanup({
+      now: "2026-04-25T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+    for (let tick = 0; tick < 50; tick += 1) {
+      await Promise.resolve();
+    }
+
+    expect(startedStatements).toBe(1);
+    releaseFirstStatement();
+    await cleanup;
+    expect(startedStatements).toBeGreaterThan(1);
+  });
+
   it("reports the summed count of the batches a category actually ran", async () => {
     let runtimeLogBatches = 0;
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {

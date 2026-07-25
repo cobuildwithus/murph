@@ -2546,6 +2546,41 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it("still claims and signals when the diagnostic batch write fails", async () => {
+    // Recovery must not be gated on the diagnostic insert: the runner's log
+    // writer is best effort and never retries a failed callback.
+    mocks.recordHostedRuntimeLogs.mockRejectedValue(
+      new Error("Synthetic runtime log insert failure."),
+    );
+    mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(true);
+
+    await expect(runtimeLogRoute.POST(jsonRequest(
+      "/api/internal/hosted-runtime/log",
+      {
+        entries: [
+          {
+            at: FIXED_NOW,
+            component: "runner",
+            errorCode: "runner_child_failed",
+            eventCode: "runner.accepted_attempt_failed",
+            level: "warn",
+            phase: "error",
+            redactedJson: {
+              safeErrorMessage: "Runner child process failed.",
+            },
+            workspaceVersion: "5",
+          },
+        ],
+      },
+    ))).resolves.toBeDefined();
+
+    expect(mocks.claimHostedAcceptedAttemptFailureRecheck).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(mocks.recordHostedRuntimeLogs.mock.invocationCallOrder[0]!);
+  });
+
   it("cooldowns accepted runtime attempt failure recheck signals behind the workspace claim", async () => {
     mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
     mocks.claimHostedAcceptedAttemptFailureRecheck.mockResolvedValue(false);

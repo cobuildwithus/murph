@@ -29,6 +29,17 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
 
+  // Recovery runs before persistence, not after it: a failed diagnostic insert
+  // must not cost an accepted attempt its recheck. The signal helper swallows
+  // its own failures, so neither direction can break the other.
+  if (
+    body.entries.some((entry) =>
+      entry.eventCode === ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE
+    )
+  ) {
+    await signalAcceptedRuntimeAttemptFailureBestEffort({ userId });
+  }
+
   await recordHostedRuntimeLogs({
     entries: body.entries.map((entry) => ({
       at: entry.at,
@@ -49,14 +60,6 @@ export const POST = withJsonError(async (request: Request) => {
     })),
     userId,
   });
-
-  if (
-    body.entries.some((entry) =>
-      entry.eventCode === ACCEPTED_RUNTIME_ATTEMPT_FAILED_EVENT_CODE
-    )
-  ) {
-    await signalAcceptedRuntimeAttemptFailureBestEffort({ userId });
-  }
 
   return jsonOk(parseHostedRuntimeLogResponse({
     loggedCount: body.entries.length,
