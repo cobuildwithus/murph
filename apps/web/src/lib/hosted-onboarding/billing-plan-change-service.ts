@@ -28,6 +28,10 @@ import {
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeSubscriptionUpdated } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
 
 export type HostedBillingPlanUpgradeResult =
   | {
@@ -169,6 +173,12 @@ export async function upgradeHostedBillingPlan(input: {
         }),
       });
     } catch (error) {
+      // Logged here because a pending_update outcome absorbs this rejection
+      // without ever converting it into a domain error.
+      logHostedStripeFailure({
+        error,
+        operationName: "subscription.update.plan-items",
+      });
       updateFailure = { error };
       updatedSubscription = await callHostedStripePlanUpgradeOperation(
         "subscription.retrieve.after-plan-items-error",
@@ -751,6 +761,7 @@ async function callHostedStripePlanUpgradeOperation<T>(
   try {
     return await operation();
   } catch (error) {
+    logHostedStripeFailure({ error, operationName });
     throw buildHostedStripePlanUpgradeOperationError(operationName, error);
   }
 }
@@ -761,44 +772,11 @@ function buildHostedStripePlanUpgradeOperationError(
 ): Error {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_STRIPE_PLAN_CHANGE_UNAVAILABLE",
-    details: {
-      operationName,
-      ...describeSafeStripePlanChangeError(error),
-    },
+    details: describeHostedStripeErrorDetails({ error, operationName }),
     httpStatus: 502,
     message: "Stripe billing is unavailable for plan changes right now. Try again shortly.",
     retryable: true,
   });
-}
-
-function describeSafeStripePlanChangeError(error: unknown): Record<string, unknown> {
-  if (typeof error !== "object" || error === null) {
-    return {
-      type: typeof error,
-    };
-  }
-
-  const code = Reflect.get(error, "code");
-  const stripeParam = parseSafeStripeErrorParam(Reflect.get(error, "param"));
-  const statusCode = Reflect.get(error, "statusCode");
-  const type = Reflect.get(error, "type");
-  const requestId = Reflect.get(error, "requestId");
-
-  return {
-    ...(typeof type === "string" && type.length > 0 ? { type } : {}),
-    ...(typeof code === "string" && code.length > 0 ? { code } : {}),
-    ...(stripeParam ? { stripeParam } : {}),
-    ...(typeof statusCode === "number" ? { statusCode } : {}),
-    requestIdPresent: typeof requestId === "string" && requestId.length > 0,
-  };
-}
-
-function parseSafeStripeErrorParam(value: unknown): string | null {
-  if (typeof value !== "string" || value.length === 0 || value.length > 120) {
-    return null;
-  }
-
-  return /^[A-Za-z0-9_.\-[\]]+$/u.test(value) ? value : null;
 }
 
 function buildHostedBillingPlanUpgradeDispatchContext(input: {

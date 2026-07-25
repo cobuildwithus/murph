@@ -20,6 +20,7 @@ import {
   normalizeNullableString,
   type HostedOnboardingReadClient,
 } from "./shared";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 
 /**
  * Owns Stripe-object-to-member lookup and customer-context reads so billing
@@ -290,15 +291,23 @@ export async function resolveStripeCustomerContext(input: {
 }): Promise<{ customerId: string | null }> {
   const stripe = requireHostedStripeApi();
 
-  if (input.chargeId) {
-    const charge = await stripe.charges.retrieve(input.chargeId);
+  const chargeId = input.chargeId;
+  if (chargeId) {
+    const charge = await withHostedStripeFailureLog(
+      "charges.retrieve.customer-context",
+      () => stripe.charges.retrieve(chargeId),
+    );
     return {
       customerId: coerceStripeObjectId(charge.customer),
     };
   }
 
-  if (input.paymentIntentId) {
-    const paymentIntent = await stripe.paymentIntents.retrieve(input.paymentIntentId);
+  const paymentIntentId = input.paymentIntentId;
+  if (paymentIntentId) {
+    const paymentIntent = await withHostedStripeFailureLog(
+      "paymentIntents.retrieve.customer-context",
+      () => stripe.paymentIntents.retrieve(paymentIntentId),
+    );
     return {
       customerId: coerceStripeObjectId(paymentIntent.customer),
     };
@@ -318,7 +327,10 @@ async function readStripeInvoiceCanonicalSubscription(
     return null;
   }
 
-  return requireHostedStripeApi().subscriptions.retrieve(subscriptionId);
+  return withHostedStripeFailureLog(
+    "subscription.retrieve.invoice-canonical",
+    () => requireHostedStripeApi().subscriptions.retrieve(subscriptionId),
+  );
 }
 
 async function readHostedMemberBillingSnapshotForDirectLookup(input: {

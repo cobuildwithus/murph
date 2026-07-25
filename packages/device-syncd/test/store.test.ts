@@ -29,6 +29,15 @@ const UNSUPPORTED_SCHEMA_VERSION_RE = new RegExp(
   "u",
 );
 
+function downgradeDeviceSyncStoreToV8(databasePath: string): void {
+  const database = openSqliteRuntimeDatabase(databasePath);
+  database.exec(`
+    alter table device_connection_source drop column last_data_at;
+    pragma user_version = 8;
+  `);
+  database.close();
+}
+
 function downgradeDeviceSyncStoreToV7(databasePath: string): void {
   const database = openSqliteRuntimeDatabase(databasePath);
   database.exec(`
@@ -999,6 +1008,58 @@ test("device sync store hosted hydration can create provider-config accounts wit
     });
   } finally {
     store.close();
+    await rm(tempDir, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("device sync store migrates an existing v8 source row to the arrival column", async () => {
+  const tempDir = await makeTempDirectory("murph-device-syncd-store-v8-migration");
+  const databasePath = path.join(tempDir, "state.sqlite");
+
+  try {
+    let store = new SqliteDeviceSyncStore(databasePath);
+    const connection = store.upsertAccount({
+      provider: "aggregator",
+      externalAccountId: "aggregator-account",
+      displayName: "Aggregator",
+      scopes: [],
+      credential: { kind: "none" },
+      metadata: {},
+      connectedAt: "2026-07-01T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: connection.id,
+      sourceInstanceKey: "src_garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: "2026-07-01T00:00:00.000Z",
+    });
+    store.close();
+
+    // Every existing runner database traverses this migration with real rows.
+    downgradeDeviceSyncStoreToV8(databasePath);
+
+    store = new SqliteDeviceSyncStore(databasePath);
+    const [migrated] = store.listConnectionSources({ connectionId: connection.id });
+    assert.ok(migrated, "the pre-existing source must survive the migration");
+    assert.equal(migrated.sourceProviderSlug, "garmin");
+    assert.equal(migrated.lastDataAt, null);
+
+    assert.equal(
+      store.markConnectionSourceDataReceived({
+        connectionId: connection.id,
+        now: "2026-07-05T00:00:00.000Z",
+        sourceProviderSlug: "garmin",
+      }),
+      1,
+    );
+    const [afterArrival] = store.listConnectionSources({ connectionId: connection.id });
+    assert.equal(afterArrival?.lastDataAt, "2026-07-05T00:00:00.000Z");
+    store.close();
+  } finally {
     await rm(tempDir, {
       force: true,
       recursive: true,

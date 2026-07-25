@@ -9,6 +9,7 @@ import {
   requestHostedPulseTrialContinuation,
   requestHostedPulseTrialStartPaid,
 } from "@/src/components/hosted-onboarding/client-api";
+import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
@@ -268,13 +269,23 @@ function StartPaidPulseConfirmationDialog(props: {
           </p>
         ) : null}
         {props.status === "billing_pending" ? (
-          <p
+          // This state can outlast the confirmation window, and when it does the
+          // check never clears on its own. Offer the billing page in the same
+          // breath so the member has a way through instead of a wait with no end.
+          <div
             role="status"
             aria-live="polite"
-            className="rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
+            className="flex flex-col gap-2 rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
           >
-            Billing is still finishing. Check again shortly.
-          </p>
+            <p>
+              Billing is still finishing. Check again, or open billing to finish it there.
+            </p>
+            <BillingPortalButton
+              billingScope="member"
+              variant="ghost"
+              label="Open billing"
+            />
+          </div>
         ) : null}
         {isSubmitting ? (
           <p role="status" aria-live="polite" className="sr-only">

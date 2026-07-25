@@ -1241,7 +1241,12 @@ export type HostedRuntimeGroupToolResponse =
   | {
       action: "update_display_name";
       result:
-        | { status: "ok"; group: HostedRuntimeGroupSummary }
+        // The provider accepted the rename request. Like set_chat_avatar, this
+        // is request acceptance, not an observation that the upstream title
+        // changed. A null group means no updated hosted group summary came back
+        // — either the chat has no hosted group record or the label write was
+        // not confirmed. It does not prove which.
+        | { status: "ok"; group: HostedRuntimeGroupSummary | null }
         | { status: "unavailable"; unavailableReason: string; group: null };
     }
   | {
@@ -2350,6 +2355,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
   "device-sync.module_load_failed",
+  "device-sync.source_stalled",
   "device-sync.wake_projection_failed",
   "mailbox.appended",
   "mailbox.dedupe_conflict",

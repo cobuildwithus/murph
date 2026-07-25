@@ -48,8 +48,13 @@ const mocks = vi.hoisted(() => {
     adapterOptions.push(options);
     return { options, pool };
   });
+  const transaction = vi.fn();
   const PrismaClient = vi.fn().mockImplementation(function (options: unknown) {
-    const client: Record<string, unknown> = { $disconnect: vi.fn(), options };
+    const client: Record<string, unknown> = {
+      $disconnect: vi.fn(),
+      $transaction: transaction,
+      options,
+    };
     client.$extends = vi.fn((extension: QueryExtension) => {
       extensions.push(extension);
       return client;
@@ -65,6 +70,7 @@ const mocks = vi.hoisted(() => {
     poolInstances,
     PrismaClient,
     PrismaPg,
+    transaction,
   };
 });
 
@@ -100,6 +106,7 @@ describe("prisma module", () => {
     mocks.adapterOptions.length = 0;
     mocks.extensions.length = 0;
     mocks.poolInstances.length = 0;
+    mocks.transaction.mockReset();
     process.env = { ...ORIGINAL_ENV };
     resetPrismaGlobal();
   });
@@ -476,4 +483,154 @@ describe("prisma module", () => {
     })).rejects.toBe(errorWithThrowingCode);
     expect(warn).not.toHaveBeenCalled();
   });
+
+  it("retries a transaction that never started and reports every attempt", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    mocks.transaction
+      .mockRejectedValueOnce(transactionStartTimeout())
+      .mockResolvedValueOnce("committed");
+
+    await expect(prisma.$transaction(async () => "unused")).resolves.toBe("committed");
+
+    expect(mocks.transaction).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", {
+      category: "transaction_start_timeout",
+      idleConnections: 0,
+      totalConnections: 0,
+      waitingRequests: 0,
+    });
+  });
+
+  it("stops retrying a transaction start after the attempt budget", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    const failure = transactionStartTimeout();
+    mocks.transaction.mockRejectedValue(failure);
+
+    await expect(prisma.$transaction(async () => "unused")).rejects.toBe(failure);
+
+    expect(mocks.transaction).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("never replays a transaction that already ran", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    // Same P2028 code, but the transaction opened and then expired, so its
+    // callback may already have run and must not be replayed.
+    const expired = Object.assign(
+      new Error("Transaction API error: Transaction already closed."),
+      { code: "P2028" },
+    );
+    mocks.transaction.mockRejectedValue(expired);
+
+    await expect(prisma.$transaction(async () => "unused")).rejects.toBe(expired);
+
+    expect(mocks.transaction).toHaveBeenCalledOnce();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("forwards non-transaction client members untouched", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    const constructed = mocks.PrismaClient.mock.results[0]?.value as
+      Record<string, unknown>;
+
+    expect(prisma.$disconnect).toBe(constructed.$disconnect);
+    expect((prisma as unknown as Record<string, unknown>).options)
+      .toBe(constructed.options);
+  });
+
+  it("retries an operation whose connection checkout timed out", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    const query = vi.fn()
+      .mockRejectedValueOnce(new Error("timeout exceeded when trying to connect"))
+      .mockResolvedValueOnce("rows");
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query,
+    })).resolves.toBe("rows");
+
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("Hosted web database pool failure.", {
+      category: "pool_checkout_timeout",
+      idleConnections: 0,
+      totalConnections: 0,
+      waitingRequests: 0,
+    });
+  });
+
+  it("does not retry operation failures that may have reached Postgres", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const extension = mocks.extensions[0];
+    if (!extension) {
+      throw new Error("Expected the Prisma query extension to be captured.");
+    }
+    const failure = Object.assign(new Error("connection closed"), { code: "P1017" });
+    const query = vi.fn().mockRejectedValue(failure);
+
+    await expect(extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query,
+    })).rejects.toBe(failure);
+
+    expect(query).toHaveBeenCalledOnce();
+  });
 });
+
+function transactionStartTimeout(): Error {
+  return Object.assign(
+    new Error("Transaction API error: Unable to start a transaction in the given time."),
+    { code: "P2028" },
+  );
+}

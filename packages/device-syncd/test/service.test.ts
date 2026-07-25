@@ -632,6 +632,7 @@ test("device sync job context lets providers update source projections", async (
       lastErrorMessage: null,
       firstSeenAt: sources[0]?.firstSeenAt,
       lastSeenAt: sources[0]?.lastSeenAt,
+      lastDataAt: null,
       createdAt: sources[0]?.createdAt,
       updatedAt: sources[0]?.updatedAt,
     });

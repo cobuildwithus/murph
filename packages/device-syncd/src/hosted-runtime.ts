@@ -255,6 +255,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   lastErrorMessage: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** Last inbound payload carrying this source's data; null until one has. */
+  lastDataAt: string | null;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSnapshot {
@@ -321,6 +323,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   lastErrorMessage?: string | null;
   firstSeenAt?: string | null;
   lastSeenAt: string;
+  lastDataAt?: string | null;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeFailureDiagnosticDetails {
@@ -1469,6 +1472,13 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
+    // Absent means "produced before this field existed", which must stay
+    // parseable: a runner-first deploy would otherwise reject every snapshot
+    // from the older Web producer and stall device sync until Web caught up.
+    // A present-but-malformed value is still rejected.
+    lastDataAt: record.lastDataAt === undefined
+      ? null
+      : readNullableIsoTimestamp(record.lastDataAt, `${label}.lastDataAt`),
     resourceCount,
     ...(record.resourceAvailabilitySummary === undefined
       ? {}
@@ -1583,6 +1593,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
   assertSupportedFields(record, label, [
     "displayName",
     "firstSeenAt",
+    "lastDataAt",
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
@@ -1640,6 +1651,9 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       ? {}
       : { firstSeenAt: readNullableIsoTimestamp(record.firstSeenAt, `${label}.firstSeenAt`) }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
+    ...(record.lastDataAt === undefined
+      ? {}
+      : { lastDataAt: readNullableIsoTimestamp(record.lastDataAt, `${label}.lastDataAt`) }),
   };
 }
 

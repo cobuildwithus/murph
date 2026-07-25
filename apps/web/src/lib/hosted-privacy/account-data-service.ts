@@ -27,6 +27,7 @@ import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-gro
 import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
+import { logHostedStripeFailure } from "../hosted-onboarding/stripe-error-log";
 import {
   generateHostedAccountExitReasonId,
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
@@ -1252,6 +1253,10 @@ async function cancelHostedStripeSubscriptionForAccountDeletion(input: {
     console.error(
       `[hosted-privacy] Stripe subscription cancel failed during account deletion (memberId=${memberId}, errorCode=${cancelErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.account-deletion",
+    });
     throw hostedOnboardingError({
       code: "ACCOUNT_DELETION_STRIPE_SUBSCRIPTION_CANCEL_FAILED",
       httpStatus: 502,
@@ -1287,6 +1292,10 @@ async function deleteHostedStripeCustomerBestEffort(input: {
     console.error(
       `[hosted-privacy] Stripe customer deletion failed after account deletion (memberId=${memberId}, errorCode=${stripeErrorCode}).`,
     );
+    logHostedStripeFailure({
+      error,
+      operationName: "customers.del.account-deletion",
+    });
     return { errorCode: stripeErrorCode, status: "failed" };
   }
 }

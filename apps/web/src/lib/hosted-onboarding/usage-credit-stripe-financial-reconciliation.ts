@@ -111,6 +111,7 @@ export async function prepareHostedUsageCreditFinancialEvent(input: {
     }
     const refund = await readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "refunds.retrieve.usage-credit-reconciliation",
       read: (options) => input.context.stripe.refunds.retrieve(
         refundId,
         undefined,
@@ -147,6 +148,7 @@ export async function prepareHostedUsageCreditFinancialEvent(input: {
     }
     const dispute = await readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "disputes.retrieve.usage-credit-reconciliation",
       read: (options) => input.context.stripe.disputes.retrieve(
         disputeId,
         undefined,
@@ -237,6 +239,7 @@ export async function retrieveHostedUsageCreditFinancialSnapshot(input: {
   }
   const charge = await readHostedUsageCreditStripe({
     context: input.context,
+    operationName: "charges.retrieve.usage-credit-reconciliation",
     read: (options) => input.context.stripe.charges.retrieve(
       chargeId,
       undefined,
@@ -250,6 +253,7 @@ export async function retrieveHostedUsageCreditFinancialSnapshot(input: {
   const paymentIntent = input.paymentIntent ??
     await readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "paymentIntents.retrieve.usage-credit-reconciliation",
       read: (options) => input.context.stripe.paymentIntents.retrieve(
         paymentIntentId,
         undefined,
@@ -264,6 +268,7 @@ export async function retrieveHostedUsageCreditFinancialSnapshot(input: {
   const [refunds, disputes] = await Promise.all([
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "refunds.list.usage-credit-reconciliation",
       read: (options) => input.context.stripe.refunds.list({
         charge: charge.id,
         limit: 100,
@@ -271,6 +276,7 @@ export async function retrieveHostedUsageCreditFinancialSnapshot(input: {
     }),
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "disputes.list.usage-credit-reconciliation",
       read: (options) => input.context.stripe.disputes.list({
         charge: charge.id,
         limit: 100,
@@ -329,6 +335,7 @@ async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
   } else {
     const sessions = await readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "checkout.sessions.list.usage-credit-reconciliation",
       read: (options) => input.context.stripe.checkout.sessions.list({
         limit: 2,
         payment_intent: input.paymentIntent.id,
@@ -355,6 +362,7 @@ async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
   const [session, lineItems] = await Promise.all([
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "checkout.sessions.retrieve.usage-credit-reconciliation",
       read: (options) => input.context.stripe.checkout.sessions.retrieve(
         sessionId,
         undefined,
@@ -363,6 +371,7 @@ async function prepareHostedUsageCreditFinancialSnapshotCheckout(input: {
     }),
     readHostedUsageCreditStripe({
       context: input.context,
+      operationName: "checkout.sessions.listLineItems.usage-credit-reconciliation",
       read: (options) => input.context.stripe.checkout.sessions.listLineItems(
         sessionId,
         { limit: 100 },
