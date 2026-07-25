@@ -9,6 +9,8 @@ import {
   type HostedRuntimeAiAccessNoticeCode,
 } from "./member-access";
 
+const HOSTED_ACCOUNT_SETTINGS_URL = "https://withmurph.ai/settings";
+
 export type HostedRecognizedInboundAccessResolution =
   | { kind: "allowed" }
   | { kind: "silent" }
@@ -39,7 +41,14 @@ export async function resolveHostedRecognizedInboundAccess(input: {
   prisma: PrismaClient;
 }): Promise<HostedRecognizedInboundAccessResolution> {
   if (input.member.suspendedAt) {
-    return { kind: "silent" };
+    // The channel has already resolved to this member, so a generic account
+    // handoff is safe. Do not expose the suspension reason over chat.
+    return {
+      kind: "access_notice",
+      message: `Murph can't use this account right now. Check your account settings or contact support:\n${HOSTED_ACCOUNT_SETTINGS_URL}`,
+      noticeCode: "billing_inactive",
+      responseReason: "sent-account-unavailable-notice",
+    };
   }
 
   const access = await readHostedRuntimeAiAccessDecision({
