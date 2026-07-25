@@ -1,22 +1,75 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS,
+  HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
+  HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS,
+  HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS,
   HOSTED_MAILBOX_RETENTION_MS,
-  HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
+  HOSTED_RETENTION_BATCH_SIZE,
+  HOSTED_RETENTION_MAX_BATCHES,
   HOSTED_RUN_LOG_RETENTION_MS,
+  HOSTED_RUN_LOG_VERBOSE_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
 
+function sqlOf(call: readonly unknown[]): string {
+  return (call[0] as TemplateStringsArray).join("?");
+}
+
+function findRetentionCall(
+  executeRaw: ReturnType<typeof vi.fn>,
+  fragment: string,
+): unknown[] {
+  const call = executeRaw.mock.calls.find((candidate) =>
+    sqlOf(candidate).includes(fragment)
+  );
+  if (!call) {
+    throw new Error(`Expected retention SQL containing ${fragment}.`);
+  }
+
+  return call;
+}
+
+/** Every retention statement resolves to `0`, so each category runs one batch. */
+function createRetentionPrisma(input?: {
+  executeRaw?: ReturnType<typeof vi.fn>;
+  queryRaw?: ReturnType<typeof vi.fn>;
+  webSessionsDeleted?: number;
+}) {
+  return {
+    $executeRaw: input?.executeRaw ?? vi.fn().mockResolvedValue(0),
+    $queryRaw: input?.queryRaw ?? vi.fn().mockResolvedValue([]),
+    hostedComputerRun: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    hostedWebSession: {
+      deleteMany: vi.fn().mockResolvedValue({
+        count: input?.webSessionsDeleted ?? 0,
+      }),
+    },
+  };
+}
+
 describe("hosted retention cleanup", () => {
-  it("deletes expired mailbox items, runtime logs, and stale web sessions", async () => {
+  it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
-    const executeRaw = vi.fn().mockResolvedValue(7);
-    const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 8 });
-    const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 9 });
-    const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
+    const countsByTable = new Map<string, number>([
+      ['DELETE FROM "hosted_mailbox_item"', 7],
+      ['DELETE FROM "hosted_runtime_log"', 8],
+      ['DELETE FROM "hosted_ingress_latency_trace"', 1],
+      ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
+      ['DELETE FROM "device_sync_signal"', 3],
+      ['DELETE FROM "device_webhook_trace"', 4],
+      ['UPDATE "hosted_linq_provider_event"', 5],
+    ]);
+    const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      const sql = strings.join("?");
+      return [...countsByTable].find(([fragment]) => sql.includes(fragment))?.[1] ?? 0;
+    });
     const queryRaw = vi.fn().mockResolvedValue([
       { userId: "member_due_1" },
       { userId: "member_due_2" },
@@ -24,26 +77,23 @@ describe("hosted retention cleanup", () => {
     const signalRuntimeRecheck = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("Temporal unavailable"));
-    const prisma = {
-      $executeRaw: executeRaw,
-      $queryRaw: queryRaw,
-      hostedComputerRun: {
-        findMany: hostedComputerRunFindMany,
-      },
-      hostedRuntimeLog: {
-        deleteMany: hostedRuntimeLogDeleteMany,
-      },
-      hostedWebSession: {
-        deleteMany: hostedWebSessionDeleteMany,
-      },
-    };
+    const prisma = createRetentionPrisma({
+      executeRaw,
+      queryRaw,
+      webSessionsDeleted: 9,
+    });
 
     await expect(runHostedRetentionCleanup({
       now,
       prisma: prisma as never,
       signalRuntimeRecheck,
     })).resolves.toEqual({
+      compactedLinqProviderEventDiagnostics: 5,
+      expiredAssistantRuntimeIssuesDeleted: 2,
       expiredComputerRunsCleanedUp: 0,
+      expiredDeviceSyncSignalsDeleted: 3,
+      expiredDeviceWebhookTracesDeleted: 4,
+      expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxItemsDeleted: 7,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
@@ -51,37 +101,69 @@ describe("hosted retention cleanup", () => {
       staleWebSessionsDeleted: 9,
     });
 
-    expect(executeRaw).toHaveBeenCalledTimes(1);
-    const mailboxDeleteSql = String(executeRaw.mock.calls[0]?.[0].join("?"));
-    expect(mailboxDeleteSql).toContain('DELETE FROM "hosted_mailbox_item"');
-    expect(mailboxDeleteSql).toContain('"expires_at" <=');
-    expect(mailboxDeleteSql).toContain('"created_at" <');
-    expect(mailboxDeleteSql).not.toContain("consumed_seq");
-    expect(mailboxDeleteSql).not.toContain("tombstoned");
-    expect(executeRaw.mock.calls[0]?.slice(1)).toEqual([
+    // One statement per category: every short batch stops that category's loop.
+    expect(executeRaw).toHaveBeenCalledTimes(countsByTable.size);
+
+    const mailboxCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_mailbox_item"');
+    expect(sqlOf(mailboxCall)).toContain('"expires_at" <=');
+    expect(sqlOf(mailboxCall)).toContain('"created_at" <');
+    expect(sqlOf(mailboxCall)).not.toContain("consumed_seq");
+    expect(sqlOf(mailboxCall)).not.toContain("tombstoned");
+    expect(mailboxCall.slice(1)).toEqual([
       now,
       new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS),
     ]);
-    expect(hostedRuntimeLogDeleteMany).toHaveBeenCalledWith({
-      where: {
-        OR: [
-          {
-            at: {
-              lt: new Date(now.getTime() - HOSTED_RUN_LOG_RETENTION_MS),
-            },
-          },
-          {
-            eventCode: "assistant.automation_detail",
-            at: {
-              lt: new Date(
-                now.getTime() - HOSTED_RUN_LOG_AUTOMATION_DETAIL_RETENTION_MS,
-              ),
-            },
-          },
-        ],
-      },
-    });
-    expect(hostedWebSessionDeleteMany).toHaveBeenCalledWith({
+
+    // Verbose levels expire first; warn and error keep the longer window.
+    const runtimeLogCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_log"');
+    expect(sqlOf(runtimeLogCall)).toContain(`"level" NOT IN ('warn', 'error')`);
+    expect(runtimeLogCall.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_RUN_LOG_VERBOSE_RETENTION_MS),
+      new Date(now.getTime() - HOSTED_RUN_LOG_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+
+    expect(
+      findRetentionCall(executeRaw, 'DELETE FROM "hosted_ingress_latency_trace"').slice(1),
+    ).toEqual([
+      new Date(now.getTime() - HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+    expect(
+      findRetentionCall(executeRaw, 'DELETE FROM "hosted_assistant_runtime_issue"').slice(1),
+    ).toEqual([now, HOSTED_RETENTION_BATCH_SIZE]);
+    expect(
+      findRetentionCall(executeRaw, 'DELETE FROM "device_sync_signal"').slice(1),
+    ).toEqual([
+      new Date(now.getTime() - HOSTED_DEVICE_SYNC_SIGNAL_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+
+    // Only processed traces expire; an in-flight claim is still the duplicate gate.
+    const webhookTraceCall = findRetentionCall(executeRaw, 'DELETE FROM "device_webhook_trace"');
+    expect(sqlOf(webhookTraceCall)).toContain(`"status" = 'processed'`);
+    expect(webhookTraceCall.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+
+    // Linq provider events are the durable webhook duplicate gate: their bulky
+    // diagnostics are nulled, but the row itself must survive.
+    const linqCall = findRetentionCall(executeRaw, 'UPDATE "hosted_linq_provider_event"');
+    expect(sqlOf(linqCall)).toContain('"extraction_json" = NULL');
+    expect(sqlOf(linqCall)).toContain('"payload_sanitized_json" = NULL');
+    expect(sqlOf(linqCall)).toContain('"payload_shape_json" = NULL');
+    expect(linqCall.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
+    expect(
+      executeRaw.mock.calls.some((call) =>
+        sqlOf(call).includes('DELETE FROM "hosted_linq_provider_event"')
+      ),
+    ).toBe(false);
+
+    expect(prisma.hostedWebSession.deleteMany).toHaveBeenCalledWith({
       where: {
         OR: [
           {
@@ -115,18 +197,17 @@ describe("hosted retention cleanup", () => {
       HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
       now,
     ]);
-    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[0],
+    // Every delete finishes before the runtime signals start, so cleanup work
+    // never runs concurrently with the signal fan-out.
+    expect(executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      queryRaw.mock.invocationCallOrder[0]!,
     );
-    expect(hostedRuntimeLogDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[0],
-    );
-    expect(hostedWebSessionDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[0],
-    );
-    expect(hostedComputerRunFindMany.mock.invocationCallOrder[0]).toBeLessThan(
-      queryRaw.mock.invocationCallOrder[0],
-    );
+    expect(
+      prisma.hostedWebSession.deleteMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
+    expect(
+      prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
     expect(signalRuntimeRecheck).toHaveBeenCalledTimes(2);
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(1, {
       userId: "member_due_1",
@@ -134,7 +215,7 @@ describe("hosted retention cleanup", () => {
     expect(signalRuntimeRecheck).toHaveBeenNthCalledWith(2, {
       userId: "member_due_2",
     });
-    expect(hostedComputerRunFindMany).toHaveBeenCalledWith({
+    expect(prisma.hostedComputerRun.findMany).toHaveBeenCalledWith({
       orderBy: {
         updatedAt: "asc",
       },
@@ -154,29 +235,61 @@ describe("hosted retention cleanup", () => {
     });
   });
 
+  it("stops each category at its per-run batch ceiling", async () => {
+    // A backlog that keeps returning full batches must not turn one hourly run
+    // into an unbounded delete loop.
+    let deviceSignalBatches = 0;
+    const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      if (!strings.join("?").includes('DELETE FROM "device_sync_signal"')) {
+        return 0;
+      }
+      deviceSignalBatches += 1;
+      return HOSTED_RETENTION_BATCH_SIZE;
+    });
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    await expect(runHostedRetentionCleanup({
+      now: "2026-04-25T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      expiredDeviceSyncSignalsDeleted:
+        HOSTED_RETENTION_BATCH_SIZE * HOSTED_RETENTION_MAX_BATCHES,
+    });
+    expect(deviceSignalBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
+  });
+
+  it("reports the summed count of the batches a category actually ran", async () => {
+    let runtimeLogBatches = 0;
+    const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
+      if (!strings.join("?").includes('DELETE FROM "hosted_runtime_log"')) {
+        return 0;
+      }
+      runtimeLogBatches += 1;
+      return runtimeLogBatches < 3 ? HOSTED_RETENTION_BATCH_SIZE : 2;
+    });
+    const prisma = createRetentionPrisma({ executeRaw });
+
+    await expect(runHostedRetentionCleanup({
+      now: "2026-04-25T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      oldRuntimeLogsDeleted: HOSTED_RETENTION_BATCH_SIZE * 2 + 2,
+    });
+    expect(runtimeLogBatches).toBe(3);
+  });
+
   it("finishes database cleanup before timing out stuck media-retention signals", async () => {
     vi.useFakeTimers();
     try {
       const now = new Date("2026-04-25T12:00:00.000Z");
       const executeRaw = vi.fn().mockResolvedValue(1);
-      const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 2 });
-      const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 3 });
-      const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
       const queryRaw = vi.fn().mockResolvedValue([{ userId: "member_due_stuck" }]);
       const signalRuntimeRecheck = vi.fn(() => new Promise(() => undefined));
-      const prisma = {
-        $executeRaw: executeRaw,
-        $queryRaw: queryRaw,
-        hostedComputerRun: {
-          findMany: hostedComputerRunFindMany,
-        },
-        hostedRuntimeLog: {
-          deleteMany: hostedRuntimeLogDeleteMany,
-        },
-        hostedWebSession: {
-          deleteMany: hostedWebSessionDeleteMany,
-        },
-      };
+      const prisma = createRetentionPrisma({
+        executeRaw,
+        queryRaw,
+        webSessionsDeleted: 3,
+      });
 
       const cleanup = runHostedRetentionCleanup({
         now,
@@ -184,31 +297,33 @@ describe("hosted retention cleanup", () => {
         signalRuntimeRecheck,
       });
 
-      for (let index = 0; index < 20 && queryRaw.mock.calls.length === 0; index += 1) {
+      for (let index = 0; index < 200 && queryRaw.mock.calls.length === 0; index += 1) {
         await Promise.resolve();
       }
       expect(queryRaw).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS);
       await expect(cleanup).resolves.toEqual({
+        compactedLinqProviderEventDiagnostics: 1,
+        expiredAssistantRuntimeIssuesDeleted: 1,
         expiredComputerRunsCleanedUp: 0,
+        expiredDeviceSyncSignalsDeleted: 1,
+        expiredDeviceWebhookTracesDeleted: 1,
+        expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxItemsDeleted: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
-        oldRuntimeLogsDeleted: 2,
+        oldRuntimeLogsDeleted: 1,
         staleWebSessionsDeleted: 3,
       });
-      expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[0],
+      expect(executeRaw.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        queryRaw.mock.invocationCallOrder[0]!,
       );
-      expect(hostedRuntimeLogDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[0],
-      );
-      expect(hostedWebSessionDeleteMany.mock.invocationCallOrder[0]).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[0],
-      );
-      expect(hostedComputerRunFindMany.mock.invocationCallOrder[0]).toBeLessThan(
-        queryRaw.mock.invocationCallOrder[0],
-      );
+      expect(
+        prisma.hostedWebSession.deleteMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
+      expect(
+        prisma.hostedComputerRun.findMany.mock.invocationCallOrder[0],
+      ).toBeLessThan(queryRaw.mock.invocationCallOrder[0]!);
       expect(signalRuntimeRecheck).toHaveBeenCalledWith({
         userId: "member_due_stuck",
       });
@@ -228,10 +343,6 @@ describe("hosted retention cleanup", () => {
         wakeAt: now,
       }),
     );
-    const executeRaw = vi.fn().mockResolvedValue(0);
-    const hostedRuntimeLogDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
-    const hostedWebSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
-    const hostedComputerRunFindMany = vi.fn().mockResolvedValue([]);
     const queryRaw = vi.fn(async (
       _sql: TemplateStringsArray,
       dueAt: Date,
@@ -260,19 +371,7 @@ describe("hosted retention cleanup", () => {
     const signalRuntimeRecheck = vi.fn(async (_input: { userId: string }) => {
       throw new Error("runtime unavailable");
     });
-    const prisma = {
-      $executeRaw: executeRaw,
-      $queryRaw: queryRaw,
-      hostedComputerRun: {
-        findMany: hostedComputerRunFindMany,
-      },
-      hostedRuntimeLog: {
-        deleteMany: hostedRuntimeLogDeleteMany,
-      },
-      hostedWebSession: {
-        deleteMany: hostedWebSessionDeleteMany,
-      },
-    };
+    const prisma = createRetentionPrisma({ queryRaw });
 
     await expect(runHostedRetentionCleanup({
       now,

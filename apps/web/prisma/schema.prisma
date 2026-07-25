@@ -168,6 +168,7 @@ model DeviceSyncSignal {
 
   @@index([userId, id])
   @@index([connectionId])
+  @@index([createdAt, id])
   @@map("device_sync_signal")
 }
 
@@ -956,6 +957,7 @@ model HostedIngressLatencyTrace {
   @@index([source, acceptedAt])
   @@index([source, providerStartAt])
   @@index([userId, acceptedAt])
+  @@index([acceptedAt, id])
   @@index([assistantInputId])
   @@index([runtimeAttemptId])
   @@index([linqDeliveryId])
@@ -1023,6 +1025,7 @@ model HostedWorkspace {
   nextWakeReason         String?      @map("next_wake_reason")
   inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
   inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
+  acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
   redactedStatusJson     Json?        @map("redacted_status_json")
   checkpointedAt         DateTime?    @map("checkpointed_at")
   createdAt              DateTime     @default(now()) @map("created_at")
@@ -1058,6 +1061,7 @@ model HostedRuntimeLog {
   @@index([attemptId, eventCode, at])
   @@index([level, at])
   @@index([component, at])
+  @@index([at, id])
   @@map("hosted_runtime_log")
 }
 
@@ -1626,6 +1630,7 @@ model HostedLinqProviderEvent {
   @@index([phoneNumberLookupKey, providerCreatedAt])
   @@index([phoneNumberLookupKey, eventType, providerCreatedAt])
   @@index([messageLookupKey, providerCreatedAt])
+  @@index([receivedAt, eventId])
   @@index([deliveryStatus, providerCreatedAt])
   @@map("hosted_linq_provider_event")
 }

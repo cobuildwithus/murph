@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  HostedRuntimeLogEntry,
-  HostedRuntimeLogResponse,
+import {
+  HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
+  type HostedRuntimeLogEntry,
+  type HostedRuntimeLogResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
   drainHostedRuntimeLogWritesBestEffort,
+  HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES,
   writeHostedRuntimeLogBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
@@ -164,7 +166,156 @@ describe("hosted runtime log write queue", () => {
     await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
   });
 
-  it("swallows queued port-write failures so the chain and later writes never reject", async () => {
+  it("coalesces entries buffered during an in-flight request into one later request", async () => {
+    const { port, writes } = createControlledLogPort();
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:00:04.000Z",
+      platform: { logPort: port },
+    });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+
+    // Entries logged while the first request is still in flight share one
+    // round trip instead of costing one each.
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:00:05.000Z",
+      platform: { logPort: port },
+    });
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:00:06.000Z",
+      platform: { logPort: port },
+    });
+    expect(writes).toHaveLength(1);
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.entries.map((entry) => entry.at)).toEqual([
+      "2026-06-12T00:00:05.000Z",
+      "2026-06-12T00:00:06.000Z",
+    ]);
+
+    writes[1]!.resolve();
+    await flushMicrotasks();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("keeps each request within the callback entry and body bounds", async () => {
+    const { port, writes } = createControlledLogPort();
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:01:00.000Z",
+      platform: { logPort: port },
+    });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+
+    const bufferedCount = HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 3;
+    for (let index = 0; index < bufferedCount; index += 1) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry("info"),
+        now: () => `2026-06-12T00:02:${String(index).padStart(2, "0")}.000Z`,
+        platform: { logPort: port },
+      });
+    }
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes[1]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+
+    writes[1]!.resolve();
+    await flushMicrotasks();
+    expect(writes[2]!.entries).toHaveLength(3);
+
+    writes[2]!.resolve();
+    await flushMicrotasks();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("splits oversized diagnostics so one request never exceeds the body limit", async () => {
+    const { port, writes } = createControlledLogPort();
+    // Two entries that individually fit the 128 KiB batch budget but together
+    // exceed it must not share a request.
+    const bulkyDiagnostic = { statusSummary: "x".repeat(100 * 1024) };
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:03:00.000Z",
+      platform: { logPort: port },
+    });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+
+    for (const at of ["2026-06-12T00:03:01.000Z", "2026-06-12T00:03:02.000Z"]) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: {
+          ...buildQueueLogEntry("info"),
+          redactedJson: bulkyDiagnostic,
+        },
+        now: () => at,
+        platform: { logPort: port },
+      });
+    }
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes[1]!.entries).toHaveLength(1);
+
+    writes[1]!.resolve();
+    await flushMicrotasks();
+    expect(writes[2]!.entries).toHaveLength(1);
+
+    writes[2]!.resolve();
+    await flushMicrotasks();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("drops only the oldest info diagnostics when a stalled endpoint fills the buffer", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { port, writes } = createControlledLogPort();
+
+    await writeHostedRuntimeLogBestEffort({
+      entry: buildQueueLogEntry("info"),
+      now: () => "2026-06-12T00:04:00.000Z",
+      platform: { logPort: port },
+    });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+
+    for (let index = 0; index < HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES + 1; index += 1) {
+      await writeHostedRuntimeLogBestEffort({
+        entry: buildQueueLogEntry("info"),
+        now: () => `2026-06-12T00:05:00.${String(index).padStart(3, "0")}Z`,
+        platform: { logPort: port },
+      });
+    }
+
+    expect(consoleWarn).toHaveBeenCalledWith(
+      "Hosted runtime log buffer is full; dropping info diagnostics.",
+      {
+        droppedEntryCount: 1,
+        maxBufferedEntries: HOSTED_RUNTIME_LOG_MAX_BUFFERED_ENTRIES,
+      },
+    );
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    // The oldest buffered entry was dropped; the newest ones survived.
+    expect(writes[1]!.entries[0]!.at).toBe("2026-06-12T00:05:00.001Z");
+
+    for (let index = 1; index < writes.length; index += 1) {
+      writes[index]!.resolve();
+      await flushMicrotasks();
+    }
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
+  it("swallows batch write failures so the chain and later writes never reject", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
 
@@ -173,27 +324,29 @@ describe("hosted runtime log write queue", () => {
       now: () => "2026-06-12T00:00:04.000Z",
       platform: { logPort: port },
     });
+    await flushMicrotasks();
+    expect(writes).toHaveLength(1);
+
     const secondInfoSettled = trackSettled(writeHostedRuntimeLogBestEffort({
       entry: buildQueueLogEntry("info"),
       now: () => "2026-06-12T00:00:05.000Z",
       platform: { logPort: port },
     }));
 
-    await flushMicrotasks();
-    expect(writes).toHaveLength(1);
-    writes[0]!.reject(new TypeError("Synthetic queued log write failure."));
+    writes[0]!.reject(new TypeError("Synthetic batched log write failure."));
     await flushMicrotasks();
     expect(consoleWarn).toHaveBeenCalledWith(
       "Hosted runtime durable log write failed.",
       {
         component: "runtime",
+        entryCount: 1,
         errorName: "TypeError",
         eventCode: "runner.started",
       },
     );
 
-    // The failed info write did not poison the chain: the next queued info
-    // write still runs, and the drain resolves cleanly.
+    // The failed write did not poison the chain: the next buffered info entry
+    // still runs, and the drain resolves cleanly.
     expect(secondInfoSettled()).toBe(true);
     expect(writes).toHaveLength(2);
     writes[1]!.resolve();

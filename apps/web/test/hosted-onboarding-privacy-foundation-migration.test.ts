@@ -896,6 +896,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260724160000_hosted_account_exit_reason",
       "20260724180000_device_connection_source_last_data_at",
       "20260725120000_hosted_thread_delivery_route",
+      "20260725120000_hosted_observability_retention",
       "migration_lock.toml",
     ]);
     expect(hostedMailboxSubscriptionActionClaimMigrationSql).toContain(
