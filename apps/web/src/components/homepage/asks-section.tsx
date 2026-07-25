@@ -59,7 +59,7 @@ export function WideFeature({
 }) {
   const t = TINTS[tint];
   const copy = (
-    <div className="flex flex-col justify-center gap-5 px-7 pt-10 pb-2 sm:px-10 sm:pt-12 lg:col-span-5 lg:py-16 lg:px-12">
+    <div className="flex flex-col justify-center gap-4 px-5 pt-8 pb-1 sm:gap-5 sm:px-10 sm:pt-12 sm:pb-2 lg:col-span-5 lg:py-16 lg:px-12">
       <span
         className={cn(
           "font-mono text-[10px] font-semibold uppercase tracking-[0.2em]",
@@ -68,20 +68,20 @@ export function WideFeature({
       >
         {eyebrow}
       </span>
-      <h3 className="font-serif text-[clamp(1.75rem,2.8vw,2.625rem)] font-semibold leading-[1.02] tracking-[-0.035em] text-balance text-[#1f1c18]">
+      <h3 className="font-serif text-[1.5rem] font-semibold leading-[1.08] tracking-[-0.03em] text-balance text-[#1f1c18] sm:text-[clamp(1.75rem,2.8vw,2.625rem)] sm:leading-[1.02] sm:tracking-[-0.035em]">
         {headline}
       </h3>
-      <p className="text-[0.9375rem] leading-[1.65] text-pretty text-[#635a48] lg:max-w-[34ch]">
+      <p className="text-[0.875rem] leading-[1.6] text-pretty text-[#635a48] sm:text-[0.9375rem] sm:leading-[1.65] lg:max-w-[34ch]">
         {body}
       </p>
     </div>
   );
 
   const panel = (
-    <div className="p-3 sm:p-4 lg:col-span-7 lg:p-5">
+    <div className="p-2.5 sm:p-4 lg:col-span-7 lg:p-5">
       <div
         className={cn(
-          "relative overflow-hidden rounded-[1.5rem] min-h-[380px] sm:min-h-[440px] lg:min-h-[480px]",
+          "relative min-h-[330px] overflow-hidden rounded-[1.25rem] sm:min-h-[440px] sm:rounded-[1.5rem] lg:min-h-[480px]",
           t.panel,
           t.glow,
         )}
@@ -92,7 +92,7 @@ export function WideFeature({
             and collides with the artifact card. */}
         <div
           className={cn(
-            "relative z-20 flex px-5 pt-6 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
+            "relative z-20 flex px-4 pt-5 sm:px-7 sm:pt-8 lg:absolute lg:top-8 lg:px-0 lg:pt-0",
             artifactSide === "left"
               ? "justify-start lg:left-7"
               : "justify-end lg:right-7",
@@ -100,7 +100,7 @@ export function WideFeature({
         >
           <div
             className={cn(
-              "max-w-[280px] px-4 py-2.5 text-[0.9375rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)]",
+              "max-w-[240px] px-3.5 py-2 text-[0.8125rem] leading-[1.4] text-white shadow-[0_8px_24px_-6px_rgba(60,40,20,0.3)] sm:max-w-[280px] sm:px-4 sm:py-2.5 sm:text-[0.9375rem]",
               t.bubble,
               artifactSide === "left"
                 ? "rounded-2xl rounded-tl-[6px]"
@@ -112,7 +112,7 @@ export function WideFeature({
         </div>
         <div
           className={cn(
-            "relative z-10 flex h-full justify-center px-5 pb-6 pt-5 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32",
+            "relative z-10 flex h-full justify-center px-3 pb-4 pt-4 sm:px-8 sm:pb-8 sm:pt-6 lg:pt-32",
             artifactAlign === "center"
               ? "items-center lg:absolute lg:inset-0"
               : "items-end",
@@ -125,7 +125,7 @@ export function WideFeature({
   );
 
   return (
-    <article className="overflow-hidden rounded-[2rem] bg-[#fffcf6] ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_20px_60px_-30px_rgba(45,52,54,0.12)] lg:grid lg:grid-cols-12 lg:items-stretch">
+    <article className="overflow-hidden rounded-[1.5rem] bg-[#fffcf6] ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_20px_60px_-30px_rgba(45,52,54,0.12)] sm:rounded-[2rem] lg:grid lg:grid-cols-12 lg:items-stretch">
       {artifactSide === "right" ? copy : panel}
       {artifactSide === "right" ? panel : copy}
     </article>
@@ -144,19 +144,19 @@ function CompactCard({
   artifact: React.ReactNode;
 }) {
   return (
-    <article className="flex min-w-0 flex-col gap-6 rounded-[1.75rem] bg-[#fffcf6] p-7 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:p-9">
-      <div className="flex flex-col gap-3">
+    <article className="flex min-w-0 flex-col gap-5 rounded-[1.5rem] bg-[#fffcf6] p-5 ring-1 ring-black/[0.04] shadow-[0_1px_2px_rgba(45,52,54,0.04),0_16px_50px_-30px_rgba(45,52,54,0.1)] sm:gap-6 sm:rounded-[1.75rem] sm:p-9">
+      <div className="flex flex-col gap-2.5 sm:gap-3">
         <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-[#736a58]">
           {eyebrow}
         </span>
-        <h3 className="font-serif text-[clamp(1.375rem,2vw,1.75rem)] font-semibold leading-[1.05] tracking-[-0.03em] text-balance text-[#1f1c18]">
+        <h3 className="font-serif text-[1.25rem] font-semibold leading-[1.08] tracking-[-0.025em] text-balance text-[#1f1c18] sm:text-[clamp(1.375rem,2vw,1.75rem)] sm:leading-[1.05] sm:tracking-[-0.03em]">
           {headline}
         </h3>
-        <p className="text-[0.875rem] leading-[1.6] text-pretty text-[#635a48]">
+        <p className="text-[0.8125rem] leading-[1.55] text-pretty text-[#635a48] sm:text-[0.875rem] sm:leading-[1.6]">
           {body}
         </p>
       </div>
-      <div className="mt-auto rounded-[1.25rem] bg-[#f5f0e8]/60 p-3 ring-1 ring-black/[0.03]">
+      <div className="mt-auto rounded-2xl bg-[#f5f0e8]/60 p-2.5 ring-1 ring-black/[0.03] sm:rounded-[1.25rem] sm:p-3">
         {artifact}
       </div>
     </article>
@@ -170,31 +170,31 @@ function RecoveryArtifact() {
     { label: "Resting HR", value: "58", unit: "bpm", delta: "-4%" },
   ];
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#5a6e32]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#5a6e32] sm:text-[10px] sm:tracking-[0.15em]">
           Tuesday · morning brief
         </span>
-        <span className="font-mono text-[10px] tabular-nums text-[#5a6e32]">
+        <span className="text-right font-mono text-[9px] tabular-nums text-[#5a6e32] sm:text-[10px]">
           Best HRV in 2 weeks
         </span>
       </div>
 
-      <p className="mt-3 font-serif text-[1rem] leading-[1.45] text-[#2d3436]">
+      <p className="mt-2.5 font-serif text-[0.9375rem] leading-[1.45] text-[#2d3436] sm:mt-3 sm:text-[1rem]">
         Recovery is above your recent baseline, and HRV was highest on the
         sauna nights. Today looks like a strong training day.
       </p>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="mt-3 divide-y divide-[#2d3436]/[0.06] rounded-xl bg-[#f5f0e8]/70 px-3.5 ring-1 ring-black/[0.03] min-[400px]:grid min-[400px]:grid-cols-3 min-[400px]:gap-2 min-[400px]:divide-y-0 min-[400px]:bg-transparent min-[400px]:px-0 min-[400px]:ring-0 sm:mt-4">
         {stats.map((s) => (
           <div
             key={s.label}
-            className="rounded-xl bg-[#f5f0e8]/70 px-3 py-3 ring-1 ring-black/[0.03]"
+            className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-1.5 py-2.5 min-[400px]:block min-[400px]:rounded-xl min-[400px]:bg-[#f5f0e8]/70 min-[400px]:px-3 min-[400px]:py-3 min-[400px]:ring-1 min-[400px]:ring-black/[0.03]"
           >
-            <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-[#736a58]">
+            <span className="font-mono text-[8px] uppercase tracking-[0.12em] text-[#736a58] min-[400px]:text-[9px]">
               {s.label}
             </span>
-            <p className="mt-1.5 font-serif text-[1.05rem] font-semibold leading-none tracking-tight tabular-nums text-[#2d3436]">
+            <p className="font-serif text-[1rem] font-semibold leading-none tracking-tight tabular-nums text-[#2d3436] min-[400px]:mt-1.5 min-[400px]:text-[1.05rem]">
               {s.value}
               {s.unit ? (
                 <span className="ml-0.5 text-[0.6875rem] font-normal text-[#736a58]">
@@ -202,7 +202,7 @@ function RecoveryArtifact() {
                 </span>
               ) : null}
             </p>
-            <p className="mt-1.5 font-mono text-[10px] tabular-nums text-[#5a6e32]">
+            <p className="font-mono text-[9px] tabular-nums text-[#5a6e32] min-[400px]:mt-1.5 min-[400px]:text-[10px]">
               {s.delta}
             </p>
           </div>
@@ -214,7 +214,7 @@ function RecoveryArtifact() {
 
 function ExperimentArtifact() {
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="font-serif text-[1.0625rem] font-semibold leading-tight text-[#2d3436]">
@@ -332,30 +332,32 @@ function BloodworkArtifact() {
     },
   ];
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
-      <div className="flex items-baseline justify-between">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#a04f30]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <span className="font-mono text-[9px] font-medium uppercase tracking-[0.14em] text-[#a04f30] sm:text-[10px] sm:tracking-[0.15em]">
           Latest panel · vs March
         </span>
-        <span className="font-mono text-[10px] text-[#736a58]">3 flagged</span>
+        <span className="text-right font-mono text-[9px] text-[#736a58] sm:text-[10px]">
+          3 flagged
+        </span>
       </div>
-      <ul className="mt-4 divide-y divide-[#2d3436]/06">
+      <ul className="mt-3 divide-y divide-[#2d3436]/06 sm:mt-4">
         {markers.map((m) => (
           <li
             key={m.label}
-            className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-2.5 first:pt-0 last:pb-0 min-[420px]:flex min-[420px]:gap-3"
           >
-            <span className="min-w-[80px] font-serif text-[0.9375rem] font-semibold text-[#2d3436]">
+            <span className="font-serif text-[0.9375rem] font-semibold text-[#2d3436] min-[420px]:min-w-[80px]">
               {m.label}
             </span>
-            <span className="flex items-baseline gap-1 font-mono text-[11px] tabular-nums text-[#736a58]">
+            <span className="col-span-2 row-start-2 mt-0.5 flex items-baseline gap-1 font-mono text-[10px] tabular-nums text-[#736a58] min-[420px]:col-span-1 min-[420px]:mt-0 min-[420px]:text-[11px]">
               <span>{m.from}</span>
               <span aria-hidden="true">→</span>
               <span className="text-[#2d3436]">{m.to}</span>
               <span className="text-[10px]">{m.unit}</span>
             </span>
             <span
-              className={`ml-auto rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums ${
+              className={`col-start-2 row-start-1 justify-self-end rounded-full px-2 py-0.5 font-mono text-[10px] font-medium tabular-nums min-[420px]:ml-auto ${
                 m.tone === "good"
                   ? "bg-[#5a6e32]/12 text-[#3d5028]"
                   : "bg-[#a04f30]/12 text-[#a04f30]"
@@ -393,7 +395,7 @@ function ErrandsArtifact() {
     },
   ];
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4a1a]">
           Things I lined up for you
@@ -424,7 +426,7 @@ function ErrandsArtifact() {
 
 function CallArtifact() {
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#7d4858]">
           Appointment booked
@@ -461,7 +463,7 @@ function CallArtifact() {
 
 function HabitArtifact() {
   return (
-    <div className="rounded-2xl bg-[#fffcf6] p-5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)]">
+    <div className="rounded-xl bg-[#fffcf6] p-3.5 ring-1 ring-black/[0.05] shadow-[0_12px_40px_-12px_rgba(45,52,54,0.18)] sm:rounded-2xl sm:p-5">
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-[10px] font-medium uppercase tracking-[0.15em] text-[#5e5530]">
           Habit · day 24
@@ -493,15 +495,15 @@ function HabitArtifact() {
 
 export function AsksGridSection() {
   return (
-    <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
+    <section className="bg-[#f5f0e8] px-4 pt-10 pb-20 sm:px-8 sm:pt-12 sm:pb-20 lg:px-16 lg:pt-16 lg:pb-28">
       <div className="mx-auto max-w-[1200px]">
         {/* Bridges the group-chat story above back to the 1:1 assistant:
             everything below happens in a private thread with Murph. */}
-        <div className="mb-12 max-w-[720px]">
+        <div className="mb-10 max-w-[720px] sm:mb-12">
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
             Just you and Murph
           </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+          <h2 className="mt-4 font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             No group? You’re still not doing this alone.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">

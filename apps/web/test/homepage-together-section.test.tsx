@@ -39,5 +39,7 @@ test("TogetherSection renders the static social feature reframe", () => {
   );
   assert.match(markup, /so proud of you kids/);
   assert.match(markup, /Grandpa/);
+  assert.match(markup, /pt-20 pb-10/);
+  assert.match(markup, /mt-10 space-y-5/);
   assert.doesNotMatch(markup, /leaderboard/i);
 });

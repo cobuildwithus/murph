@@ -7,13 +7,13 @@ import {
 
 export function TogetherSection() {
   return (
-    <section className="bg-[#f5f0e8] px-4 py-20 sm:px-8 lg:px-16 lg:py-28">
+    <section className="bg-[#f5f0e8] px-4 pt-20 pb-10 sm:px-8 sm:pt-20 sm:pb-12 lg:px-16 lg:pt-28 lg:pb-16">
       <div className="mx-auto max-w-[1200px]">
         <div className="max-w-[720px]">
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
             Better together
           </p>
-          <h2 className="mt-4 font-serif text-[clamp(2rem,4vw,3.25rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
+          <h2 className="mt-4 font-serif text-[1.875rem] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436] sm:text-[clamp(2rem,4vw,3.25rem)]">
             Do it with your people.
           </h2>
           <p className="mt-5 max-w-[62ch] text-[1rem] leading-[1.7] text-[#3a322a]">
@@ -23,7 +23,7 @@ export function TogetherSection() {
           </p>
         </div>
 
-        <div className="mt-12 space-y-5 sm:space-y-6">
+        <div className="mt-10 space-y-5 sm:mt-12 sm:space-y-6">
           <WideFeature
             tint="sage"
             artifactSide="right"
