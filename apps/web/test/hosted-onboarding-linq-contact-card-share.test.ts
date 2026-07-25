@@ -142,6 +142,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
     shareSendMocks.getHostedLinqContactCard.mockResolvedValue({
       firstName: "Murph",
       imageUrl: null,
+      imageUrlPresent: true,
       isActive: true,
       lastName: null,
       phoneNumber: "+15557770000",
@@ -153,7 +154,7 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
     vi.clearAllMocks();
   });
 
-  it("verifies the chat's own line is image-free before reserving and sharing", async () => {
+  it("requires a matching active line card with an explicitly absent image before sharing", async () => {
     const prisma = createContactCardSharePrismaStub();
     const now = new Date("2026-07-24T12:00:00.000Z");
     const signal = new AbortController().signal;
@@ -186,11 +187,32 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
     ]);
   });
 
+  it("uses the only active self handle when a stale self handle is also present", async () => {
+    const prisma = createContactCardSharePrismaStub();
+    shareSendMocks.getHostedLinqChatHandles.mockResolvedValueOnce([
+      { handle: "+15556660000", isMe: true, status: "inactive" },
+      { handle: "+15557770000", isMe: true, status: " ACTIVE " },
+      { handle: "+15550000001", isMe: false, status: "active" },
+    ]);
+
+    await expect(shareMurphHostedLinqNativeContactCardToChat({
+      chatId: "chat_123",
+      memberId: "member_123",
+      prisma: prisma.client,
+    })).resolves.toEqual({ status: "sent" });
+
+    expect(shareSendMocks.getHostedLinqContactCard).toHaveBeenCalledWith({
+      phoneNumber: "+15557770000",
+    });
+    expect(shareSendMocks.shareHostedLinqContactCard).toHaveBeenCalledOnce();
+  });
+
   it("skips an imaged line card without reserving or invoking native share", async () => {
     const prisma = createContactCardSharePrismaStub();
     shareSendMocks.getHostedLinqContactCard.mockResolvedValueOnce({
       firstName: "Murph",
       imageUrl: "https://assets.example.invalid/line-card.png",
+      imageUrlPresent: true,
       isActive: true,
       lastName: null,
       phoneNumber: "+15557770000",
@@ -213,12 +235,22 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
   it.each([
     ["an empty roster", []],
     [
-      "no own handle",
-      [{ handle: "+15550000001", isMe: false, status: "active" }],
+      "zero active self handles",
+      [
+        { handle: "+15556660000", isMe: true, status: "inactive" },
+        { handle: "+15550000001", isMe: false, status: "active" },
+      ],
     ],
     [
-      "an unresolvable own handle",
+      "an unresolvable active self handle",
       [{ handle: "unresolvable-handle", isMe: true, status: "active" }],
+    ],
+    [
+      "multiple active self handles",
+      [
+        { handle: "+15557770000", isMe: true, status: "active" },
+        { handle: "+15558880000", isMe: true, status: "active" },
+      ],
     ],
   ])("skips as line_card_unverified for %s", async (_label, handles) => {
     const prisma = createContactCardSharePrismaStub();
@@ -239,9 +271,44 @@ describe("shareMurphHostedLinqNativeContactCardToChat", () => {
     expect(shareSendMocks.shareHostedLinqContactCard).not.toHaveBeenCalled();
   });
 
-  it("skips as line_card_unverified when the line card is missing", async () => {
+  it.each([
+    ["the line card is missing", null],
+    [
+      "the line card is inactive",
+      {
+        firstName: "Murph",
+        imageUrl: null,
+        imageUrlPresent: true,
+        isActive: false,
+        lastName: null,
+        phoneNumber: "+15557770000",
+      },
+    ],
+    [
+      "the line card phone does not match",
+      {
+        firstName: "Murph",
+        imageUrl: null,
+        imageUrlPresent: true,
+        isActive: true,
+        lastName: null,
+        phoneNumber: "+15557770001",
+      },
+    ],
+    [
+      "the image_url field was omitted",
+      {
+        firstName: "Murph",
+        imageUrl: null,
+        imageUrlPresent: false,
+        isActive: true,
+        lastName: null,
+        phoneNumber: "+15557770000",
+      },
+    ],
+  ])("skips as line_card_unverified when %s", async (_label, lineCard) => {
     const prisma = createContactCardSharePrismaStub();
-    shareSendMocks.getHostedLinqContactCard.mockResolvedValueOnce(null);
+    shareSendMocks.getHostedLinqContactCard.mockResolvedValueOnce(lineCard);
 
     await expect(shareMurphHostedLinqNativeContactCardToChat({
       chatId: "chat_123",

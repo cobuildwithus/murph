@@ -293,20 +293,18 @@ export type MurphHostedLinqNativeContactCardShareOutcome =
 
 /**
  * Share the sending line's provider contact card into a Linq chat. Callers own
- * eligibility and thread authority; this first verifies that the chat's own
- * sending-line card is image-free, then owns the shared per-chat reservation
- * and the single native provider POST. Unverifiable cards skip fail-soft. Any
+ * eligibility and thread authority; this preflight binds the chat to exactly
+ * one active self handle, requires an active provider card whose normalized
+ * phone number matches that line, and requires `image_url` to be explicitly
+ * present and parse to null. It then owns the shared per-chat reservation and
+ * the single native provider POST. Unverifiable cards skip fail-soft. Any
  * native provider failure is ambiguous, so the reservation stays in place to
  * avoid a blind duplicate.
  *
- * This is a deliberately simple, best-effort guard, not an authoritative proof.
- * Native `share_contact_card` is a bodyless POST, so Linq chooses which card to
- * push and our preflight GET cannot be atomically bound to that effect; on an
- * ambiguous roster the wrong self line could be read. We accept that residual
- * risk in exchange for minimal complexity, because the real fix is Linq
- * exposing a provider-enforced image-free share (in progress) plus operators
- * clearing existing line-card images (the hourly reconcile normalizes the name
- * but never clears images, and the API cannot clear them).
+ * Native `share_contact_card` is a bodyless POST, so Linq selects the card at
+ * send time and the preflight GET cannot be atomically bound to that effect.
+ * This hardened preflight is therefore a strong best-effort check, not a
+ * mathematical guarantee.
  *
  * When the line card has an image or cannot be verified, this share is skipped
  * for that delivery by explicit product decision, not a silent drop: the
@@ -328,9 +326,13 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
       chatId: input.chatId,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    const linePhoneNumber = normalizePhoneNumber(
-      handles.find((handle) => handle.isMe)?.handle ?? null,
+    const activeSelfHandles = handles.filter((handle) =>
+      handle.isMe && handle.status?.trim().toLowerCase() === "active",
     );
+    if (activeSelfHandles.length !== 1) {
+      return { status: "skipped", reason: "line_card_unverified" };
+    }
+    const linePhoneNumber = normalizePhoneNumber(activeSelfHandles[0]?.handle);
     if (!linePhoneNumber) {
       return { status: "skipped", reason: "line_card_unverified" };
     }
@@ -339,7 +341,12 @@ export async function shareMurphHostedLinqNativeContactCardToChat(input: {
       phoneNumber: linePhoneNumber,
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    if (!lineCard) {
+    if (
+      !lineCard
+      || lineCard.isActive !== true
+      || normalizePhoneNumber(lineCard.phoneNumber) !== linePhoneNumber
+      || lineCard.imageUrlPresent !== true
+    ) {
       return { status: "skipped", reason: "line_card_unverified" };
     }
     if (lineCard.imageUrl !== null) {
