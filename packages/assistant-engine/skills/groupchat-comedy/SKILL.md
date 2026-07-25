@@ -228,7 +228,7 @@ group proposes. They do not police safe, opted-in adult choices.
 - Whoever is DOWN today stays protected no matter the frame — illness,
   grief, a rough stretch gets warmth and a comeback frame, never the
   punchline.
-- If unsure whether a joke is safe: it isn't. Send the straight version.
+- If unsure whether a joke of yours is safe: it isn't. Send the straight version.
 
 ## Telemetry to notice (signals the loop is working)
 
