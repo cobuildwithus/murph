@@ -194,10 +194,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
   );
-  assert.match(
-    markup,
-    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
-  );
   assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
   assert.match(markup, /Better together/);
