@@ -119,6 +119,9 @@ export async function handleHostedGroupJoinOfferReaction(input: {
           tx,
         });
         return revokeHostedGroupJoinOutreachForRemovedReactionTx({
+          allowMissingRowTombstone: isHostedGroupJoinOutreachSupportedRegion(
+            participantPhoneNumber,
+          ),
           groupId: offer.groupId,
           now: input.event.providerCreatedAt,
           offerId: offer.offerId,
@@ -146,23 +149,26 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     if (!participantPhoneNumber) {
       return skipHostedGroupJoinOfferReaction({ reason: "non_phone_handle" });
     }
-    // Refuse here rather than enqueue work the drain can only terminalize: a
-    // region with no derivable safe window will never be sendable, so recording
-    // pending intent would promise a text that cannot arrive.
-    if (!isHostedGroupJoinOutreachSupportedRegion(participantPhoneNumber)) {
-      return skipHostedGroupJoinOfferReaction({
-        reason: "recipient_region_unsupported",
-      });
-    }
-
+    let regionSupported = true;
     try {
       await input.prisma.$transaction(async (tx) => {
+        // Prove the reaction targeted the canonical join offer before deciding
+        // anything: a reaction to an unrelated message must not be consumed just
+        // because this reactor's region is unsupported.
         const offer = await readHostedGroupJoinOfferTargetTx({
           channel: "linq",
           messageLookupKeyReadCandidates,
           threadIdentityLookupKeyReadCandidates,
           tx,
         });
+        // A region with no derivable safe window can never be sent, so no durable
+        // intent is recorded for it.
+        regionSupported = isHostedGroupJoinOutreachSupportedRegion(
+          participantPhoneNumber,
+        );
+        if (!regionSupported) {
+          return;
+        }
         await enqueueHostedGroupJoinOutreachTx({
           groupId: offer.groupId,
           offerId: offer.offerId,
@@ -178,7 +184,11 @@ export async function handleHostedGroupJoinOfferReaction(input: {
       }
       return skipHostedGroupJoinOfferReaction({ reason });
     }
-    return { status: "accepted", reason: "outreach_enqueued" };
+    return regionSupported
+      ? { status: "accepted", reason: "outreach_enqueued" }
+      : skipHostedGroupJoinOfferReaction({
+          reason: "recipient_region_unsupported",
+        });
   }
   if (
     member.suspendedAt

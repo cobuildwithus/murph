@@ -151,6 +151,7 @@ describe("hosted group join outreach store", () => {
   }
 
   const REVOKE_INPUT = {
+    allowMissingRowTombstone: true,
     groupId: "hgrp_opaque",
     now: new Date("2026-07-24T16:05:00.000Z"),
     offerId: "hgrpjo_opaque",
@@ -223,6 +224,37 @@ describe("hosted group join outreach store", () => {
     })).resolves.toEqual({ kind: "not_pending" });
 
     expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("does not tombstone a refused region that had no outreach", async () => {
+    // An unsupported recipient is declined before any durable work, so a
+    // remove-before-add must not store their encrypted phone.
+    const { createMany, tx } = createRevokeTx(null);
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      allowMissingRowTombstone: false,
+      tx,
+    })).resolves.toEqual({ kind: "not_pending" });
+
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("still revokes an existing outreach for a refused region", async () => {
+    const { tx, updateMany } = createRevokeTx({
+      dispatchStartedAt: null,
+      id: "hgrpjoa_opaque",
+      sentAt: null,
+      skippedAt: null,
+    });
+
+    await expect(revokeHostedGroupJoinOutreachForRemovedReactionTx({
+      ...REVOKE_INPUT,
+      allowMissingRowTombstone: false,
+      tx,
+    })).resolves.toEqual({ kind: "revoked" });
+
+    expect(updateMany).toHaveBeenCalled();
   });
 
   it("recovers the originating group and records the reply", async () => {

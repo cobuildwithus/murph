@@ -122,6 +122,7 @@ export type RevokeHostedGroupJoinOutreachTxResult =
  * terminal row keeps a later re-like from opening a second thread.
  */
 export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
+  allowMissingRowTombstone: boolean;
   groupId: string;
   now: Date;
   offerId: string;
@@ -181,6 +182,13 @@ export async function revokeHostedGroupJoinOutreachForRemovedReactionTx(input: {
       },
     });
     return { kind: "revoked" };
+  }
+
+  // Only a recipient who could actually have been texted needs the
+  // remove-before-add tombstone. Writing one for a refused region would store an
+  // encrypted phone for someone this feature declines before accepting any work.
+  if (!input.allowMissingRowTombstone) {
+    return { kind: "not_pending" };
   }
 
   const outreachId = generateHostedGroupJoinOutreachId();

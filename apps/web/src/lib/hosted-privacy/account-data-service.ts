@@ -24,6 +24,7 @@ import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-ide
 import { readHostedAccountGroupStripeBillingRef } from "../hosted-onboarding/family-plan";
 import { deleteHostedPrivyUser } from "../hosted-onboarding/privy";
 import { HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE } from "@/src/lib/hosted-groups/group-join-outreach-drain";
+import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { buildHostedLinqInviteSignupEffectIdMemberPrefix } from "../hosted-onboarding/linq-invite-signup-effect-id";
 import { getHostedOnboardingStripe } from "../hosted-onboarding/runtime";
 import {
@@ -1058,12 +1059,21 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
 ): Promise<{ deliveryCount: number; outreachCount: number }> {
-  // The outreach row and its provider correlation are one privacy record, and
-  // `sourceRef` is the only link between them. Deleting the outreach row first,
-  // or letting the group cascade remove it, would leave the correlation
-  // undiscoverable forever. So this resolves every outreach this account can
-  // reach -- as the texted participant, and as the owner of groups that are
-  // about to be deleted -- then removes correlations before rows.
+  // The outreach row and its provider correlation are one privacy record, and the
+  // correlation's only link is its source reference. Two things make that fragile,
+  // so both are handled here rather than by a second owner:
+  //
+  // The stored source reference is a digest, not the logical outreach id, because
+  // the delivery store normalizes every non-invite reference. Deleting by raw id
+  // would match nothing and then remove the rows that derive the digest.
+  //
+  // The minute drain can create a correlation concurrently. Taking the drain's own
+  // advisory lock for the rest of this transaction serializes against it, so a
+  // correlation cannot appear after the delete and before the outreach row is gone.
+  await prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext('hosted_group_join_outreach_drain'))
+  `;
+
   const identities = await prisma.hostedMemberIdentity.findMany({
     where: { memberId: memberIdFilter },
     select: { phoneLookupKey: true },
@@ -1087,29 +1097,51 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
     return { deliveryCount: 0, outreachCount: 0 };
   }
 
-  const reachable: Prisma.HostedGroupJoinOutreachWhereInput = {
-    OR: [
-      ...(phoneLookupKeys.length > 0
-        ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
-        : []),
-      ...(ownedGroupIds.length > 0 ? [{ groupId: { in: ownedGroupIds } }] : []),
-    ],
-  };
   const outreaches = await prisma.hostedGroupJoinOutreach.findMany({
-    where: reachable,
-    select: { id: true },
+    where: {
+      OR: [
+        ...(phoneLookupKeys.length > 0
+          ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
+          : []),
+        ...(ownedGroupIds.length > 0 ? [{ groupId: { in: ownedGroupIds } }] : []),
+      ],
+    },
+    select: { dispatchStartedAt: true, id: true, sentAt: true, skippedAt: true },
   });
-  const outreachIds = outreaches.map((outreach) => outreach.id);
-  if (outreachIds.length === 0) {
+  if (outreaches.length === 0) {
     return { deliveryCount: 0, outreachCount: 0 };
   }
 
-  const deliveries = await prisma.hostedLinqDelivery.deleteMany({
-    where: {
-      source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
-      sourceRef: { in: outreachIds },
-    },
-  });
+  // A claim can be committed while its provider call is still outside any
+  // transaction. Deleting now would report success while a private text about a
+  // group that no longer exists is still in flight, so fail closed and let the
+  // caller retry once the attempt terminalizes.
+  if (
+    outreaches.some((outreach) =>
+      outreach.dispatchStartedAt !== null
+      && outreach.sentAt === null
+      && outreach.skippedAt === null)
+  ) {
+    throw hostedOnboardingError({
+      code: "ACCOUNT_DELETION_GROUP_JOIN_OUTREACH_DISPATCH_IN_PROGRESS",
+      httpStatus: 503,
+      message: "A group-join outreach provider attempt is in progress. Retry account deletion once that attempt finishes.",
+      retryable: true,
+    });
+  }
+
+  const outreachIds = outreaches.map((outreach) => outreach.id);
+  const deliverySourceRefs = outreachIds
+    .map((outreachId) => createHostedLinqDeliverySourceRefLookupKey(outreachId))
+    .filter((lookupKey): lookupKey is string => Boolean(lookupKey));
+  const deliveries = deliverySourceRefs.length > 0
+    ? await prisma.hostedLinqDelivery.deleteMany({
+        where: {
+          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+          sourceRef: { in: deliverySourceRefs },
+        },
+      })
+    : { count: 0 };
   const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
     where: { id: { in: outreachIds } },
   });

@@ -72,6 +72,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { createHostedLinqDeliverySourceRefLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { ComposioConnectedAppsRequestError } from "@/src/lib/connected-apps/composio";
 import {
   HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
@@ -433,6 +434,31 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("fails closed while a group-join outreach provider attempt is in flight", async () => {
+    // The provider call happens outside any transaction, so deleting here would
+    // report success while a private text about a just-deleted group is still on
+    // its way. Retry once the attempt terminalizes instead.
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
+      groupJoinOutreachRows: [{
+        dispatchStartedAt: new Date("2026-07-25T09:00:00.000Z"),
+        id: "hgrpjoa_inflight",
+        sentAt: null,
+        skippedAt: null,
+      }],
+      onTransaction: () => undefined,
+    });
+
+    await expect(deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_GROUP_JOIN_OUTREACH_DISPATCH_IN_PROGRESS",
+      retryable: true,
+    });
+  });
+
   it("deletes an owned group's outreach correlation before the group cascade hides it", async () => {
     // The delivery correlation is reachable only through the outreach id. If the
     // group cascade removed the outreach row first, the correlation would survive
@@ -441,7 +467,12 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       groupJoinOutreachOwnedGroupIds: ["hgrp_owned"],
-      groupJoinOutreachRows: [{ id: "hgrpjoa_owned" }],
+      groupJoinOutreachRows: [{
+        dispatchStartedAt: null,
+        id: "hgrpjoa_owned",
+        sentAt: null,
+        skippedAt: null,
+      }],
       onTransaction: () => undefined,
     });
 
@@ -456,7 +487,9 @@ describe("deleteHostedAccountData", () => {
         model: "hostedLinqDelivery",
         where: {
           source: "hosted_group_join_outreach",
-          sourceRef: { in: ["hgrpjoa_owned"] },
+          sourceRef: {
+            in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_owned")],
+          },
         },
       },
       {
@@ -480,7 +513,12 @@ describe("deleteHostedAccountData", () => {
     const prisma = createHostedAccountDeletionPrismaForTest({
       deleteCalls,
       groupJoinOutreachPhoneLookupKeys: ["hbidx:phone:v1:participant"],
-      groupJoinOutreachRows: [{ id: "hgrpjoa_opaque" }],
+      groupJoinOutreachRows: [{
+        dispatchStartedAt: null,
+        id: "hgrpjoa_opaque",
+        sentAt: null,
+        skippedAt: null,
+      }],
       onTransaction: () => undefined,
     });
 
@@ -499,7 +537,9 @@ describe("deleteHostedAccountData", () => {
         model: "hostedLinqDelivery",
         where: {
           source: "hosted_group_join_outreach",
-          sourceRef: { in: ["hgrpjoa_opaque"] },
+          sourceRef: {
+            in: [createHostedLinqDeliverySourceRefLookupKey("hgrpjoa_opaque")],
+          },
         },
       },
     ]));
@@ -2073,7 +2113,12 @@ function createHostedAccountDeletionPrismaForTest(input: {
   identityRecord?: Record<string, unknown> | null;
   groupJoinOutreachOwnedGroupIds?: readonly string[];
   groupJoinOutreachPhoneLookupKeys?: readonly string[];
-  groupJoinOutreachRows?: readonly { id: string }[];
+  groupJoinOutreachRows?: readonly {
+    dispatchStartedAt?: Date | null;
+    id: string;
+    sentAt?: Date | null;
+    skippedAt?: Date | null;
+  }[];
   onTransaction: () => void;
   operationOrder?: string[];
   transactionConnectedAppConnectIntentRows?: HostedAccountDeletionConnectedAppIntentRow[];

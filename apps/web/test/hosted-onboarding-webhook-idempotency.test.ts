@@ -1000,6 +1000,42 @@ describe("hosted onboarding Linq webhook hard-cut flows", () => {
     expect(mocks.nudgeHostedRunnerUserBestEffort).not.toHaveBeenCalled();
   });
 
+  it("consumes an unsupported-region join reaction without staging group work", async () => {
+    // The refusal is a decided outcome for a reaction that targeted the canonical
+    // offer, so the webhook must stop here rather than fall through to the generic
+    // affirmative-reaction path and wake the group mailbox only to skip it.
+    mocks.handleHostedGroupJoinOfferReaction.mockResolvedValueOnce({
+      reason: "recipient_region_unsupported",
+      status: "ignored",
+    });
+    const prisma = createPrismaStub();
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(
+      handleHostedOnboardingLinqWebhook({
+        rawBody: buildLinqProviderWebhookBody({
+          data: {
+            chat_id: "chat_group_1",
+            from_handle: { handle: "+353871234567", service: "iMessage" },
+            line: { phone_number: "+15550000000" },
+            message_id: "msg_offer_123",
+            reaction_type: "like",
+          },
+          eventId: "evt_reaction_region",
+          eventType: "reaction.added",
+        }),
+        signature: null,
+        timestamp: null,
+      }),
+    ).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "ignored-linq-group-join-offer-region-unsupported",
+    });
+
+    expect(mocks.stageHostedLinqGroupReactionContext).not.toHaveBeenCalled();
+  });
+
   it("sends the signup link directly for an inactive member and finalizes without receipt state", async () => {
     const prisma = createPrismaStub();
     mocks.getPrisma.mockReturnValue(prisma);

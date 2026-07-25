@@ -188,12 +188,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         prisma,
         signal: input.signal,
       });
-      if (reactionResult.status === "accepted") {
+      // A refused region is a decided outcome for a reaction that provably
+      // targeted the canonical join offer, so it must be consumed here. Falling
+      // through would stage group-runtime work and wake the mailbox only to skip
+      // it, and could produce the group-visible behaviour this path avoids.
+      if (
+        reactionResult.status === "accepted"
+        || reactionResult.reason === "recipient_region_unsupported"
+      ) {
         const response: HostedOnboardingLinqWebhookResponse = {
           duplicate: providerResult.duplicate || undefined,
-          ignored: false,
+          ignored: reactionResult.status !== "accepted",
           ok: true,
-          reason: "accepted-linq-group-join-offer-reaction",
+          reason: reactionResult.status === "accepted"
+            ? "accepted-linq-group-join-offer-reaction"
+            : "ignored-linq-group-join-offer-region-unsupported",
         };
         responseReason = response.reason ?? null;
         finishHostedOnboardingTiming(timing, "completed", {
