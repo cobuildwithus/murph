@@ -138,10 +138,12 @@ Because activation is the last step before copying, an abort during the fence
 happens while the control is still unset and needs no unwinding at all. There
 is no ordinary exit that leaves it set.
 
-The message names no return time. A promised time can expire while the window
-is still open, and telling a member to come back at a moment that has already
-passed is worse than not naming one, so the copy says "in a few hours" and the
-table above — not a timestamp — is what bounds the window.
+The message makes no timing promise, not even a relative one. This window runs
+from before the copy until OC retirement, which section 8 permits as late as 24
+hours after cutover and extends when a retirement check fails, so any duration
+the copy named could expire while the window was still open. It tells members
+to try again after maintenance instead; the table above is what bounds the
+window.
 
 Set it as directed in section 5:
 
@@ -197,8 +199,9 @@ margin for one prune-and-reprove cycle.
 
 Account deletion stays declined from the start of the copy until section 8
 clears the control after OC retirement, which cannot happen until at least an
-hour after cutover. Size the operation knowing that, but note the member-facing
-copy names no time, so a longer run degrades nothing and needs no correction.
+hour after cutover and may be later. Size the operation knowing that. The
+member-facing copy makes no timing promise, so a longer run leaves nothing to
+correct or re-announce.
 
 An overrun is not a data risk. If the copy or any proof does not finish inside
 the booked window, take the abandonment path in the safety contract, which

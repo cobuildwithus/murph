@@ -126,15 +126,25 @@ describe("settings sensitive-action challenge route", () => {
       vi.unstubAllEnvs();
     });
 
-    it("never names a return time that could expire while the window is open", async () => {
+    it("makes no timing promise that could expire while the window is open", async () => {
       vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
 
-      const response = await route.POST(challengeRequest("account.delete"));
-      const body = await response.json();
+      const first = await route.POST(challengeRequest("account.delete"));
+      const firstBody = await first.json();
 
-      expect(response.status).toBe(503);
-      expect(body.error.message).toContain("Please try again in a few hours.");
-      expect(body.error.message).not.toMatch(/\d{4}/u);
+      // Asserted verbatim: recovery guidance is a condition, not a duration or
+      // a calendar time, because the window can outlast either.
+      expect(first.status).toBe(503);
+      expect(firstBody.error.message).toBe(
+        "Murph is in scheduled maintenance, so we can't delete your account right now. "
+        + "Nothing has changed and your request was not started. Please try again after maintenance.",
+      );
+
+      // Still true on a later attempt inside the same window.
+      const second = await route.POST(challengeRequest("account.delete"));
+      const secondBody = await second.json();
+      expect(secondBody.error.message).toBe(firstBody.error.message);
+      expect(mocks.createSensitiveActionChallenge).not.toHaveBeenCalled();
 
       vi.unstubAllEnvs();
     });

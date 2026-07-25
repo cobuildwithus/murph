@@ -11,9 +11,12 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
  * a deletion we cannot complete everywhere, we decline it for the length of the
  * window.
  *
- * The flag is the only authority and it names no return time. A promised time
- * can expire while the window is still open, which is a worse lie than saying
- * nothing; the runbook owns opening and closing this window instead.
+ * The flag is the only authority and the message makes no timing promise, not
+ * even a relative one. The window runs from before the copy until OC
+ * retirement, which the runbook permits as late as 24 hours after cutover and
+ * may extend, so any duration we name can expire while the window is still
+ * open. Recovery guidance is stated as a condition instead, which stays true
+ * for as long as the window lasts.
  *
  * Delete this module, its env var, and both call sites with the runbook once
  * the OC buckets are retired.
@@ -24,7 +27,7 @@ export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_CODE = "account_deletion_mainte
 
 export const HOSTED_ACCOUNT_DELETION_MAINTENANCE_MESSAGE =
   "Murph is in scheduled maintenance, so we can't delete your account right now. "
-  + "Nothing has changed and your request was not started. Please try again in a few hours.";
+  + "Nothing has changed and your request was not started. Please try again after maintenance.";
 
 export function assertHostedAccountDeletionAvailable(
   environment: Readonly<Record<string, string | undefined>> = process.env,
