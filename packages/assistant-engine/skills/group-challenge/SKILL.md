@@ -65,10 +65,10 @@ participant may decline it and still join the challenge. The permission offer
 grants only the disclosed Murph group shares; it cannot connect a source or
 grant Apple Health access.
 
-Whenever a challenge turn is authorized under `group-chat`'s rules to send a
-permission request — a `create_join_link` reply, an explicitly requested
-permission flow, or the one evidence-gated standings offer — the request must
-name everything the challenge needs to score, all in that single request:
+Whenever a challenge turn is authorized under `group-chat`'s rules to send an
+*up-front* permission request — a `create_join_link` reply or an explicitly
+requested permission flow — the request must name everything the challenge
+needs to score, all in that single request:
 
 - `group-email.v0` and `device-sync-status.v0`, always.
 - The exact scoring scope (or scopes) for the agreed metric — a steps
@@ -84,6 +84,12 @@ The join page opens with every requested permission preselected; each stays
 an individual choice the member can uncheck before joining. Requesting
 prefills that page — it never pre-grants, so describe it as a prefilled
 request, not as something you cannot preselect and not as automatic sharing.
+
+That all-scopes rule does **not** apply to the evidence-gated standings offer.
+A proactive offer during standings may name only the scopes the most recent
+read proved `not_granted`, because the runtime accepts exactly those and
+spends the turn's one offer attempt on any wider request, leaving the member
+with no card at all.
 
 - Activity minutes for a specific recognized activity alias:
   `{ "projectionKind": "activity-minutes-days.v1", "selector": { "activityKind": "<alias>" } }`

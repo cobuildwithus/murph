@@ -1656,6 +1656,84 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
+  it("merges a generic provider copy into its specific twin across the threshold", async () => {
+    const vaultRoot = await createActivitySessionVault([
+      {
+        // Specific copy starts exactly at 18:00, so a strict "after 18:00"
+        // challenge must NOT qualify on it.
+        schemaVersion: "murph.event.v1",
+        id: "evt_specific_copy",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T18:00:00.000Z",
+        dayKey: "2026-07-03",
+        recordedAt: "2026-07-03T19:05:00.000Z",
+        timeZone: "UTC",
+        source: "device",
+        externalRef: {
+          system: "junction",
+          resourceType: "junction-garmin-workouts",
+          resourceId: "junction-dup-1",
+        },
+        activityType: "running",
+        durationMinutes: 60,
+      },
+      {
+        // Same session from another provider, one minute later and generic.
+        // Before the fix this survived separately and falsely qualified.
+        schemaVersion: "murph.event.v1",
+        id: "evt_generic_copy",
+        kind: "activity_session",
+        occurredAt: "2026-07-03T18:01:00.000Z",
+        dayKey: "2026-07-03",
+        recordedAt: "2026-07-03T19:06:00.000Z",
+        timeZone: "UTC",
+        source: "device",
+        externalRef: {
+          system: "whoop",
+          resourceType: "workout",
+          resourceId: "whoop-dup-1",
+        },
+        activityType: "workout",
+        durationMinutes: 59,
+      },
+      {
+        // A standalone generic workout must still be disclosed generically.
+        schemaVersion: "murph.event.v1",
+        id: "evt_standalone_generic",
+        kind: "activity_session",
+        occurredAt: "2026-07-02T07:00:00.000Z",
+        dayKey: "2026-07-02",
+        recordedAt: "2026-07-02T08:00:00.000Z",
+        timeZone: "UTC",
+        source: "device",
+        externalRef: {
+          system: "whoop",
+          resourceType: "workout",
+          resourceId: "whoop-standalone-1",
+        },
+        activityType: "workout",
+        durationMinutes: 30,
+      },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      const selected = await readProjectableWorkoutsDays(vaultRoot);
+      const duplicated = findWorkoutsRecord(selected, "2026-07-03")?.data
+        .workouts as { kind: string; startLocalMs: number }[];
+      // One workout, not two, and the specific label wins.
+      expect(duplicated).toHaveLength(1);
+      expect(duplicated[0]?.kind).toBe("running");
+      // 18:00 exactly, so a strict after-18:00 rule does not qualify.
+      expect(duplicated[0]?.startLocalMs).toBe(18 * 60 * 60 * 1_000);
+      expect(findWorkoutsRecord(selected, "2026-07-02")?.data.workouts)
+        .toMatchObject([{ kind: "workout", minutes: 30 }]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("widens the UTC source read for the Asia/Tokyo earliest local window day", async () => {
     const vaultRoot = await createActivitySessionVault([{
       schemaVersion: "murph.event.v1",

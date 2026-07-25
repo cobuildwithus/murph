@@ -880,14 +880,14 @@ export function selectProjectableWorkoutsDays(
     }
 
     // A row without a specific activity kind still reached here through
-    // positive workout evidence, so it is a real workout with a generic
-    // provider label. Disclose it generically instead of failing the whole
-    // projection and erasing every other member workout in the window.
-    const kind = normalizeActivityKindToken(row.activityKind ?? "")
-      ?? HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND;
+    // positive workout evidence, so it is a real workout carrying only a
+    // generic provider label. Keep it non-specific through dedupe: labelling it
+    // now would stop it matching a specific copy of the same session, and both
+    // copies would be published.
+    const kind = normalizeActivityKindToken(row.activityKind ?? "");
     const minutes = row.durationMinutes;
     if (
-      kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
+      (kind !== null && kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH)
       || typeof minutes !== "number"
       || !Number.isFinite(minutes)
       || minutes <= 0
@@ -907,7 +907,9 @@ export function selectProjectableWorkoutsDays(
       startedAtMs,
       timeZone,
       workout: {
-        kind,
+        // Only a row that survived dedupe without a specific kind is disclosed
+        // generically; a specific copy of the same session wins above.
+        kind: kind ?? HOSTED_VAULT_SHARE_WORKOUT_GENERIC_KIND,
         minutes,
         startLocalMs: localStart.localMs,
       },
@@ -1695,7 +1697,11 @@ function activitySessionRowsHaveEquivalentKinds(
     return true;
   }
   if (!left.activityKind || !right.activityKind) {
-    return false;
+    // A row with no specific kind carries no evidence that it is a *different*
+    // activity, so an overlapping specific copy of the same session may still
+    // be the same workout. Only the workouts projection supplies such rows;
+    // the activity selectors filter to an exact kind before deduping.
+    return true;
   }
   return activityTextMatchesKind(left.activityKind, right.activityKind)
     || activityTextMatchesKind(right.activityKind, left.activityKind);
@@ -1729,6 +1735,13 @@ function choosePreferredActivitySessionRow(
   left: ActivitySessionProjectionRow,
   right: ActivitySessionProjectionRow,
 ): ActivitySessionProjectionRow {
+  // A specific activity kind is stronger evidence than a provider's generic
+  // label, so the named copy of a duplicated session wins before any other
+  // ranking.
+  if (Boolean(left.activityKind) !== Boolean(right.activityKind)) {
+    return left.activityKind ? left : right;
+  }
+
   const completenessDifference =
     activitySessionRowCompletenessScore(right)
     - activitySessionRowCompletenessScore(left);

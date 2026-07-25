@@ -291,6 +291,15 @@ describe('assistant group challenge diagnostics guidance', () => {
     expect(challenge).toContain(
       'Read the scoring scope on its own first.',
     )
+    // The proactive standings offer must not inherit the up-front all-scopes
+    // rule: the runtime accepts only scopes the most recent read proved
+    // not_granted and spends the turn's one attempt on any wider request.
+    expect(challenge).toContain(
+      'That all-scopes rule does **not** apply to the evidence-gated standings offer.',
+    )
+    expect(challenge).toContain(
+      'may name only the scopes the most recent read proved `not_granted`',
+    )
     expect(challenge).toContain(
       'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',
     )
