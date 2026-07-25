@@ -292,6 +292,72 @@ test("expired capture text stops being searchable without a projection rebuild",
   }
 });
 
+test("expired captures leave no projected carrier of the message body", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-carriers");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+
+  await persistTextCapture({
+    captureId: "cap_text_old",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W1",
+    recordedAt: OLD_AT,
+    text: "kumquat marmalade experiment",
+    vaultRoot,
+  });
+
+  const before = await openInboxRuntime({ vaultRoot });
+  try {
+    await rebuildRuntimeFromVault({ enqueueParserJobs: false, vaultRoot, runtime: before });
+  } finally {
+    before.close();
+  }
+
+  await runInboxTextRetention({ now: NOW, vaultRoot });
+
+  // raw_json carried the Telegram reply preview that the canonical pass strips,
+  // so leaving it behind would have kept quoted message content readable in a
+  // database that hosted snapshots ship.
+  const after = await openInboxRuntime({ vaultRoot });
+  try {
+    const projected = JSON.stringify(after.getCapture("cap_text_old"));
+    assert.ok(!projected.includes("kumquat marmalade experiment"));
+    assert.ok(!projected.includes("quoted text from the replied-to message"));
+  } finally {
+    after.close();
+  }
+});
+
+test("a projection failure leaves the capture un-expired so the next pass retries", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-retry");
+  await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });
+
+  await persistTextCapture({
+    captureId: "cap_text_old",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W1",
+    recordedAt: OLD_AT,
+    text: "an old message body",
+    vaultRoot,
+  });
+
+  // Make the projection unopenable: a directory where the database file goes.
+  const projectionPath = path.join(vaultRoot, ".runtime", "projections", "inboxd.sqlite");
+  await fs.rm(projectionPath, { force: true });
+  await fs.mkdir(projectionPath, { recursive: true });
+
+  await assert.rejects(runInboxTextRetention({ now: NOW, vaultRoot }));
+
+  // The canonical record must NOT claim retention completed. Marking it first
+  // and clearing the projection afterwards would strand readable content here.
+  const records = await readCaptureRecords(vaultRoot);
+  const capture = findCapture(records, "cap_text_old");
+  assert.equal(capture.textRetiredAt, undefined);
+  assert.equal(capture.text, "an old message body");
+
+  // With the projection reachable again the retry completes.
+  await fs.rm(projectionPath, { recursive: true, force: true });
+  const retry = await runInboxTextRetention({ now: NOW, vaultRoot });
+  assert.equal(retry.expiredCaptures, 1);
+});
+
 test("expired capture text disappears from the rebuilt projection", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-text-retention-projection");
   await initializeVault({ vaultRoot, createdAt: VAULT_CREATED_AT });

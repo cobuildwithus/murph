@@ -1225,12 +1225,25 @@ function createInboxRuntimeStore(
       return rows.map(createSearchHitFromRow);
     },
     redactCaptureText(captureId) {
-      const updated = database
-        .prepare("update capture set text_content = null where capture_id = ? and text_content is not null")
-        .run(captureId);
-      if (updated.changes === 0) {
+      const exists = database
+        .prepare("select 1 from capture where capture_id = ?")
+        .get(captureId);
+      if (!exists) {
         return false;
       }
+      // Every projected carrier of the message body goes together. Clearing
+      // text_content alone left raw_json readable — it still holds the provider
+      // payload, including the Telegram reply preview the canonical pass strips
+      // — and left attachment transcripts feeding the search index. A voice memo
+      // has no text_content at all, so keying the work off that column also
+      // skipped the FTS refresh entirely for exactly the captures whose
+      // transcript mattered most.
+      database
+        .prepare("update capture set text_content = null, raw_json = '{}' where capture_id = ?")
+        .run(captureId);
+      database
+        .prepare("update capture_attachment set extracted_text = null, transcript_text = null where capture_id = ?")
+        .run(captureId);
       refreshCaptureSearchIndex(database, captureId);
       return true;
     },

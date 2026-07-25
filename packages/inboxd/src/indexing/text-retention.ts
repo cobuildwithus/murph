@@ -139,6 +139,22 @@ export async function runInboxTextRetention(
       }
 
       throwIfAborted(input.signal);
+      // Clear the projection BEFORE the ledger commits textRetiredAt.
+      //
+      // Ordering matters for recovery, not just tidiness. The projection is a
+      // rebuildable cache, so failing here leaves the canonical record still
+      // marked un-expired and the next pass retries the whole capture. Doing it
+      // after the commit inverted that: planShardRedaction skips a record that
+      // already carries textRetiredAt, so one transient SQLite failure stranded
+      // readable content in the hosted snapshot permanently while the canonical
+      // record claimed retention was complete. Hosted inbox init uses
+      // rebuild: false, so no later rebuild is guaranteed to repair it.
+      await redactCaptureProjections({
+        captureIds: redactions.flatMap((shard) => shard.redactedCaptureIds),
+        vaultRoot: input.vaultRoot,
+      });
+
+      throwIfAborted(input.signal);
       // The shard rewrite and the unlink of any out-of-line text file must
       // commit together. Split across two writes, a crash between them leaves
       // either a record still advertising content whose bytes are gone, or
@@ -164,15 +180,6 @@ export async function runInboxTextRetention(
         },
       });
 
-      // The ledger is now redacted, but the SQLite projection still holds the
-      // text and hosted snapshots carry that database, so a redacted message
-      // would stay searchable until something forced a full rebuild. Clearing
-      // it here keeps both copies expiring together.
-      await redactCaptureProjections({
-        captureIds: redactions.flatMap((shard) => shard.redactedCaptureIds),
-        vaultRoot: input.vaultRoot,
-      });
-
       return {
         expiredCaptures,
         hasMoreEligibleCaptures,
@@ -193,15 +200,11 @@ async function redactCaptureProjections(input: {
     return;
   }
 
-  let runtime: Awaited<ReturnType<typeof openInboxRuntime>>;
-  try {
-    runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
-  } catch {
-    // The projection is a rebuildable cache. If it cannot be opened the ledger
-    // redaction still stands and a later rebuild drops the text, so this must
-    // not fail the pass and leave the canonical write unacknowledged.
-    return;
-  }
+  // Deliberately not swallowed: running before the canonical write means a
+  // throw here simply leaves the capture un-expired for the next pass, which is
+  // the retry-safe outcome. Swallowing it would let the ledger record the
+  // content as expired while the projection still served it.
+  const runtime = await openInboxRuntime({ vaultRoot: input.vaultRoot });
 
   try {
     for (const captureId of input.captureIds) {
