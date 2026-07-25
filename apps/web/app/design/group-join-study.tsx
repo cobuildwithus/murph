@@ -36,11 +36,29 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   },
   {
     description:
-      "Shares your last 7 days of daily protein totals from meals you logged with Murph.",
+      "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
     label: "Daily protein",
     projectionScope: { projectionKind: "protein-days.v0" },
     projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
       projectionKind: "protein-days.v0",
+    }),
+  },
+  {
+    description:
+      "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+    label: "Daily carbs",
+    projectionScope: { projectionKind: "carbs-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "carbs-days.v0",
+    }),
+  },
+  {
+    description:
+      "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+    label: "Daily fiber",
+    projectionScope: { projectionKind: "fiber-days.v0" },
+    projectionScopeKey: buildHostedVaultShareProjectionScopeKey({
+      projectionKind: "fiber-days.v0",
     }),
   },
 ];
