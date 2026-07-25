@@ -623,21 +623,72 @@ describe("R2 migration orchestration", () => {
     expect(calls.some((call) => call.args.includes("delete-object"))).toBe(false);
   });
 
-  it("carries staged lifecycle-managed objects instead of dropping them", async () => {
-    const email = inventoryEntry({ key: "hosted-email/messages/transient-email" });
-    const meal = inventoryEntry({ key: "hosted-meal-photos/images/transient-photo" });
+  it.each([
+    ["raw email", "hosted-email/messages/transient-email"],
+    ["staged meal photo", "hosted-meal-photos/images/transient-photo"],
+  ])("refuses to start while a staged %s object remains", async (_label, key) => {
+    const staged = inventoryEntry({ key });
     const { calls, runner } = createMockRunner({
       destinationLifecycleEmpty: true,
-      sourceInventory: [inventoryEntry(), email, meal],
+      sourceInventory: [inventoryEntry(), staged],
     });
-    await runR2BundlesMigration(options({
-      apply: true,
-      confirmDestination: DESTINATION_BUCKET,
-    }), migrationEnvironment(), { log: () => undefined, runner });
-    const copiedKeys = calls
-      .filter((call) => call.args[1] === "copy-object")
-      .map((call) => call.args[call.args.indexOf("--key") + 1]);
-    expect(copiedKeys.slice().sort()).toEqual([email.key, meal.key, PRIVATE_KEY].sort());
+    let message = "";
+    try {
+      await runR2BundlesMigration(options({
+        apply: true,
+        confirmDestination: DESTINATION_BUCKET,
+      }), migrationEnvironment(), { log: () => undefined, runner });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("retention age reset");
+    expect(message).not.toContain(key);
+    expect(mutationCalls(calls)).toHaveLength(0);
+  });
+
+  it("reports opposite recovery directions distinguishably", async () => {
+    // The runbook picks rollback or forward from these two shapes, so they must
+    // never collapse into one message.
+    const stale = createMockRunner({
+      destinationInventory: [inventoryEntry(), inventoryEntry({ key: "stale-copy" }), markerEntry()],
+    });
+    const incomplete = createMockRunner({
+      destinationInventory: [markerEntry()],
+      sourceInventory: [inventoryEntry()],
+    });
+    const read = async (mock: ReturnType<typeof createMockRunner>): Promise<string> => {
+      try {
+        await runR2BundlesMigration(options(), migrationEnvironment(), {
+          log: () => undefined,
+          runner: mock.runner,
+        });
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      throw new Error("Expected the read-only gate to fail.");
+    };
+
+    const staleMessage = await read(stale);
+    const incompleteMessage = await read(incomplete);
+    expect(staleMessage).toContain("unexpected object");
+    expect(staleMessage).not.toContain("not a complete copy");
+    expect(incompleteMessage).toContain("not a complete copy of the frozen source");
+    expect(incompleteMessage).not.toContain("unexpected object");
+    expect(mutationCalls(stale.calls)).toHaveLength(0);
+    expect(mutationCalls(incomplete.calls)).toHaveLength(0);
+  });
+
+  it("blocks the read-only gate while a lifecycle-managed source object remains", async () => {
+    const staged = inventoryEntry({ key: "hosted-email/messages/transient-email" });
+    const { calls, runner } = createMockRunner({
+      destinationInventory: [inventoryEntry(), staged, markerEntry()],
+      sourceInventory: [inventoryEntry(), staged],
+    });
+    await expect(runR2BundlesMigration(options(), migrationEnvironment(), {
+      log: () => undefined,
+      runner,
+    })).rejects.toThrow("retention age reset");
+    expect(mutationCalls(calls)).toHaveLength(0);
   });
 
   it("fails closed when ordinary cleanup deletes an already-copied source object", async () => {

@@ -110,6 +110,18 @@ Updated: 2026-07-25
   copy over destination reconciliation or a deletion fence, which also deleted
   the temporary account-deletion block, the 24-hour ownership lease, the
   abandonment escalation, and the two-phase seed/final command surface.
-- The focused migration suite passes all 32 cases, Cloudflare typecheck passes,
+- Round 2 accepted two review-induced findings against that shape. The fence
+  did not actually freeze the source, because `HostedUserRunner` orphan-cleanup
+  alarms fire on schedule with no invocation; and copying staged
+  lifecycle-managed objects restarted their 24-hour and 31-day deletion
+  backstops. The fixes use existing owners only: the fence now holds for the
+  existing 65-minute `WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS` past the
+  last possible write so no candidate can become newly eligible during the
+  copy, and the migration refuses to start while either lifecycle-managed
+  prefix is non-empty. Round 2 also showed that a parity failure followed by a
+  reflexive rollback could republish an accepted account deletion, so the
+  recovery direction is now chosen from the proof's failure shape, which the
+  tool already reports distinguishably.
+- The focused migration suite passes all 35 cases, Cloudflare typecheck passes,
   and the canonical `test:diff apps/cloudflare` lane passes.
 Completed: 2026-07-25

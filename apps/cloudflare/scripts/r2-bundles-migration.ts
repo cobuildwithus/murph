@@ -376,6 +376,7 @@ export async function runR2BundlesMigration(
   };
   const log = dependencies.log ?? console.log;
   const expectedLifecycle = await readCanonicalLifecycle();
+  const lifecyclePrefixes = expectedLifecycle.map((rule) => rule.prefix);
   const markerKey = createR2MigrationMarkerKey(options.source, options.destination);
 
   await assertAwsCliV2(context);
@@ -394,6 +395,7 @@ export async function runR2BundlesMigration(
   const before = await readInventoryPair(context);
   assertNoMigrationMarkers(before.source);
   assertEligiblePair(before);
+  assertNoLifecycleObjects(before.source, lifecyclePrefixes);
   if (before.source.length === 0) {
     throw new Error("Refusing an R2 bundles migration with an empty source bucket.");
   }
@@ -620,6 +622,21 @@ function withoutExpectedMarker(
 function assertNoMigrationMarkers(entries: readonly R2ObjectInventoryEntry[]): void {
   if (entries.some((entry) => entry.key.startsWith(MIGRATION_MARKER_PREFIX))) {
     throw new Error("An unexpected R2 bundles migration marker is present.");
+  }
+}
+
+function assertNoLifecycleObjects(
+  entries: readonly R2ObjectInventoryEntry[],
+  prefixes: readonly string[],
+): void {
+  const keys = entries
+    .filter((entry) => prefixes.some((prefix) => entry.key.startsWith(prefix)))
+    .map((entry) => entry.key);
+  if (keys.length > 0) {
+    throw new Error(formatFingerprintFailure(
+      `${keys.length} lifecycle-managed source object(s) would have their retention age reset`,
+      keys,
+    ));
   }
 }
 

@@ -9,12 +9,13 @@ bucket. The move therefore needs no dual-read runtime, fallback, or data-model
 change: create dedicated ENAM buckets, copy and prove them, then switch the
 existing configuration in one immediate deploy.
 
-The entire copy happens inside a single write fence. There is no live
-pre-seed, so no ordinary bundle cleanup can delete a source object after that
-object has already been copied, and the destination can never drift from the
-source while the operation is in flight. The window is therefore longer than a
-delta cutover and correspondingly simpler: the source is authoritative and
-unchanged throughout, and aborting costs only the window.
+The entire copy happens inside a single write fence that covers every deletion
+owner, not only writers. There is no live pre-seed, so no ordinary bundle or
+snapshot cleanup can delete a source object after that object has already been
+copied, and the destination cannot drift from the source while the operation is
+in flight. The window is therefore longer than a delta cutover and
+correspondingly simpler: the source is authoritative and unchanged throughout,
+and aborting costs only the window.
 
 ## Safety contract
 
@@ -29,10 +30,9 @@ unchanged throughout, and aborting costs only the window.
   but absent from the source is an invariant failure: it means the source moved
   while the fence was supposed to hold it still.
 - Aborting is free before the first ENAM checkpoint. Nothing at the source has
-  changed and no configuration has moved. Recovery is to empty and delete the
-  ENAM destination — which only ever held copies of the source — create a fresh
-  one, and run again inside the same or a later fence. Never delete or recreate
-  an OC source.
+  changed and no configuration has moved. Recovery is the abandonment procedure
+  below, then a fresh destination and another run inside the same or a later
+  fence. Never delete or recreate an OC source.
 - Keep the production ENAM destination unbound and writer-exclusive until
   cutover. Use a temporary Object Read & Write key scoped only to the exact
   bucket pair.
@@ -41,7 +41,8 @@ unchanged throughout, and aborting costs only the window.
   source ETag as a precondition, metadata `COPY`, and Standard storage. There
   is no `sync` heuristic or multipart path.
 - Objects at the single-copy limit, non-Standard objects, and multipart or
-  non-MD5 ETags fail closed.
+  non-MD5 ETags fail closed, as does any object still staged under a
+  lifecycle-managed prefix.
 - The first run against an empty destination reads back its lifecycle rules,
   conditionally creates one zero-byte marker bound to the exact pair, and
   proves that marker is the only object before copying. Every later run against
@@ -54,24 +55,70 @@ unchanged throughout, and aborting costs only the window.
   fence active through the copy, variable readback, both deploys, the
   post-deploy proofs, direct smokes, and both controlled restore wakes.
 
+### Abandoning a destination
+
+This is the recovery path for every pre-commit failure, so it must be a real
+procedure rather than an intention. It applies only to an ENAM destination that
+is still unbound and writer-exclusive, and therefore contains nothing but
+copies of the source and the pair marker. Confirm both facts before starting:
+the bucket name must not appear in any of the three production variables, and
+the migration key must still be the pair-scoped one.
+
+The migration command has no delete operation and is not used here. The
+operator empties the destination directly with the pair-scoped key, then
+deletes the bucket and creates a fresh one:
+
+```bash
+aws s3 rm "s3://$DESTINATION_BUCKET" --recursive \
+  --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+  --region auto
+pnpm --dir apps/cloudflare exec wrangler r2 bucket delete "$DESTINATION_BUCKET"
+```
+
+Never point either command at an OC source. Prove the destination bucket name
+in the command matches `$DESTINATION_BUCKET` and not `$SOURCE_BUCKET` before
+running it, and prove the bucket is gone afterwards. Then reopen writers if the
+fence is still up, and rebook.
+
 ### Account deletion stays available
 
 Account deletion is not blocked at any point in this operation. The runtime
-deletion path targets the active bucket, and the single-window shape keeps that
-correct at every moment:
+deletion path targets whichever bucket is currently active, and a member who
+completes deletion must never have their data survive in a bucket that later
+becomes active. Two copies exist between the copy and OC retirement, so the
+recovery contract — not a block on the flow — is what keeps that true.
 
 - Before the fence, no ENAM copy exists, so deletion removes the member's
   objects from the only copy that exists.
-- Inside the fence, a deletion that reaches R2 mutates the frozen source. The
-  copy or the closing proof fails closed, because the removed object is still
-  present in the destination. The operator recovers by abandoning the
-  destination and re-running; no member data is carried forward.
-- Between the closing proof and the binding switch, the post-deploy proof in
-  section 7 re-runs before any writer is reopened and detects the same
-  condition. The response there is the rollback in section 6, which is still
-  free at that point.
-- After cutover, deletion targets ENAM. OC is a retirement copy that section 8
-  destroys whole, so nothing a member deleted can come back.
+- During the copy, a deletion mutates the frozen source. The copy or its
+  closing proof fails closed because the removed object is still present in the
+  destination. Recovery is the abandonment procedure above, which destroys the
+  destination and every copy in it. Nothing is carried forward.
+- After the switch and before the commit point, the post-deploy proofs in
+  section 7 decide the recovery direction. **Never choose that direction by
+  default; read the failure shape**, because rolling the wrong way is what
+  would republish deleted data.
+- After the commit point, deletion targets ENAM. OC is a retirement copy that
+  is never restored and that section 8 destroys whole.
+
+**Recovery direction by failure shape.** The read-only proof reports the two
+shapes distinguishably, and they require opposite responses:
+
+| Proof failure | Meaning | Required response |
+| --- | --- | --- |
+| `Destination has N unexpected object(s).` | ENAM holds objects the source no longer has | Roll back to OC. OC has already lost those objects, and abandoning ENAM destroys the extra copies. |
+| `Destination is not a complete copy of the frozen source` | ENAM lacks objects OC still has | Do **not** roll back. OC holds data ENAM does not, and restoring it can republish an accepted deletion. |
+
+For the second shape, establish the cause before doing anything else. Query the
+production deployment logs for any accepted `POST /api/settings/privacy/delete`
+between the closing proof and the failed proof:
+
+- If one exists, the missing objects are that deletion and ENAM is correct.
+  Continue forward and retire OC promptly per section 8. Do not re-run
+  `--apply`; that would copy the deleted member's objects back into the active
+  bucket.
+- If none exists, the copy is genuinely incomplete. The fence is still up and
+  the source is intact, so re-run `--apply` and re-prove before the canary.
 
 References: [R2 data location][data-location], [R2 consistency][consistency],
 [R2 authentication][r2-auth], [R2 S3 compatibility][s3-api], and [R2's current
@@ -101,8 +148,10 @@ pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
 Record the reported object count and payload size. Take the copy rate from the
 timed preview rehearsal in section 2, which uses the same account, the same
 command, and the same OC-to-ENAM path. Book the fence with margin over the
-extrapolated copy time plus the fixed cost of section 4's ten-minute drain, the
-cutover deploy, the post-deploy proofs, and both restore canaries.
+extrapolated copy time plus the fixed cost of section 4: the ten-minute PUT
+drain, the 65-minute orphan-cleanup drain that has to elapse before the copy can
+start, the cutover deploy, the post-deploy proofs, and both restore canaries.
+The fixed cost alone is therefore over 75 minutes before any object is copied.
 
 An overrun is not a data risk. If the copy or any proof does not finish inside
 the booked window, take the abandonment path in the safety contract, reopen
@@ -230,12 +279,31 @@ One cutover owner must prove every item below. Abort if any item is uncertain.
    that can write BUNDLES.
 3. Confirm every runner has no invocation in flight and the mailbox is drained.
 4. Record the last possible presigned PUT time and wait ten full minutes.
-5. Account for `HostedUserRunner` cleanup alarms. They can still delete only an
-   aged orphan after re-reading Web's current snapshot; they do not create
-   objects or delete the current referenced snapshot. Do not claim a global
-   alarm pause. A cleanup that fires during the window removes an object the
-   copy already carried, which the closing proof reports as a destination-only
-   object; that is an abandon-and-retry condition, not a partial success.
+5. Drain `HostedUserRunner` orphan cleanup before starting the copy. This is
+   the one deletion owner the writer fence does not stop: its alarm fires on
+   schedule with no invocation. Every other deleter — bundle transition GC,
+   replaced legacy snapshot cleanup — runs only on a write path and is already
+   fenced by items 1 and 2.
+
+   `WORKSPACE_SNAPSHOT_ORPHAN_CLEANUP_MIN_AGE_MS` in
+   `src/user-runner/workspace-snapshot-sessions.ts` is 65 minutes, and a
+   candidate is only recorded when a checkpoint replaces a previous snapshot.
+   No candidate can therefore be created after item 4, and the newest one that
+   can exist becomes eligible 65 minutes after the last possible write. Hold
+   the fence for at least 65 minutes past that recorded time, plus margin, so
+   every candidate that can exist has become eligible and its alarm has already
+   fired.
+
+   Prove quiescence rather than assuming it. Record the source object count
+   from `wrangler r2 bucket info` when the drain starts and again immediately
+   before the copy, and require the two to be equal:
+
+   ```bash
+   pnpm --dir apps/cloudflare exec wrangler r2 bucket info "$SOURCE_BUCKET" --json
+   ```
+
+   If the counts differ, the fence is not yet quiet. Wait for another equal
+   pair before starting the copy.
 
 Keep the fence through section 7.
 
@@ -269,13 +337,18 @@ A destination-only object is different: it means the source moved under the
 fence. Do not delete around the gate. Abandon that destination per the safety
 contract, reopen writers, and rebook.
 
-Objects staged under the lifecycle-managed `hosted-email/messages/` and
-`hosted-meal-photos/images/` prefixes are copied like any other object rather
-than dropped, so a pending import survives the move. Both destinations carry
-the identical checked-in lifecycle rules, so the deletion backstop still
-applies; a staged object that was already partway through its backstop restarts
-that clock in ENAM. Carrying a pending import forward is the intended trade
-against losing it when OC is retired.
+The migration refuses to start while anything remains under the
+lifecycle-managed `hosted-email/messages/` or `hosted-meal-photos/images/`
+prefixes, in both the `--apply` and read-only forms, before it creates or
+copies any destination object. Copying such an object would restart its 24-hour
+or 31-day deletion backstop in ENAM, and dropping it would lose a pending
+import when OC is retired; neither is acceptable, so the operation waits for
+the existing import, post-checkpoint cleanup, account-deletion, and lifecycle
+owners to empty those prefixes.
+
+Record a zero-object inventory for both prefixes immediately before the copy.
+If either prefix cannot be emptied, rebook the window rather than copying or
+dropping its contents.
 
 ## 6. Switch and read back all configuration
 
@@ -328,13 +401,18 @@ for _ in 1 2; do
 done
 ```
 
-If either proof fails, do not wake the canary. Restore all three captured OC
+If either proof fails, do not wake the canary, and do not roll back reflexively.
+Read the reported failure shape and follow the recovery-direction table in the
+safety contract: a destination-only report means restore all three captured OC
 values, deploy immediately, and require the exact rollback workflow and OC
-direct-R2 smoke before reopening writers. Cloudflare can briefly run old
-Durable Object code during an update; these proofs are the gate that catches an
-OC or ENAM orphan cleanup, or a member account deletion, in the binding-switch
-window. Cleanup re-reads the current snapshot before deleting, so it cannot
-remove the referenced checkpoint.
+direct-R2 smoke before reopening writers; an incomplete-copy report means
+establish whether an account deletion caused it before choosing between
+continuing forward and re-running `--apply`.
+
+Cloudflare can briefly run old Durable Object code during an update; these
+proofs are the gate that catches an OC or ENAM orphan cleanup, or a member
+account deletion, in the binding-switch window. Cleanup re-reads the current
+snapshot before deleting, so it cannot remove the referenced checkpoint.
 
 Next use the existing ops runtime-maintenance wake for exactly one controlled
 operator-owned member while all other ingress stays fenced:
