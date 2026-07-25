@@ -4,11 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
-import {
-  decodeExperimentCardData,
-  encodeExperimentCardData,
-  type ExperimentCardData,
-} from "@/src/lib/experiments/share-card";
+import type { ExperimentCardData } from "@/src/lib/experiments/share-card";
 import { resolveHealthCommonsExperimentResultsPublic } from "@/src/lib/health-commons/experiment-projections";
 import type { ExperimentRunProjection } from "@/src/types/experiments";
 
@@ -49,7 +45,7 @@ beforeEach(() => {
   });
 });
 
-test("encodes the saved run duration in the share artifact after catalog timing changes", () => {
+test("uses the saved run duration in the private share artifact after catalog timing changes", () => {
   const protocol = resolveHealthCommonsExperimentResultsPublic("finnish-sauna");
   assert.ok(protocol);
   assert.equal(protocol.durationDays, 28);
@@ -65,9 +61,8 @@ test("encodes the saved run duration in the share artifact after catalog timing 
   }));
 
   assert.ok(mocks.cardData);
-  const decoded = decodeExperimentCardData(encodeExperimentCardData(mocks.cardData));
-  assert.equal(decoded?.title, `21-day ${protocol.title}`);
-  assert.notEqual(decoded?.title, `28-day ${protocol.title}`);
+  assert.equal(mocks.cardData.title, `21-day ${protocol.title}`);
+  assert.notEqual(mocks.cardData.title, `28-day ${protocol.title}`);
 });
 
 test("omits duration from a share artifact when the saved timing is incomplete", () => {
@@ -85,8 +80,7 @@ test("omits duration from a share artifact when the saved timing is incomplete",
   }));
 
   assert.ok(mocks.cardData);
-  const decoded = decodeExperimentCardData(encodeExperimentCardData(mocks.cardData));
-  assert.equal(decoded?.title, protocol.title);
+  assert.equal(mocks.cardData.title, protocol.title);
 });
 
 function createPrivateRun(

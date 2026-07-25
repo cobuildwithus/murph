@@ -854,7 +854,11 @@ function parseHostedAssistantDeliveryVaultImageMedia(
     );
   }
   return {
-    alt: requireNullableString(record.alt ?? null, `${label}.alt`),
+    alt: requireNullableBoundedTrimmedString(
+      record.alt ?? null,
+      `${label}.alt`,
+      500,
+    ),
     contentType,
     filename,
     kind: "vault_image",
@@ -865,7 +869,11 @@ function parseHostedAssistantDeliveryVaultImageMedia(
       `${label}.sizeBytes`,
       10 * 1024 * 1024,
     ),
-    source: requireNullableString(record.source ?? null, `${label}.source`),
+    source: requireNullableBoundedTrimmedString(
+      record.source ?? null,
+      `${label}.source`,
+      200,
+    ),
   };
 }
 
@@ -1254,6 +1262,18 @@ function requireNullableString(value: unknown, label: string): string | null {
   }
 
   return requireString(value, label);
+}
+
+function requireNullableBoundedTrimmedString(
+  value: unknown,
+  label: string,
+  maxLength: number,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return requireBoundedTrimmedString(value, label, maxLength);
 }
 
 function requireNullableNonNegativeInteger(value: unknown, label: string): number | null {

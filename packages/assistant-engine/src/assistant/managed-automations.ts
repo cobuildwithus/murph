@@ -244,7 +244,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '',
       'Do not duplicate the weekly health insight automation: that one covers durable non-obvious personal findings; the digest covers the narrative of this week.',
       '',
-      'If there is an active experiment with enough data to show movement, attach its progress image with `vault-cli experiment progress-card <slug> --format json` and fold its progress into the digest.',
+      'If there is an active experiment with enough data to show movement, fold a concise text recap into the digest. Public progress-card URLs are retired; do not call `experiment progress-card` or attach a progress-card URL.',
       '',
       'Do not overstate certainty. If data is missing, say that plainly.',
     ].join('\n'),

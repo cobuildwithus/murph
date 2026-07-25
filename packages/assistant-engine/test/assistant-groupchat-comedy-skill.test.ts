@@ -215,69 +215,21 @@ describe('assistant group-chat comedy skill', () => {
     expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
   })
 
-  it('makes the group photo an unannounced drop with taste rails, not a permission flow', async () => {
+  it('keeps group-avatar changes unavailable until delivery is private', async () => {
     const comedy = await readSkill('groupchat-comedy')
     const normalized = comedy.replace(/\s+/gu, ' ')
 
     expect(normalized).toContain(
-      'The chat avatar is a comedy surface, not a settings field.',
+      'Group-avatar changes are unavailable until Linq supports a private, provider-ingested image path.',
     )
     expect(normalized).toContain(
-      'edit yourself into a funny corner of it and make it the group photo',
+      'Do not offer, attempt, or narrate the old URL-based avatar action.',
     )
     expect(normalized).toContain(
-      'Nobody asks for this, and you do not ask either. The discovery is the joke.',
+      'without making member images publicly fetchable',
     )
-    expect(normalized).toContain(
-      'Setting it IS the delivery.',
-    )
-    expect(normalized).toContain(
-      'never a heads-up before. Announcing it kills it.',
-    )
-    expect(normalized).toContain('Once is the move.')
-
-    // Scheduled occurrences reject every group mutation except ask_member and
-    // read_current, so the drop can only happen on an ordinary turn.
-    expect(normalized).toContain(
-      'Ordinary group turns only. A scheduled occurrence cannot change an avatar at all',
-    )
-    expect(normalized).not.toContain('the group photo drop below')
-
-    expect(normalized).toContain(
-      'A Telegram group has no way to set a chat photo, so the bit does not exist there',
-    )
-    expect(normalized).toContain(
-      'One call: `murph.group` with `action="set_chat_avatar"`, `avatarSource="generate"`, the `prompt` describing the edit, and `referenceImageRefs` carrying the photo plus your character sheet.',
-    )
-    expect(normalized).toContain(
-      'Edit yourself INTO their photo; do not redraw their photo.',
-    )
-    expect(normalized).toContain('It has to read as a thumbnail.')
-    expect(normalized).toContain(
-      'Whatever the human did in that photo stays the joke. You are the second beat, never the replacement punchline.',
-    )
-
-    expect(normalized).toContain(
-      "The room's own joke is the material. If the person in the photo is visibly not in on it, that is not the frame",
-    )
-    expect(normalized).toContain(
-      "The moment is fair game; the person's body is not.",
-    )
-    expect(normalized).toContain(
-      'Say plainly that you cannot put the previous photo back, because you cannot.',
-    )
-
-    // `preflight_set_chat_avatar` is issued by the runtime, not the model: it is
-    // absent from the murph.group action enum, so naming it as a step would send
-    // Murph after an action it cannot call.
+    expect(comedy).not.toContain('action="set_chat_avatar"')
     expect(comedy).not.toContain('preflight_set_chat_avatar')
-    // The drop is unannounced by product decision. No permission prompt, and no
-    // itemized disclosure of processing or hosting: this is the same image path
-    // challenge comics already use, and the group can change the icon back.
-    expect(comedy).not.toContain('image generator')
-    expect(comedy).not.toContain('public link')
-    expect(comedy).not.toContain('want me to put myself')
-    expect(comedy).not.toContain('Silence is a no')
   })
 
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {

@@ -3042,7 +3042,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(emailSendMock).toHaveBeenCalledOnce();
   });
 
-  it("uploads generated images through the write-fenced results port", async () => {
+  it("tombstones generated-image URL uploads after the write fence", async () => {
     const runner = createWorkspaceVersionAwareUserRunner();
     const pngBytes = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47,
@@ -3120,20 +3120,16 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123" ,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(410);
     expect(runner.ownsActiveInvocationLease).toHaveBeenCalledOnce();
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
-      media: {
-        alt: "Generated product image",
-        kind: "image",
-        source: "gpt-image-2",
-        url: "https://imagedelivery.net/account_123/image_123/public",
-      },
+      error:
+        "Generated-image URL upload is disabled; use private provider attachments.",
     });
   });
 
-  it("invokes the generated-image upload fetch with the global receiver", async () => {
+  it("does not reach the legacy generated-image upload fetch", async () => {
     // Regression guard for the production incident: workerd's global `fetch` is
     // receiver-sensitive, so calling it as a foreign-object method (e.g. the old
     // `input.fetchImpl(...)` where `fetchImpl` was the bare ambient global) throws
@@ -3211,9 +3207,9 @@ describe("handleRunnerOutboundRequest", () => {
       userId: "member_123",
     });
 
-    expect(response.status).toBe(200);
-    expect(receiverStrictCallCount).toBe(1);
-    expect(observedReceiver).toBe(globalThis);
+    expect(response.status).toBe(410);
+    expect(receiverStrictCallCount).toBe(0);
+    expect(observedReceiver).toBe("unset");
   });
 
   it("rejects email sends when the live invocation lease is stale", async () => {

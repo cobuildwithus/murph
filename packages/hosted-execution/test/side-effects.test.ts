@@ -124,6 +124,35 @@ describe("hosted assistant delivery contracts", () => {
     expect(parseHostedAssistantDeliverySideEffects(payload)).toEqual(payload);
   });
 
+  it("parses bounded private vault-image delivery media", () => {
+    const media = {
+      alt: "Generated mobility setup",
+      contentType: "image/webp" as const,
+      filename: "generated-mobility.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/generated-mobility.webp",
+      sha256: "a".repeat(64),
+      sizeBytes: 42,
+      source: "gpt-image-2",
+    };
+    const build = (override: Record<string, unknown> = {}) =>
+      buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-private-image",
+        effectId: "intent-private-image",
+        payload: createHostedAssistantDeliveryPayload({
+          media: [{ ...media, ...override } as HostedAssistantDeliveryMedia],
+        }),
+      });
+
+    expect(build().payload.media).toEqual([media]);
+    expect(() => build({ ref: "../generated-mobility.webp" })).toThrow();
+    expect(() => build({ contentType: "image/svg+xml" })).toThrow();
+    expect(() => build({ sizeBytes: 10 * 1024 * 1024 + 1 })).toThrow();
+    expect(() => build({ alt: "a".repeat(501) })).toThrow();
+    expect(() => build({ source: "s".repeat(201) })).toThrow();
+    expect(() => build({ url: "https://example.test/private.webp" })).toThrow();
+  });
+
   it("accepts only the exact assistant runtime generated-delivery ref exception", () => {
     const media = {
       approvalGeneration: null,

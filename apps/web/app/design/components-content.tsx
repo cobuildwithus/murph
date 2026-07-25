@@ -97,6 +97,7 @@ import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 import { DESIGN_USAGE_OFFERS } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -731,6 +732,12 @@ export function ComponentsContent() {
               <div className="flex justify-end gap-2 pt-4"><Button variant="outline">Cancel</Button><Button>Confirm</Button></div>
             </DialogContent>
           </Dialog>
+        </Section>
+
+        <Separator />
+
+        <Section title="Private experiment results share">
+          <ExperimentResultsShareStudy />
         </Section>
 
         <Separator />

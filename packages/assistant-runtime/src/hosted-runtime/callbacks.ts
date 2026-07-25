@@ -68,6 +68,7 @@ import type {
   AssistantDeliveryError,
   AssistantOutboxIntent,
   AssistantResponseMedia,
+  AssistantVaultImageResponseMedia,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   setTelegramMessageReaction,
@@ -2756,6 +2757,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
           return result;
         },
         sendTelegramImage: async (request) => {
+          const verifiedVaultImages = await preloadHostedAssistantVaultImages({
+            media: request.media,
+            vaultRoot: input.vaultRoot,
+          });
           await assertHostedDeliveryCanEnterProvider(input);
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
@@ -2772,6 +2777,24 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             fetchImplementation: input.providerFetch,
             ...(request.signal ?? input.signal
               ? { signal: request.signal ?? input.signal ?? undefined }
+              : {}),
+            ...(verifiedVaultImages.size > 0
+              ? {
+                  loadVaultImage: async (
+                    media: AssistantVaultImageResponseMedia,
+                  ) => {
+                    const bytes = verifiedVaultImages.get(
+                      buildHostedVaultImageMediaIdentity(media),
+                    );
+                    if (!bytes) {
+                      throw new VaultCliError(
+                        "ASSISTANT_VAULT_IMAGE_IDENTITY_CONFLICT",
+                        "The prepared private image no longer matches the outbox media.",
+                      );
+                    }
+                    return bytes;
+                  },
+                }
               : {}),
           }, "Hosted assistant Telegram image delivery");
           providerDispatchEntered = true;

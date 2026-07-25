@@ -53,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   readAssistantOutboxIntentMirrorState: vi.fn(),
   readAssistantVaultFileMedia: vi.fn(),
   readVerifiedAssistantVaultFileBytes: vi.fn(),
+  readVerifiedAssistantVaultImageBytes: vi.fn(),
   resetAssistantOutboxPreparedDispatchById: vi.fn(),
   saveAssistantOutboxIntentIfUnchanged: vi.fn(),
   setLinqMessageReaction: vi.fn(),
@@ -106,6 +107,8 @@ vi.mock("@murphai/assistant-engine", async () => {
     readAssistantVaultFileMedia: mocks.readAssistantVaultFileMedia,
     readVerifiedAssistantVaultFileBytes:
       mocks.readVerifiedAssistantVaultFileBytes,
+    readVerifiedAssistantVaultImageBytes:
+      mocks.readVerifiedAssistantVaultImageBytes,
     resetAssistantOutboxPreparedDispatchById:
       mocks.resetAssistantOutboxPreparedDispatchById,
     saveAssistantOutboxIntentIfUnchanged:
@@ -451,6 +454,9 @@ beforeEach(() => {
   mocks.readAssistantVaultFileMedia.mockReturnValue(null);
   mocks.readVerifiedAssistantVaultFileBytes.mockResolvedValue(
     new Uint8Array([1, 2, 3]),
+  );
+  mocks.readVerifiedAssistantVaultImageBytes.mockResolvedValue(
+    new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
   );
   mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(
     async ({ intent }) => intent,
@@ -7725,6 +7731,78 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+  });
+
+  it("verifies private Telegram image bytes before provider dispatch and sends multipart", async () => {
+    const image = {
+      alt: "Private generated chart",
+      contentType: "image/webp" as const,
+      filename: "generated-chart.webp",
+      kind: "vault_image" as const,
+      ref: "raw/captures/generated-chart.webp",
+      sha256: "a".repeat(64),
+      sizeBytes: 12,
+      source: "gpt-image-2",
+    };
+    const effect = createEffect({ media: [image] });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      const sendTelegramImage = dependencies.sendTelegramImage;
+      if (!sendTelegramImage) {
+        throw new Error("Expected hosted Telegram image transport.");
+      }
+      const delivery = await sendTelegramImage({
+        media: [image],
+        message: "Private chart",
+        target: "chat_123",
+      });
+      return createDispatchResult({
+        delivery: createDelivery({
+          providerMessageId: delivery.providerMessageId,
+          target: delivery.target,
+        }),
+        status: "sent",
+      });
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (_request, init) => {
+      expect(init?.body).toBeInstanceOf(FormData);
+      const entries = Object.fromEntries((init?.body as FormData).entries());
+      expect(entries).toMatchObject({
+        caption: "Private chart",
+        chat_id: "chat_123",
+      });
+      expect(entries.photo).toBeInstanceOf(File);
+      expect((entries.photo as File).name).toBe("generated-chart.webp");
+      expect((entries.photo as File).type).toBe("image/webp");
+      return Response.json({
+        ok: true,
+        result: { message_id: 301 },
+      });
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        providerMessageId: "301",
+      }),
+    ]);
+
+    expect(mocks.readVerifiedAssistantVaultImageBytes).toHaveBeenCalledWith({
+      image,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+    });
+    expect(
+      mocks.readVerifiedAssistantVaultImageBytes.mock.invocationCallOrder[0],
+    ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
   });
 
   it("fails a route-scoped Telegram group delivery before provider entry when live authority is unavailable", async () => {

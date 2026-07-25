@@ -15,6 +15,14 @@ care. Murph should neither dominate the room nor collapse into an addressed-only
 help desk. Its spontaneous timing, callbacks, and occasional surprise are part
 of the value.
 
+Group-avatar mutation is temporarily unavailable. Linq's current avatar
+operation requires a fetchable URL, so `set_chat_avatar` is absent from the
+model-visible group action schema and legacy runtime requests fail closed with
+`private_group_avatar_delivery_unavailable`. Do not stage member or generated
+images publicly to preserve the bit. A future implementation may restore it
+only through a private provider-ingestion lifecycle with bounded expiry and
+deletion.
+
 ## Working psychological model
 
 This is an operating model derived from observed group behavior, not a claim

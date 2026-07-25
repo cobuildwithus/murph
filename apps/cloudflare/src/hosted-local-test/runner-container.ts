@@ -643,7 +643,13 @@ const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandle
   ) {
     return new Response("Not found", { status: 404 });
   }
-  if (request.headers.get("content-type")?.trim().toLowerCase() !== "application/pdf") {
+  const contentType = request.headers.get("content-type")?.trim().toLowerCase() ?? "";
+  if (
+    contentType !== "application/pdf"
+    && contentType !== "image/jpeg"
+    && contentType !== "image/png"
+    && contentType !== "image/webp"
+  ) {
     return new Response("Unsupported media type", { status: 415 });
   }
   const uploadBytes = (await request.arrayBuffer()).byteLength;
@@ -653,7 +659,7 @@ const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandle
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
-      contentType: "application/pdf",
+      contentType,
       uploadBytes,
     },
     message: "Hosted-local Linq attachment upload accepted.",

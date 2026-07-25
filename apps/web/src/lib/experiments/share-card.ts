@@ -37,17 +37,10 @@ export interface ExperimentCardData {
   chart?: ExperimentCardChart;
 }
 
-/**
- * Legacy URL codec constants retained for decoding already-open local clients.
- * New code must use `parseExperimentCardData` and POST the payload in the body.
- */
-export const EXPERIMENT_CARD_PARAM = "d";
-export const EXPERIMENT_CARD_VERSION = 7;
-
 /** The card layout only has room for three metric tiles. */
 export const EXPERIMENT_CARD_MAX_SIGNALS = 3;
 
-/** Cap on chart points kept in the URL — the series is downsampled to fit. */
+/** Cap on chart points kept in a rendered card. */
 export const EXPERIMENT_CARD_MAX_CHART_POINTS = 40;
 
 const DIRECTIONS: ReadonlySet<ExperimentCardDirection> = new Set([
@@ -60,71 +53,6 @@ const SENTIMENTS: ReadonlySet<ExperimentCardSentiment> = new Set([
   "negative",
   "neutral",
 ]);
-
-export function encodeExperimentCardData(data: ExperimentCardData): string {
-  return toBase64Url(JSON.stringify(normalizeCardData(data)));
-}
-
-export function decodeExperimentCardData(
-  encoded: string | null | undefined,
-): ExperimentCardData | null {
-  if (!encoded) {
-    return null;
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(fromBase64Url(encoded));
-    return parseCardData(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function normalizeCardData(data: ExperimentCardData): ExperimentCardData {
-  return {
-    title: data.title.trim(),
-    protocol: data.protocol?.trim() || undefined,
-    signals: data.signals
-      .slice(0, EXPERIMENT_CARD_MAX_SIGNALS)
-      .map((signal) => ({
-        label: signal.label.trim(),
-        value: signal.value.trim(),
-        unit: signal.unit?.trim() || undefined,
-        delta: signal.delta.trim(),
-        direction: signal.direction,
-        sentiment: signal.sentiment,
-        baseline: signal.baseline?.trim() || undefined,
-      })),
-    chart: normalizeCardChart(data.chart),
-  };
-}
-
-function normalizeCardChart(
-  chart: ExperimentCardChart | undefined,
-): ExperimentCardChart | undefined {
-  if (!chart) {
-    return undefined;
-  }
-
-  const values = chart.values
-    .filter((value) => typeof value === "number" && Number.isFinite(value))
-    .slice(0, EXPERIMENT_CARD_MAX_CHART_POINTS)
-    .map(roundTo1);
-  if (values.length < 2) {
-    return undefined;
-  }
-
-  return {
-    label: chart.label.trim(),
-    unit: chart.unit?.trim() || undefined,
-    baselineCount: clampInteger(chart.baselineCount, 0, values.length),
-    values,
-    baselineAvg:
-      typeof chart.baselineAvg === "number" && Number.isFinite(chart.baselineAvg)
-        ? roundTo1(chart.baselineAvg)
-        : undefined,
-  };
-}
 
 export function parseExperimentCardData(input: unknown): ExperimentCardData | null {
   return parseCardData(input);
@@ -228,34 +156,6 @@ function parseCardSignal(input: unknown): ExperimentCardSignal | null {
   };
 }
 
-function roundTo1(value: number): number {
-  return Math.round(value * 10) / 10;
-}
-
 function clampInteger(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
-}
-
-/** Unicode-safe base64url encode — usable in both the browser and Node. */
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary)
-    .replace(/\+/gu, "-")
-    .replace(/\//gu, "_")
-    .replace(/=+$/u, "");
-}
-
-/** Unicode-safe base64url decode — usable in both the browser and Node. */
-function fromBase64Url(value: string): string {
-  const base64 = value.replace(/-/gu, "+").replace(/_/gu, "/");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return new TextDecoder().decode(bytes);
 }

@@ -1582,7 +1582,7 @@ export const vaultCliCommandDescriptors = [
       {
         path: ['experiment', 'progress-card'],
         description:
-          'Build the shareable progress-card snapshot for one experiment and emit its image URL.',
+          'Compatibility tombstone for the retired public experiment progress-card URL.',
       },
       {
         path: ['experiment', 'session', 'log'],

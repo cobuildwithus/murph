@@ -14,6 +14,16 @@ import {
   type ExperimentCardData,
   type ExperimentCardSignal,
 } from "@/src/lib/experiments/share-card";
+import {
+  requireActiveHostedAppSessionFromRequest,
+} from "@/src/lib/hosted-onboarding/app-session";
+import {
+  assertHostedOnboardingMutationOrigin,
+} from "@/src/lib/hosted-onboarding/csrf";
+import {
+  readHostedOnboardingJsonObject,
+  withJsonError,
+} from "@/src/lib/hosted-onboarding/http";
 
 export const dynamic = "force-dynamic";
 
@@ -48,24 +58,16 @@ export async function GET(): Promise<Response> {
   });
 }
 
-export async function POST(request: Request): Promise<Response> {
-  const declaredLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_CARD_REQUEST_BYTES) {
-    return invalidCardResponse(413);
-  }
-
-  const body = await request.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_CARD_REQUEST_BYTES) {
-    return invalidCardResponse(413);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return invalidCardResponse(400);
-  }
-  const data = parseExperimentCardData(parsed);
+export const POST = withJsonError(async (request: Request): Promise<Response> => {
+  assertHostedOnboardingMutationOrigin(request);
+  await requireActiveHostedAppSessionFromRequest(request);
+  const data = parseExperimentCardData(
+    await readHostedOnboardingJsonObject(request, {
+      limitBytes: MAX_CARD_REQUEST_BYTES,
+      tooLargeErrorCode: "EXPERIMENT_CARD_BODY_TOO_LARGE",
+      tooLargeErrorMessage: "Card data is too large.",
+    }),
+  );
   if (!data) {
     return invalidCardResponse(400);
   }
@@ -90,16 +92,13 @@ export async function POST(request: Request): Promise<Response> {
       "Cache-Control": "private, no-store",
     },
   });
-}
+});
 
-function invalidCardResponse(status: 400 | 413): Response {
-  return new Response(
-    status === 413 ? "Card data is too large." : "Invalid or missing card data.",
-    {
-      headers: { "Cache-Control": "private, no-store" },
-      status,
-    },
-  );
+function invalidCardResponse(status: 400): Response {
+  return new Response("Invalid or missing card data.", {
+    headers: { "Cache-Control": "private, no-store" },
+    status,
+  });
 }
 
 function Card({ data, logoSrc }: { data: ExperimentCardData; logoSrc: string }) {

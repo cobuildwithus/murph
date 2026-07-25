@@ -20,27 +20,36 @@ Key decisions:
 - Remove model-visible group-avatar generation until the provider supports a genuinely private ingestion lifecycle.
 
 State:
-- Exact-base isolated worktree created; patch application and current-main reconciliation are in progress.
+- Implementation is stable on current `origin/main`; focused, full assistant-engine, and direct hosted delivery proof are green. Product/preliminary/final review gates and final canonical verification remain.
 
 Done:
 - Read the required repository workflow, architecture, product, security, reliability, and completion guidance.
 - Confirmed the supplied base commit exists locally.
 - Inspected the coordination ledger and identified overlap with generated-media E2E, media-catalog deletion, and experiment-lifecycle work.
 - Confirmed the primary checkout is unsafe for task edits and created a dedicated worktree through the repository helper.
+- Applied the supplied patch against its exact base, repaired malformed patch hunks, and reconciled the result onto current `origin/main`.
+- Added and verified the shared `vault_image` contract, vault byte verifier, durable side-effect persistence, callback preverification, Linq attachment delivery, Telegram multipart delivery, and hosted generated-image capture path.
+- Tombstoned the public generated-image upload and experiment-card URL routes; removed group-avatar generation from the model-visible action schema; changed scheduled experiment summaries to private text/optional voice.
+- Reworked explicit browser result sharing to an authenticated same-origin POST with a private no-store PNG response, native File sharing/download, loading/retry states, and real production-component design studies.
+- Updated the affected architecture, security, reliability, capture, experiment, group-chat, Cloudflare deployment, and test-owner documentation.
+- Regenerated the CLI command metadata through the supported repository generator after the source-only generator entrypoint proved unavailable without workspace builds.
+- Passed focused contract, channel, callback, CLI, Cloudflare, Web, automation, and typecheck coverage.
+- Passed the full assistant-engine owner suite: 173 files passed, one explicitly skipped; 2,666 tests passed and five explicitly skipped.
+- Passed `pnpm hosted-local e2e codex-image-media-delivery`: both public catalog URL delivery and private generated-image vault capture, Linq attachment upload/send, and next-turn reference reuse completed.
+- The first complete `pnpm test:diff` rerun passed every preflight, affected typecheck, assistant-engine test, and assistant CLI test before one untouched assistant-runtime clinical-records preemption test timing-flaked; its exact isolated rerun passed.
+- Added the required design-catalog component and section registrations. The mandated browser runtime exposed no installed target, so desktop/mobile rendered captures remain unavailable.
+- Attempted the required Claude Fable UI double-check; it stopped at explicit usage-credit exhaustion, so policy forbids an Opus fallback.
 
 Now:
-- Validate and apply the supplied patch against its exact base, then inspect every changed owner and resolve missing integration coverage.
+- Resolve the required product-experience audit, commit/push the review candidate, and run the preliminary unified prompt/frontend/coverage ReviewGPT pass.
 
 Next:
-- Update durable owner docs and design-catalog proof for the changed browser share flow.
-- Reconcile with current `origin/main`.
-- Run focused and canonical verification plus direct hosted delivery/browser scenarios.
-- Complete product, preliminary specialist, parent-final, and final ReviewGPT review gates.
-- Close the plan with the scoped final commit, push the branch, open the PR, and prove green CI plus merge readiness.
+- Resolve preliminary findings, run the parent final review, rerun canonical diff/acceptance verification, and close this plan with `scripts/finish-task`.
+- Push the final head, run final ReviewGPT concurrently with CI, and prove merge readiness against current `main`.
 
 Open questions (UNCONFIRMED if needed):
-- Whether current Linq group-avatar APIs now expose a provider-native byte upload path; absent direct evidence, retain the fail-closed behavior.
-- Whether the hosted generated-image E2E can reuse the active scenario owner without conflicting with its separate worktree; coordinate by updating only this branch and noting the overlap.
+- Whether a browser target can be attached before final handoff so the required desktop/mobile design-catalog evidence can be captured; current browser discovery returned no targets.
+- Whether current Linq group-avatar APIs will later expose provider-native byte upload; the current patch deliberately retains fail-closed behavior until that capability exists.
 
 Working set (files/ids/commands):
 - `packages/operator-config/src/assistant-cli-contracts.ts`

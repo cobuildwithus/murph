@@ -17,10 +17,8 @@ import type {
 } from '@murphai/operator-config/assistant-cli-contracts'
 
 import type {
-  AssistantHostedGeneratedImageUploader,
   AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
-import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import { hashAssistantProviderStableJson } from '../assistant/providers/helpers.js'
 import type {
   AssistantProviderUsageDraft,
@@ -57,9 +55,6 @@ export interface GenerateImageToolResult {
   responseMedia?: AssistantResponseMedia[]
   rpcSuccess: boolean
   rpcText: string
-  // A specific runtime issue for the assistant runtime's existing issue owner to
-  // record off-path (e.g. an upload failure); populated only on failure.
-  runtimeIssue?: AssistantRuntimeIssueInput
   savedCaptureId?: string | null
   savedImageRef?: string | null
   usageDraft?: AssistantProviderUsageDraft | null
@@ -109,7 +104,6 @@ export async function executeGenerateImageTool(input: {
   codexHome?: string | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
-  hostedGeneratedImageUploader?: AssistantHostedGeneratedImageUploader | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   providerRequestOrdinal: number
   requireHostedGeneratedImageUploader?: boolean | null

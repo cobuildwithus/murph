@@ -267,7 +267,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(wrapped[HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]).toBeTypeOf("function");
   });
 
-  it("accepts only nonempty PDF PUTs on the hosted-local Linq upload path", async () => {
+  it("accepts supported nonempty private-media PUTs on the hosted-local Linq upload path", async () => {
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST
     ];
@@ -307,6 +307,19 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       phase: "wake.running",
     });
     await expect(run({
+      body: "synthetic-webp-bytes",
+      contentType: "image/webp",
+    }).then((response) => response.status)).resolves.toBe(204);
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenLastCalledWith({
+      component: "runner",
+      details: {
+        contentType: "image/webp",
+        uploadBytes: 20,
+      },
+      message: "Hosted-local Linq attachment upload accepted.",
+      phase: "wake.running",
+    });
+    await expect(run({
       body: "synthetic-pdf-bytes",
       contentType: "text/plain",
     }).then((response) => response.status)).resolves.toBe(415);
@@ -321,7 +334,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     }).then((response) => response.status)).resolves.toBe(404);
   });
 
-  it("preserves the generated-image upload method and body in the Cloudflare Images stub", async () => {
+  it("returns the generated-image URL upload compatibility tombstone", async () => {
     const handler = readHostedLocalTestOutboundByHost()[
       HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.effectsPort
     ];
@@ -371,14 +384,10 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       { containerId: "opaque-container-id" },
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(410);
     await expect(response.json()).resolves.toEqual({
-      media: {
-        alt: "Generated mobility setup",
-        kind: "image",
-        source: "gpt-image-2",
-        url: "https://imagedelivery.net/hosted-local/generated-image/public",
-      },
+      error:
+        "Generated-image URL upload is disabled; use private provider attachments.",
     });
   });
 

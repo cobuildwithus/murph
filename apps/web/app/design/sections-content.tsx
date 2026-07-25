@@ -20,6 +20,7 @@ import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
 } from "./group-usage-funding-study";
+import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 
 function StudySection({
   children,
@@ -109,6 +110,12 @@ export function SectionsContent() {
 
       <StudySection title="Personal usage credit states">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private experiment results share">
+        <ExperimentResultsShareStudy />
       </StudySection>
 
       <Separator />
