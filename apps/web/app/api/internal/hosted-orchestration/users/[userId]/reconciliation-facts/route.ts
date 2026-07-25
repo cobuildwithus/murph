@@ -13,8 +13,8 @@ import {
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
 import {
-  readHostedRuntimeReconciliationFacts,
-} from "@/src/lib/hosted-orchestration/runtime-reconciliation-facts";
+  readHostedRuntimeReconciliationFactsWithVisibleAccess,
+} from "@/src/lib/hosted-orchestration/visible-runtime-reconciliation";
 import {
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
@@ -38,7 +38,9 @@ export const GET = withJsonError(async (
     userId: routeUserId,
   });
 
-  return jsonOk(await readHostedRuntimeReconciliationFacts(factsRequest));
+  return jsonOk(
+    await readHostedRuntimeReconciliationFactsWithVisibleAccess(factsRequest),
+  );
 });
 
 function assertHostedOrchestrationUserMatches(input: {
