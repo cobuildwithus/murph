@@ -58,8 +58,12 @@ vi.mock("@/src/components/hosted-groups/group-join-client", () => ({
       "Legal consent gate",
     );
   },
-  GroupJoinSignInButton() {
-    return createElement("button", null, "Continue to join");
+  GroupJoinSignInButton(props: { inviteCode?: string | null }) {
+    return createElement(
+      "button",
+      { "data-invite-code": props.inviteCode ?? "" },
+      "Continue to join",
+    );
   },
 }));
 
@@ -304,9 +308,71 @@ test("does not offer self-service leave to the group owner", async () => {
   expect(markup).not.toContain("Leave group");
 });
 
+// A cold-outreach recipient arrives on /groups/join/<code>?invite=<code>. If the
+// page drops that invite, authentication can resolve a different provisional
+// identity than the phone member first-contact just created, and the account
+// they finish would not be bound to the group they meant to join.
+test("forwards an invite code from the join link into the sign-in action", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+  });
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce(createSignedOutJoinView());
+
+  const markup = await renderGroupJoinPage("JOIN123", {
+    invite: "invite_opaque",
+  });
+
+  expect(markup).toContain('data-invite-code="invite_opaque"');
+  expect(markup).toContain("Continue to join");
+});
+
+test("omits an invite code when the join link carries none", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
+    authenticated: false,
+    authenticatedMember: null,
+  });
+  mocks.readHostedGroupJoinView.mockResolvedValueOnce(createSignedOutJoinView());
+
+  const markup = await renderGroupJoinPage("JOIN123");
+
+  expect(markup).toContain('data-invite-code=""');
+});
+
+function createSignedOutJoinView(): {
+  activeVaultShareProjectionKinds: readonly string[];
+  activeVaultShareProjectionScopes: readonly string[];
+  displayName: string;
+  id: string;
+  kind: string;
+  memberCount: number;
+  requestedVaultShareProjections: readonly string[];
+  status: string;
+  viewerCanLeave: boolean;
+  viewerMembershipId: null;
+  viewerMembershipStatus: null;
+} {
+  return {
+    activeVaultShareProjectionKinds: [],
+    activeVaultShareProjectionScopes: [],
+    displayName: "Sunday Sleep Crew",
+    id: "hgrp_123",
+    kind: "custom",
+    memberCount: 2,
+    requestedVaultShareProjections: [],
+    status: "active",
+    viewerCanLeave: false,
+    viewerMembershipId: null,
+    viewerMembershipStatus: null,
+  };
+}
+
 async function renderGroupJoinPage(
   joinCode: string,
-  searchParams?: { postJoin?: string | string[] | undefined },
+  searchParams?: {
+    invite?: string | string[] | undefined;
+    postJoin?: string | string[] | undefined;
+  },
 ): Promise<string> {
   const { default: GroupJoinPage } = await import("../app/groups/join/[joinCode]/page");
 

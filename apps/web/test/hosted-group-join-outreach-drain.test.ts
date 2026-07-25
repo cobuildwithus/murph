@@ -58,6 +58,7 @@ import {
   buildHostedGroupJoinOutreachMessage,
   drainOneHostedGroupJoinOutreach,
 } from "@/src/lib/hosted-groups/group-join-outreach-drain";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-07-24T16:00:00.000Z");
 const LINE = {
@@ -151,6 +152,200 @@ describe("hosted group join outreach drain", () => {
     );
   });
 
+  // Each of these is a refusal that must never reach the provider. Proving them
+  // together is what keeps an unsolicited or duplicate cold thread from becoming
+  // possible while the happy-path test stays green.
+  const refusals: readonly {
+    arrange: () => void;
+    expected: { kind: "deferred" | "skipped"; reason: string };
+    name: string;
+    stub?: Parameters<typeof createPrismaStub>[0];
+  }[] = [
+    {
+      arrange: () => {
+        mocks.lookupMember.mockResolvedValue({
+          core: { id: "hbm_existing", suspendedAt: null },
+        });
+      },
+      expected: { kind: "skipped", reason: "recipient_now_member" },
+      name: "the recipient already has an account",
+    },
+    {
+      arrange: () => {},
+      expected: { kind: "skipped", reason: "recipient_already_outreached" },
+      name: "the recipient already has a cold thread for another group",
+      stub: { priorAttempt: { id: "hgrpjoa_earlier" } },
+    },
+    {
+      arrange: () => {
+        mocks.decideSendWindow.mockReturnValue({
+          kind: "defer",
+          nextAttemptAt: new Date("2026-07-25T13:00:00.000Z"),
+          reason: "recipient_quiet_hours",
+        });
+      },
+      expected: { kind: "deferred", reason: "recipient_quiet_hours" },
+      name: "the recipient is inside quiet hours",
+    },
+    {
+      arrange: () => {
+        mocks.listHealthyLines.mockResolvedValue([]);
+      },
+      expected: { kind: "deferred", reason: "no_healthy_line" },
+      name: "no healthy line can send",
+    },
+    {
+      arrange: () => {
+        mocks.claimDelivery.mockResolvedValue({ claimed: false, retryAt: null });
+      },
+      expected: { kind: "deferred", reason: "delivery_in_flight" },
+      name: "a delivery attempt is already in flight",
+    },
+    {
+      arrange: () => {
+        mocks.readParticipantPhone.mockReturnValue(null);
+      },
+      expected: { kind: "skipped", reason: "participant_phone_unreadable" },
+      name: "the stored participant phone cannot be read",
+    },
+    {
+      arrange: () => {},
+      expected: { kind: "skipped", reason: "offer_revoked" },
+      name: "the offer was revoked after enqueue",
+      stub: { offerRevokedAt: new Date("2026-07-24T15:00:00.000Z") },
+    },
+  ];
+
+  for (const refusal of refusals) {
+    it(`refuses without a provider call when ${refusal.name}`, async () => {
+      refusal.arrange();
+      const { prisma, updateMany } = createPrismaStub(refusal.stub);
+
+      await expect(drainOneHostedGroupJoinOutreach({
+        now: NOW,
+        prisma,
+      })).resolves.toEqual({
+        ...refusal.expected,
+        outreachId: "hgrpjoa_opaque",
+      });
+
+      expect(mocks.createChat).not.toHaveBeenCalled();
+      expect(mocks.assertParticipantAuthority).not.toHaveBeenCalled();
+      expect(updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining(
+            refusal.expected.kind === "skipped"
+              ? { skipReason: refusal.expected.reason }
+              : { lastDeferralReason: refusal.expected.reason },
+          ),
+        }),
+      );
+    });
+  }
+
+  it("persists the exact next attempt instant for a quiet-hours deferral", async () => {
+    const nextAttemptAt = new Date("2026-07-25T13:00:00.000Z");
+    mocks.decideSendWindow.mockReturnValue({
+      kind: "defer",
+      nextAttemptAt,
+      reason: "recipient_quiet_hours",
+    });
+    const { prisma, updateMany } = createPrismaStub();
+
+    await drainOneHostedGroupJoinOutreach({ now: NOW, prisma });
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          lastDeferralReason: "recipient_quiet_hours",
+          nextAttemptAt,
+        }),
+      }),
+    );
+  });
+
+  it("retries a retryable provider failure instead of abandoning the recipient", async () => {
+    mocks.createChat.mockRejectedValue(new Error("provider unavailable"));
+    const { prisma, updateMany } = createPrismaStub({ attemptCount: 1 });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "deferred",
+      outreachId: "hgrpjoa_opaque",
+      reason: "provider_retry",
+    });
+
+    expect(mocks.markDeliveryFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ retryAfterAt: expect.any(Date) }),
+    );
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ lastDeferralReason: "provider_retry" }),
+      }),
+    );
+  });
+
+  it("stops retrying a provider rejection that cannot succeed", async () => {
+    mocks.createChat.mockRejectedValue(hostedOnboardingError({
+      code: "HOSTED_LINQ_SEND_REJECTED",
+      httpStatus: 400,
+      message: "Provider rejected the recipient.",
+      retryable: false,
+    }));
+    const { prisma, updateMany } = createPrismaStub({ attemptCount: 1 });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "skipped",
+      outreachId: "hgrpjoa_opaque",
+      reason: "provider_rejected",
+    });
+
+    expect(mocks.markDeliveryFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ retryAfterAt: null }),
+    );
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ skipReason: "provider_rejected" }),
+      }),
+    );
+  });
+
+  it("stops after the provider attempt ceiling", async () => {
+    mocks.createChat.mockRejectedValue(new Error("provider unavailable"));
+    const { prisma, updateMany } = createPrismaStub({ attemptCount: 5 });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({
+      kind: "skipped",
+      outreachId: "hgrpjoa_opaque",
+      reason: "provider_attempt_limit",
+    });
+
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ skipReason: "provider_attempt_limit" }),
+      }),
+    );
+  });
+
+  it("reports idle without touching the provider when nothing is due", async () => {
+    const { prisma } = createPrismaStub({ due: null });
+
+    await expect(drainOneHostedGroupJoinOutreach({
+      now: NOW,
+      prisma,
+    })).resolves.toEqual({ kind: "idle" });
+
+    expect(mocks.createChat).not.toHaveBeenCalled();
+  });
+
   it("never lets a URL-shaped group name enter first-contact copy", () => {
     expect(buildHostedGroupJoinOutreachMessage("https://example.test/join"))
       .toBe("You liked the invite to this group. Reply here and I'll help you join.");
@@ -166,7 +361,12 @@ describe("hosted group join outreach drain", () => {
   });
 });
 
-function createPrismaStub(): {
+function createPrismaStub(options?: {
+  attemptCount?: number;
+  due?: null;
+  offerRevokedAt?: Date;
+  priorAttempt?: { id: string } | null;
+}): {
   prisma: Parameters<typeof drainOneHostedGroupJoinOutreach>[0]["prisma"];
   updateMany: ReturnType<typeof vi.fn>;
 } {
@@ -193,14 +393,27 @@ function createPrismaStub(): {
           runtimeMemberId: "hbm_runtime",
         },
         groupId: "hgrp_opaque",
-        revokedAt: null,
+        revokedAt: options?.offerRevokedAt ?? null,
       })),
     },
     hostedGroupJoinOutreach: {
+      // The drain reads three different shapes through findFirst: the due row,
+      // this participant's prior cold attempt, and the newest attempt anywhere
+      // for global pacing. Distinguish them by the predicate each one uses.
       findFirst: vi.fn(async (input: {
         where: Record<string, unknown>;
-      }) => "nextAttemptAt" in input.where ? dueOutreach : null),
-      findUnique: vi.fn(async () => ({ attemptCount: 1 })),
+      }) => {
+        if ("nextAttemptAt" in input.where) {
+          return options?.due === null ? null : dueOutreach;
+        }
+        if ("participantPhoneLookupKey" in input.where) {
+          return options?.priorAttempt ?? null;
+        }
+        return null;
+      }),
+      findUnique: vi.fn(async () => ({
+        attemptCount: options?.attemptCount ?? 1,
+      })),
       update: vi.fn(async () => dueOutreach),
       updateMany,
     },

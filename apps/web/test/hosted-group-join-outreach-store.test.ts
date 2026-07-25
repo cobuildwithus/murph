@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { enqueueHostedGroupJoinOutreachTx } from "@/src/lib/hosted-groups/group-join-outreach-store";
+import {
+  claimHostedGroupJoinOutreachReplyContextTx,
+  enqueueHostedGroupJoinOutreachTx,
+} from "@/src/lib/hosted-groups/group-join-outreach-store";
 
 const TEST_CONTACT_PRIVACY_KEY =
   "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=";
@@ -76,6 +79,102 @@ describe("hosted group join outreach store", () => {
     } | undefined;
     expect(created?.data[0]?.participantPhoneEncrypted)
       .not.toContain("+15551234567");
+  });
+
+  // The reply-context claim is the owner that turns "someone texted back" into
+  // "this reply belongs to that group offer". Proving it here keeps the group
+  // handoff from depending only on a URL builder called with a hand-fed code.
+  function createReplyContextTx(options?: {
+    offer?: {
+      group: { joinCode: string | null; runtimeMemberId: string | null } | null;
+    } | null;
+    outreach?: {
+      groupId: string;
+      id: string;
+      linqChatLookupKey: string | null;
+      offerId: string;
+    } | null;
+  }) {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const outreach = options?.outreach === undefined
+      ? {
+          groupId: "hgrp_opaque",
+          id: "hgrpjoa_opaque",
+          linqChatLookupKey: null,
+          offerId: "hgrpjo_opaque",
+        }
+      : options.outreach;
+    const offer = options?.offer === undefined
+      ? { group: { joinCode: "join_opaque", runtimeMemberId: "hbm_runtime" } }
+      : options.offer;
+    return {
+      tx: {
+        hostedGroupJoinOffer: { findFirst: vi.fn(async () => offer) },
+        hostedGroupJoinOutreach: {
+          findFirst: vi.fn(async () => outreach),
+          updateMany,
+        },
+      } as never,
+      updateMany,
+    };
+  }
+
+  it("recovers the originating group and records the reply", async () => {
+    const { tx, updateMany } = createReplyContextTx();
+    const now = new Date("2026-07-24T20:00:00.000Z");
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      now,
+      participantPhoneNumber: "+15551234567",
+      tx,
+    })).resolves.toEqual({ joinCode: "join_opaque" });
+
+    // A reply is the only engagement signal a cold outreach earns, and the
+    // thread it arrived on binds the row when dispatch never recorded one.
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        linqChatLookupKey: expect.any(String),
+        repliedAt: now,
+      }),
+    }));
+  });
+
+  it("claims nothing when no pending outreach matches the sender", async () => {
+    const { tx, updateMany } = createReplyContextTx({ outreach: null });
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_unrelated",
+      now: new Date("2026-07-24T20:00:00.000Z"),
+      participantPhoneNumber: "+15559876543",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the generic link when the offer no longer resolves", async () => {
+    const { tx } = createReplyContextTx({ offer: null });
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      now: new Date("2026-07-24T20:00:00.000Z"),
+      participantPhoneNumber: "+15551234567",
+      tx,
+    })).resolves.toBeNull();
+  });
+
+  it("does not treat a non-phone sender as a reply", async () => {
+    const { tx, updateMany } = createReplyContextTx();
+
+    await expect(claimHostedGroupJoinOutreachReplyContextTx({
+      linqChatId: "chat_direct_opaque",
+      now: new Date("2026-07-24T20:00:00.000Z"),
+      participantPhoneNumber: "not-a-phone",
+      tx,
+    })).resolves.toBeNull();
+
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });
 
