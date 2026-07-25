@@ -24,6 +24,7 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 import {
   selectMetricSeries,
+  type MealNutritionDayTotal,
   type MetricPoint,
   type MetricSeriesPoint,
 } from "@murphai/query";
@@ -38,8 +39,10 @@ import {
   readProjectableDailyMetricDays,
   readProjectableWorkoutDays,
   readProjectableWorkoutsDays,
+  readProjectableMealNutritionDays,
   readProjectableProfileName,
   selectProjectableDailyMetricDays,
+  selectProjectableMealNutritionDays,
   selectProjectableActivityDistanceDays,
   selectProjectableActivityMinutesDays,
   selectProjectableActivitySessionCountDays,
@@ -74,6 +77,7 @@ const RECORD = {
 const SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("sleep-times.v0");
 const GROUP_EMAIL_SCOPE = hostedVaultShareProjectionKindToScope("group-email.v0");
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const DEVICE_SYNC_STATUS_SCOPE = hostedVaultShareProjectionKindToScope(
   HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND,
 );
@@ -253,6 +257,29 @@ function scoreSettledWorkoutsDate(
     ),
     status: "settled",
     workoutCount: record.data.workouts.length,
+  };
+}
+
+function mealNutritionDay(input: {
+  date: string;
+  mealCount?: number;
+  proteinMealCount?: number;
+  proteinTotal: number | null;
+}): MealNutritionDayTotal {
+  const mealCount = input.mealCount ?? 1;
+  return {
+    date: input.date,
+    mealCount,
+    totals: {
+      calories: { mealCount: 0, total: null },
+      carbsGrams: { mealCount: 0, total: null },
+      fatGrams: { mealCount: 0, total: null },
+      fiberGrams: { mealCount: 0, total: null },
+      proteinGrams: {
+        mealCount: input.proteinMealCount ?? mealCount,
+        total: input.proteinTotal,
+      },
+    },
   };
 }
 
@@ -834,6 +861,323 @@ describe("selectProjectableDailyMetricDays", () => {
         expect(JSON.stringify(selected)).not.toContain("strava");
         expect(JSON.stringify(selected)).not.toContain("averagePowerWatts");
       }
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("selectProjectableMealNutritionDays", () => {
+  const nowMs = Date.parse("2026-07-04T00:00:00.000Z");
+  const proteinSpec = requireDailyMetricSpec("protein-days.v0");
+
+  it("maps a complete meal-nutrition day to one scalar gram record", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({
+        date: "2026-07-03",
+        mealCount: 2,
+        proteinTotal: 87.5,
+      }),
+    ], proteinSpec, nowMs)).toEqual([{
+      data: {
+        date: "2026-07-03",
+        metricKey: "protein-grams",
+        unit: "g",
+        value: 87.5,
+      },
+      occurredAt: "2026-07-03T00:00:00.000Z",
+      recordKey: "2026-07-03",
+    }]);
+  });
+
+  it("omits a day when protein is missing from one of its meals", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({
+        date: "2026-07-03",
+        mealCount: 2,
+        proteinMealCount: 1,
+        proteinTotal: 42,
+      }),
+    ], proteinSpec, nowMs)).toEqual([]);
+  });
+
+  it("retains a complete true-zero protein day", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({
+        date: "2026-07-03",
+        mealCount: 2,
+        proteinTotal: 0,
+      }),
+    ], proteinSpec, nowMs)).toEqual([{
+      data: {
+        date: "2026-07-03",
+        metricKey: "protein-grams",
+        unit: "g",
+        value: 0,
+      },
+      occurredAt: "2026-07-03T00:00:00.000Z",
+      recordKey: "2026-07-03",
+    }]);
+  });
+
+  it("skips protein totals outside the projection bounds", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({ date: "2026-07-03", proteinTotal: 2_001 }),
+      mealNutritionDay({ date: "2026-07-02", proteinTotal: -1 }),
+    ], proteinSpec, nowMs)).toEqual([]);
+  });
+
+  it("skips protein days older than the seven-day cutoff", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({ date: "2026-06-26", proteinTotal: 55 }),
+    ], proteinSpec, nowMs)).toEqual([]);
+  });
+
+  it("keeps at most the seven newest complete protein days", () => {
+    const selected = selectProjectableMealNutritionDays([
+      "2026-07-04",
+      "2026-06-30",
+      "2026-06-27",
+      "2026-07-02",
+      "2026-06-29",
+      "2026-07-01",
+      "2026-06-28",
+      "2026-07-03",
+    ].map((date, index) => mealNutritionDay({
+      date,
+      proteinTotal: 40 + index,
+    })), proteinSpec, nowMs);
+
+    expect(selected).toHaveLength(7);
+    expect(selected.map((record) => record.recordKey)).toEqual([
+      "2026-07-04",
+      "2026-07-03",
+      "2026-07-02",
+      "2026-07-01",
+      "2026-06-30",
+      "2026-06-29",
+      "2026-06-28",
+    ]);
+  });
+
+  it("returns no records for a metric-series-sourced projection spec", () => {
+    expect(selectProjectableMealNutritionDays([
+      mealNutritionDay({ date: "2026-07-03", proteinTotal: 55 }),
+    ], requireDailyMetricSpec("steps-days.v0"), nowMs)).toEqual([]);
+  });
+
+  const NUTRIENT_CASES = [
+    { projectionKind: "calories-days.v0", totalKey: "calories", metricKey: "dietary-calories", unit: "kcal", value: 2_150, overMax: 20_001 },
+    { projectionKind: "carbs-days.v0", totalKey: "carbsGrams", metricKey: "carbs-grams", unit: "g", value: 240, overMax: 2_001 },
+    { projectionKind: "fat-days.v0", totalKey: "fatGrams", metricKey: "fat-grams", unit: "g", value: 71, overMax: 2_001 },
+    { projectionKind: "fiber-days.v0", totalKey: "fiberGrams", metricKey: "fiber-grams", unit: "g", value: 34, overMax: 501 },
+  ] as const;
+
+  for (const nutrient of NUTRIENT_CASES) {
+    const dayForNutrient = (
+      date: string,
+      total: number | null,
+      opts: { metricMealCount?: number; mealCount?: number } = {},
+    ): MealNutritionDayTotal => {
+      const mealCount = opts.mealCount ?? 1;
+      const empty = { mealCount: 0, total: null as number | null };
+      const totals = {
+        calories: { ...empty },
+        carbsGrams: { ...empty },
+        fatGrams: { ...empty },
+        fiberGrams: { ...empty },
+        proteinGrams: { ...empty },
+      };
+      totals[nutrient.totalKey] = { mealCount: opts.metricMealCount ?? mealCount, total };
+      return { date, mealCount, totals };
+    };
+
+    it(`shares complete ${nutrient.projectionKind} days and fails closed otherwise`, () => {
+      const spec = requireDailyMetricSpec(nutrient.projectionKind);
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.value),
+      ], spec, nowMs)).toEqual([{
+        data: {
+          date: "2026-07-03",
+          metricKey: nutrient.metricKey,
+          unit: nutrient.unit,
+          value: nutrient.value,
+        },
+        occurredAt: "2026-07-03T00:00:00.000Z",
+        recordKey: "2026-07-03",
+      }]);
+
+      // Complete true-zero day is data.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", 0),
+      ], spec, nowMs)[0]?.data).toMatchObject({ value: 0 });
+
+      // Incomplete day (a meal lacks the nutrient) is omitted.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.value, { mealCount: 2, metricMealCount: 1 }),
+      ], spec, nowMs)).toEqual([]);
+
+      // Out-of-bounds total is skipped, never clamped.
+      expect(selectProjectableMealNutritionDays([
+        dayForNutrient("2026-07-03", nutrient.overMax),
+      ], spec, nowMs)).toEqual([]);
+    });
+  }
+
+  it("reads and offers complete local-day protein totals without exposing meal metadata", async () => {
+    const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-protein-days-"));
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(
+      Date.parse("2026-07-05T00:00:00.000Z"),
+    );
+
+    try {
+      await mkdir(join(vaultRoot, "ledger", "events", "2026"), { recursive: true });
+      await writeFile(
+        join(vaultRoot, "vault.json"),
+        `${JSON.stringify({
+          formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+          vaultId: "vault_01K72NVW6Z4QK8VYAVX7GT7S4D",
+          createdAt: "2026-07-01T00:00:00.000Z",
+          title: "Vault share protein test",
+          timezone: "America/Los_Angeles",
+        })}\n`,
+        "utf8",
+      );
+      await writeFile(
+        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+        `${[
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_01K72NVW6Z4QK8VYAVX7GT7S5A",
+            kind: "meal",
+            occurredAt: "2026-07-04T00:30:00Z",
+            dayKey: "2026-07-03",
+            recordedAt: "2026-07-04T00:35:00Z",
+            title: "Local evening meal",
+            source: "manual",
+            mealId: "meal_01K72NVW6Z4QK8VYAVX7GT7S5A",
+            nutrition: {
+              totals: {
+                calories: 610,
+                proteinGrams: 40,
+              },
+            },
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_01K72NVW6Z4QK8VYAVX7GT7S5B",
+            kind: "meal",
+            occurredAt: "2026-07-03T17:00:00Z",
+            dayKey: "2026-07-03",
+            recordedAt: "2026-07-03T17:01:00Z",
+            title: "Imported meal revision one",
+            source: "device",
+            externalRef: {
+              system: "junction",
+              resourceType: "junction-meal",
+              resourceId: "protein-meal-01",
+            },
+            mealId: "meal_01K72NVW6Z4QK8VYAVX7GT7S5B",
+            nutrition: {
+              totals: {
+                calories: 420,
+                proteinGrams: 10,
+              },
+            },
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_01K72NVW6Z4QK8VYAVX7GT7S5C",
+            kind: "meal",
+            occurredAt: "2026-07-03T17:00:00Z",
+            dayKey: "2026-07-03",
+            recordedAt: "2026-07-03T17:05:00Z",
+            title: "Imported meal revision two",
+            source: "device",
+            externalRef: {
+              system: "junction",
+              resourceType: "junction-meal",
+              resourceId: "protein-meal-01",
+            },
+            mealId: "meal_01K72NVW6Z4QK8VYAVX7GT7S5C",
+            nutrition: {
+              totals: {
+                calories: 450,
+                proteinGrams: 22,
+              },
+            },
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_01K72NVW6Z4QK8VYAVX7GT7S5D",
+            kind: "meal",
+            occurredAt: "2026-07-04T16:00:00Z",
+            dayKey: "2026-07-04",
+            recordedAt: "2026-07-04T16:01:00Z",
+            title: "Partial day protein meal",
+            source: "manual",
+            mealId: "meal_01K72NVW6Z4QK8VYAVX7GT7S5D",
+            nutrition: {
+              totals: {
+                calories: 500,
+                proteinGrams: 35,
+              },
+            },
+          },
+          {
+            schemaVersion: "murph.event.v1",
+            id: "evt_01K72NVW6Z4QK8VYAVX7GT7S5E",
+            kind: "meal",
+            occurredAt: "2026-07-04T20:00:00Z",
+            dayKey: "2026-07-04",
+            recordedAt: "2026-07-04T20:01:00Z",
+            title: "Partial day meal without protein",
+            source: "manual",
+            mealId: "meal_01K72NVW6Z4QK8VYAVX7GT7S5E",
+            nutrition: {
+              totals: {
+                calories: 300,
+              },
+            },
+          },
+        ].map((record) => JSON.stringify(record)).join("\n")}\n`,
+        "utf8",
+      );
+
+      const selected = await readProjectableMealNutritionDays(
+        vaultRoot,
+        proteinSpec,
+      );
+
+      expect(selected).toEqual([{
+        data: {
+          date: "2026-07-03",
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 62,
+        },
+        occurredAt: "2026-07-03T00:00:00.000Z",
+        recordKey: "2026-07-03",
+      }]);
+      expect(selected[0]).not.toHaveProperty("sourceRevision");
+      expect(JSON.stringify(selected)).not.toContain("externalRef");
+      expect(JSON.stringify(selected)).not.toContain("mealId");
+
+      const deliver = vi.fn().mockResolvedValue({ status: "delivered" });
+      await expect(offerHostedVaultShareProjectionBestEffort({
+        vaultRoot,
+        vaultSharePort: {
+          deliver,
+          listActiveProjectionScopes: async () => [PROTEIN_SCOPE],
+        },
+      })).resolves.toEqual({ outcome: "delivered" });
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(deliver).toHaveBeenCalledWith({
+        projectionKind: "protein-days.v0",
+        projectionScope: PROTEIN_SCOPE,
+        records: selected,
+      });
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });

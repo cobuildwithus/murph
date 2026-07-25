@@ -32,6 +32,7 @@ import {
 
 const RUNTIME_MEMBER_ID = "member_group_runtime";
 const PROFILE_SCOPE = hostedVaultShareProjectionKindToScope("profile-name.v0");
+const PROTEIN_SCOPE = hostedVaultShareProjectionKindToScope("protein-days.v0");
 const STEPS_SCOPE = hostedVaultShareProjectionKindToScope("steps-days.v0");
 const DEEP_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("deep-sleep-days.v0");
 const REM_SLEEP_SCOPE = hostedVaultShareProjectionKindToScope("rem-sleep-days.v0");
@@ -39,6 +40,7 @@ const WORKOUTS_SCOPE = hostedVaultShareProjectionKindToScope(
   "workouts.v0",
 );
 const DEVICE_SCOPE = hostedVaultShareProjectionKindToScope("device-sync-status.v0");
+const PROTEIN_KEY = buildHostedVaultShareProjectionScopeKey(PROTEIN_SCOPE);
 const STEPS_KEY = buildHostedVaultShareProjectionScopeKey(STEPS_SCOPE);
 const DEEP_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(DEEP_SLEEP_SCOPE);
 const REM_SLEEP_KEY = buildHostedVaultShareProjectionScopeKey(REM_SLEEP_SCOPE);
@@ -49,6 +51,7 @@ const DEVICE_KEY = buildHostedVaultShareProjectionScopeKey(DEVICE_SCOPE);
 
 type TestProjectionScope =
   | typeof PROFILE_SCOPE
+  | typeof PROTEIN_SCOPE
   | typeof STEPS_SCOPE
   | typeof DEEP_SLEEP_SCOPE
   | typeof REM_SLEEP_SCOPE
@@ -380,6 +383,94 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     }));
   });
 
+  it("returns the encrypted protein grant matrix without source or meal metadata", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const proteinA = snapshot({
+      id: "share_protein_a",
+      memberId: "member_a",
+      projectionScope: PROTEIN_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 94,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+        sourceRevision: "p".repeat(32),
+      }],
+    });
+    const proteinB = snapshot({
+      id: "share_protein_b",
+      memberId: "member_b",
+      projectionScope: PROTEIN_SCOPE,
+      records: [],
+    });
+    installCiphertexts({ proteinA, proteinB });
+    const { prisma } = createPrisma({
+      shares: [
+        shareRow({
+          ciphertext: "proteinA",
+          id: "share_protein_a",
+          memberId: "member_a",
+          projectionScope: PROTEIN_SCOPE,
+        }),
+        shareRow({
+          ciphertext: "proteinB",
+          id: "share_protein_b",
+          memberId: "member_b",
+          projectionScope: PROTEIN_SCOPE,
+        }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [PROTEIN_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.requestedProjectionScopeKeys).toEqual([PROTEIN_KEY]);
+    expect(result.members[0]?.projections).toEqual([{
+      dataStatus: "available",
+      grantStatus: "granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 94,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    }]);
+    expect(result.members[1]?.projections).toEqual([{
+      dataStatus: "missing",
+      grantStatus: "granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [],
+    }]);
+    expect(result.members[2]?.projections).toEqual([{
+      dataStatus: "missing",
+      grantStatus: "not_granted",
+      projectionScope: PROTEIN_SCOPE,
+      projectionScopeKey: PROTEIN_KEY,
+      records: [],
+    }]);
+    expect(JSON.stringify(result)).not.toContain("sourceRevision");
+    expect(JSON.stringify(result)).not.toContain("mealId");
+    expect(JSON.stringify(result)).not.toContain("externalRef");
+  });
+
   it("preserves an encrypted daily-metric zero as available shared data", async () => {
     const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
       .toISOString()
@@ -612,6 +703,71 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
       }),
     ]);
     expect(JSON.stringify(result)).not.toContain("sourceRevision");
+  });
+
+  it("preserves an encrypted protein zero as available shared data", async () => {
+    const date = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const proteinZero = snapshot({
+      id: "share_protein_zero",
+      memberId: "member_protein_zero",
+      projectionScope: PROTEIN_SCOPE,
+      records: [{
+        data: {
+          date,
+          metricKey: "protein-grams",
+          unit: "g",
+          value: 0,
+        },
+        occurredAt: `${date}T00:00:00.000Z`,
+        recordKey: date,
+      }],
+    });
+    installCiphertexts({ proteinZero });
+    const { prisma } = createPrisma({
+      group: {
+        members: [{
+          id: "participant_protein_zero",
+          memberId: "member_protein_zero",
+        }],
+      },
+      shares: [shareRow({
+        ciphertext: "proteinZero",
+        id: "share_protein_zero",
+        memberId: "member_protein_zero",
+        projectionScope: PROTEIN_SCOPE,
+      })],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [PROTEIN_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members).toEqual([expect.objectContaining({
+      memberId: "member_protein_zero",
+      participantId: "participant_protein_zero",
+      projections: [{
+        dataStatus: "available",
+        grantStatus: "granted",
+        projectionScope: PROTEIN_SCOPE,
+        projectionScopeKey: PROTEIN_KEY,
+        records: [{
+          data: {
+            date,
+            metricKey: "protein-grams",
+            unit: "g",
+            value: 0,
+          },
+          occurredAt: `${date}T00:00:00.000Z`,
+          recordKey: date,
+        }],
+      }],
+    })]);
   });
 
   it("does not read device state without an active device-status grant", async () => {

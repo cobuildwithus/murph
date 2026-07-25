@@ -761,12 +761,16 @@ describe("Retell phone-call result handling", () => {
     const wake = buildPhoneCallResultNotificationWake({
       brief: VALID_BRIEF,
       callId: "hpc_123",
+      destination: {
+        conversationShape: "direct-member",
+        externalThreadRouteAuthority: null,
+        route,
+      },
       memberId: "member_123",
       result: {
         outcome: "completed",
         summary: "The office confirmed the appointment for Friday at 10am.",
       },
-      route,
     });
 
     expect(wake.kind).toBe("assistant.notification.requested");
@@ -776,12 +780,66 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.deliveryDedupeToken).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryIdempotencyKey).toBe("phone-call-result:hpc_123");
     expect(wake.notification.deliveryDispatchMode).toBe("queue-only");
+    expect(wake.notification).not.toHaveProperty("externalThreadRouteAuthority");
     expect(wake.notification.route).toEqual(route);
     expect(wake.notification.instructions).toContain("untrusted provider/callee text");
     expect(wake.notification.instructions).toContain(
       "The office confirmed the appointment for Friday at 10am.",
     );
     expect(wake.notification.instructions).toContain("you may skip sending a message");
+  });
+
+  it("carries non-direct group route authority into the result notification wake", () => {
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const route = {
+      actorId: null,
+      channel: "linq" as const,
+      delivery: {
+        kind: "thread" as const,
+        target: "linq-group-chat",
+      },
+      identityId: "group-identity",
+      threadId: "group-thread",
+      threadIsDirect: false,
+    };
+
+    const wake = buildPhoneCallResultNotificationWake({
+      brief: {
+        ...VALID_BRIEF,
+        allowTransferToUser: false,
+      },
+      callId: "hpc_group",
+      destination: {
+        conversationShape: "thread-container",
+        externalThreadRouteAuthority,
+        route,
+      },
+      memberId: "group-runtime-member",
+      result: {
+        outcome: "completed",
+        summary: "The restaurant confirmed a table for six.",
+      },
+    });
+
+    expect(wake.notification.externalThreadRouteAuthority).toEqual(
+      externalThreadRouteAuthority,
+    );
+    expect(wake.notification.route).toEqual(route);
+    expect(wake.notification.route.actorId).toBeNull();
+    expect(wake.notification.route.threadIsDirect).toBe(false);
+    // The room asked collectively, so it must always hear how the call ended.
+    // allow_send_or_skip here would let a completed, paid, externally visible
+    // call produce no group message at all.
+    expect(wake.notification.responsePolicy).toEqual({ kind: "require_send" });
+    expect(wake.notification.instructions).toContain("this group chat");
+    expect(wake.notification.instructions).not.toContain(
+      "you may skip sending a message",
+    );
   });
 
   it("updates call_ended once with provider id and end timestamp", async () => {

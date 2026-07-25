@@ -130,6 +130,14 @@ with no card at all.
   neither proves location nor reopens a completed challenge date.
 - VO2 max, resting heart rate, or HRV: `vo2-max-days.v0`,
   `resting-heart-rate-days.v0`, or `hrv-days.v0`
+- Daily nutrition logged from meals: `protein-days.v0` (protein grams),
+  `calories-days.v0` (calories), `carbs-days.v0` (carbohydrate grams),
+  `fat-days.v0` (fat grams), or `fiber-days.v0` (fiber grams). Values are what
+  the member logged in Murph — including meals imported from connected apps like
+  Cronometer or MyFitnessPal — not verified consumption. A day only appears once
+  every meal that day carries data for that nutrient, so a member with no record
+  for a day has no data, which never ranks as zero. Frame standings as the
+  nutrient "logged".
 
 For `deep-sleep-days.v0` and `rem-sleep-days.v0`, the producer marks the open
 member-local date `data.provisional: true`; absence means settled. Rank only
