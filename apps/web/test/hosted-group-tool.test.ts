@@ -806,9 +806,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledWith(expect.objectContaining({
       memberId: "member_owner",
     }));
-    expect(mocks.readHostedGroupIdByRuntimeMemberId).toHaveBeenCalledWith({
-      runtimeMemberId: "member_group_runtime",
-    });
     expect(mocks.readHostedGroupByRuntimeMemberId).not.toHaveBeenCalled();
     expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
       chatId: "chat_group_runtime",
@@ -855,8 +852,8 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
   });
 
-  it("reports group_not_found when the active runtime has no hosted group to rename", async () => {
-    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
+  it("renames the chat with a null group when the runtime has no hosted group record", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValueOnce(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -869,13 +866,73 @@ describe("handleHostedRuntimeGroupTool", () => {
       action: "update_display_name",
       result: {
         group: null,
-        status: "unavailable",
-        unavailableReason: "group_not_found",
+        status: "ok",
       },
     });
 
-    expect(mocks.updateHostedLinqChatDisplayName).not.toHaveBeenCalled();
-    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Unattached group",
+    });
+  });
+
+  it("labels a hosted group created while the chat rename was in flight", async () => {
+    const renamed = {
+      ...groupSummaryWithOwnerEmailGrant(),
+      displayName: RENAMED_GROUP_SUMMARY.displayName,
+    };
+    // The group does not exist when the rename starts; a concurrent
+    // create_join_link commits it while the provider request is in flight.
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+    mocks.updateHostedLinqChatDisplayName.mockImplementationOnce(async () => {
+      mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(renamed);
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: renamed,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        displayName: "Weekly Health Crew",
+        runtimeMemberId: "member_group_runtime",
+      }));
+  });
+
+  it("keeps the accepted rename when storing the hosted group label fails", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
+      .mockRejectedValueOnce(new Error("transaction unavailable"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Weekly Health Crew",
+    });
   });
 
   it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
@@ -1272,6 +1329,49 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
         }],
         status: "ok",
         truncated: false,
+      },
+    });
+  });
+
+  it("filters a renamed group summary and passes a null group through", () => {
+    const supportedScopeKeys = new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+    ]);
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
       },
     });
   });
@@ -1732,7 +1832,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupDisclosurePermissionTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       originAssistantInputId: DISCLOSURE_ORIGIN_ASSISTANT_INPUT_ID,
       permissionText: "Recent sleep timing and duration",
       postedAt: expect.any(Date),
@@ -1803,7 +1903,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
@@ -1845,7 +1945,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: diagnosticScopes,
       tx: fakeTx,
@@ -1976,14 +2076,14 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(1, {
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(2, {
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
@@ -2044,7 +2144,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: canonicalScopes,
       tx: fakeTx,
@@ -2081,7 +2181,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: canonicalScopes,
       tx: fakeTx,
@@ -2249,7 +2349,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
-      messageId: "msg_offer_1",
+      message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
       projectionScopes: [],
       tx: fakeTx,

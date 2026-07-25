@@ -59,8 +59,12 @@ describe("hosted phone call contracts", () => {
   it("parses the server-owned start request", () => {
     expect(hostedPhoneCallStartRequestSchema.parse({
       brief: VALID_BRIEF,
+      originSessionId: "session_phone_call",
       requestKey: "turn-123:tool-1",
-    }).requestKey).toBe("turn-123:tool-1");
+    })).toMatchObject({
+      originSessionId: "session_phone_call",
+      requestKey: "turn-123:tool-1",
+    });
   });
 
   it("keeps start responses bounded to transport lifecycle states", () => {

@@ -50,6 +50,10 @@ import {
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import { applyStripeInvoicePaid } from "./stripe-billing-events";
 import type { HostedStripeDispatchContext } from "./stripe-dispatch";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+} from "./stripe-error-log";
 
 const START_PAID_PULSE_PLAN = "launch_monthly";
 const START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH = "/settings#subscription";
@@ -501,24 +505,35 @@ function assertHostedStripePulseTrialSubscriptionBillingShapeCanChange(input: {
 }
 
 function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
+  return Boolean(readHostedStripeSubscriptionPaymentMethodId(subscription));
+}
+
+/**
+ * The payment method that should settle this subscription's next invoice.
+ * A resumed trial cuts a cycle invoice immediately, so the card has to be on the
+ * subscription: a card held only on the customer leaves that invoice in
+ * `requires_payment_method`, which strands the resume in `pending_update` until
+ * Stripe expires and voids it.
+ */
+function readHostedStripeSubscriptionPaymentMethodId(
+  subscription: Stripe.Subscription,
+): string | null {
   const subscriptionPaymentMethodId =
     coerceStripeObjectId(subscription.default_payment_method) ||
     coerceStripeObjectId(subscription.default_source);
 
   if (subscriptionPaymentMethodId) {
-    return true;
+    return subscriptionPaymentMethodId;
   }
 
   const customer = readExpandedStripeCustomer(subscription.customer);
   if (!customer) {
-    return false;
+    return null;
   }
 
-  const customerPaymentMethodId =
-    coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
-    coerceStripeObjectId(customer.default_source);
-
-  return Boolean(customerPaymentMethodId);
+  return coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
+    coerceStripeObjectId(customer.default_source) ||
+    null;
 }
 
 function readExpandedStripeCustomer(
@@ -954,15 +969,22 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       run: async () => {
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
+          // Stripe rejects `proration_behavior` outright while a subscription is
+          // paused ("Resume the subscription first"), so it may only ride along
+          // with the item deletes it exists for. Without those, this degenerates
+          // to the metadata-only shape the trial-extension path already relies on
+          // against a paused subscription.
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
             ...(input.legacyMeteredItems.length > 0
-              ? { items: input.legacyMeteredItems }
+              ? {
+                items: input.legacyMeteredItems,
+                proration_behavior: "none" as const,
+              }
               : {}),
             metadata: {
               [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
             },
-            proration_behavior: "none",
           }, {
             idempotencyKey:
               buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
@@ -976,10 +998,19 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
           return cleanedSubscription;
         }
 
+        const resumePaymentMethodId =
+          readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) ??
+          readHostedStripeSubscriptionPaymentMethodId(input.subscription);
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
             billing_cycle_anchor: "now",
+            // Carry the card onto the subscription. Without it the cycle invoice
+            // this resume creates has nothing to charge, so it stalls the whole
+            // resume in `pending_update` and Stripe voids it minutes later.
+            ...(resumePaymentMethodId
+              ? { default_payment_method: resumePaymentMethodId }
+              : {}),
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
           }, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
@@ -1149,39 +1180,15 @@ async function callHostedStripeStartPaidPulseOperation<T>(
   try {
     return await operation();
   } catch (error) {
+    logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
       code: "HOSTED_PULSE_TRIAL_START_PAID_STRIPE_UNAVAILABLE",
-      details: {
-        operationName,
-        ...describeSafeStripeStartPaidPulseError(error),
-      },
+      details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,
       message: "Stripe billing is unavailable for starting Pulse right now. Try again shortly.",
       retryable: true,
     });
   }
-}
-
-function describeSafeStripeStartPaidPulseError(error: unknown): Record<string, unknown> {
-  if (!error || typeof error !== "object") {
-    return {};
-  }
-
-  const candidate = error as {
-    code?: unknown;
-    rawType?: unknown;
-    requestId?: unknown;
-    statusCode?: unknown;
-    type?: unknown;
-  };
-
-  return {
-    ...(typeof candidate.code === "string" ? { code: candidate.code } : {}),
-    ...(typeof candidate.rawType === "string" ? { type: candidate.rawType } : {}),
-    ...(typeof candidate.type === "string" ? { type: candidate.type } : {}),
-    ...(typeof candidate.statusCode === "number" ? { statusCode: candidate.statusCode } : {}),
-    ...(typeof candidate.requestId === "string" ? { requestIdPresent: true } : {}),
-  };
 }
 
 function isHostedPulseTrialStartPaidStripeUnavailableError(error: unknown): error is HostedOnboardingError {

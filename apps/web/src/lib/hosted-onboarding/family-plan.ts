@@ -129,6 +129,11 @@ import {
   sumHostedFamilyPlanCapacities,
   type HostedFamilyPlanCapacities,
 } from "./family-plan-capacity";
+import {
+  describeHostedStripeErrorDetails,
+  logHostedStripeFailure,
+  withHostedStripeFailureLog,
+} from "./stripe-error-log";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -1602,32 +1607,35 @@ export async function createHostedFamilyBillingCheckout(input: {
     ...buildHostedFamilyStripeMetadata(checkoutInput.group),
     checkoutAttemptId: checkoutInput.checkoutAttemptId,
   };
-  const checkoutSession = await stripe.checkout.sessions.create({
-    cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
-    client_reference_id: checkoutInput.group.id,
-    ...(checkoutInput.stripeCustomerId
-      ? { customer: checkoutInput.stripeCustomerId }
-      : {}),
-    line_items: [{
-      price: checkoutInput.priceId,
-      quantity: checkoutInput.seatCount,
-    }],
-    metadata,
-    mode: "subscription",
-    payment_method_types: ["card"],
-    subscription_data: {
+  const checkoutSession = await withHostedStripeFailureLog(
+    "checkout.sessions.create.family",
+    () => stripe.checkout.sessions.create({
+      cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
+      client_reference_id: checkoutInput.group.id,
+      ...(checkoutInput.stripeCustomerId
+        ? { customer: checkoutInput.stripeCustomerId }
+        : {}),
+      line_items: [{
+        price: checkoutInput.priceId,
+        quantity: checkoutInput.seatCount,
+      }],
       metadata,
-    },
-    success_url: `${checkoutInput.publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-  }, {
-    idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
-      attemptId: checkoutInput.checkoutAttemptId,
-      groupId: checkoutInput.group.id,
-      priceId: checkoutInput.priceId,
-      seatCount: checkoutInput.seatCount,
-      stripeCustomerId: checkoutInput.stripeCustomerId,
+      mode: "subscription",
+      payment_method_types: ["card"],
+      subscription_data: {
+        metadata,
+      },
+      success_url: `${checkoutInput.publicBaseUrl}/settings?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    }, {
+      idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
+        attemptId: checkoutInput.checkoutAttemptId,
+        groupId: checkoutInput.group.id,
+        priceId: checkoutInput.priceId,
+        seatCount: checkoutInput.seatCount,
+        stripeCustomerId: checkoutInput.stripeCustomerId,
+      }),
     }),
-  });
+  );
 
   if (!checkoutSession.url) {
     throw hostedOnboardingError({
@@ -2027,37 +2035,15 @@ async function callHostedFamilyDirectPaidStripeOperation<T>(
     if (isHostedOnboardingError(error)) {
       throw error;
     }
+    logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_DIRECT_PAID_STRIPE_UNAVAILABLE",
-      details: {
-        operationName,
-        ...describeSafeHostedFamilyDirectPaidStripeError(error),
-      },
+      details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,
       message: "Stripe billing is unavailable for Family plan changes right now. Try again shortly.",
       retryable: true,
     });
   }
-}
-
-function describeSafeHostedFamilyDirectPaidStripeError(error: unknown): Record<string, unknown> {
-  if (typeof error !== "object" || error === null) {
-    return {
-      type: typeof error,
-    };
-  }
-
-  const code = Reflect.get(error, "code");
-  const statusCode = Reflect.get(error, "statusCode");
-  const type = Reflect.get(error, "type");
-  const requestId = Reflect.get(error, "requestId");
-
-  return {
-    ...(typeof type === "string" && type.length > 0 ? { type } : {}),
-    ...(typeof code === "string" && code.length > 0 ? { code } : {}),
-    ...(typeof statusCode === "number" ? { statusCode } : {}),
-    requestIdPresent: typeof requestId === "string" && requestId.length > 0,
-  };
 }
 
 export async function updateHostedFamilyPlanCapacities(input: {
@@ -2191,7 +2177,8 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
   };
   target: HostedFamilyPlanCapacities;
 }): Promise<void> {
-  if (!input.billingRef.stripeSubscriptionId) {
+  const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
+  if (!stripeSubscriptionId) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_BILLING_SYNCING",
       httpStatus: 409,
@@ -2208,9 +2195,12 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
     }
   }
   const stripe = requireHostedStripeApi();
-  const subscription = await stripe.subscriptions.retrieve(
-    input.billingRef.stripeSubscriptionId,
-    { expand: ["items.data.price"] },
+  const subscription = await withHostedStripeFailureLog(
+    "subscription.retrieve.family-capacity",
+    () => stripe.subscriptions.retrieve(
+      stripeSubscriptionId,
+      { expand: ["items.data.price"] },
+    ),
   );
   const stripeState = readHostedFamilyStripePlanState({
     priceIdsByPlan,
@@ -2240,29 +2230,32 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
 
   const increase = calculateHostedFamilyMonthlyAmountUsdCents(input.target) >
     calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
-  const updated = await stripe.subscriptions.update(
-    input.billingRef.stripeSubscriptionId,
-    {
-      expand: ["items.data.price"],
-      items: buildHostedFamilyStripeCapacityUpdateItems({
-        current: stripeState,
-        priceIdsByPlan,
-        target: input.target,
-      }),
-      ...(input.memberTransition
-        ? {
-            proration_behavior: "create_prorations" as const,
-            proration_date: input.memberTransition.prorationDate,
-          }
-        : {
-            ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
-            proration_behavior: increase ? "always_invoice" as const : "none" as const,
-          }),
-    },
-    {
-      idempotencyKey: input.memberTransition?.idempotencyKey ??
-        `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}`,
-    },
+  const updated = await withHostedStripeFailureLog(
+    "subscription.update.family-capacity",
+    () => stripe.subscriptions.update(
+      stripeSubscriptionId,
+      {
+        expand: ["items.data.price"],
+        items: buildHostedFamilyStripeCapacityUpdateItems({
+          current: stripeState,
+          priceIdsByPlan,
+          target: input.target,
+        }),
+        ...(input.memberTransition
+          ? {
+              proration_behavior: "create_prorations" as const,
+              proration_date: input.memberTransition.prorationDate,
+            }
+          : {
+              ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
+              proration_behavior: increase ? "always_invoice" as const : "none" as const,
+            }),
+      },
+      {
+        idempotencyKey: input.memberTransition?.idempotencyKey ??
+          `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}`,
+      },
+    ),
   );
   const applied = readHostedFamilyStripePlanState({
     priceIdsByPlan,

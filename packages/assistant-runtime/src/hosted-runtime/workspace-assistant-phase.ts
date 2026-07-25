@@ -153,6 +153,7 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
   type HostedSystemMailboxPendingItem,
+  type HostedSystemMailboxRouteAction,
 } from "./system-mailbox.ts";
 import type {
   HostedAssistantLinqDeliveryContext,
@@ -1593,7 +1594,8 @@ export async function runHostedWorkspaceAssistantPhase(
     const memberPreferencesPrePlanningStartedAt = Date.now();
     const memberPreferencesPrePlanning =
       hasFreshConversationInput
-        ? await runPrePlanningMemberPreferencesMailboxPhase({
+        ? await runPrePlanningSystemMailboxPhase({
+          allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
           executionContext,
           input,
         })
@@ -2299,6 +2301,57 @@ async function applyHostedManagedAutomationsBestEffort(input: {
         murphManagedAutomationFailed: true,
       },
     });
+  }
+
+  if (result.experimentLifecycleFailure !== undefined) {
+    // The pass still delivered every automation that does not depend on the
+    // experiment scan, so this is reported and not treated as a failed setup.
+    const failure = buildHostedRuntimeFailureDiagnostics(
+      result.experimentLifecycleFailure,
+      "Hosted managed automation experiment lifecycle staging failed.",
+      { includeSafeIdentity: true },
+    );
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        errorCode: failure.errorCode,
+        eventCode: "runner.error",
+        level: "warn",
+        phase: "error",
+        redactedJson: {
+          ...failure.redactedJson,
+          ...buildHostedManagedAutomationStageDiagnostics({
+            stage: "experiment_lifecycle",
+          }),
+          murphManagedAutomationExperimentLifecycleFailed: true,
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+
+    // A transient filesystem or lock failure is still owned by the existing
+    // bounded setup-retry ladder. Degrading the stage must not swallow those
+    // and report a successful pass, or a time-bound experiment seed is never
+    // installed and its one-shot goes stale unrecoverably.
+    if (
+      isHostedManagedAutomationSetupRetryableError(result.experimentLifecycleFailure)
+    ) {
+      return buildHostedManagedAutomationFailureResult({
+        error: result.experimentLifecycleFailure,
+        input: input.input,
+        redactedStatus: {
+          murphManagedAutomationCreated: result.created,
+          murphManagedAutomationExperimentLifecycleFailed: true,
+          murphManagedAutomationSkipped: result.skipped,
+          murphManagedAutomationUpdated: result.updated,
+        },
+      });
+    }
   }
 
   if (result.yielded === true) {
@@ -3847,7 +3900,8 @@ function buildPreAutomationLaneSkippedAssistantWakeResult(input: {
   };
 }
 
-async function runPrePlanningMemberPreferencesMailboxPhase(input: {
+async function runPrePlanningSystemMailboxPhase(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[];
   executionContext: AssistantExecutionContext;
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
 }): Promise<{
@@ -3862,7 +3916,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     assertHostedAssistantPhaseLiveness(input.input.signal);
     const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
     const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
       now: () => now,
       vaultRoot: input.input.restored.vaultRoot,
     });
@@ -3890,7 +3944,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
     }
 
     const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
-      allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+      allowedRouteActions: input.allowedRouteActions,
       executionContext: input.executionContext,
       now: () => now,
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
@@ -3932,7 +3986,7 @@ async function runPrePlanningMemberPreferencesMailboxPhase(input: {
 
   const now = new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString();
   const pendingWake = await resolveHostedSystemMailboxNextWakeCandidate({
-    allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
+    allowedRouteActions: input.allowedRouteActions,
     now: () => now,
     vaultRoot: input.input.restored.vaultRoot,
   });
@@ -4221,7 +4275,8 @@ async function runSystemMailboxMaintenancePhase(input: {
         continueAssistantLane: true,
         result: null,
       }
-    : await runPrePlanningMemberPreferencesMailboxPhase({
+    : await runPrePlanningSystemMailboxPhase({
+        allowedRouteActions: HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_ROUTE_ACTIONS,
         executionContext: input.executionContext,
         input: phaseInput,
       });

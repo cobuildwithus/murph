@@ -98,6 +98,7 @@ export interface DeviceSyncAccountSourceSummary {
   lastErrorMessage: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  lastDataAt: string | null;
 }
 
 export interface DeviceConnectionSourceRecord {
@@ -112,6 +113,8 @@ export interface DeviceConnectionSourceRecord {
   lastErrorMessage: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  /** Last inbound payload that carried this source's data; null until one has. */
+  lastDataAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +130,8 @@ export interface UpsertDeviceConnectionSourceInput {
   lastErrorMessage?: string | null;
   firstSeenAt?: string | null;
   lastSeenAt: string;
+  /** Omit to preserve the stored arrival signal; only hosted hydration sets it. */
+  lastDataAt?: string | null;
 }
 
 export interface ListDeviceConnectionSourcesInput {

@@ -21,6 +21,7 @@ import {
 import {
   readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
+import { logHostedStripeFailure } from "./stripe-error-log";
 
 export type HostedPulseTrialCandidateDisposition =
   | "current"
@@ -268,6 +269,10 @@ export async function retrieveHostedPulseTrialCleanupTarget(input: {
     ) {
       return null;
     }
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.retrieve.trial-cleanup-target",
+    });
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",
@@ -301,6 +306,10 @@ export async function cancelHostedPulseTrialLoserSubscription(input: {
     ) {
       return;
     }
+    logHostedStripeFailure({
+      error,
+      operationName: "subscription.cancel.trial-loser",
+    });
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_PULSE_TRIAL_CLEANUP_FAILED",

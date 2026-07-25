@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getHostedAppSession: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberOwnsSubscription: vi.fn().mockResolvedValue(false),
   redirect: vi.fn((path: string) => {
     throw new Error(`NEXT_REDIRECT:${path}`);
   }),
@@ -13,6 +14,10 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("next/navigation", () => ({
   redirect: mocks.redirect,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  readHostedMemberOwnsSubscription: mocks.readHostedMemberOwnsSubscription,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -320,6 +325,49 @@ describe("hosted dashboard page auth", () => {
       memberId: "member_123",
     });
     expect(mocks.redirect).toHaveBeenCalledWith("/join");
+  });
+
+  it("keeps an incomplete member who already owns a subscription out of the checkout redirect", async () => {
+    mocks.readHostedMemberOwnsSubscription.mockResolvedValue(true);
+    mocks.getHostedAppSession.mockResolvedValue({
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member: createHostedMember({
+        billingStatus: HostedBillingStatus.incomplete,
+      }),
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    });
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    // Owning a subscription is recovery, not a first checkout, so this member
+    // reaches the dashboard instead of being bounced back into the invite flow.
+    await getHostedDashboardPageAuthSnapshot();
+
+    expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("keeps paused members on the dashboard recovery surface", async () => {
+    const member = createHostedMember({
+      billingStatus: HostedBillingStatus.paused,
+    });
+    const session = {
+      expiresAt: new Date("2026-04-26T00:00:00.000Z"),
+      member,
+      privyUserId: "did:privy:user_123",
+      sessionId: "hws_123",
+    };
+    mocks.getHostedAppSession.mockResolvedValue(session);
+    const { getHostedDashboardPageAuthSnapshot } =
+      await import("@/src/lib/hosted-onboarding/page-auth");
+
+    await expect(getHostedDashboardPageAuthSnapshot()).resolves.toEqual({
+      authenticated: true,
+      authenticatedMember: member,
+      session,
+    });
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.redirect).not.toHaveBeenCalled();
   });
 
   it("does not redirect Family-sponsored dashboard reads that no longer have direct member billing", async () => {

@@ -6,6 +6,7 @@ import {
 } from "vitest";
 
 import {
+  buildTelegramThreadId,
   summarizeTelegramUpdate,
 } from "../src/telegram-webhook.ts";
 import {
@@ -731,4 +732,74 @@ test("summarizeTelegramUpdate returns null for empty updates and empty fallback 
     })?.text,
     null,
   );
+});
+
+test("parseTelegramWebhookUpdate validates a callback query and keeps its binding", () => {
+  const update = parseTelegramWebhookUpdate(JSON.stringify({
+    callback_query: {
+      data: "murph:group:join",
+      from: { first_name: "Member", id: 4242, is_bot: false },
+      id: "cbq_1",
+      message: {
+        chat: { id: -100777, type: "supergroup" },
+        message_id: 55,
+        message_thread_id: 9,
+      },
+    },
+    update_id: 7,
+  }));
+
+  assert.equal(update.callback_query?.id, "cbq_1");
+  assert.equal(update.callback_query?.data, "murph:group:join");
+  assert.equal(update.callback_query?.from.id, 4242);
+  assert.equal(update.callback_query?.message?.chat.id, -100777);
+  assert.equal(update.callback_query?.message?.message_id, 55);
+  // The topic must survive so a tap resolves to the same thread as the card.
+  assert.equal(
+    buildTelegramThreadId(update.callback_query!.message!),
+    "-100777:topic:9",
+  );
+});
+
+test("parseTelegramWebhookUpdate rejects malformed callback identities", () => {
+  const cases = [
+    { callback_query: { from: { id: 1 }, id: "" }, update_id: 1 },
+    { callback_query: { from: { id: 1 } }, update_id: 1 },
+    { callback_query: { from: {}, id: "cbq" }, update_id: 1 },
+    { callback_query: { id: "cbq" }, update_id: 1 },
+    {
+      callback_query: {
+        from: { id: 1 },
+        id: "cbq",
+        message: { chat: {}, message_id: 5 },
+      },
+      update_id: 1,
+    },
+    {
+      callback_query: {
+        from: { id: 1 },
+        id: "cbq",
+        message: { chat: { id: -1 } },
+      },
+      update_id: 1,
+    },
+  ];
+
+  for (const payload of cases) {
+    assert.throws(
+      () => parseTelegramWebhookUpdate(JSON.stringify(payload)),
+      TypeError,
+      `expected rejection for ${JSON.stringify(payload)}`,
+    );
+  }
+});
+
+test("parseTelegramWebhookUpdate leaves ordinary message updates alone", () => {
+  const update = parseTelegramWebhookUpdate(JSON.stringify({
+    message: { chat: { id: 5, type: "private" }, message_id: 1, text: "hi" },
+    update_id: 8,
+  }));
+
+  assert.equal(update.callback_query, undefined);
+  assert.equal(update.message?.text, "hi");
 });

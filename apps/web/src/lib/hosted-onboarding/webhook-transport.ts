@@ -21,6 +21,10 @@ import {
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
+import {
+  isHostedRuntimeAiAccessNoticeCode,
+  type HostedRuntimeAiAccessNoticeCode,
+} from "./member-access";
 import { sanitizeHostedOnboardingLogString } from "./http";
 import { buildHostedInviteUrl } from "./invite-service";
 import { normalizePhoneNumber } from "./phone";
@@ -113,7 +117,7 @@ export type HostedLinqAiUsageQuotaPayload =
   })
   | (HostedLinqAiUsageQuotaBasePayload & {
     claimToken: null;
-    noticeCode: "trial_conversion_pending";
+    noticeCode: HostedRuntimeAiAccessNoticeCode;
   });
 
 export type HostedLinqInviteSignupMessagePayload = {
@@ -200,7 +204,7 @@ export type CreateHostedWebhookLinqMessageSideEffectInput =
       claimToken?: null;
       message: string;
       memberId: string;
-      noticeCode: "trial_conversion_pending";
+      noticeCode: HostedRuntimeAiAccessNoticeCode;
       occurredAt: string;
       replyToMessageId?: string | null;
       routeAuthority?: HostedLinqThreadRouteEgressAuthority | null;
@@ -1115,10 +1119,10 @@ function buildHostedLinqAiUsageQuotaPayload(
     template: input.template,
   };
 
-  if (input.noticeCode === "trial_conversion_pending") {
+  if (isHostedRuntimeAiAccessNoticeCode(input.noticeCode)) {
     if (input.claimToken) {
       throw new TypeError(
-        "Hosted Linq trial conversion notices must not include AI usage claim metadata.",
+        "Hosted Linq access notices must not include AI usage claim metadata.",
       );
     }
     return {

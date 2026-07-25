@@ -143,6 +143,32 @@ export interface HostedRuntimeLogRecord {
   createdAt: string;
 }
 
+/** One runtime log entry as the runtime reports it, before the user is attached. */
+export interface HostedRuntimeLogEntryInput {
+  at?: Date | string | null;
+  attemptId?: string | null;
+  checkpointVersion?: bigint | number | string | null;
+  component: HostedRuntimeLogComponent | string;
+  errorCode?: string | null;
+  eventCode: HostedRuntimeLogEventCode | string;
+  id?: string | null;
+  leaseGeneration?: bigint | number | string | null;
+  level: HostedRuntimeLogLevel | string;
+  mailboxLane?: HostedMailboxLane | string | null;
+  mailboxSeqEnd?: bigint | number | string | null;
+  mailboxSeqStart?: bigint | number | string | null;
+  outboxIntentRef?: string | null;
+  phase: HostedRuntimeLogPhase | string;
+  redacted?: HostedRuntimeRedactedJson | null;
+  workspaceVersion?: bigint | number | string | null;
+}
+
+/** The identity a bulk writer returns; the full row is never read back. */
+export interface HostedRuntimeLogReference {
+  eventCode: HostedRuntimeLogEventCode;
+  id: string;
+}
+
 export async function ensureHostedWorkspace(input: {
   prisma?: HostedWorkspaceStoreClient;
   userId: string;
@@ -864,7 +890,20 @@ export async function recordHostedRuntimeLogTx(input: {
   workspaceVersion?: bigint | number | string | null;
 }): Promise<HostedRuntimeLogRecord> {
   const row = await input.tx.hostedRuntimeLog.create({
-    data: {
+    data: buildHostedRuntimeLogCreateData(input),
+  });
+
+  return projectHostedRuntimeLog(row);
+}
+
+/**
+ * Normalizes one runtime log entry into its row shape. Shared by the single-row
+ * and bulk writers so both validate identically.
+ */
+function buildHostedRuntimeLogCreateData(
+  input: HostedRuntimeLogEntryInput & { userId: string },
+) {
+  return {
       at: input.at === undefined || input.at === null
         ? new Date()
         : requireDate(input.at, "Hosted runtime log at"),
@@ -927,10 +966,40 @@ export async function recordHostedRuntimeLogTx(input: {
         input.workspaceVersion,
         "Hosted runtime log workspaceVersion",
       ),
-    },
+  };
+}
+
+/**
+ * Writes a batch of runtime log entries as one statement. The runtime log
+ * callback accepts up to 50 entries, and one Prisma call per entry would put a
+ * single request's fanout above the whole pool's capacity, making the pool
+ * itself the request's concurrency limiter. `createMany` keeps one callback to
+ * one statement. Returns only the references the caller needs to decide whether
+ * to signal a recheck.
+ */
+export async function recordHostedRuntimeLogs(input: {
+  entries: readonly HostedRuntimeLogEntryInput[];
+  prisma?: HostedWorkspaceStoreClient;
+  userId: string;
+}): Promise<HostedRuntimeLogReference[]> {
+  const prisma = input.prisma ?? getPrisma();
+  const rows = input.entries.map((entry) => buildHostedRuntimeLogCreateData({
+    ...entry,
+    userId: input.userId,
+  }));
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  await prisma.hostedRuntimeLog.createMany({
+    data: rows,
   });
 
-  return projectHostedRuntimeLog(row);
+  return rows.map((row) => ({
+    eventCode: row.eventCode,
+    id: row.id,
+  }));
 }
 
 export async function listHostedRuntimeLogs(input: {

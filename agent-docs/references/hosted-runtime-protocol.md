@@ -1058,8 +1058,26 @@ checkpoint can contain it. Portable support bundles omit all `.runtime/**`; the
 generic `exports/assistant-deliveries/**` path remains ordinary checkpointed
 vault data and receives no deletion or path-specific packaging authority.
 Existing global file-type exclusions still apply regardless of directory.
-External outcomes that require generated user-facing prose, such as phone-call
-results, continue to use `assistant.notification.requested` instead.
+Detached `assistant.notification.requested` work remains output-only and cannot
+mutate resident conversation history or native provider resume state. A completed phone
+call is delivered as an ordinary `assistant.notification.requested` system-mailbox
+event: Murph composes the result in its own voice and proactively messages the
+member's resolved messaging route, and may skip a non-meaningful call
+(allow-send-or-skip). The result JSON is framed as untrusted provider/callee
+text. At call start Web stores the trusted initiating resident-session id on the
+call row for request-key idempotency only; delivery resolves its target route
+from member state at completion time, so a lost or missing origin session does
+not orphan the result and no pre-provider workspace checkpoint is required.
+Delivery is idempotent on `phone-call-result:${callId}` via the notification
+`deliveryIdempotencyKey`.
+
+Because completion reuses the existing notification wake path, phone-call
+results add no new mailbox kind, runtime consumer, or checkpoint boundary, and
+there is no result-path consumer-first rollout. Apply the additive nullable
+`origin_session_id` migration; it feeds only request idempotency, so legacy rows
+without it still deliver. The `create_phone_call` start schema requires
+`originSessionId`, so a runner-first window fails those starts closed at the old
+Web endpoint — deploy Web and the runner together, or keep the window short.
 
 Approval decisions always append the generation-scoped reconciliation wake in
 the same transaction as the decision. Browser returns use a bare conversation

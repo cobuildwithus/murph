@@ -18,8 +18,18 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const DEFAULT_ELEVENLABS_API_BASE_URL = 'https://api.elevenlabs.io'
 const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2'
-const ELEVENLABS_TTS_TIMEOUT_MS = 30_000
 const ELEVENLABS_MUSIC_TIMEOUT_MS = 5 * 60_000
+
+// Speech synthesis time scales with the text, so the accepted length and the
+// request timeout are one decision and must be read together. Measured against
+// eleven_v3 on 2026-07-25: 300 chars took 8.6s, 600 took 17.8s, 900 took 23.0s,
+// and 2900 took over 60s — roughly 25ms per character. The previous pairing
+// accepted 4000 characters against a 30s timeout, so every memo longer than
+// ~1100 characters timed out with certainty. Keep the timeout at several times
+// the longest accepted memo's measured synthesis time so a slow-but-healthy
+// request is never cut off, and raise them together if either changes.
+export const ELEVENLABS_TTS_MAX_TEXT_LENGTH = 1_000
+export const ELEVENLABS_TTS_TIMEOUT_MS = 90_000
 
 export const ELEVENLABS_TTS_OUTPUT_FORMAT = assistantVoiceMemoSpeechOutputFormat
 export const ELEVENLABS_MUSIC_MODEL_ID = assistantVoiceMemoMusicModelId
@@ -76,6 +86,11 @@ export async function generateElevenLabsSpeech(input: {
   const voiceId = normalizeRequiredElevenLabsString(input.voiceId, 'voice id')
   const modelId = normalizeRequiredElevenLabsString(input.modelId, 'model id')
   const text = normalizeRequiredElevenLabsString(input.text, 'text')
+  if (text.length > ELEVENLABS_TTS_MAX_TEXT_LENGTH) {
+    throw createElevenLabsInvalidInputError(
+      `ElevenLabs speech text must contain at most ${ELEVENLABS_TTS_MAX_TEXT_LENGTH} characters.`,
+    )
+  }
 
   return await requestElevenLabsAudio({
     apiKey: input.apiKey,
@@ -217,7 +232,7 @@ async function requestElevenLabsAudio(input: {
     })
 
     if (!response.ok) {
-      const responseBodyTextLength = await readResponseTextLength(response)
+      const responseBody = await readElevenLabsErrorBody(response)
       throw new VaultCliError(
         'ELEVENLABS_API_REQUEST_FAILED',
         `ElevenLabs ${input.operation} request failed with HTTP ${response.status}.`,
@@ -226,7 +241,10 @@ async function requestElevenLabsAudio(input: {
           failureStage: 'http',
           operation: input.operation,
           provider: 'elevenlabs',
-          responseBodyTextLength,
+          providerErrorCode: responseBody.code,
+          providerErrorMessage: responseBody.message,
+          providerRequestId: responseBody.requestId,
+          responseBodyTextLength: responseBody.textLength,
           retryable: response.status === 408 || response.status === 429 ||
             response.status >= 500,
           status: response.status,
@@ -293,14 +311,79 @@ function createElevenLabsInvalidInputError(message: string): VaultCliError {
   )
 }
 
-async function readResponseTextLength(
+interface ElevenLabsErrorBody {
+  code: string | null
+  message: string | null
+  requestId: string | null
+  textLength: number | null
+}
+
+// ElevenLabs reports failures as
+// `{"detail":{"code","status","message","request_id"}}`. The machine-readable
+// code and request id say what to do next and what to quote to the provider;
+// the message says which input was rejected. It is echoed provider text, so it
+// is length-capped before it reaches an assistant context or a runtime log.
+const ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH = 300
+
+async function readElevenLabsErrorBody(
   response: Pick<ElevenLabsFetchResponse, 'text'>,
-): Promise<number | null> {
+): Promise<ElevenLabsErrorBody> {
+  let text: string
   try {
-    return (await response.text()).length
+    text = await response.text()
+  } catch {
+    return { code: null, message: null, requestId: null, textLength: null }
+  }
+
+  const detail = readElevenLabsErrorDetail(text)
+  return {
+    code: readBoundedErrorString(detail?.code ?? detail?.status, 100),
+    message: readBoundedErrorString(
+      detail?.message,
+      ELEVENLABS_ERROR_MESSAGE_MAX_LENGTH,
+    ),
+    requestId: readBoundedErrorString(detail?.request_id, 100),
+    textLength: text.length,
+  }
+}
+
+function readElevenLabsErrorDetail(text: string): {
+  code?: unknown
+  message?: unknown
+  request_id?: unknown
+  status?: unknown
+} | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
   } catch {
     return null
   }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null
+  }
+  const detail = (parsed as { detail?: unknown }).detail
+  // A plain-string `detail` carries no structured fields worth splitting out.
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) {
+    return null
+  }
+  return detail
+}
+
+function readBoundedErrorString(
+  value: unknown,
+  maxLength: number,
+): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return null
+  }
+  return trimmed.length > maxLength
+    ? `${trimmed.slice(0, maxLength)}…`
+    : trimmed
 }
 
 function readSafeTransportErrorName(error: unknown): string | null {

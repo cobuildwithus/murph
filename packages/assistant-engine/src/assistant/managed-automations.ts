@@ -86,6 +86,7 @@ export interface MurphManagedAutomationDiagnosticStage {
 
 export interface ApplyMurphManagedAutomationsResult {
   created: number
+  experimentLifecycleFailure?: unknown
   skipped: number
   stableKeyFailure?: unknown
   stableKeyRetryNeeded?: true
@@ -588,15 +589,27 @@ export async function applyMurphManagedAutomations(
   let experimentLifecycle: Awaited<ReturnType<
     typeof prepareExperimentLifecycleAutomations
   >> | null = null
+  let experimentLifecycleFailure: unknown = null
   if (input.seeds === undefined) {
     reportMurphManagedAutomationDiagnosticStage(input, {
       stage: 'experiment_lifecycle',
     })
-    experimentLifecycle = await prepareExperimentLifecycleAutomations({
-      now,
-      shouldYield: input.shouldYield ?? null,
-      vaultRoot: input.vaultRoot,
-    })
+    try {
+      experimentLifecycle = await prepareExperimentLifecycleAutomations({
+        now,
+        shouldYield: input.shouldYield ?? null,
+        vaultRoot: input.vaultRoot,
+      })
+    } catch (error) {
+      // Experiment seeds are one contributor to this pass, not a precondition
+      // for it. Letting this stage abort the whole call took every unrelated
+      // managed automation down with it, so record the failure and compose the
+      // seeds that do not depend on the experiment scan.
+      experimentLifecycleFailure = error
+    }
+  }
+  if (experimentLifecycleFailure !== null) {
+    result.experimentLifecycleFailure = experimentLifecycleFailure
   }
   if (experimentLifecycle?.yielded === true || input.shouldYield?.() === true) {
     return { ...result, yielded: true }
@@ -610,9 +623,13 @@ export async function applyMurphManagedAutomations(
       ...MURPH_MANAGED_AUTOMATIONS,
       ...(experimentLifecycle?.seeds ?? []),
     ])
-  const desiredExperimentSupportSeries = input.seeds === undefined
-    ? buildDesiredExperimentSupportSeries(rawSeeds)
-    : null
+  // A failed experiment scan leaves the desired experiment state *unknown*, not
+  // empty. Reconciling an empty desired set against live records archives every
+  // active experiment automation, so skip that namespace entirely instead.
+  const desiredExperimentSupportSeries =
+    input.seeds === undefined && experimentLifecycleFailure === null
+      ? buildDesiredExperimentSupportSeries(rawSeeds)
+      : null
   const seeds = rawSeeds.filter((seed) =>
     murphManagedAutomationAppliesToRuntime(seed, input.runtimeEnv)
   )
