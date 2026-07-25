@@ -105,3 +105,6 @@ Remaining (outbound half, nothing user-visible until done):
 
 Focused owner suites for the touched packages plus `pnpm test:diff` over the
 changed paths.
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25
