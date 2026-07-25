@@ -10,7 +10,6 @@ CREATE TABLE "hosted_group_join_outreach" (
   "attempt_count" INTEGER NOT NULL DEFAULT 0,
   "phone_number_lookup_key" TEXT,
   "linq_chat_lookup_key" TEXT,
-  "message_lookup_key" TEXT,
   "sent_at" TIMESTAMP(3),
   "replied_at" TIMESTAMP(3),
   "skipped_at" TIMESTAMP(3),
@@ -22,9 +21,6 @@ CREATE TABLE "hosted_group_join_outreach" (
 
   CONSTRAINT "hosted_group_join_outreach_pkey" PRIMARY KEY ("id")
 );
-
-CREATE UNIQUE INDEX "hosted_group_join_outreach_message_lookup_key_key"
-  ON "hosted_group_join_outreach"("message_lookup_key");
 
 CREATE UNIQUE INDEX "hosted_group_join_outreach_offer_participant_key"
   ON "hosted_group_join_outreach"(

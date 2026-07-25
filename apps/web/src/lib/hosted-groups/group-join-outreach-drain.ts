@@ -4,7 +4,6 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 import {
   createHostedLinqChatLookupKey,
-  createHostedLinqMessageLookupKey,
   createHostedPhoneLookupKeyReadCandidates,
 } from "../hosted-onboarding/contact-privacy";
 import {
@@ -123,7 +122,6 @@ export async function drainOneHostedGroupJoinOutreach(input: {
         },
         data: {
           linqChatLookupKey: createHostedLinqChatLookupKey(sent.chatId),
-          messageLookupKey: createHostedLinqMessageLookupKey(sent.messageId),
           sentAt: new Date(),
         },
       });

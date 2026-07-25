@@ -50,6 +50,48 @@ export function decideHostedGroupJoinOutreachSendWindow(input: {
   };
 }
 
+/**
+ * Recipient-safe UTC send windows by calling code.
+ *
+ * Each row is the intersection of 05:00-23:00 across the plausible civil zones
+ * for that region, so a send inside the window is outside quiet hours for every
+ * zone the code can represent. Codes are matched longest-prefix-first, which is
+ * what keeps NANP Pacific territories correct without depending on the order
+ * rows happen to be written in. A code absent from this table has no defensible
+ * window and defers durably rather than being dropped; widening coverage means
+ * adding a row whose window still satisfies the quiet-hours intersection.
+ */
+const HOSTED_GROUP_JOIN_OUTREACH_SEND_WINDOWS: readonly {
+  callingCodes: readonly string[];
+  endHourUtc: number;
+  startHourUtc: number;
+}[] = [
+  // NANP Pacific territories sit far outside the Americas' zone range.
+  { callingCodes: ["+1670", "+1671"], endHourUtc: 13, startHourUtc: 19 },
+  { callingCodes: ["+1684"], endHourUtc: 10, startHourUtc: 16 },
+  { callingCodes: ["+1"], endHourUtc: 1, startHourUtc: 16 },
+  { callingCodes: ["+44"], endHourUtc: 21, startHourUtc: 6 },
+  { callingCodes: ["+33", "+34", "+39", "+49"], endHourUtc: 20, startHourUtc: 6 },
+  { callingCodes: ["+27"], endHourUtc: 20, startHourUtc: 5 },
+  { callingCodes: ["+234"], endHourUtc: 21, startHourUtc: 5 },
+  { callingCodes: ["+52"], endHourUtc: 3, startHourUtc: 14 },
+  { callingCodes: ["+54"], endHourUtc: 1, startHourUtc: 9 },
+  { callingCodes: ["+55"], endHourUtc: 0, startHourUtc: 12 },
+  { callingCodes: ["+61"], endHourUtc: 11, startHourUtc: 23 },
+  { callingCodes: ["+64"], endHourUtc: 9, startHourUtc: 18 },
+  { callingCodes: ["+81", "+82"], endHourUtc: 13, startHourUtc: 21 },
+  { callingCodes: ["+86"], endHourUtc: 14, startHourUtc: 22 },
+  { callingCodes: ["+91"], endHourUtc: 17, startHourUtc: 0 },
+];
+
+export function resolveHostedGroupJoinOutreachSendWindowCoverage(): readonly {
+  callingCodes: readonly string[];
+  endHourUtc: number;
+  startHourUtc: number;
+}[] {
+  return HOSTED_GROUP_JOIN_OUTREACH_SEND_WINDOWS;
+}
+
 function resolveHostedGroupJoinOutreachUtcWindow(
   value: string | null | undefined,
 ): HostedGroupJoinOutreachUtcWindow | null {
@@ -58,51 +100,29 @@ function resolveHostedGroupJoinOutreachUtcWindow(
     return null;
   }
 
-  // NANP Pacific territories need separate handling from the Americas.
-  if (phoneNumber.startsWith("+1670") || phoneNumber.startsWith("+1671")) {
-    return hours(19, 13);
+  let matched: { callingCode: string; endHourUtc: number; startHourUtc: number } | null =
+    null;
+  for (const row of HOSTED_GROUP_JOIN_OUTREACH_SEND_WINDOWS) {
+    for (const callingCode of row.callingCodes) {
+      if (
+        phoneNumber.startsWith(callingCode)
+        && callingCode.length > (matched?.callingCode.length ?? 0)
+      ) {
+        matched = {
+          callingCode,
+          endHourUtc: row.endHourUtc,
+          startHourUtc: row.startHourUtc,
+        };
+      }
+    }
   }
-  if (phoneNumber.startsWith("+1684")) {
-    return hours(16, 10);
-  }
-  if (phoneNumber.startsWith("+1")) {
-    return hours(16, 1);
+  if (!matched) {
+    return null;
   }
 
-  if (phoneNumber.startsWith("+44")) return hours(6, 21);
-  if (
-    phoneNumber.startsWith("+33")
-    || phoneNumber.startsWith("+34")
-    || phoneNumber.startsWith("+39")
-    || phoneNumber.startsWith("+49")
-  ) {
-    return hours(6, 20);
-  }
-  if (phoneNumber.startsWith("+27")) return hours(5, 20);
-  if (phoneNumber.startsWith("+234")) return hours(5, 21);
-
-  if (phoneNumber.startsWith("+52")) return hours(14, 3);
-  if (phoneNumber.startsWith("+54")) return hours(9, 1);
-  if (phoneNumber.startsWith("+55")) return hours(12, 0);
-
-  if (phoneNumber.startsWith("+61")) return hours(23, 11);
-  if (phoneNumber.startsWith("+64")) return hours(18, 9);
-  if (phoneNumber.startsWith("+81") || phoneNumber.startsWith("+82")) {
-    return hours(21, 13);
-  }
-  if (phoneNumber.startsWith("+86")) return hours(22, 14);
-  if (phoneNumber.startsWith("+91")) return hours(0, 17);
-
-  return null;
-}
-
-function hours(
-  startHourUtc: number,
-  endHourUtc: number,
-): HostedGroupJoinOutreachUtcWindow {
   return {
-    endMinuteUtc: endHourUtc * 60,
-    startMinuteUtc: startHourUtc * 60,
+    endMinuteUtc: matched.endHourUtc * 60,
+    startMinuteUtc: matched.startHourUtc * 60,
   };
 }
 

@@ -1433,7 +1433,6 @@ model HostedGroupJoinOutreach {
   attemptCount              Int             @default(0) @map("attempt_count")
   phoneNumberLookupKey      String?         @map("phone_number_lookup_key")
   linqChatLookupKey         String?         @map("linq_chat_lookup_key")
-  messageLookupKey          String?         @unique @map("message_lookup_key")
   sentAt                    DateTime?       @map("sent_at")
   repliedAt                 DateTime?       @map("replied_at")
   skippedAt                 DateTime?       @map("skipped_at")
