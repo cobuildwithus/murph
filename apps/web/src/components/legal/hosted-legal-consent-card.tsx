@@ -393,6 +393,7 @@ export function HostedLaunchConsentPrompt({
   const variantCopy = resolveLaunchConsentCopy(variant);
   const copy = {
     actionLabel: variantCopy.actionLabel,
+    assurances: variantCopy.assurances,
     description: description ?? variantCopy.description,
     title: title ?? variantCopy.title,
   };
@@ -407,6 +408,13 @@ export function HostedLaunchConsentPrompt({
         <p className="max-w-[40rem] text-[15px] leading-6 text-pretty text-muted-foreground">
           {copy.description}
         </p>
+        {copy.assurances.length > 0 ? (
+          <ul className="mt-0.5 flex list-disc flex-col gap-1 pl-4 text-[13px] leading-5 text-muted-foreground marker:text-border">
+            {copy.assurances.map((assurance) => (
+              <li key={assurance}>{assurance}</li>
+            ))}
+          </ul>
+        ) : null}
       </div>
       <LaunchDocumentLinks documents={documents} />
     </div>
@@ -616,14 +624,21 @@ function resolveLaunchConsentVariant(
   return "legal";
 }
 
+const LAUNCH_CONSENT_ASSURANCES = [
+  "We do not sell health data.",
+  "We do not use Murph-managed health data to train general-purpose AI models.",
+];
+
 function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
   actionLabel: string;
+  assurances: string[];
   description: string;
   title: string;
 } {
   if (variant === "legal") {
     return {
       actionLabel: "Agree",
+      assurances: [],
       description: "Review the updated terms and disclosures that govern your use of Murph.",
       title: "Review Murph’s terms",
     };
@@ -632,6 +647,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
   if (variant === "health-data") {
     return {
       actionLabel: "Consent",
+      assurances: LAUNCH_CONSENT_ASSURANCES,
       description:
         "Murph and contracted AI providers use health data you add or connect to personalize your experience.",
       title: "Use your health data",
@@ -640,6 +656,7 @@ function resolveLaunchConsentCopy(variant: HostedLaunchConsentVariant): {
 
   return {
     actionLabel: "Consent",
+    assurances: LAUNCH_CONSENT_ASSURANCES,
     description:
       "By selecting Consent, you agree to the Terms and let Murph and contracted AI providers use health data you add or connect to personalize your experience.",
     title: "Use your health data",
