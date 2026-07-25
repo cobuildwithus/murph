@@ -162,6 +162,9 @@ export function isHostedRuntimeAiAccessNoticeCode(
 
 const HOSTED_RUNTIME_AI_ACCESS_RETRY_MS = 15 * 60_000;
 const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
+// Lapsed billing recovers from the Subscription controls, not the dashboard: the
+// Home page only surfaces a billing action for a narrow paused-trial shape.
+const HOSTED_BILLING_RECOVERY_URL = "https://withmurph.ai/settings#subscription";
 
 function hasActiveHostedPersonAccess(person: HostedMemberPersonAccessState): boolean {
   if (isHostedMemberSuspended(person.suspendedAt)) {
@@ -403,7 +406,7 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
       code: "billing_inactive",
       message: renderUserFacingMessage({
         context: {
-          homeUrl: HOSTED_AI_USAGE_HOME_URL,
+          homeUrl: HOSTED_BILLING_RECOVERY_URL,
         },
         key: "linq.ai_usage.billing_inactive",
         seed: buildHostedRuntimeAiAccessNoticeSeed({
@@ -471,7 +474,7 @@ function resolveHostedRuntimeAiPersonAccessDecision(input: {
       code: "trial_conversion_pending",
       message: renderUserFacingMessage({
         context: {
-          homeUrl: HOSTED_AI_USAGE_HOME_URL,
+          homeUrl: HOSTED_BILLING_RECOVERY_URL,
         },
         key: "linq.ai_usage.trial_conversion_pending",
         seed: buildHostedRuntimeAiAccessNoticeSeed({

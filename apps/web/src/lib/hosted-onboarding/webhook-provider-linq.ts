@@ -1,4 +1,4 @@
-import { HostedBillingStatus, type Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import {
   type HostedExecutionLinqConversationMessage,
   type HostedExecutionLinqConversationMessagePart,
@@ -6,6 +6,7 @@ import {
 } from "@murphai/hosted-execution";
 
 import { issueHostedInviteTx } from "./invite-service";
+import { requiresHostedBillingCheckout } from "./lifecycle";
 import {
   isHostedMemberSuspended,
 } from "./entitlement";
@@ -563,16 +564,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
   // A member whose billing lapsed after activation can never be onboarded as a
   // first contact on their own bound home chat: the pending-bind write would hit
   // the home-route race guard and 503 on every retry, forever. Answer from their
-  // access decision and stop here instead. Only `not_started` is excluded: it is
-  // pure acquisition, so it keeps the signup-link and fallback-retry paths below.
-  // `incomplete` is deliberately included, because the Stripe status mapper writes
-  // it for an expired pulse trial whose subscription reports active, which is a
-  // previously-active member. Owning this bound home route is what separates them
-  // from a first-time checkout, who never reaches this branch.
+  // access decision and stop here instead. Statuses that still owe checkout stay
+  // on the signup-link and fallback-retry paths below, because checkout is their
+  // real recovery surface and this reply would otherwise route an unfinished
+  // subscriber away from it.
   if (
     existingMember
     && !existingMemberEffectiveActive
-    && existingMember.billingStatus !== HostedBillingStatus.not_started
+    && !requiresHostedBillingCheckout(existingMember.billingStatus)
     && incomingHomeLinqChatOwnerLookup?.routing.memberId === existingMember.id
   ) {
     const accessDecision = await readHostedRuntimeAiAccessDecision({

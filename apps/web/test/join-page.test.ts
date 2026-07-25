@@ -249,7 +249,7 @@ test("JoinInvitePage builds a server model with the app-session member", async (
   assert.doesNotMatch(markup, /data-share-code/);
 });
 
-test("JoinInvitePage sends a matched paused member to the dashboard recovery surface", async () => {
+test("JoinInvitePage sends a matched lapsed member to the subscription recovery surface", async () => {
   const { default: JoinInvitePage } = await import("../app/join/[inviteCode]/page");
   mocks.getHostedPageAuthSnapshot.mockResolvedValueOnce({
     authenticated: true,
@@ -278,9 +278,9 @@ test("JoinInvitePage sends a matched paused member to the dashboard recovery sur
   await expect(JoinInvitePage({
     params: Promise.resolve({ inviteCode: "invite-code" }),
     searchParams: Promise.resolve({ preview: undefined }),
-  })).rejects.toThrow("NEXT_REDIRECT:/home");
+  })).rejects.toThrow("NEXT_REDIRECT:/settings#subscription");
 
-  expect(mocks.redirect).toHaveBeenCalledWith("/home");
+  expect(mocks.redirect).toHaveBeenCalledWith("/settings#subscription");
   expect(mocks.joinInvitePageViewProps).toBeNull();
 });
 

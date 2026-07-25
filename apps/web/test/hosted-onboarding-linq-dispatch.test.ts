@@ -7219,7 +7219,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: fixture.homeChatId,
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -7286,7 +7286,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: fixture.homeChatId,
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
         replyToMessageId: "msg_123",
       }),
     );
@@ -7304,7 +7304,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     [HostedBillingStatus.past_due, "sent-billing-inactive-notice"],
     [HostedBillingStatus.canceled, "sent-billing-inactive-notice"],
     [HostedBillingStatus.unpaid, "sent-billing-inactive-notice"],
-    [HostedBillingStatus.incomplete, "sent-billing-inactive-notice"],
   ] as const)(
     "answers a %s member on their bound home chat instead of dropping the text",
     async (billingStatus, expectedReason) => {
@@ -7354,7 +7353,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
         expect.objectContaining({
           chatId: fixture.homeChatId,
-          message: expect.stringContaining("https://withmurph.ai/home"),
+          message: expect.stringContaining("https://withmurph.ai/settings#subscription"),
         }),
       );
       expect(readHostedMemberRoutingUpsertMock(prisma)).not.toHaveBeenCalled();
