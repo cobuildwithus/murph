@@ -5,7 +5,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "@/src/lib/hosted-onboarding/logging";
-import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
+import { completeHostedPrivyVerificationWithRepairs } from "@/src/lib/hosted-onboarding/privy-completion-repair";
 import {
   isHostedPrivyAuthMethod,
   type HostedPrivyAuthMethod,
@@ -41,7 +41,7 @@ export const POST = withJsonError(async (request: Request) => {
       clientTimeZone: body.timeZone,
       headers: request.headers,
     });
-    const result = await completeHostedPrivyVerification({
+    const result = await completeHostedPrivyVerificationWithRepairs({
       authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
