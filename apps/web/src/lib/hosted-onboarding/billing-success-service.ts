@@ -13,6 +13,7 @@ import {
 import { getHostedInviteStatus, requireHostedInviteForAuthentication } from "./invite-service";
 import { type PrivyLinkedAccountLike } from "./privy-shared";
 import { requireHostedStripeApi } from "./runtime";
+import { withHostedStripeFailureLog } from "./stripe-error-log";
 import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
@@ -47,9 +48,12 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   }
 
   const stripe = requireHostedStripeApi();
-  const session = await stripe.checkout.sessions.retrieve(input.sessionId, {
-    expand: ["subscription"],
-  });
+  const session = await withHostedStripeFailureLog(
+    "checkout.sessions.retrieve.billing-success",
+    () => stripe.checkout.sessions.retrieve(input.sessionId, {
+      expand: ["subscription"],
+    }),
+  );
 
   assertHostedCheckoutSessionReadyForSuccessRedirect(session);
 

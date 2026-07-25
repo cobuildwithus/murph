@@ -53,7 +53,7 @@ For an OTC sleep aid or medication-sedation question, ask: "What is the exact pr
 - Do not advise abrupt alcohol or benzodiazepine cessation for dependent users; withdrawal can be dangerous.
 - Do not recommend starting, continuing, increasing, or experimenting with an OTC sedating antihistamine when use is chronic, above-label, duplicates an active ingredient, or has a possible medication or substance interaction. Route the exact stack to a pharmacist or clinician.
 - Suspected overdose or severe impairment needs poison-control or emergency guidance, not sleep coaching.
-- Escalate for blackouts, morning drinking, severe withdrawal symptoms, pregnancy, polysubstance use, or safety-critical impairment.
+- Escalate for blackouts, morning drinking, severe withdrawal symptoms, pregnancy, polysubstance use, or signs of actual impairment while driving, boating, or operating machinery.
 
 ## Answer Shape
 
