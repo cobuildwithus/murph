@@ -109,7 +109,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const challenge = (await readSkill('group-challenge')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      '`grantStatus="granted"` plus `dataStatus="missing"` means it is granted but no usable record was returned',
+      '`status="missing"` means it is granted but no usable record was returned',
     )
     expect(challenge).toContain(
       'A genuinely missing snapshot still follows the recovery evidence order below.',

@@ -681,27 +681,21 @@ describe("murph.group dynamic tool", () => {
             currentTurnHandles: ["+15551110001"],
             displayName: "Alex",
             participantId: "participant_a",
-            projections: [
-              {
-                dataStatus: "available",
-                grantStatus: "granted",
-                projectionScopeKey: "steps-days.v0",
-              },
-              {
-                dataStatus: "missing",
-                grantStatus: "not_granted",
-                projectionScopeKey: "device-sync-status.v0",
-              },
-            ],
+            // Keyed by scope, and the granted/data pair collapses to the one
+            // status the model actually acts on.
+            projections: {
+              "steps-days.v0": { status: "available" },
+              "device-sync-status.v0": { status: "not_granted" },
+            },
           },
           {
             currentTurnHandles: ["member-b@example.test"],
             displayName: "Alex",
             participantId: "participant_b",
-            projections: [
-              { dataStatus: "missing", grantStatus: "granted" },
-              { dataStatus: "available", grantStatus: "granted" },
-            ],
+            projections: {
+              "steps-days.v0": { status: "missing" },
+              "device-sync-status.v0": { status: "available" },
+            },
           },
         ],
         status: "ok",
@@ -769,19 +763,23 @@ describe("murph.group dynamic tool", () => {
       result: {
         members: [{
           participantId: "participant_timing",
-          projections: [{
-            // Days are keyed by their ISO date, and the one required semantics
-            // literal is stated once for the projection instead of per record.
-            days: {
-              "2026-07-18": [{
-                kindIndex: 0,
-                minutes: 45,
-                startLocalMs: 64_800_001,
-              }],
+          // Projections are keyed by scope, so each one no longer restates it.
+          projections: {
+            "workouts.v0": {
+              // Days are keyed by their ISO date, and the one required semantics
+              // literal is stated once for the projection, not per record.
+              days: {
+                "2026-07-18": [{
+                  kindIndex: 0,
+                  minutes: 45,
+                  startLocalMs: 64_800_001,
+                }],
+              },
+              kinds: ["running"],
+              status: "available",
+              timeSemantics: "canonical-event-zone-or-vault-zone.v0",
             },
-            kinds: ["running"],
-            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
-          }],
+          },
         }],
       },
     });
@@ -942,10 +940,7 @@ describe("murph.group dynamic tool", () => {
     // A partial toMatchObject here would pass while recordKey or occurredAt were
     // being stripped, which is exactly how an earlier version of this test lied.
     expect(projection).toEqual({
-      dataStatus: "available",
-      grantStatus: "granted",
-      projectionScope: { projectionKind: "activity-days.v0" },
-      projectionScopeKey: "activity-days.v0",
+      status: "available",
       records: [
         {
           data: {
@@ -1111,7 +1106,7 @@ describe("murph.group dynamic tool", () => {
     expect(payload.result.members.length).toBeGreaterThan(0);
     expect(payload.result.members.length).toBeLessThan(3);
     for (const member of payload.result.members) {
-      expect(member.projections[0].projectionScopeKey).toBe("steps-days.v0");
+      expect(Object.keys(member.projections)).toEqual(["steps-days.v0"]);
     }
     // Everyone dropped is named, so the referee can say so rather than treat
     // them as missing data.
@@ -3530,6 +3525,7 @@ function readGroupToolPayload(
 
 interface ReadSharedProjectionShape {
   days?: Record<string, unknown>;
+  status?: string;
   kinds?: string[];
   provisional?: string[];
   records?: { data: Record<string, unknown> }[];
@@ -3537,8 +3533,11 @@ interface ReadSharedProjectionShape {
 }
 
 function readFirstProjection(payload: unknown): ReadSharedProjectionShape {
-  const projection = JSON.parse(JSON.stringify(payload))
-    ?.result?.members?.[0]?.projections?.[0];
+  const projections = JSON.parse(JSON.stringify(payload))
+    ?.result?.members?.[0]?.projections;
+  const projection = projections === undefined
+    ? undefined
+    : Object.values(projections)[0];
   if (!projection) {
     throw new Error("Expected a read_shared payload with one projection.");
   }

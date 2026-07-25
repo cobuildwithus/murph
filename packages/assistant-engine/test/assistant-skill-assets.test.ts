@@ -948,7 +948,7 @@ describe('assistant skill assets', () => {
     // the combined result is refused whole above the model ceiling.
     expect(raw).not.toContain('the exact scoring scope and `device-sync-status.v0`')
     expect(raw).toContain('post that offer immediately from')
-    expect(raw).toContain('an explicit `grantStatus`, `dataStatus`')
+    expect(raw).toContain('an explicit `status`')
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
     expect(raw).toMatch(
@@ -962,9 +962,9 @@ describe('assistant skill assets', () => {
     )
     expect(raw).toMatch(/A unique or equal\s+display name is not\s+identity proof/u)
     expect(raw).toContain('`participantId: unresolved`')
-    expect(raw).toContain('`grantStatus="not_granted"`')
-    expect(raw).toContain('`dataStatus="missing"`')
-    expect(raw).toContain('`dataStatus="available"`')
+    expect(raw).toContain('`status="not_granted"`')
+    expect(raw).toContain('`status="missing"`')
+    expect(raw).toContain('`status="available"`')
     expect(raw).not.toContain('Gap disclosure log')
     expect(raw).not.toContain('`gapState`')
     expect(raw).not.toContain('`episodePublicGapDate`')

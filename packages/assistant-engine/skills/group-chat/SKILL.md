@@ -19,7 +19,7 @@ join-policy, or permission-offer facts. Use
 `murph.group action="read_shared"` when the current turn needs shared group
 data or exact current-turn membership attribution. Pass one to three exact
 projection scopes. That read happens after the model turn has begun and returns
-every current group member with an explicit `grantStatus` and `dataStatus` for
+every current group member with an explicit `status` for
 each requested scope. It is the only hosted model-facing path to the current
 Web-owned shared snapshot; do not use `vault-cli group shared`, `vault-cli group
 weekly`, a preloaded roster, or a remembered prompt snapshot as an alternate
@@ -367,10 +367,10 @@ warranted. Do not request both scopes in one read. Start
 with challenge-page participants recorded as `in`, then left join the tool's
 current member results by exact group-scoped `participantId`, never by display
 name. For every requested scope, treat
-`grantStatus="not_granted"` as missing group-sharing permission,
-`grantStatus="granted"` plus `dataStatus="missing"` as granted but without a
+`status="not_granted"` as missing group-sharing permission,
+`status="missing"` as granted but without a
 usable record in the current snapshot,
-and `dataStatus="available"` as usable only from the returned records. A
+and `status="available"` as usable only from the returned records. A
 recorded zero is available data. Never infer a grant from a record, rank
 missing data as zero, or let an empty result hide an opted-in participant.
 

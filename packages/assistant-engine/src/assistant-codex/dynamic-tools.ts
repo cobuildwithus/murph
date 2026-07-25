@@ -3310,6 +3310,19 @@ function groupSharedUnavailableToolResult(
  * once. Every other projection is passed through byte-identically, and storage and
  * the delivery wire format are unchanged for all of them.
  */
+/**
+ * `grantStatus` and `dataStatus` only ever encode three states between them, so
+ * the model reads one field instead of decoding a pair.
+ */
+function groupSharedProjectionStatus(
+  projection: AssistantHostedGroupSharedProjection,
+): 'available' | 'missing' | 'not_granted' {
+  if (projection.grantStatus === 'not_granted') {
+    return 'not_granted'
+  }
+  return projection.dataStatus === 'missing' ? 'missing' : 'available'
+}
+
 function groupSharedWorkoutsModelProjection(
   projection: AssistantHostedGroupSharedProjection,
 ): Record<string, unknown> | null {
@@ -3366,17 +3379,13 @@ function groupSharedWorkoutsModelProjection(
     days[date] = dayWorkouts
   }
   return {
-    dataStatus: projection.dataStatus,
     days,
-    grantStatus: projection.grantStatus,
     // Each workout's `kindIndex` points into this list.
     ...(kinds.length === 0 ? {} : { kinds }),
-    // projectionScopeKey already encodes the scope; carrying the object too
-    // repeated the same value on every member and projection.
-    projectionScopeKey: projection.projectionScopeKey,
     // Dates whose member-local day is still open, so scoring them would settle
     // a result that a later workout can still change.
     ...(provisional.length === 0 ? {} : { provisional }),
+    status: groupSharedProjectionStatus(projection),
     ...(timeSemantics === undefined ? {} : { timeSemantics }),
   }
 }
@@ -3408,10 +3417,15 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
-      projections: member.projections.map((projection) =>
-        // Only workouts.v0 gets a derived view; every other scope passes through.
-        groupSharedWorkoutsModelProjection(projection) ?? projection
-      ),
+      // Keyed by scope so each projection no longer restates its own key, and
+      // the scope reads as a heading rather than a field to hunt for.
+      projections: Object.fromEntries(member.projections.map((projection) => [
+        projection.projectionScopeKey,
+        groupSharedWorkoutsModelProjection(projection) ?? {
+          records: projection.records,
+          status: groupSharedProjectionStatus(projection),
+        },
+      ])),
     })),
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
     status: result.status,

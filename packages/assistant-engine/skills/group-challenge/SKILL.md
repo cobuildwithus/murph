@@ -398,7 +398,7 @@ automation action rules with a `dailyLocal` schedule and
    context as another hosted data path.
 
    `status="ok"` returns every current group member and, for each requested
-   scope, an explicit `grantStatus`, `dataStatus`, and only the bounded records
+   scope, an explicit `status`, and only the bounded records
    allowed by current exact authority. Each returned `participantId` identifies
    only that membership in this group; it carries no account, device, provider,
    or route identity. Left join those members to the challenge roster by exact
@@ -430,9 +430,9 @@ automation action rules with a `dailyLocal` schedule and
    evidence makes that one association exact.
 
    Classify every `in` participant in a successful result before composing:
-   `grantStatus="not_granted"` means the group share is not granted;
-   `grantStatus="granted"` plus `dataStatus="missing"` means it is granted but
-   no usable record was returned; and `dataStatus="available"` means use only the
+   Each projection carries one `status`. `status="not_granted"` means the group
+   share is not granted; `status="missing"` means it is granted but
+   no usable record was returned; and `status="available"` means use only the
    returned records. If every record otherwise eligible for a completed-date
    ruling is provisional, keep the participant pending, skip diagnostics and
    permission offers, and say the value settles once that member's own local day closes. Apply `group-chat`'s
