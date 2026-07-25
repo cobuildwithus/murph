@@ -5923,7 +5923,7 @@ test("a recovery job whose episode already ended makes no provider call", async 
   assert.deepEqual(result, {});
 });
 
-test("a gated recovery trigger terminalizes the episode end to end", async () => {
+test("a gated recovery trigger pauses the episode and resumes after enablement", async () => {
   const provider = createJunctionProvider(async () =>
     createJsonResponse({ detail: "not enabled" }, 403)
   );
@@ -5955,8 +5955,9 @@ test("a gated recovery trigger terminalizes the episode end to end", async () =>
     }),
   );
 
+  // A gated call never reached the recovery mechanism, so it spends no attempt.
   assert.deepEqual(result.metadataPatch, {
-    junctionPushSourceRecoveryAttempts: 1,
+    junctionPushSourceRecoveryAttempts: 0,
     junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T00:00:00.000Z",
     junctionPushSourceRecoveryLastFailureCode: null,
     junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
@@ -5964,16 +5965,23 @@ test("a gated recovery trigger terminalizes the episode end to end", async () =>
     junctionPushSourceRecoveryStatus: "unavailable",
   });
 
-  // Nothing local can enable a gated endpoint, so the ladder must stop here
-  // rather than keep issuing gated provider requests.
   const gatedAccount = createStoredAccount({
     metadata: result.metadataPatch as Record<string, unknown>,
     sources: staleSources,
   });
+
+  // Not re-probed immediately...
   assert.equal(
-    executor.createScheduledJobs?.(gatedAccount, "2026-07-30T00:00:00.000Z")
+    executor.createScheduledJobs?.(gatedAccount, "2026-07-20T06:00:00.000Z")
       ?.jobs.find((job) => job.kind === "push_source_recovery"),
     undefined,
+  );
+
+  // ...but enablement is a vendor-side change we cannot observe, so a stall
+  // seen before enablement must not be abandoned for the rest of its episode.
+  assert.ok(
+    executor.createScheduledJobs?.(gatedAccount, "2026-07-21T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
   );
 });
 

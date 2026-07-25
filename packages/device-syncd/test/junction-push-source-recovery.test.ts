@@ -140,22 +140,38 @@ test("recovery attempts follow a bounded ladder and then stop", () => {
   );
 });
 
-test("a gated trigger endpoint stops the ladder immediately", () => {
+test("a gated trigger endpoint pauses the episode without spending the ladder", () => {
   const metadata = metadataAfter({
-    attempts: 1,
+    // A gated call never reached the recovery mechanism, so it consumes no
+    // attempt; otherwise a build deployed before enablement would spend every
+    // episode's whole ladder on 403s.
+    attempts: 0,
     endpointUnavailable: true,
     now: "2026-07-19T16:00:00.000Z",
   });
 
   assert.equal(readJunctionPushSourceRecoveryState(metadata).status, "unavailable");
-  // Nothing here can enable a gated endpoint, so retrying it is pure noise.
+  assert.equal(readJunctionPushSourceRecoveryState(metadata).attempts, 0);
+
+  // Not retried immediately: a gated endpoint stays gated for a while.
   assert.equal(
     selectDueJunctionPushSourceRecovery({
       metadata,
-      now: "2026-07-25T00:00:00.000Z",
+      now: "2026-07-20T00:00:00.000Z",
       stale: [staleGarmin()],
     }),
     null,
+  );
+
+  // But enablement is a vendor-side change we cannot observe, so the episode
+  // must become eligible again rather than being abandoned forever.
+  assert.deepEqual(
+    selectDueJunctionPushSourceRecovery({
+      metadata,
+      now: "2026-07-20T17:00:00.000Z",
+      stale: [staleGarmin()],
+    }),
+    { silentSinceAt: STALL_START, sourceProviderSlug: "garmin" },
   );
 });
 

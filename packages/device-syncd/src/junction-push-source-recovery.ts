@@ -29,7 +29,11 @@ export const JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS = Object.freeze({
 export type JunctionPushSourceRecoveryStatus =
   /** A trigger was accepted; waiting to see whether data resumes. */
   | "triggered"
-  /** The aggregator does not expose the trigger to this team. */
+  /**
+   * The aggregator does not expose the trigger to this team *yet*. This is not
+   * terminal: the endpoint is enabled by vendor support, so an episode that was
+   * gated today can become recoverable tomorrow without anything changing here.
+   */
   | "unavailable"
   /** The bounded ladder ran out without data resuming. */
   | "exhausted";
@@ -41,6 +45,15 @@ export type JunctionPushSourceRecoveryStatus =
  * actually land before the next.
  */
 const RECOVERY_ATTEMPT_DELAY_HOURS = Object.freeze([0, 6, 24, 48]);
+
+/**
+ * How long to wait before re-probing an episode whose trigger endpoint was
+ * gated. Enablement is a vendor-side change we cannot observe, so the only way
+ * a gated stall ever recovers is by asking again later. One probe per day per
+ * source is a cheap 403 and keeps a not-yet-enabled deployment from silently
+ * abandoning every stalled member it saw first.
+ */
+const RECOVERY_UNAVAILABLE_RECHECK_HOURS = 24;
 
 const HOUR_MS = 60 * 60_000;
 
@@ -142,8 +155,27 @@ export function selectDueJunctionPushSourceRecovery(input: {
       };
     }
 
-    // Nothing here can make a gated endpoint work, so retrying it is pure noise.
-    if (state.status === "unavailable" || state.status === "exhausted") {
+    if (state.status === "exhausted") {
+      continue;
+    }
+
+    // A gated endpoint is a "not enabled yet" answer, not a permanent one. If
+    // this were treated as terminal, every connection already stalled when an
+    // endpoint-less build deploys would be abandoned for that entire stall even
+    // after support enables it.
+    if (state.status === "unavailable") {
+      const lastAttemptMs = state.lastAttemptAt ? Date.parse(state.lastAttemptAt) : Number.NaN;
+
+      if (
+        !Number.isFinite(lastAttemptMs)
+        || nowMs >= lastAttemptMs + RECOVERY_UNAVAILABLE_RECHECK_HOURS * HOUR_MS
+      ) {
+        return {
+          silentSinceAt: candidate.silentSinceAt,
+          sourceProviderSlug: candidate.sourceProviderSlug,
+        };
+      }
+
       continue;
     }
 
@@ -183,4 +215,16 @@ export function resolveJunctionPushSourceRecoveryStatus(input: {
   }
 
   return input.attempts >= RECOVERY_ATTEMPT_DELAY_HOURS.length ? "exhausted" : "triggered";
+}
+
+/**
+ * A gated response never reached the provider's recovery mechanism, so it must
+ * not consume one of the bounded attempts. Otherwise a deployment that predates
+ * enablement would silently spend every episode's whole ladder on 403s.
+ */
+export function resolveJunctionPushSourceRecoveryAttempts(input: {
+  endpointUnavailable: boolean;
+  priorAttempts: number;
+}): number {
+  return input.endpointUnavailable ? input.priorAttempts : input.priorAttempts + 1;
 }

@@ -119,6 +119,7 @@ import {
   JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS,
   buildJunctionPushSourceRecoveryMetadataPatch,
   readJunctionPushSourceRecoveryState,
+  resolveJunctionPushSourceRecoveryAttempts,
   resolveJunctionPushSourceRecoveryStatus,
   selectDueJunctionPushSourceRecovery,
 } from "../junction-push-source-recovery.ts";
@@ -727,7 +728,7 @@ export function createJunctionDeviceSyncProvider(
     const state = readJunctionPushSourceRecoveryState(context.account.metadata);
     const isRecordedEpisode = state.silentSinceAt === silentSinceAt
       && state.sourceProviderSlug === sourceProviderSlug;
-    const attempts = (isRecordedEpisode ? state.attempts : 0) + 1;
+    const priorAttempts = isRecordedEpisode ? state.attempts : 0;
 
     // This is a one-shot external mutation, so once it can be dispatched the
     // attempt must be consumed no matter how the pass ends. Deliberately not
@@ -736,6 +737,16 @@ export function createJunctionDeviceSyncProvider(
     // have been accepted, so the next run would re-send it without advancing
     // the ladder. Every other Junction job is a replay-safe read; this one is
     // not. The call is a single POST already bounded by the client timeout.
+    //
+    // Known residual window: the attempt is recorded through the job's metadata
+    // patch, which commits after this returns. If the worker dies or loses its
+    // lease between the provider accepting the POST and that commit, the
+    // reclaimed job re-sends one trigger. Closing it needs either a provider
+    // idempotency key (Junction documents none) or a durable claim written
+    // before the send, which today would mean a second metadata-write owner on
+    // the job context. The bounded consequence -- one extra historical-pull
+    // request per crash, re-delivering data rather than corrupting it -- does
+    // not justify that, so it is accepted and recorded here rather than hidden.
     //
     // A failure is recorded rather than thrown for the same reason: letting the
     // error escape would leave the episode at its previous count and the next
@@ -753,6 +764,11 @@ export function createJunctionDeviceSyncProvider(
         ? error.code
         : "JUNCTION_PUSH_SOURCE_RECOVERY_TRIGGER_FAILED";
     }
+
+    const attempts = resolveJunctionPushSourceRecoveryAttempts({
+      endpointUnavailable,
+      priorAttempts,
+    });
 
     return {
       metadataPatch: {
