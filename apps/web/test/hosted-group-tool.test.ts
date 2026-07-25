@@ -219,6 +219,7 @@ const RENAMED_GROUP_SUMMARY = {
 };
 const SLEEP_SCOPE = { projectionKind: "sleep-times.v0" } as const;
 const SLEEP_DURATION_SCOPE = { projectionKind: "sleep-duration-days.v0" } as const;
+const PROTEIN_SCOPE = { projectionKind: "protein-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
 });
@@ -1442,6 +1443,11 @@ describe("hosted group join policy", () => {
       RUNNING_DISTANCE_SCOPE,
       RUNNING_SESSION_COUNT_SCOPE,
       { projectionKind: "heart-rate-zones-days.v0" },
+      PROTEIN_SCOPE,
+      { projectionKind: "calories-days.v0" },
+      { projectionKind: "carbs-days.v0" },
+      { projectionKind: "fat-days.v0" },
+      { projectionKind: "fiber-days.v0" },
     ])).toEqual([
       {
         description:
@@ -1480,6 +1486,46 @@ describe("hosted group join policy", () => {
         projectionScopeKey: "heart-rate-zones-days.v0",
       },
       {
+        description:
+          "Shares your last 7 days of daily protein totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily protein",
+        projectionKind: "protein-days.v0",
+        projectionScope: PROTEIN_SCOPE,
+        projectionScopeKey: "protein-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily calorie totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily calories",
+        projectionKind: "calories-days.v0",
+        projectionScope: { projectionKind: "calories-days.v0" },
+        projectionScopeKey: "calories-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily carbohydrate totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily carbs",
+        projectionKind: "carbs-days.v0",
+        projectionScope: { projectionKind: "carbs-days.v0" },
+        projectionScopeKey: "carbs-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily fat totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily fat",
+        projectionKind: "fat-days.v0",
+        projectionScope: { projectionKind: "fat-days.v0" },
+        projectionScopeKey: "fat-days.v0",
+      },
+      {
+        description:
+          "Shares your last 7 days of daily fiber totals from meals in Murph, including meals imported from connected apps.",
+        label: "Daily fiber",
+        projectionKind: "fiber-days.v0",
+        projectionScope: { projectionKind: "fiber-days.v0" },
+        projectionScopeKey: "fiber-days.v0",
+      },
+      {
         description: "Shares your last 7 days of running minutes.",
         label: "Running minutes",
         projectionKind: "activity-minutes-days.v1",
@@ -1502,6 +1548,8 @@ describe("hosted group join policy", () => {
       },
     ]);
 
+    expect(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES)
+      .toContainEqual(PROTEIN_SCOPE);
     expect(projectHostedVaultShareProjectionDisplays(
       HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
     ).map((entry) => entry.projectionScopeKey)).toEqual([
@@ -1950,6 +1998,29 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: diagnosticScopes,
       tx: fakeTx,
     });
+  });
+
+  it("discloses the meal source when a nutrition scope is offered", async () => {
+    const nutritionScopes = [{ projectionKind: "protein-days.v0" as const }];
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionScopes: nutritionScopes },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      action: "post_join_offer",
+      result: { status: "sent" },
+    });
+
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message:
+          "Like or heart this message to share the following with this group: your Murph profile name and daily protein (nutrition totals come from your meals in Murph, including meals imported from connected apps). To choose different permissions, use https://www.withmurph.ai/groups/join/abc123.",
+      }),
+    );
   });
 
   it("reuses an active covering offer without another provider send", async () => {

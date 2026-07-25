@@ -98,6 +98,7 @@ import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from '../assistant/group-shared-read-limits.js'
+import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import type {
   AssistantHostedToolContext,
@@ -4174,6 +4175,14 @@ async function readNewsletterWeeklyMembers(input: {
   }
 }
 
+// The newsletter reads the global selectable registry, so it must be intersected
+// with the newsletter's own configured allowlist. Otherwise any scope a member
+// grants for another surface (e.g. challenge-only nutrient totals) would flow into
+// scheduled email composition even though the newsletter was never configured for it.
+const NEWSLETTER_ALLOWED_PROJECTION_KINDS = new Set<string>(
+  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,
+)
+
 function readNewsletterAuthorizedProjectionScopes(
   participants: readonly HostedRuntimeNewsletterParticipantSummary[],
 ): HostedVaultShareSelectableProjectionScope[] {
@@ -4188,6 +4197,7 @@ function readNewsletterAuthorizedProjectionScopes(
   )
   return HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(
     (projectionScope) =>
+      NEWSLETTER_ALLOWED_PROJECTION_KINDS.has(projectionScope.projectionKind) &&
       authorizedScopeKeys.has(
         buildHostedVaultShareProjectionScopeKey(projectionScope),
       ),
