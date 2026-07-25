@@ -74,7 +74,11 @@ export async function acceptHostedGroupOfferAffirmation(input: {
   threadIdentityLookupKeyReadCandidates: readonly string[];
 }): Promise<HostedGroupOfferAffirmationResult> {
   if (input.kinds.includes("disclosure")) {
-    const disclosureResult = await input.prisma.$transaction(async (tx) =>
+    let disclosureResult: Awaited<
+      ReturnType<typeof acceptHostedGroupDisclosurePermissionReactionTx>
+    >;
+    try {
+      disclosureResult = await input.prisma.$transaction(async (tx) =>
       (await input.assertActorStillBound?.(tx),
       acceptHostedGroupDisclosurePermissionReactionTx({
         channel: input.channel,
@@ -85,6 +89,16 @@ export async function acceptHostedGroupOfferAffirmation(input: {
         threadIdentityLookupKeyReadCandidates: input.threadIdentityLookupKeyReadCandidates,
         tx,
       })), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+    } catch (error) {
+      // Same normalization the join branch uses. Without it an authority
+      // change throws out of the webhook, so the tap is never answered and the
+      // route never returns its terminal response.
+      const reason = readHostedGroupOfferAffirmationSkipReason(error);
+      if (!reason) {
+        throw error;
+      }
+      return { status: "ignored", reason };
+    }
     if (disclosureResult.kind === "accepted") {
       return { status: "accepted", kind: "disclosure" };
     }

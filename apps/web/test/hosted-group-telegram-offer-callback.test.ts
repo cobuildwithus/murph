@@ -264,10 +264,24 @@ describe("hosted telegram group offer callback", () => {
       .mockResolvedValueOnce({ lookup: { core: { id: "usr_1", suspendedAt: null } }, status: "found" })
       .mockResolvedValueOnce({ lookup: { core: { id: "usr_other", suspendedAt: null } }, status: "found" });
 
+    // A changed binding must stay terminal: refuse, answer once, no throw.
+    mocks.acceptHostedGroupOfferAffirmation.mockImplementation(async (args: {
+      assertActorStillBound?: (tx: unknown) => Promise<void>;
+    }) => {
+      try {
+        await args.assertActorStillBound?.(tx);
+      } catch {
+        return { reason: "no_offer_match", status: "ignored" };
+      }
+      return { kind: "join", status: "accepted" };
+    });
+    mocks.answerHostedTelegramCallbackQueryBestEffort.mockClear();
+
     await expect(handleHostedTelegramGroupOfferCallback({
       callbackQuery: buildCallbackQuery(),
       prisma,
-    })).rejects.toMatchObject({ code: "HOSTED_GROUP_RUNTIME_UNSUPPORTED" });
+    })).resolves.toMatchObject({ handled: false });
+    expect(mocks.answerHostedTelegramCallbackQueryBestEffort).toHaveBeenCalledTimes(1);
   });
 
   it("answers the tap before running the optional post-commit tail", async () => {
