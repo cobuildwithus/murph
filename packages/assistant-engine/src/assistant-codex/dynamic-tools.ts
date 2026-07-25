@@ -2761,6 +2761,7 @@ export async function executeMurphDynamicToolRequest(input: {
       try {
         const result = await phoneCalls.start({
           brief: input.request.brief,
+          originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
             brief: input.request.brief,
             scope: requestKeyScope,
@@ -2768,13 +2769,18 @@ export async function executeMurphDynamicToolRequest(input: {
         }, {
           signal: input.abortSignal ?? null,
         })
+        const resultContextGuidance =
+          'When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.'
         if (result.status === "calling") {
-          return toolTextResult(true, `phone call accepted or placed: ${result.phoneCallId}`)
+          return toolTextResult(
+            true,
+            `phone call accepted or placed: ${result.phoneCallId}. ${resultContextGuidance}`,
+          )
         }
         return toolTextResult(
           false,
           result.status === "starting"
-            ? `phone call start is still being reconciled: ${result.phoneCallId}`
+            ? `phone call start is still being reconciled: ${result.phoneCallId}. ${resultContextGuidance}`
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
       } catch {

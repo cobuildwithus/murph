@@ -884,6 +884,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260720173000_hosted_assistant_persona",
       "20260720230000_hosted_group_usage_funding",
       "20260721160000_clinical_retrieval_wire_identity",
+      "20260722190000_hosted_phone_call_origin_session",
       "20260723230000_hosted_member_assistant_unhinged",
       "20260724160000_hosted_account_exit_reason",
       "migration_lock.toml",

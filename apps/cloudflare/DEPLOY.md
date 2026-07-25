@@ -152,6 +152,23 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+## Phone-Call Result Deployment
+
+A completed phone call delivers its result as a proactive
+`assistant.notification.requested` message: Murph composes the result in its own
+voice and may skip a non-meaningful call. This reuses the existing notification
+wake path, so no new mailbox kind or runtime consumer is introduced and there is
+no result-path old-runner/new-web compatibility window.
+
+Apply the additive nullable `HostedPhoneCall.origin_session_id` migration; it is
+used only for phone-call request-key idempotency, not for delivery, so legacy
+rows without an origin session still deliver their result. The start schema
+still requires `originSessionId`, so `create_phone_call` fails closed during a
+runner-first window (a new runner sends the field to an old Web start endpoint
+that rejects it) — deploy Web and the runner together, or keep the window short.
+Delivery requires a resolvable member messaging route, exactly like every other
+proactive notification.
+
 ## Consented Group Disclosure Rollout
 
 The group-to-member adapter reuses Assistant Ask and adds no Cloudflare binding,

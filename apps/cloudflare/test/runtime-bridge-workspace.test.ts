@@ -148,13 +148,21 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     });
 
     for (const reason of HOSTED_WORKSPACE_CHECKPOINT_REASONS.filter((reason) =>
-      reason !== "canonical_runtime_commit" && reason !== "idle_shutdown"
+      reason !== "assistant_runtime_commit"
+      && reason !== "canonical_runtime_commit"
+      && reason !== "idle_shutdown"
     )) {
       await expect(createOptions().createCheckpointSnapshot(createCheckpointInput(reason)))
         .rejects.toThrow(
           "Hosted workspace snapshot construction is idle-shutdown only.",
         );
     }
+    await expect(createOptions().createCheckpointSnapshot(
+      // @ts-expect-error Older wire callers can still send this retired reason;
+      createCheckpointInput("assistant_runtime_commit"),
+    )).rejects.toThrow(
+      "Hosted workspace snapshot construction is idle-shutdown only.",
+    );
 
     expect(readWorkspace).not.toHaveBeenCalled();
     expect(putArtifact).not.toHaveBeenCalled();

@@ -170,6 +170,7 @@ export interface HostedPhoneCallForTest {
   endedAt: Date | null;
   id: string;
   memberId: string;
+  originSessionId: string | null;
   providerCallId: string | null;
   requestKey: string;
   resultEncrypted: string | null;
@@ -542,6 +543,7 @@ interface HostedAiUsageForTestPrismaRow {
   reasoningTokens: number | null;
   requestedModel: string | null;
   servedModel: string | null;
+  sessionId: string;
   surface: string | null;
   tokenPricingBasis: string;
   totalTokens: number | null;
@@ -566,6 +568,7 @@ export interface HostedAiUsageForTestRow {
   reasoningTokens: number | null;
   requestedModel: string | null;
   servedModel: string | null;
+  sessionId: string;
   surface: string | null;
   tokenPricingBasis: string;
   totalTokens: number | null;
@@ -866,6 +869,7 @@ export async function listHostedAiUsageForTest(input: {
       reasoningTokens: row.reasoningTokens,
       requestedModel: row.requestedModel,
       servedModel: row.servedModel,
+      sessionId: row.sessionId,
       surface: row.surface,
       tokenPricingBasis: row.tokenPricingBasis,
       totalTokens: row.totalTokens,
@@ -891,6 +895,7 @@ export async function seedHostedPhoneCallForTest(input: {
   environment?: NodeJS.ProcessEnv;
   id: string;
   memberId: string;
+  originSessionId: string;
   providerCallId: string;
   requestKey: string;
 }): Promise<HostedPhoneCallForTest> {
@@ -913,6 +918,7 @@ export async function seedHostedPhoneCallForTest(input: {
         },
         id: input.id,
         memberId: input.memberId,
+        originSessionId: input.originSessionId,
         provider: "retell",
         providerCallId: input.providerCallId,
         requestKey: input.requestKey,

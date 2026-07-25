@@ -198,6 +198,11 @@ publishing a snapshot; inherited or committed wakes and durability barriers
 remain checkpoint-first. If state remains dirty, the direct invocation
 checkpoints with reason `idle_shutdown` at the floor or during shutdown before
 returning success. A restored due wake in a clean workspace runs ordinarily.
+Before a direct user-action provider turn, a session absent from the restored
+published snapshot receives that same full `idle_shutdown` checkpoint while the
+foreground watcher and detached work are quiescent. This includes a session
+created earlier in the live invocation by deterministic welcome output; a
+session already restored from the published snapshot adds no extra checkpoint.
 Foreground conversation staging also aborts runner-owned background maintenance,
 including an in-flight provider-cleanup request, without aborting the foreground
 invocation itself.

@@ -235,3 +235,36 @@ export async function writeTextFileAtomic(
 
   await writeRuntimeTextFileAtomic(filePath, value)
 }
+
+const assistantConversationHistoryTextEncoder = new TextEncoder()
+
+export function assistantConversationHistoryUtf8Bytes(value: string): number {
+  return assistantConversationHistoryTextEncoder.encode(value).byteLength
+}
+
+export function limitAssistantConversationHistoryTextBytes(
+  value: string | null,
+  maxBytes: number,
+): string | null {
+  if (!value) {
+    return null
+  }
+  if (assistantConversationHistoryUtf8Bytes(value) <= maxBytes) {
+    return value
+  }
+
+  const codePoints = Array.from(value)
+  let low = 0
+  let high = codePoints.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    const candidate = codePoints.slice(0, mid).join('').trimEnd()
+    if (assistantConversationHistoryUtf8Bytes(candidate) <= maxBytes) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+
+  return normalizeNullableString(codePoints.slice(0, low).join('').trimEnd())
+}
