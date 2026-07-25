@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ExternalLinkIcon, ShieldCheckIcon } from "lucide-react";
+import { CheckIcon, ExternalLinkIcon, MailIcon, ShieldCheckIcon } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
-import { Button } from "@/src/components/ui/button";
+import { Button, buttonVariants } from "@/src/components/ui/button";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import { Skeleton } from "@/src/components/ui/skeleton";
+import { buildContactSupportMailto } from "@/src/components/support/contact-support-action";
 import {
   HostedOnboardingApiError,
   requestHostedOnboardingJson,
@@ -20,6 +21,8 @@ import { cn } from "@/src/lib/utils";
 
 type HostedLegalConsentCardMode = "compact" | "panel";
 type HostedLaunchConsentVariant = "combined" | "health-data" | "legal";
+
+const CONSENT_RETRY_SUPPORT_THRESHOLD = 3;
 
 export interface HostedLegalConsentAcceptanceInput {
   acceptedDocumentVersions: Record<string, string>;
@@ -55,6 +58,7 @@ interface HostedLaunchConsentPromptProps {
   description?: string;
   documents: HostedConsentScopeStatus["documents"];
   errorMessage?: string | null;
+  failedAttempts?: number;
   handoffPending?: boolean;
   mode?: HostedLegalConsentCardMode;
   onContinue: () => void;
@@ -96,6 +100,7 @@ function HostedLegalConsentCardState({
   const [retrying, setRetrying] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [failedAttempts, setFailedAttempts] = useState(0);
   const [featureAccepted, setFeatureAccepted] = useState(false);
   const status = statusOverride ?? loadedStatus ?? initialStatus;
 
@@ -223,6 +228,7 @@ function HostedLegalConsentCardState({
         setStatusOverride(latestStatus);
       }
       setAcceptedHandoffPending(false);
+      setFailedAttempts((attempts) => attempts + 1);
       setErrorMessage(
         readConsentErrorMessage(error, "Could not record Murph legal consent right now."),
       );
@@ -299,6 +305,7 @@ function HostedLegalConsentCardState({
         description={launchDescription}
         documents={launchDocuments}
         errorMessage={errorMessage}
+        failedAttempts={failedAttempts}
         handoffPending={acceptedHandoffPending}
         mode={mode}
         onContinue={handleAccept}
@@ -382,6 +389,7 @@ export function HostedLaunchConsentPrompt({
   description,
   documents,
   errorMessage = null,
+  failedAttempts = 0,
   handoffPending = false,
   mode = "compact",
   onContinue,
@@ -408,57 +416,87 @@ export function HostedLaunchConsentPrompt({
         <p className="max-w-[40rem] text-[15px] leading-6 text-pretty text-muted-foreground">
           {copy.description}
         </p>
-        {copy.assurances.length > 0 ? (
-          <ul className="mt-0.5 flex list-disc flex-col gap-1 pl-4 text-[13px] leading-5 text-muted-foreground marker:text-border">
-            {copy.assurances.map((assurance) => (
-              <li key={assurance}>{assurance}</li>
-            ))}
-          </ul>
-        ) : null}
       </div>
+      {copy.assurances.length > 0 ? (
+        <ul className="flex flex-col gap-2 rounded-xl bg-muted/50 px-3.5 py-3 text-[13px] leading-5 text-foreground/85">
+          {copy.assurances.map((assurance) => (
+            <li className="flex items-start gap-2.5" key={assurance}>
+              <CheckIcon className="mt-[3px] size-3.5 shrink-0 text-olive" aria-hidden />
+              <span>{assurance}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <LaunchDocumentLinks documents={documents} />
     </div>
   );
+  const supportExhausted = failedAttempts >= CONSENT_RETRY_SUPPORT_THRESHOLD;
   const error = errorMessage ? (
     <Alert
       className="rounded-lg border-destructive/25 bg-destructive/[0.07] px-3.5 py-2.5 before:hidden"
       variant="destructive"
     >
       <AlertTitle className="sr-only">Unable to record consent</AlertTitle>
-      <AlertDescription className="text-[13px] leading-5">{errorMessage}</AlertDescription>
+      <AlertDescription className="text-[13px] leading-5">
+        {errorMessage}
+        {supportExhausted ? " Our team can finish this for you." : null}
+      </AlertDescription>
     </Alert>
   ) : null;
+  const consentLabel = handoffPending
+    ? acceptedPendingLabel
+    : pending
+      ? "Saving..."
+      : supportExhausted
+        ? "Try again later"
+        : copy.actionLabel;
   const primaryButton = (
     <Button
       aria-busy={accepting}
-      className="min-w-0 flex-1 sm:max-w-[13rem]"
+      className={cn(
+        "min-w-0 flex-1 sm:max-w-[13rem]",
+        supportExhausted && "text-muted-foreground",
+      )}
       disabled={actionPending}
       onClick={onContinue}
       size="lg"
       type="button"
+      variant={supportExhausted ? "outline" : "default"}
     >
-      {handoffPending
-        ? acceptedPendingLabel
-        : pending
-          ? "Saving..."
-          : copy.actionLabel}
+      {consentLabel}
     </Button>
   );
   const actions = (
-    <div
-      className={cn(
-        "flex items-center gap-3",
-        onDecline ? "justify-between" : "justify-end",
-      )}
-    >
-      {onDecline ? (
-        <ConsentDeclineButton
-          busy={declinePending}
-          disabled={actionPending}
-          onDecline={onDecline}
-        />
+    <div className="flex flex-col gap-3">
+      {supportExhausted ? (
+        <a
+          className={cn(
+            buttonVariants({ size: "lg" }),
+            "w-full",
+          )}
+          href={buildContactSupportMailto({
+            subject: "Murph could not record my consent",
+          })}
+        >
+          <MailIcon aria-hidden />
+          Contact support
+        </a>
       ) : null}
-      {primaryButton}
+      <div
+        className={cn(
+          "flex items-center gap-3",
+          onDecline ? "justify-between" : "justify-end",
+        )}
+      >
+        {onDecline ? (
+          <ConsentDeclineButton
+            busy={declinePending}
+            disabled={actionPending}
+            onDecline={onDecline}
+          />
+        ) : null}
+        {primaryButton}
+      </div>
     </div>
   );
 
@@ -556,11 +594,11 @@ function LaunchDocumentLinks({
   return (
     <nav
       aria-label="Consent documents"
-      className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px] leading-5 text-muted-foreground"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs leading-5 text-muted-foreground"
     >
       {documents.map((document) => (
         <a
-          className="underline decoration-border underline-offset-4 transition-colors hover:text-foreground hover:decoration-foreground"
+          className="underline decoration-transparent underline-offset-4 transition-colors hover:text-foreground hover:decoration-border"
           href={document.href}
           key={document.id}
           rel="noreferrer"

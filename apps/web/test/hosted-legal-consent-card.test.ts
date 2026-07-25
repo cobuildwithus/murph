@@ -514,6 +514,67 @@ test("launch consent keeps the prompt visible when the accepted handoff fails", 
   expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
 });
 
+test("launch consent offers support after three failed attempts", async () => {
+  const currentStatus = createConsentStatus({
+    connectedHealthGranted: false,
+    launchGranted: false,
+  });
+
+  mocks.requestHostedOnboardingJson.mockRejectedValue(
+    new Error("Could not record consent. Try again."),
+  );
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      initialStatus: currentStatus,
+      mode: "compact",
+      onAccepted: mocks.onAccepted,
+      source: "homepage-signup-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  for (const attempt of [1, 2, 3]) {
+    const consentButton = findButtonByText(container, /^Consent$/);
+    await act(async () => {
+      consentButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(attempt);
+    });
+
+    if (attempt < 3) {
+      expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
+    }
+  }
+
+  await vi.waitFor(() => {
+    const supportLink = container.querySelector('a[href^="mailto:"]');
+    expect(supportLink).toBeTruthy();
+    expect(supportLink?.getAttribute("href")).toContain("support@withmurph.ai");
+    expect(supportLink?.textContent).toContain("Contact support");
+  });
+
+  expect(container.textContent).toContain("Our team can finish this for you.");
+  const retryLater = findButtonByText(container, /^Try again later$/);
+  expect(retryLater.disabled).toBe(false);
+  expect(
+    [...container.querySelectorAll("button")].some(
+      (button) => button.textContent?.trim() === "Consent",
+    ),
+  ).toBe(false);
+
+  await act(async () => {
+    retryLater.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(4);
+  });
+});
+
 test("HostedLegalConsentCard keeps decline available when status loading fails", async () => {
   const recoveredStatus = createConsentStatus({
     connectedHealthGranted: false,

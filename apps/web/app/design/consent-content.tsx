@@ -97,6 +97,17 @@ export function ConsentContent() {
                 onDecline={() => {}}
               />
             </div>
+            <div className="flex flex-col gap-3">
+              <PreviewLabel>Error after three attempts</PreviewLabel>
+              <HostedLaunchConsentPrompt
+                documents={DESIGN_LAUNCH_DOCUMENTS}
+                errorMessage="Could not record consent. Try again."
+                failedAttempts={3}
+                mode="panel"
+                onContinue={() => {}}
+                onDecline={() => {}}
+              />
+            </div>
           </div>
         </div>
       </section>
