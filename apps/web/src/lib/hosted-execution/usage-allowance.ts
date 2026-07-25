@@ -1064,6 +1064,31 @@ export async function resolveHostedAiUsageGate(input: {
   now?: Date | string;
   prisma?: HostedAiUsageAllowanceClient;
 }): Promise<HostedAiUsageGateDecisionWithSource> {
+  return resolveHostedAiUsageGateWithPolicy({
+    ...input,
+    preserveExistingLegacyPaidPeriodLimit: true,
+  });
+}
+
+export async function reconcileHostedAiUsageGateForBillingModeChangeTx(input: {
+  memberId: string;
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await resolveHostedAiUsageGateWithPolicy({
+    memberId: input.memberId,
+    now: input.now,
+    preserveExistingLegacyPaidPeriodLimit: false,
+    prisma: input.tx,
+  });
+}
+
+async function resolveHostedAiUsageGateWithPolicy(input: {
+  memberId: string;
+  now?: Date | string;
+  preserveExistingLegacyPaidPeriodLimit: boolean;
+  prisma?: HostedAiUsageAllowanceClient;
+}): Promise<HostedAiUsageGateDecisionWithSource> {
   const prisma = input.prisma ?? getPrisma();
   const now = normalizeHostedAiUsageAllowanceDate(input.now ?? new Date());
 
@@ -1159,6 +1184,8 @@ export async function resolveHostedAiUsageGate(input: {
       billingRef: allowanceBillingRef,
       memberId: input.memberId,
       now,
+      preserveExistingLegacyPaidPeriodLimit:
+        input.preserveExistingLegacyPaidPeriodLimit,
       threadContainer: memberState.threadContainer,
       threadContainerAccessActive,
       tx,
@@ -1568,6 +1595,7 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
   billingRef: HostedAiUsageAllowanceBillingRef | null;
   memberId: string;
   now: Date;
+  preserveExistingLegacyPaidPeriodLimit?: boolean;
   threadContainer?: HostedAiUsageAllowanceThreadContainerRef | null;
   threadContainerAccessActive?: boolean | null;
   tx: Prisma.TransactionClient;
@@ -1640,10 +1668,13 @@ async function ensureHostedAiUsageAllowancePeriodTx(input: {
     periodIdentityMatches &&
     (
       current.limitUsdMicros === resolved.limitUsdMicros ||
-      shouldPreserveExistingPaidPeriodLimit({
-        currentLimitUsdMicros: current.limitUsdMicros,
-        resolved,
-      })
+      (
+        input.preserveExistingLegacyPaidPeriodLimit !== false &&
+        shouldPreserveExistingPaidPeriodLimit({
+          currentLimitUsdMicros: current.limitUsdMicros,
+          resolved,
+        })
+      )
     );
 
   if (periodMatches) {

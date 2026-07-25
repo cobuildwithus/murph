@@ -34,11 +34,11 @@ Updated: 2026-07-25
 1. Risk: reusing the direct price for Family seats would grant the wrong allowance.
    Mitigation: expose separate direct-plan and Family-seat allowance helpers from the billing catalog and cover all four plan/mode combinations.
 2. Risk: lowering an allowance mid-period could abruptly block a member who still had granted capacity.
-   Mitigation: preserve a higher same-plan limit for the open paid period, then prove the following period starts at 80%; keep actual plan or tier changes immediate.
+   Mitigation: preserve a higher same-plan limit for the open paid period, then prove the following period starts at 80%; keep actual plan, tier, and billing-mode changes immediate.
 3. Risk: unrelated fixed values for trials, malformed provider usage, purchased packs, or test scaffolding could be changed accidentally.
    Mitigation: change only paid-plan allowance derivation and its behavior-specific assertions; leave other fixed limits intact.
-4. Risk: preserving the rollout limit could accidentally prevent real plan or tier changes from taking effect.
-   Mitigation: key preservation to the same plan and period identity, and cover a current-period plan change separately.
+4. Risk: preserving the rollout limit could accidentally prevent a same-tier direct-to-Family conversion from taking effect.
+   Mitigation: force reconciliation through the existing allowance owner at the canonical Family webhook handoff and cover Pulse and Edge conversions with unchanged period bounds.
 
 ## Tasks
 
@@ -54,7 +54,7 @@ Updated: 2026-07-25
 
 - Interpret “whatever they paid” as the server-owned recurring plan or seat amount currently charged by Murph: $8/$20 for direct plans and $7/$19 for Family seats. Discounts, taxes, prorations, purchased credit, and trial value remain outside this allowance rule because they are not current allowance-owner inputs.
 - Use integer cents and USD micros, so every current catalog price produces an exact allowance with no floating-point rounding.
-- Preserve a higher allowance already granted for the same open paid period, then apply the 80% rule at renewal. Real plan or Family tier changes still reconcile during the current period.
+- Preserve a higher allowance already granted for the same open paid period, then apply the 80% rule at renewal. Real plan, Family tier, and direct-to-Family billing-mode changes still reconcile during the current period.
 
 ## Verification
 

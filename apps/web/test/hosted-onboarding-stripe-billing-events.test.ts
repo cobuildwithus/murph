@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   findMemberForStripeSubscription: vi.fn(),
   prepareHostedMemberStripeBillingWrite: vi.fn(),
   readActiveHostedFamilySponsorship: vi.fn(),
+  reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   requireHostedStripeApi: vi.fn(),
   suspendHostedMemberForBillingReversalTx: vi.fn(),
   upsertHostedMemberStripeCheckoutEmailIfFreshTx: vi.fn(),
@@ -35,6 +36,18 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
 }));
+
+vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-execution/usage-allowance")
+  >("@/src/lib/hosted-execution/usage-allowance");
+
+  return {
+    ...actual,
+    reconcileHostedAiUsageGateForBillingModeChangeTx:
+      mocks.reconcileHostedAiUsageGateForBillingModeChangeTx,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", async () => {
   const actual = await vi.importActual<
@@ -145,8 +158,10 @@ describe("hosted onboarding stripe billing events", () => {
     mocks.applyHostedFamilyStripeCheckoutCompletedTx.mockResolvedValue({ groupId: null });
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValue({
       activations: [],
+      billingModeChangedMemberIds: [],
       groupId: null,
     });
+    mocks.reconcileHostedAiUsageGateForBillingModeChangeTx.mockResolvedValue(undefined);
     mocks.requireHostedStripeApi.mockReturnValue({
       invoicePayments: {
         list: vi.fn(async () => ({ data: [] })),
@@ -582,8 +597,10 @@ describe("hosted onboarding stripe billing events", () => {
   it("routes Family subscription updates to group billing without member billing writes", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
       activations: [],
+      billingModeChangedMemberIds: ["member_owner"],
       groupId: "hbag_family",
     });
+    const tx = {};
 
     await applyStripeSubscriptionUpdated(
       makeStripeSubscription({
@@ -598,9 +615,14 @@ describe("hosted onboarding stripe billing events", () => {
         sourceEventId: "evt_family_sub_updated",
         sourceType: "stripe.customer.subscription.updated",
       },
-      {} as never,
+      tx as never,
     );
 
+    expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx).toHaveBeenCalledWith({
+      memberId: "member_owner",
+      now: new Date("2026-04-23T00:00:00.000Z"),
+      tx,
+    });
     expect(mocks.findMemberForStripeSubscription).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();

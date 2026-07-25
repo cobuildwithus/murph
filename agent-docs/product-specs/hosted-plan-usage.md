@@ -92,7 +92,8 @@ from their $7 and $19 seat prices. Discounts, taxes, prorations, trials, and
 purchased usage credit do not redefine this catalog-owned allowance.
 An already-open paid period keeps a higher included limit that was granted when
 the period began. The price-derived allowance starts on its next paid period;
-an actual plan or Family tier change still reconciles during the current period.
+an actual plan, Family tier, or direct-to-Family billing-mode change still
+reconciles during the current period.
 
 A forecast requires at least 24 hours of counted usage. It is shown only when
 the observed pace projects exhaustion before the current period ends. The

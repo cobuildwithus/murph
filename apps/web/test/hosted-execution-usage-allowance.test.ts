@@ -31,6 +31,7 @@ import {
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
+  reconcileHostedAiUsageGateForBillingModeChangeTx,
   resolveHostedAiUsageGate,
 } from "@/src/lib/hosted-execution/usage-allowance";
 import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-execution/usage-retell";
@@ -2919,6 +2920,81 @@ describe("resolveHostedAiUsageGate", () => {
     }));
   });
 
+  it.each([
+    {
+      billingPlanCode: "launch_monthly",
+      familyPlanCode: "pulse" as const,
+      legacyLimitUsdMicros: 10_000_000n,
+      resolvedLimitUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 6_000_000n,
+    },
+    {
+      billingPlanCode: "launch_edge_monthly",
+      familyPlanCode: "edge" as const,
+      legacyLimitUsdMicros: 25_000_000n,
+      resolvedLimitUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: 16_000_000n,
+    },
+  ])(
+    "reconciles direct $familyPlanCode legacy capacity at the Family billing-mode handoff",
+    async ({
+      billingPlanCode,
+      familyPlanCode,
+      legacyLimitUsdMicros,
+      resolvedLimitUsdMicros,
+      spentUsdMicros,
+    }) => {
+      const now = new Date("2026-03-29T12:00:00.000Z");
+      const periodStart = new Date("2026-03-01T00:00:00.000Z");
+      const periodEnd = new Date("2026-04-01T00:00:00.000Z");
+      const update = vi.fn(async (args: {
+        data: {
+          billingPlanCode: string;
+          blockedAt: Date | null;
+          limitUsdMicros: bigint;
+          periodEnd: Date;
+        };
+      }) => ({
+        billingPlanCode: args.data.billingPlanCode,
+        blockedAt: args.data.blockedAt,
+        limitUsdMicros: args.data.limitUsdMicros,
+        periodEnd: args.data.periodEnd,
+        periodStart,
+        spentUsdMicros,
+      }));
+      const tx = createGatePrisma({
+        billingPlanCode,
+        billingStatus: HostedBillingStatus.not_started,
+        familyAccessActive: true,
+        familyPlanCode,
+        limitUsdMicros: legacyLimitUsdMicros,
+        periodEnd,
+        periodStart,
+        spentUsdMicros,
+        update,
+      });
+
+      await expect(reconcileHostedAiUsageGateForBillingModeChangeTx({
+        memberId: "member_123",
+        now,
+        tx: tx as never,
+      })).resolves.toBeUndefined();
+
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          billingPlanCode,
+          blockedAt: now,
+          limitUsdMicros: resolvedLimitUsdMicros,
+          periodEnd,
+        }),
+      }));
+      const updateData =
+        (update.mock.calls[0]?.[0] as { data?: Record<string, unknown> } | undefined)
+          ?.data;
+      expect(updateData).not.toHaveProperty("spentUsdMicros");
+    },
+  );
+
   it("uses billing-period counter without aggregating historical usage rows", async () => {
     const queryRaw = vi.fn(async (sql: TemplateStringsArray) => {
       void sql;
@@ -3177,6 +3253,62 @@ describe("readHostedAiUsageGate", () => {
       remainingUsdMicros: FAMILY_PULSE_ALLOWANCE_USD_MICROS,
       spentUsdMicros: 0n,
     });
+  });
+
+  it("reads a direct legacy fixed Pulse limit through its current paid period", async () => {
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 8_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_monthly",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 2_000_000n,
+      spentUsdMicros: 8_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
+  });
+
+  it("reads a Family-sponsored legacy fixed Edge limit through its current paid period", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_edge_monthly",
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPlanCode: "edge",
+      limitUsdMicros: 25_000_000n,
+      periodEnd: new Date("2026-04-01T00:00:00.000Z"),
+      periodStart: new Date("2026-03-01T00:00:00.000Z"),
+      spentUsdMicros: 17_000_000n,
+    });
+
+    await expect(readHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      allowanceSource: "family_sponsored_plan",
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 25_000_000n,
+      remainingUsdMicros: 8_000_000n,
+      spentUsdMicros: 17_000_000n,
+    });
+
+    expect(prisma.hostedAiUsagePeriod.createMany).not.toHaveBeenCalled();
+    expect(prisma.hostedAiUsagePeriod.update).not.toHaveBeenCalled();
   });
 
   it("reads gate state without creating or updating usage-period rows", async () => {
