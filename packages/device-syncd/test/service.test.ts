@@ -7759,3 +7759,113 @@ test("device sync service carries an automatic Garmin recovery from scheduler to
     close();
   }
 });
+
+test("a foreground yield during a recovery trigger cannot replay the provider mutation", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-push-recovery-yield");
+  const now = new Date("2026-07-20T00:00:00.000Z");
+  let yieldRequested = false;
+  const triggerRequests: unknown[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: {
+      now: () => now,
+    },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+      shouldYieldJobExecution: () => yieldRequested,
+    },
+    providers: [
+      createJunctionDeviceSyncProvider({
+        apiKey: "sk_us_test_123",
+        clientUserIdSecret: "junction-client-user-id-secret",
+        environment: "sandbox",
+        region: "us",
+        summaryBackfillDays: 2,
+        summaryResources: [],
+        timeseriesResources: [],
+        webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+        fetchImpl: async (input, init) => {
+          const url = String(
+            input instanceof URL ? input : input instanceof Request ? input.url : input,
+          );
+
+          if (url.includes("/v2/link/bulk_trigger_historical_pull")) {
+            triggerRequests.push(init?.body ? JSON.parse(String(init.body)) : null);
+            // Foreground work asks to yield while the trigger is in flight, and
+            // the yield poller runs every 100ms, so wait past it. The remote
+            // side may already have accepted this POST.
+            yieldRequested = true;
+            await new Promise((resolve) => setTimeout(resolve, 350));
+
+            if (init?.signal?.aborted) {
+              // Only reachable if this one-shot mutation is cancellable, which
+              // is what lets the job be released and replayed.
+              throw Object.assign(new Error("aborted"), { name: "AbortError" });
+            }
+
+            return new Response(JSON.stringify({ success: true }), {
+              headers: { "content-type": "application/json" },
+              status: 202,
+            });
+          }
+
+          return new Response(JSON.stringify({ data: [] }), {
+            headers: { "content-type": "application/json" },
+            status: 200,
+          });
+        },
+      }),
+    ],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-user-1",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-07-01T00:00:00.000Z",
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: "garmin",
+      sourceProviderSlug: "garmin",
+      status: "connected",
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      lastDataAt: "2026-07-18T00:00:00.000Z",
+    });
+    store.markSyncSucceeded(account.id, "2026-07-19T00:00:00.000Z", null, {
+      nextReconcileAt: "2026-07-19T23:00:00.000Z",
+    });
+
+    await service.runSchedulerOnce();
+    await service.runWorkerOnce();
+
+    // The attempt must be durably consumed even though a yield was requested
+    // mid-flight, or the ladder bound is meaningless.
+    assert.equal(triggerRequests.length, 1);
+    assert.equal(
+      store.getAccountById(account.id)?.metadata.junctionPushSourceRecoveryAttempts,
+      1,
+    );
+
+    yieldRequested = false;
+    await service.runWorkerOnce();
+
+    assert.equal(
+      triggerRequests.length,
+      1,
+      "a released job must not re-send the historical-pull trigger",
+    );
+  } finally {
+    close();
+  }
+});

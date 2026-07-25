@@ -729,25 +729,26 @@ export function createJunctionDeviceSyncProvider(
       && state.sourceProviderSlug === sourceProviderSlug;
     const attempts = (isRecordedEpisode ? state.attempts : 0) + 1;
 
-    // A failed call still consumed an attempt. Letting the error escape would
-    // leave the episode at its previous count, so the next scheduled pass would
-    // derive the identical attempt again and keep doing so for as long as the
-    // source stays silent, which is exactly the unbounded provider work the
-    // ladder exists to prevent. The failure is recorded instead of retried.
+    // This is a one-shot external mutation, so once it can be dispatched the
+    // attempt must be consumed no matter how the pass ends. Deliberately not
+    // cancellable: a foreground yield mid-flight would release the job back to
+    // the queue without its metadata patch, and the remote trigger may already
+    // have been accepted, so the next run would re-send it without advancing
+    // the ladder. Every other Junction job is a replay-safe read; this one is
+    // not. The call is a single POST already bounded by the client timeout.
+    //
+    // A failure is recorded rather than thrown for the same reason: letting the
+    // error escape would leave the episode at its previous count and the next
+    // scheduled pass would derive the identical attempt again, indefinitely.
     let endpointUnavailable = false;
     let failureCode: string | null = null;
 
     try {
       ({ endpointUnavailable } = await client.bulkTriggerHistoricalPull({
-        signal: context.signal ?? null,
         sourceProviderSlug,
         userIds: [context.account.externalAccountId],
       }));
     } catch (error) {
-      if (context.signal?.aborted) {
-        throw error;
-      }
-
       failureCode = isDeviceSyncError(error)
         ? error.code
         : "JUNCTION_PUSH_SOURCE_RECOVERY_TRIGGER_FAILED";
