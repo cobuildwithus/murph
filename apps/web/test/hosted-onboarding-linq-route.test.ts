@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   finishHostedOnboardingTiming: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  sendHostedLinqChatMessage: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
     startedAtMs: 0,
@@ -27,6 +28,17 @@ vi.mock("next/server", async () => {
 vi.mock("@/src/lib/hosted-onboarding/webhook-service", () => ({
   handleHostedOnboardingLinqWebhook: mocks.handleHostedOnboardingLinqWebhook,
 }));
+
+vi.mock("@/src/lib/hosted-onboarding/linq", async () => {
+  const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/linq")>(
+    "@/src/lib/hosted-onboarding/linq",
+  );
+
+  return {
+    ...actual,
+    sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
   const actual = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/logging")>(
@@ -56,6 +68,10 @@ describe("hosted onboarding Linq webhook route", () => {
     mocks.after.mockImplementation((callback: () => void) => callback());
     mocks.handleHostedOnboardingLinqWebhook.mockResolvedValue({
       ok: true,
+    });
+    mocks.sendHostedLinqChatMessage.mockResolvedValue({
+      chatId: "chat_visible_route",
+      messageId: "msg_visible_reply",
     });
   });
 
@@ -126,6 +142,73 @@ describe("hosted onboarding Linq webhook route", () => {
         signalAbortedBeforeReturn: false,
       }),
     );
+  });
+
+  it("composes visible secondary replies through the public Linq route", async () => {
+    mocks.handleHostedOnboardingLinqWebhook.mockResolvedValueOnce({
+      ignored: true,
+      ok: true,
+      reason: "signup-link-already-sent",
+    });
+    const rawBody = JSON.stringify({
+      api_version: "v3",
+      created_at: "2026-07-25T12:00:00.000Z",
+      data: {
+        chat: {
+          id: "chat_visible_route",
+          is_group: false,
+          owner_handle: {
+            handle: "+15550000000",
+            id: "handle_owner",
+            is_me: true,
+            service: "sms",
+          },
+        },
+        direction: "inbound",
+        id: "msg_visible_route",
+        parts: [{ type: "text", value: "hello again" }],
+        recipient_handle: {
+          handle: "+15550000000",
+          id: "handle_recipient",
+          is_me: true,
+          service: "sms",
+        },
+        recipient_phone: "+15550000000",
+        sender_handle: {
+          handle: "+15551234567",
+          id: "handle_sender",
+          service: "sms",
+        },
+        sent_at: "2026-07-25T12:00:00.000Z",
+        service: "sms",
+      },
+      event_id: "evt_visible_route",
+      event_type: "message.received",
+      webhook_version: "2026-02-03",
+    });
+
+    const response = await hostedOnboardingLinqRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+        body: rawBody,
+        headers: {
+          "x-webhook-signature": "sha256=test",
+          "x-webhook-timestamp": "1711278000",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:signup-link-already-sent",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith({
+      chatId: "chat_visible_route",
+      idempotencyKey: "visible-secondary:evt_visible_route",
+      message: "I already sent your setup link in your Murph messages. Open it to finish setting up Murph.",
+      replyToMessageId: "msg_visible_route",
+    });
   });
 
   it("returns a retryable server response when Linq chat classification is unavailable", async () => {

@@ -1,5 +1,7 @@
+import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 
+import type { HostedMemberEmailAuthorizationLookup } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import {
   parseHostedLinqWebhookEvent,
   requireHostedLinqMessageReceivedEvent,
@@ -52,6 +54,108 @@ describe("visible secondary webhook outcomes", () => {
       reason: "group-chat",
       recognizedSender: true,
     })).toContain("group chat");
+  });
+
+  it("does not send an operational Linq reply when the participant phone is unknown", async () => {
+    const event = buildOperationalLinqEvent({
+      eventId: "evt_unknown_phone",
+      messageId: "msg_unknown_phone",
+      senderHandle: "+15551234567",
+      senderService: "sms",
+    });
+    const lookupHostedMemberIdentityByPhoneNumber = vi.fn(async () => null);
+    const sendHostedLinqChatMessage = vi.fn();
+    const dependencies: HostedVisibleSecondaryLinqDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
+      lookupHostedMemberIdentityByPhoneNumber,
+      parseHostedLinqWebhookEvent: vi.fn(() => event),
+      sendHostedLinqChatMessage,
+    };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "unattested-direct-chat",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).resolves.toEqual({
+      ignored: true,
+      ok: true,
+      reason: "unattested-direct-chat",
+    });
+    expect(lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith({
+      phoneNumber: "+15551234567",
+      prisma: {},
+    });
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("sends an operational Linq reply when the participant email is recognized", async () => {
+    const event = buildOperationalLinqEvent({
+      eventId: "evt_recognized_email",
+      messageId: "msg_recognized_email",
+      senderHandle: "member@example.test",
+      senderService: "email",
+    });
+    const recognizedMember: HostedMemberEmailAuthorizationLookup = {
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-07-25T12:00:00.000Z"),
+        id: "member_recognized",
+        suspendedAt: null,
+        updatedAt: new Date("2026-07-25T12:00:00.000Z"),
+      },
+      emailAuthorization: {
+        directPublicSender: null,
+        memberId: "member_recognized",
+        stripeCheckoutEmail: null,
+        verifiedEmail: {
+          address: "member@example.test",
+          lookupKey: "lookup_recognized",
+          verifiedAt: new Date("2026-07-25T12:00:00.000Z"),
+        },
+      },
+      matchedBy: "verifiedEmail",
+    };
+    const lookupHostedMemberByVerifiedEmailAddress = vi.fn(async () => recognizedMember);
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_visible_operational",
+      messageId: "msg_visible_reply",
+    }));
+    const dependencies: HostedVisibleSecondaryLinqDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      lookupHostedMemberByVerifiedEmailAddress,
+      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
+      parseHostedLinqWebhookEvent: vi.fn(() => event),
+      sendHostedLinqChatMessage,
+    };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "unattested-direct-chat",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).resolves.toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:unattested-direct-chat",
+    });
+    expect(lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith({
+      address: "member@example.test",
+      prisma: {},
+    });
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_visible_operational",
+      idempotencyKey: "visible-secondary:evt_recognized_email",
+      replyToMessageId: "msg_recognized_email",
+    }));
   });
 
   it.each([
@@ -244,3 +348,47 @@ describe("visible secondary webhook outcomes", () => {
     expect(dependencies.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 });
+
+function buildOperationalLinqEvent(input: {
+  eventId: string;
+  messageId: string;
+  senderHandle: string;
+  senderService: "email" | "sms";
+}): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
+  return requireHostedLinqMessageReceivedEvent({
+    api_version: "v3",
+    created_at: "2026-07-25T12:00:00.000Z",
+    data: {
+      chat: {
+        id: "chat_visible_operational",
+        is_group: false,
+        owner_handle: {
+          handle: "+15550000000",
+          id: "handle_owner",
+          is_me: true,
+          service: "sms",
+        },
+      },
+      direction: "inbound",
+      id: input.messageId,
+      parts: [{ type: "text", value: "hello" }],
+      recipient_handle: {
+        handle: "+15550000000",
+        id: "handle_recipient",
+        is_me: true,
+        service: "sms",
+      },
+      recipient_phone: "+15550000000",
+      sender_handle: {
+        handle: input.senderHandle,
+        id: "handle_sender",
+        service: input.senderService,
+      },
+      sent_at: "2026-07-25T12:00:00.000Z",
+      service: "sms",
+    },
+    event_id: input.eventId,
+    event_type: "message.received",
+    webhook_version: "2026-02-03",
+  });
+}

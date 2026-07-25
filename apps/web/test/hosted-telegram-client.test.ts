@@ -6,7 +6,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
-import { sendHostedTelegramTextMessage } from "@/src/lib/hosted-onboarding/telegram-client";
+import {
+  answerHostedTelegramCallbackQueryBestEffort,
+  sendHostedTelegramTextMessage,
+} from "@/src/lib/hosted-onboarding/telegram-client";
 
 describe("sendHostedTelegramTextMessage", () => {
   const fetchMock = vi.fn();
@@ -61,5 +64,15 @@ describe("sendHostedTelegramTextMessage", () => {
       code: "HOSTED_TELEGRAM_API_REQUEST_FAILED",
       retryable: true,
     });
+  });
+
+  it("keeps callback acknowledgement best effort when Telegram refuses it", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 429 }));
+
+    await expect(answerHostedTelegramCallbackQueryBestEffort({
+      callbackQueryId: "callback_1",
+      text: "Already handled.",
+    })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

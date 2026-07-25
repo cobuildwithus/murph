@@ -32,3 +32,6 @@ every accepted finding and PR-specific failure.
   with zero accepted findings.
 - Required GitHub checks green on the final reviewed head, with unrelated flakes
   retried only after log evidence distinguishes them from PR-specific failures.
+Status: completed
+Updated: 2026-07-25
+Completed: 2026-07-25
