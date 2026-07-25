@@ -1558,6 +1558,38 @@ describe("murph.group dynamic tool", () => {
     });
   });
 
+  it("executes a rename that renamed the chat without a hosted group record", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "update_display_name",
+      displayName: "Weekly Health Crew",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const response = {
+      action: "update_display_name" as const,
+      result: { group: null, status: "ok" as const },
+    };
+    const groupRequest = vi.fn<GroupToolRequest>(async () => response);
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({ groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual(response);
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain('a renamed chat with no hosted group record yet returns status="ok" with group=null');
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.displayName.description)
+      .toContain("stores the same hosted group label when the chat has a hosted group record");
+  });
+
   it("rejects invalid update_display_name arguments", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "update_display_name",

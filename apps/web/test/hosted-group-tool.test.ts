@@ -1274,6 +1274,49 @@ describe("filterHostedRuntimeGroupToolResponseProjectionScopes", () => {
     });
   });
 
+  it("filters a renamed group summary and passes a null group through", () => {
+    const supportedScopeKeys = new Set([
+      buildHostedVaultShareProjectionScopeKey(SLEEP_SCOPE),
+    ]);
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: groupWithSelectorScopes,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: {
+          ...groupWithSelectorScopes,
+          members: [{
+            ...groupWithSelectorScopes.members[0],
+            grantedVaultShareProjectionKinds: ["sleep-times.v0"],
+            grantedVaultShareProjectionScopes: [SLEEP_SCOPE],
+          }],
+          requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        },
+        status: "ok",
+      },
+    });
+
+    expect(filterHostedRuntimeGroupToolResponseProjectionScopes({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    }, supportedScopeKeys)).toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+  });
+
   it("keeps selector scopes for current group-tool callers", () => {
     const filtered = filterHostedRuntimeGroupToolResponseProjectionScopes({
       action: "create_join_link",
