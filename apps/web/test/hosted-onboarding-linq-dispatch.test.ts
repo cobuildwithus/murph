@@ -516,7 +516,7 @@ type PrismaFixtureBase = {
   $transaction?: MockedFunction;
   hostedAccountGroupMembership?: HostedAccountGroupMembershipFixture;
   hostedGroupJoinOutreach?: {
-    findFirst?: MockedFunction;
+    findMany?: MockedFunction;
     updateMany?: MockedFunction;
   };
   hostedInvite?: HostedInviteFixture;
@@ -9029,11 +9029,11 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
 
   // Inbound planning consults pending pre-member group-join outreach to recover
   // the originating group. These fixtures have no outreach rows.
-  if (!prisma.hostedGroupJoinOutreach?.findFirst) {
+  if (!prisma.hostedGroupJoinOutreach?.findMany) {
     Object.defineProperty(prisma, "hostedGroupJoinOutreach", {
       configurable: true,
       value: {
-        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([]),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     });
