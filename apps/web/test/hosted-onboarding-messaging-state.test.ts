@@ -138,7 +138,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("keeps Telegram-only setup pending until an inbound thread exists", () => {
+  it("tracks a linked Telegram identity separately from a replyable thread", () => {
     const input = {
       identity: null,
       routing: {
@@ -154,7 +154,7 @@ describe("hosted member messaging authority", () => {
       telegramAwaitingInbound: true,
       telegramTarget: null,
     });
-    expect(isHostedMemberMessagingSetupRequired(input)).toBe(true);
+    expect(isHostedMemberMessagingSetupRequired(input)).toBe(false);
     expect(resolveHostedMemberChannels({
       ...input,
       emailLinked: false,
