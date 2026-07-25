@@ -626,7 +626,162 @@ describe("prisma module", () => {
 
     expect(query).toHaveBeenCalledOnce();
   });
+
+  it("warns once per interval while callers are queued for a connection", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const pool = mocks.poolInstances[0];
+    const extension = mocks.extensions[0];
+    if (!pool || !extension) {
+      throw new Error("Expected the Prisma pool and query extension to be captured.");
+    }
+    pool.idleCount = 0;
+    pool.totalCount = 15;
+    pool.waitingCount = 4;
+
+    const run = () => extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => "rows",
+    });
+    await run();
+    await run();
+    await run();
+
+    // Three contended operations, but the pool is sampled at most once per
+    // interval so a burst cannot flood the log.
+    expect(pressureLogs(warn)).toEqual([{
+      idleConnections: 0,
+      totalConnections: 15,
+      waitingRequests: 4,
+    }]);
+  });
+
+  it("stays silent while no caller is waiting for a connection", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+    const pool = mocks.poolInstances[0];
+    const extension = mocks.extensions[0];
+    if (!pool || !extension) {
+      throw new Error("Expected the Prisma pool and query extension to be captured.");
+    }
+    pool.idleCount = 12;
+    pool.totalCount = 15;
+    pool.waitingCount = 0;
+
+    await extension.query.$allOperations({
+      args: {},
+      operation: "queryRaw",
+      query: async () => "rows",
+    });
+
+    expect(pressureLogs(warn)).toEqual([]);
+  });
+
+  it("reports a transaction that held its connection past the slow threshold", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const { getPrisma } = await import("@/src/lib/prisma");
+      const prisma = getPrisma();
+      mocks.transaction.mockImplementation(async () => {
+        vi.advanceTimersByTime(6_000);
+        return "committed";
+      });
+
+      await expect(prisma.$transaction(async () => "unused")).resolves.toBe("committed");
+
+      expect(slowTransactionLogs(warn)).toEqual([{ durationMs: 6_000 }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not report an ordinary short transaction", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    const prisma = getPrisma();
+    mocks.transaction.mockResolvedValue("committed");
+
+    await expect(prisma.$transaction(async () => "unused")).resolves.toBe("committed");
+
+    expect(slowTransactionLogs(warn)).toEqual([]);
+  });
+
+  it("records the effective pool size and whether it was configured", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_POOL_MAX: "9",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "Hosted web database pool configured.",
+      { maxConnections: 9, source: "configured" },
+    );
+  });
+
+  it("marks an inherited pool size as the default rather than a decision", async () => {
+    process.env = {
+      ...process.env,
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://example.invalid/db?sslmode=require",
+    };
+    delete process.env.DATABASE_POOL_MAX;
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const { getPrisma } = await import("@/src/lib/prisma");
+
+    getPrisma();
+
+    expect(info).toHaveBeenCalledExactlyOnceWith(
+      "Hosted web database pool configured.",
+      { maxConnections: 15, source: "default" },
+    );
+  });
 });
+
+function pressureLogs(warn: { mock: { calls: unknown[][] } }): unknown[] {
+  return warn.mock.calls
+    .filter((call) => call[0] === "Hosted web database pool pressure.")
+    .map((call) => call[1]);
+}
+
+function slowTransactionLogs(warn: { mock: { calls: unknown[][] } }): unknown[] {
+  return warn.mock.calls
+    .filter((call) => call[0] === "Hosted web database slow transaction.")
+    .map((call) => call[1]);
+}
+
 
 function transactionStartTimeout(): Error {
   return Object.assign(

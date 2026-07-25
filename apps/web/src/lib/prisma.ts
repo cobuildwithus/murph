@@ -24,6 +24,14 @@ const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
 const DATABASE_RETRY_ATTEMPTS = 3;
 const DATABASE_RETRY_DELAY_MS = 250;
+const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
+const SLOW_TRANSACTION_MS = 5_000;
+
+/**
+ * Last pressure sample per pool. Keyed by pool rather than held in a module
+ * variable so a second client cannot suppress the first client's samples.
+ */
+const lastPoolPressureSampleAtMs = new WeakMap<PgPool, number>();
 
 type DatabasePoolFailureCategory =
   | "active_connection_error"
@@ -176,6 +184,7 @@ async function runWithDatabaseRetry<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
+    reportDatabasePoolPressure(pool);
     try {
       return await run();
     } catch (error) {
@@ -213,12 +222,18 @@ function withTransactionStartRetry(
         return value;
       }
 
-      return (...args: unknown[]): Promise<unknown> =>
-        runWithDatabaseRetry(
-          pool,
-          "transaction_start_timeout",
-          () => Reflect.apply(value, target, args) as Promise<unknown>,
-        );
+      return async (...args: unknown[]): Promise<unknown> => {
+        const startedAtMs = Date.now();
+        try {
+          return await runWithDatabaseRetry(
+            pool,
+            "transaction_start_timeout",
+            () => Reflect.apply(value, target, args) as Promise<unknown>,
+          );
+        } finally {
+          reportSlowDatabaseTransaction(Date.now() - startedAtMs);
+        }
+      };
     },
   });
 }
@@ -230,11 +245,22 @@ function delay(milliseconds: number): Promise<void> {
 }
 
 function createPrisma(): PrismaClient {
+  const configuredPoolMax = Number.isFinite(DATABASE_POOL_MAX) && DATABASE_POOL_MAX > 0
+    ? DATABASE_POOL_MAX
+    : null;
+
+  // The pool limit is per module runtime, so the effective ceiling is this
+  // number times the live instance count. Say which number is in force and
+  // whether anyone chose it, so an inherited default is never mistaken for a
+  // capacity decision.
+  console.info("Hosted web database pool configured.", {
+    maxConnections: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
+    source: configuredPoolMax === null ? "default" : "configured",
+  });
+
   return createPrismaClient({
     databaseUrl: assertHostedWebDatabaseUrlConfigured(),
-    poolMax: Number.isFinite(DATABASE_POOL_MAX) && DATABASE_POOL_MAX > 0
-      ? DATABASE_POOL_MAX
-      : DEFAULT_DATABASE_POOL_MAX,
+    poolMax: configuredPoolMax ?? DEFAULT_DATABASE_POOL_MAX,
   });
 }
 
@@ -336,6 +362,48 @@ function reportDatabasePoolFailure(
     idleConnections: normalizePoolCount(pool.idleCount),
     totalConnections: normalizePoolCount(pool.totalCount),
     waitingRequests: normalizePoolCount(pool.waitingCount),
+  });
+}
+
+/**
+ * Reports pool contention before it becomes a failure. `waitingCount` is the
+ * pool's own count of callers queued for a client, so a sustained non-zero
+ * value is the early warning that a checkout timeout is coming; a healthy pool
+ * logs nothing. Rate limited per pool so a contended burst cannot flood the
+ * log, and it carries counts only, never a query, URL, or identifier.
+ */
+function reportDatabasePoolPressure(pool: PgPool): void {
+  const waitingRequests = normalizePoolCount(pool.waitingCount);
+  if (waitingRequests === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const lastSampleAtMs = lastPoolPressureSampleAtMs.get(pool) ?? 0;
+  if (now - lastSampleAtMs < POOL_PRESSURE_SAMPLE_INTERVAL_MS) {
+    return;
+  }
+  lastPoolPressureSampleAtMs.set(pool, now);
+
+  console.warn("Hosted web database pool pressure.", {
+    idleConnections: normalizePoolCount(pool.idleCount),
+    totalConnections: normalizePoolCount(pool.totalCount),
+    waitingRequests,
+  });
+}
+
+/**
+ * Reports a transaction that held its connection far longer than the pool can
+ * afford. Duration only: naming the caller would mean threading a label through
+ * every call site, and the identifier would add exposure for no diagnostic gain.
+ */
+function reportSlowDatabaseTransaction(durationMs: number): void {
+  if (durationMs < SLOW_TRANSACTION_MS) {
+    return;
+  }
+
+  console.warn("Hosted web database slow transaction.", {
+    durationMs: Math.trunc(durationMs),
   });
 }
 

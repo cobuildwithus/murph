@@ -952,6 +952,28 @@ rethrown untouched. Retries exist because a primary switchover or a thawed Fluid
 with stale pooled sockets produces exactly these two errors; they are not a
 substitute for capacity.
 
+Pool pressure is reported before it becomes a failure. `Hosted web database pool
+pressure.` logs the same total, idle, and waiting counts whenever a caller is
+queued for a client, rate limited to once per ten seconds per pool; a pool with
+nothing waiting logs nothing. Treat a sustained non-zero `waitingRequests` as the
+signal to act, not the later checkout timeout, because by then requests are
+already failing. `Hosted web database slow transaction.` logs a bare duration
+whenever a transaction holds its connection for five seconds or more; it carries
+no caller name or identifier, so use it to find long connection occupancy rather
+than to attribute it. Checkout timeouts and connection-establishment failures
+stay separable through the existing `category` field.
+
+`Hosted web database pool configured.` records the effective limit once per
+module runtime and whether it was `configured` or inherited as the `default`.
+That limit is per module runtime, not a global cap, so the real ceiling is this
+number multiplied by the live Fluid instance count. Set `DATABASE_POOL_MAX`
+explicitly in production and budget every instance together with headroom for
+migrations, scripts, and administrative sessions against the same database;
+leaving it unset means the ceiling is an inherited default rather than a
+capacity decision. Re-baseline it against representative ingress, runtime-log,
+device-sync, signup, and Stripe workloads and choose the smallest value that
+holds the latency target without sustained waiters.
+
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
