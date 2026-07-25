@@ -1,6 +1,6 @@
 # Paid usage allowance at eighty percent
 
-Status: active
+Status: completed
 Created: 2026-07-25
 Updated: 2026-07-25
 
@@ -58,4 +58,21 @@ Updated: 2026-07-25
 
 ## Verification
 
-- Pending.
+- Focused billing-plan, usage-allowance, Family-plan, and Stripe-event coverage:
+  273 tests passed.
+- Downstream billing, status, and reset coverage: 62 tests passed with one
+  intentional skip.
+- Canonical `pnpm test:diff` verification passed in Blacksmith Testbox
+  `tbx_01kydr0mkbd4wv4t5qamspx3wt`: Web build, lint, smoke, TypeScript, and
+  6,513 tests passed with 172 skips.
+- Direct scenario proof covers same-source legacy allowance retention, renewal
+  into the price-derived limit, immediate plan changes, and same-tier direct-to-
+  Family Pulse and Edge handoffs without rewriting current-period spend.
+- The preliminary completion-specialists review identified the direct-to-Family
+  handoff and read-only legacy coverage gaps. The handoff was fixed at the
+  canonical Family webhook boundary, and the inspected test-only coverage patch
+  was applied. The post-remediation product-experience review returned no
+  findings, and the parent final review found no remaining issue.
+- Final PR ReviewGPT and CI validate the exact closed-plan pushed head before
+  handoff, as required by the PR-lane workflow.
+Completed: 2026-07-25
