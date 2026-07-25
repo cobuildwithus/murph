@@ -560,15 +560,6 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("display_name_unavailable");
   }
 
-  // Renaming the chat is a provider mutation authorized by the route and the
-  // owner, exactly like set_chat_avatar. The hosted group label is an optional
-  // durable copy that only exists once the group has a hosted record, so read
-  // that record before the rename: a chat without one has nothing to store and
-  // must not risk failing a rename the provider already applied.
-  const existingGroupId = await readHostedGroupIdByRuntimeMemberId({
-    runtimeMemberId: input.memberId,
-  });
-
   try {
     await updateHostedLinqChatDisplayName({
       chatId: access.chatId,
@@ -578,23 +569,30 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
-  if (!existingGroupId) {
-    return {
-      action: "update_display_name",
-      result: { group: null, status: "ok" },
-    };
+  // The chat title is the rename, authorized by the route and the owner exactly
+  // like set_chat_avatar. The hosted group label is derived metadata that only
+  // exists once the group has a hosted record, so observe that record after the
+  // provider accepted — a group created while the rename was in flight still
+  // gets the label — and keep the write best-effort: a title the chat already
+  // shows must not be reported as a failed rename. A null group means the label
+  // was not stored, and the next rename or group read carries it instead.
+  let updated: Awaited<
+    ReturnType<typeof updateHostedGroupDisplayNameByRuntimeMemberIdTx>
+  > = null;
+  try {
+    updated = await getPrisma().$transaction(
+      async (tx) => {
+        return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
+          displayName,
+          runtimeMemberId: input.memberId,
+          tx,
+        });
+      },
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+  } catch {
+    // Keep the accepted rename; the label is not worth failing it over.
   }
-
-  const updated = await getPrisma().$transaction(
-    async (tx) => {
-      return updateHostedGroupDisplayNameByRuntimeMemberIdTx({
-        displayName,
-        runtimeMemberId: input.memberId,
-        tx,
-      });
-    },
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
 
   return {
     action: "update_display_name",

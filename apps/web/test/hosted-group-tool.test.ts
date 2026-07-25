@@ -41,7 +41,6 @@ const mocks = vi.hoisted(() => ({
   resolveHostedPublicBaseUrl: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
-  transaction: vi.fn(),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
@@ -178,10 +177,7 @@ const fakePrisma = {
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: () => ({
     ...fakePrisma,
-    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => {
-      mocks.transaction();
-      return run(fakeTx);
-    },
+    $transaction: (run: (tx: typeof fakeTx) => Promise<unknown>) => run(fakeTx),
   }),
 }));
 
@@ -857,7 +853,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   });
 
   it("renames the chat with a null group when the runtime has no hosted group record", async () => {
-    mocks.readHostedGroupIdByRuntimeMemberId.mockResolvedValue(null);
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValueOnce(null);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
@@ -878,8 +874,65 @@ describe("handleHostedRuntimeGroupTool", () => {
       chatId: "chat_group_runtime",
       displayName: "Unattached group",
     });
-    expect(mocks.transaction).not.toHaveBeenCalled();
-    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx).not.toHaveBeenCalled();
+  });
+
+  it("labels a hosted group created while the chat rename was in flight", async () => {
+    const renamed = {
+      ...groupSummaryWithOwnerEmailGrant(),
+      displayName: RENAMED_GROUP_SUMMARY.displayName,
+    };
+    // The group does not exist when the rename starts; a concurrent
+    // create_join_link commits it while the provider request is in flight.
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(null);
+    mocks.updateHostedLinqChatDisplayName.mockImplementationOnce(async () => {
+      mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx.mockResolvedValue(renamed);
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: renamed,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        displayName: "Weekly Health Crew",
+        runtimeMemberId: "member_group_runtime",
+      }));
+  });
+
+  it("keeps the accepted rename when storing the hosted group label fails", async () => {
+    mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx
+      .mockRejectedValueOnce(new Error("transaction unavailable"));
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "update_display_name",
+        linqThread: GROUP_RUNTIME_LINQ_THREAD,
+        updateDisplayName: { displayName: "Weekly Health Crew" },
+      },
+    })).resolves.toEqual({
+      action: "update_display_name",
+      result: {
+        group: null,
+        status: "ok",
+      },
+    });
+
+    expect(mocks.updateHostedLinqChatDisplayName).toHaveBeenCalledWith({
+      chatId: "chat_group_runtime",
+      displayName: "Weekly Health Crew",
+    });
   });
 
   it("does not update the hosted group display name when the provider rejects the chat rename", async () => {
