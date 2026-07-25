@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupDisclosurePermissionReactionTx: vi.fn(),
   acceptHostedGroupJoinOfferTx: vi.fn(),
   enqueueHostedGroupJoinOutreachTx: vi.fn(),
+  revokeHostedGroupJoinOutreachForRemovedReactionTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   lookupHostedMemberByVerifiedEmailAddress: vi.fn(),
   lookupHostedMemberIdentityByPhoneNumber: vi.fn(),
@@ -38,6 +39,8 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-join-outreach-store", () => ({
   enqueueHostedGroupJoinOutreachTx: mocks.enqueueHostedGroupJoinOutreachTx,
+  revokeHostedGroupJoinOutreachForRemovedReactionTx:
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -90,6 +93,9 @@ let restoreKeyring: (() => void) | null = null;
 describe("handleHostedGroupJoinOfferReaction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.revokeHostedGroupJoinOutreachForRemovedReactionTx.mockResolvedValue({
+      kind: "not_pending",
+    });
     mocks.acceptHostedGroupDisclosurePermissionReactionTx.mockResolvedValue({
       kind: "not_found",
     });
@@ -242,6 +248,42 @@ describe("handleHostedGroupJoinOfferReaction", () => {
     });
 
     expect(mocks.acceptHostedGroupDisclosurePermissionReactionTx).not.toHaveBeenCalled();
+  });
+
+  it("emits recipient_region_unsupported for a refused-region canonical removal", async () => {
+    // The producer half of the ownership exception: the webhook can only consume
+    // this decision if the handler actually emits it, so assert it here rather
+    // than mocking the handler at the consumer.
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        handle: "+353871234567",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({
+      reason: "recipient_region_unsupported",
+      status: "ignored",
+    });
+
+    // Nothing durable is written for a participant this feature declines.
+    expect(mocks.enqueueHostedGroupJoinOutreachTx).not.toHaveBeenCalled();
+  });
+
+  it("keeps a supported-region removal on its ordinary reaction_removed path", async () => {
+    mocks.lookupHostedMemberIdentityByPhoneNumber.mockResolvedValueOnce(null);
+    const prisma = createPrismaStub();
+
+    await expect(handleHostedGroupJoinOfferReaction({
+      event: parseReactionEvent({
+        eventType: "reaction.removed",
+        reactionType: "like",
+      }),
+      prisma,
+    })).resolves.toEqual({ reason: "reaction_removed", status: "ignored" });
   });
 
   it("does not treat a removed Like as disclosure consent or a legacy join", async () => {
