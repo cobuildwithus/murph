@@ -19,6 +19,7 @@ export const JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND = "push_source_recovery";
 
 export const JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS = Object.freeze({
   attempts: "junctionPushSourceRecoveryAttempts",
+  lastFailureCode: "junctionPushSourceRecoveryLastFailureCode",
   lastAttemptAt: "junctionPushSourceRecoveryLastAttemptAt",
   silentSinceAt: "junctionPushSourceRecoverySilentSinceAt",
   sourceProviderSlug: "junctionPushSourceRecoverySourceProviderSlug",

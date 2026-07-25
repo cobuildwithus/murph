@@ -12,6 +12,8 @@ import {
 } from "@murphai/contracts";
 import { test } from "vitest";
 
+import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-definitions.ts";
+
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
@@ -5733,6 +5735,23 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
     sourceProviderSlug: "garmin",
   });
 
+  // Every scheduled job crosses the configured-manifest enqueue boundary before
+  // it is queued. An undeclared kind or payload field throws there, which would
+  // discard the whole scheduled pass before any recovery ran.
+  assert.deepEqual(
+    normalizeConfiguredDeviceSyncJobInput("junction", {
+      kind: recoveryJob.kind,
+      payload: recoveryJob.payload ?? {},
+    }, "scheduler"),
+    {
+      kind: "push_source_recovery",
+      payload: {
+        silentSinceAt: "2026-07-18T00:00:00.000Z",
+        sourceProviderSlug: "garmin",
+      },
+    },
+  );
+
   const result = await executeJunctionJob(
     provider,
     createJunctionJobContext({ account: createAccount(), now: "2026-07-20T00:00:00.000Z" }),
@@ -5748,6 +5767,7 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
   assert.deepEqual(result.metadataPatch, {
     junctionPushSourceRecoveryAttempts: 1,
     junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T00:00:00.000Z",
+    junctionPushSourceRecoveryLastFailureCode: null,
     junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
     junctionPushSourceRecoverySourceProviderSlug: "garmin",
     junctionPushSourceRecoveryStatus: "triggered",
@@ -5782,6 +5802,69 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
     executor.createScheduledJobs?.(afterAttempt, "2026-07-20T01:00:00.000Z")
       ?.jobs.find((job) => job.kind === "push_source_recovery"),
     undefined,
+  );
+});
+
+test("a failed recovery trigger still burns its attempt instead of retrying forever", async () => {
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ detail: "boom" }, 500);
+  });
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({ account: createAccount(), now: "2026-07-20T00:00:00.000Z" }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Letting the failure escape would leave the episode at zero attempts, so the
+  // next scheduled pass would derive the identical attempt again, forever.
+  assert.equal(triggerCalls, 1);
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryAttempts,
+    1,
+  );
+  assert.equal(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryStatus,
+    "triggered",
+  );
+  // The burned attempt stays diagnosable.
+  assert.ok(
+    (result.metadataPatch as Record<string, unknown>).junctionPushSourceRecoveryLastFailureCode,
+  );
+
+  const afterFailure = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
+    sources: [{
+      displayName: "Garmin",
+      firstSeenAt: "2026-07-01T00:00:00.000Z",
+      lastDataAt: "2026-07-18T00:00:00.000Z",
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      lastSeenAt: "2026-07-20T00:00:00.000Z",
+      resourceCount: 20,
+      sourceProviderSlug: "garmin",
+      status: "connected",
+    }],
+  });
+
+  // The next hourly pass must respect the ladder delay, not re-fire.
+  assert.equal(
+    executor.createScheduledJobs?.(afterFailure, "2026-07-20T01:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
+  );
+  assert.ok(
+    executor.createScheduledJobs?.(afterFailure, "2026-07-20T06:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
   );
 });
 

@@ -116,6 +116,7 @@ import { classifyDeviceSyncWebhookAcceptanceMode } from "../types.ts";
 import { evaluatePushPrimarySourceStaleness } from "../source-staleness.ts";
 import {
   JUNCTION_PUSH_SOURCE_RECOVERY_JOB_KIND,
+  JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS,
   buildJunctionPushSourceRecoveryMetadataPatch,
   readJunctionPushSourceRecoveryState,
   resolveJunctionPushSourceRecoveryStatus,
@@ -705,23 +706,46 @@ export function createJunctionDeviceSyncProvider(
     const isRecordedEpisode = state.silentSinceAt === silentSinceAt
       && state.sourceProviderSlug === sourceProviderSlug;
     const attempts = (isRecordedEpisode ? state.attempts : 0) + 1;
-    const result = await client.bulkTriggerHistoricalPull({
-      signal: context.signal ?? null,
-      sourceProviderSlug,
-      userIds: [context.account.externalAccountId],
-    });
+
+    // A failed call still consumed an attempt. Letting the error escape would
+    // leave the episode at its previous count, so the next scheduled pass would
+    // derive the identical attempt again and keep doing so for as long as the
+    // source stays silent, which is exactly the unbounded provider work the
+    // ladder exists to prevent. The failure is recorded instead of retried.
+    let endpointUnavailable = false;
+    let failureCode: string | null = null;
+
+    try {
+      ({ endpointUnavailable } = await client.bulkTriggerHistoricalPull({
+        signal: context.signal ?? null,
+        sourceProviderSlug,
+        userIds: [context.account.externalAccountId],
+      }));
+    } catch (error) {
+      if (context.signal?.aborted) {
+        throw error;
+      }
+
+      failureCode = isDeviceSyncError(error)
+        ? error.code
+        : "JUNCTION_PUSH_SOURCE_RECOVERY_TRIGGER_FAILED";
+    }
 
     return {
-      metadataPatch: buildJunctionPushSourceRecoveryMetadataPatch({
-        attempts,
-        now: context.now,
-        silentSinceAt,
-        sourceProviderSlug,
-        status: resolveJunctionPushSourceRecoveryStatus({
+      metadataPatch: {
+        ...buildJunctionPushSourceRecoveryMetadataPatch({
           attempts,
-          endpointUnavailable: result.endpointUnavailable,
+          now: context.now,
+          silentSinceAt,
+          sourceProviderSlug,
+          status: resolveJunctionPushSourceRecoveryStatus({
+            attempts,
+            endpointUnavailable,
+          }),
         }),
-      }),
+        // Kept so a burned attempt stays diagnosable without a second owner.
+        [JUNCTION_PUSH_SOURCE_RECOVERY_METADATA_KEYS.lastFailureCode]: failureCode,
+      },
     };
   }
 
