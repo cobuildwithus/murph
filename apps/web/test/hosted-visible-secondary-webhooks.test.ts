@@ -132,7 +132,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
     const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
       ignored: true,
-      ok: true,
+      ok: true as const,
       reason: "signup-link-already-sent",
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
@@ -185,7 +185,7 @@ describe("visible secondary webhook outcomes", () => {
     const sendHostedTelegramTextMessage = vi.fn(async () => {});
     const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
       ignored: true,
-      ok: true,
+      ok: true as const,
       reason: "unlinked-telegram",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
@@ -217,7 +217,7 @@ describe("visible secondary webhook outcomes", () => {
   it("leaves unrelated silent outcomes unchanged", async () => {
     const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
       ignored: true,
-      ok: true,
+      ok: true as const,
       reason: "own-message",
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
