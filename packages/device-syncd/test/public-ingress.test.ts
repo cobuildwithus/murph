@@ -2681,6 +2681,48 @@ test("public ingress accepts already-satisfied dirty hints before claiming exact
   assert.equal(store.getConnectionByExternalAccount("demo", "demo-abc")?.lastWebhookAt, null);
 });
 
+test("public ingress records no source arrival when durable acceptance fails", async () => {
+  const store = new InMemoryPublicIngressStore();
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            dataSourceProviderSlug: "garmin",
+            externalAccountId: "demo-abc",
+            eventType: "daily.data.sleep.created",
+            traceId: "trace-acceptance-failure",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onWebhookAccepted() {
+        throw new Error("durable acceptance failed");
+      },
+    },
+  });
+
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({
+    provider: "demo",
+    state: begin.state,
+    code: "abc",
+  });
+
+  await assert.rejects(
+    () => ingress.handleWebhook("demo", new Headers(), Buffer.from("{}")),
+    /durable acceptance failed/u,
+  );
+
+  // Stamping an arrival for a payload that was never durably accepted would
+  // report a stalled carrier as healthy.
+  assert.deepEqual(store.recordedSourceDataArrivals, []);
+});
+
 test("public ingress does not use already-satisfied coalescing for durable webhook work", async () => {
   const store = new InMemoryPublicIngressStore();
   let alreadySatisfiedCalls = 0;

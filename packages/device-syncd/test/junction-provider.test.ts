@@ -4180,6 +4180,68 @@ test("Junction direct Apple Health canonical delivery records history despite th
   assert.deepEqual(result.scheduledJobs?.map((job) => job.kind), ["backfill"]);
 });
 
+test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const parseWebhook = async (input: {
+    body: Record<string, unknown>;
+    messageId: string;
+  }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: input.body,
+      messageId: input.messageId,
+      timestamp: "1775174400",
+    });
+
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+  };
+
+  // The arrival stamp is only as good as the real parser naming the source, so
+  // assert it on signed payloads rather than through a fake provider.
+  for (const sourceProviderSlug of ["garmin", "oura"]) {
+    const parsed = await parseWebhook({
+      body: {
+        event_type: "daily.data.activity.created",
+        user_id: "junction-user-1",
+        data: {
+          date: "2026-04-03",
+          id: `activity-${sourceProviderSlug}`,
+          source: {
+            provider: sourceProviderSlug,
+            type: "watch",
+          },
+          steps: 1234,
+        },
+      },
+      messageId: `msg_arrival_${sourceProviderSlug}`,
+    });
+
+    assert.equal(parsed.dataSourceProviderSlug, sourceProviderSlug);
+  }
+
+  // A connection lifecycle event proves nothing about the data carrier.
+  const lifecycle = await parseWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {
+        provider: "garmin",
+      },
+    },
+    messageId: "msg_arrival_lifecycle",
+  });
+
+  assert.equal(lifecycle.dataSourceProviderSlug, null);
+});
+
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);

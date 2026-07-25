@@ -161,6 +161,7 @@ function createAuthorityHarness(input: {
     connectionId: string;
     displayName: string | null;
     firstSeenAt: string;
+    lastDataAt?: string | null;
     lastErrorCode: string | null;
     lastErrorMessage: string | null;
     lastSeenAt: string | null;
@@ -736,6 +737,81 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
     expect(harness.syncDurableConnectionState).not.toHaveBeenCalled();
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+  });
+
+  it("never lets a stale runtime source update rewind the recorded arrival", async () => {
+    const applySourceUpdateWithArrival = async (lastDataAt: string | null) => {
+      const harness = createAuthorityHarness({
+        connectionSources: [
+          {
+            connectionId: "conn_123",
+            displayName: null,
+            firstSeenAt: "2026-04-06T09:00:00.000Z",
+            lastDataAt: "2026-04-08T00:00:00.000Z",
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSeenAt: "2026-04-06T10:00:00.000Z",
+            resourceAvailabilitySummary: { activity: true },
+            sourceInstanceKey: "junction_garmin",
+            sourceProviderSlug: "garmin",
+            status: "connected",
+          },
+        ],
+      });
+      const { applyHostedDeviceSyncRuntimeResult } = await import(
+        "@/src/lib/device-sync/hosted-runtime-authority"
+      );
+
+      await applyHostedDeviceSyncRuntimeResult({
+        request: new Request("https://example.test/device-sync/runtime/apply", {
+          body: JSON.stringify({
+            updates: [
+              {
+                connectionId: "conn_123",
+                sources: [
+                  {
+                    displayName: null,
+                    firstSeenAt: "2026-04-06T09:00:00.000Z",
+                    lastDataAt,
+                    lastErrorCode: null,
+                    lastErrorMessage: null,
+                    lastSeenAt: "2026-04-06T10:05:00.000Z",
+                    observedLastSeenAt: "2026-04-06T10:00:00.000Z",
+                    resourceAvailabilitySummary: { activity: true },
+                    sourceInstanceKey: "junction_garmin",
+                    sourceProviderSlug: "garmin",
+                    status: "connected",
+                  },
+                ],
+              },
+            ],
+            userId: "user_123",
+          }),
+          method: "POST",
+        }),
+        trustedUserId: "user_123",
+      });
+
+      return harness.upsertConnectionSource;
+    };
+
+    // The runner snapshotted before Web recorded the newer arrival; replaying
+    // its stale value would reopen a silence window that already closed.
+    expect(await applySourceUpdateWithArrival("2026-04-07T00:00:00.000Z"))
+      .toHaveBeenCalledWith(
+        expect.objectContaining({ lastDataAt: "2026-04-08T00:00:00.000Z" }),
+      );
+
+    // A runner that has never seen an arrival must not erase one either.
+    expect(await applySourceUpdateWithArrival(null)).toHaveBeenCalledWith(
+      expect.objectContaining({ lastDataAt: "2026-04-08T00:00:00.000Z" }),
+    );
+
+    // A genuinely newer arrival still advances.
+    expect(await applySourceUpdateWithArrival("2026-04-09T00:00:00.000Z"))
+      .toHaveBeenCalledWith(
+        expect.objectContaining({ lastDataAt: "2026-04-09T00:00:00.000Z" }),
+      );
   });
 
   it("persists runtime source availability updates without rewriting connection state", async () => {

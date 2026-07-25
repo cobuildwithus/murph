@@ -820,6 +820,21 @@ function resolveHostedRuntimeSourceUpdatesToApply(input: {
     const current = currentByInstanceKey.get(update.sourceInstanceKey) ?? null;
     const currentLastSeenAt = current?.lastSeenAt ?? null;
 
+    // The runner's snapshot can predate an arrival Web already recorded, so an
+    // otherwise valid update must not carry the older value back. Forward-only
+    // is the whole basis of the stall signal: a rewind reopens a silence window
+    // that already closed and can manufacture a false stall alert.
+    if (Object.prototype.hasOwnProperty.call(update, "lastDataAt")) {
+      const mergedLastDataAt = laterHostedRuntimeTimestamp(
+        update.lastDataAt ?? null,
+        current?.lastDataAt ?? null,
+      );
+
+      if (mergedLastDataAt !== (update.lastDataAt ?? null)) {
+        update = { ...update, lastDataAt: mergedLastDataAt };
+      }
+    }
+
     if (
       (historicalResetRequired || !historicalProgressMutable)
       && current
@@ -888,6 +903,22 @@ function normalizeHostedRuntimeSourceUpdateForProvider(input: {
       sourceInstanceKey: canonicalSourceInstanceKey,
     },
   };
+}
+
+/** Returns whichever ISO timestamp is later, treating null as "never". */
+function laterHostedRuntimeTimestamp(
+  left: string | null,
+  right: string | null,
+): string | null {
+  if (!left) {
+    return right;
+  }
+
+  if (!right) {
+    return left;
+  }
+
+  return Date.parse(left) >= Date.parse(right) ? left : right;
 }
 
 function isHostedRuntimeTimestampOlder(
