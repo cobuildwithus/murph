@@ -178,25 +178,43 @@ test.each([
   },
 );
 
-test("keeps invalid or signed-out returns inert", async () => {
+test("keeps an invalid return inert so settings cannot bounce it back here", async () => {
   mocks.readPaymentReturnAction.mockReturnValueOnce(null);
   const invalidResponse = await route.GET(new Request(
-    "https://join.example.test/api/settings/billing/pulse-trial-continuation?action=continue_pulse",
+    "https://join.example.test/api/settings/billing/pulse-trial-continuation?action=continue_pulse&expires=123&signature=signed",
   ));
   expect(invalidResponse.headers.get("location")).toBe(
     "https://join.example.test/settings#subscription",
   );
   expect(invalidResponse.headers.get("set-cookie")).toBeNull();
+  expect(mocks.buildContinuationCookie).not.toHaveBeenCalled();
+});
 
+test("carries a signed-out return to settings so signing in can resume it", async () => {
   mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce(null);
   const signedOutResponse = await route.GET(new Request(
-    "https://join.example.test/api/settings/billing/pulse-trial-continuation?action=continue_pulse",
+    "https://join.example.test/api/settings/billing/pulse-trial-continuation?action=continue_pulse&expires=123&signature=signed",
   ));
+
+  // The signature is bound to a member id absent from the URL, so it cannot be
+  // verified until a session exists; dropping the params here is what stranded
+  // members who paid in a browser that never held a Murph session.
   expect(signedOutResponse.headers.get("location")).toBe(
-    "https://join.example.test/settings#subscription",
+    "https://join.example.test/settings?action=continue_pulse&expires=123&signature=signed#subscription",
   );
-  expect(mocks.readPaymentReturnAction).toHaveBeenCalledTimes(1);
+  expect(mocks.readPaymentReturnAction).not.toHaveBeenCalled();
   expect(mocks.buildContinuationCookie).not.toHaveBeenCalled();
+});
+
+test("does not forward repeated continuation params from a signed-out return", async () => {
+  mocks.getHostedAppSessionFromRequest.mockResolvedValueOnce(null);
+  const response = await route.GET(new Request(
+    "https://join.example.test/api/settings/billing/pulse-trial-continuation?action=continue_pulse&action=start_pulse_now&expires=123&signature=signed",
+  ));
+
+  expect(response.headers.get("location")).toBe(
+    "https://join.example.test/settings?expires=123&signature=signed#subscription",
+  );
 });
 
 test("dispatches continue_pulse without ending the trial", async () => {

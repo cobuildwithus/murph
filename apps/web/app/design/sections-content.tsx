@@ -16,6 +16,7 @@ import { FamilyInviteJoinStudy } from "./family-invite-join-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { HomeLoadStateStudy } from "./home-load-state-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -85,6 +86,12 @@ export function SectionsContent() {
 
       <StudySection title="Account deletion exit reason">
         <AccountExitReasonStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Settings sign-in required">
+        <SettingsAuthRequiredStudy />
       </StudySection>
 
       <Separator />

@@ -39,6 +39,8 @@ export interface HostedMemberStripeBillingRefSnapshot {
   currentTrialStartedAt?: Date | null;
   lastStripeEventCreatedAt?: Date | null;
   memberId: string;
+  pulseTrialPaymentIntentAction?: string | null;
+  pulseTrialPaymentIntentExpiresAt?: Date | null;
   pulseTrialPolicyVersion?: string | null;
   pulseTrialRedeemedAt?: Date | null;
   scheduledBillingEffectiveAt?: Date | null;
@@ -433,6 +435,8 @@ export async function projectHostedMemberStripeBillingRefSnapshot(
     currentTrialEndsAt: billingRef.currentTrialEndsAt,
     currentTrialStartedAt: billingRef.currentTrialStartedAt,
     memberId: billingRef.memberId,
+    pulseTrialPaymentIntentAction: billingRef.pulseTrialPaymentIntentAction,
+    pulseTrialPaymentIntentExpiresAt: billingRef.pulseTrialPaymentIntentExpiresAt,
     pulseTrialPolicyVersion: billingRef.pulseTrialPolicyVersion,
     pulseTrialRedeemedAt: billingRef.pulseTrialRedeemedAt,
     ...(billingRef.scheduledBillingEffectiveAt

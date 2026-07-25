@@ -88,6 +88,9 @@ const START_PAID_PULSE_RECOVERABLE_STRIPE_SUBSCRIPTION_STATUSES = new Set([
 ]);
 const PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY =
   "murphTrialExtensionTargetTrialEnd";
+// Matches the signed return link's lifetime so the browser and webhook recovery
+// paths cannot disagree about whether an intent is still live.
+const PULSE_TRIAL_PAYMENT_INTENT_MAX_AGE_MS = 30 * 60 * 1000;
 
 type HostedPulseTrialStartPaidIdempotencyOperation =
   | "active-trial-end-now-v2"
@@ -313,9 +316,12 @@ async function transitionHostedPulseTrialPaidPlan(
       billingPlanCode: START_PAID_PULSE_PLAN,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
         continuation: paymentMethodContinuation,
+        memberId: input.memberId,
         now,
+        prisma,
         stripe,
         stripeCustomerId,
+        timing: input.timing,
       }),
       ...(paymentMethodContinuation?.kind === "settings"
         ? { resumeStartAfterPaymentMethodSetup: true as const }
@@ -534,11 +540,20 @@ function readExpandedStripeCustomer(
 
 async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
   continuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
+  memberId: string;
   now: Date;
+  prisma: PrismaClient;
   stripe: Stripe;
   stripeCustomerId: string;
+  timing: "at_trial_end" | "now";
 }): Promise<string> {
   const publicBaseUrl = requireHostedOnboardingPublicBaseUrl();
+  await recordHostedPulseTrialPaymentIntent({
+    memberId: input.memberId,
+    now: input.now,
+    prisma: input.prisma,
+    timing: input.timing,
+  });
   const returnUrl = new URL(START_PAID_PULSE_PAYMENT_METHOD_RETURN_PATH, publicBaseUrl).toString();
   const completedReturnUrl = buildHostedPulseTrialPaymentMethodCompletedReturnUrl({
     continuation: input.continuation,
@@ -572,6 +587,64 @@ async function createHostedPulseTrialStartPaidPaymentMethodPortalUrl(input: {
     httpStatus: 502,
     message: "Stripe did not return a billing setup link. Try again shortly.",
     retryable: true,
+  });
+}
+
+// Best effort on purpose: failing to record the intent must not cost the member
+// the payment link itself, which is still the primary way they finish. Kept in
+// our own row rather than on the Stripe subscription so that handing out a link
+// never mutates the subscription before a card exists.
+async function recordHostedPulseTrialPaymentIntent(input: {
+  memberId: string;
+  now: Date;
+  prisma: PrismaClient;
+  timing: "at_trial_end" | "now";
+}): Promise<void> {
+  try {
+    await input.prisma.hostedMemberBillingRef.update({
+      where: { memberId: input.memberId },
+      data: {
+        pulseTrialPaymentIntentAction:
+          input.timing === "now" ? "start_pulse_now" : "continue_pulse",
+        pulseTrialPaymentIntentExpiresAt: new Date(
+          input.now.getTime() + PULSE_TRIAL_PAYMENT_INTENT_MAX_AGE_MS,
+        ),
+      },
+    });
+  } catch (error) {
+    console.warn(
+      "Pulse trial payment intent was not recorded before the payment-method handoff.",
+      error,
+    );
+  }
+}
+
+export function readHostedPulseTrialPaymentIntent(input: {
+  action: string | null;
+  expiresAt: Date | null;
+  now: Date;
+}): HostedPulseTrialContinuationAction | null {
+  if (input.action !== "continue_pulse" && input.action !== "start_pulse_now") {
+    return null;
+  }
+
+  if (!(input.expiresAt instanceof Date) || input.expiresAt.getTime() <= input.now.getTime()) {
+    return null;
+  }
+
+  return input.action;
+}
+
+export async function clearHostedPulseTrialPaymentIntent(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await input.prisma.hostedMemberBillingRef.update({
+    where: { memberId: input.memberId },
+    data: {
+      pulseTrialPaymentIntentAction: null,
+      pulseTrialPaymentIntentExpiresAt: null,
+    },
   });
 }
 
@@ -934,9 +1007,12 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       billingPlanCode: START_PAID_PULSE_PLAN,
       paymentUrl: await createHostedPulseTrialStartPaidPaymentMethodPortalUrl({
         continuation: input.paymentMethodContinuation,
+        memberId: input.memberId,
         now: input.now,
+        prisma: input.prisma,
         stripe: input.stripe,
         stripeCustomerId: input.stripeCustomerId,
+        timing: "now",
       }),
       ...(input.paymentMethodContinuation?.kind === "settings"
         ? { resumeStartAfterPaymentMethodSetup: true as const }

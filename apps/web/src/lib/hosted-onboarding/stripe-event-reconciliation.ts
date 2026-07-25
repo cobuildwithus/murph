@@ -59,6 +59,7 @@ import {
   finishHostedOnboardingTiming,
   startHostedOnboardingTiming,
 } from "./logging";
+import { applyStripePulseTrialPaymentMethodAttached } from "./billing-pulse-trial-payment-method-recovery";
 import { requireHostedStripeApi } from "./runtime";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
@@ -773,6 +774,14 @@ async function processClaimedHostedStripeEvent(
         memberId: processingMemberId,
         prisma,
         subscriptionId: result.cleanupPulseTrialStripeSubscriptionId,
+      });
+    }
+    // Runs outside the reconciliation transaction: finishing the plan change
+    // makes Stripe calls and takes its own member lock.
+    if (stripeEvent.type === "payment_method.attached") {
+      await applyStripePulseTrialPaymentMethodAttached({
+        paymentMethod: stripeEvent.data.object as Stripe.PaymentMethod,
+        prisma,
       });
     }
     if (result.welcomeEmailMemberId) {

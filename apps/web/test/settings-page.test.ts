@@ -357,7 +357,7 @@ test("SettingsDataPrivacyPage opens the auth-required data privacy handoff for s
   assert.match(markup, /After sign-in, this link opens the deletion controls directly in settings\./);
 });
 
-test("SettingsPage redirects signed-out visitors before reading member settings", async () => {
+test("SettingsPage offers sign-in to signed-out visitors before reading member settings", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: false,
     authenticatedMember: null,
@@ -366,7 +366,9 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  await expect(SettingsPage()).rejects.toThrow("NEXT_REDIRECT:/");
+  const markup = renderToStaticMarkup(await SettingsPage());
+
+  assert.match(markup, /Sign in to open settings/);
 
   expect(mocks.getPrisma).not.toHaveBeenCalled();
   expect(mocks.readHostedAccountSettingsPageSnapshot).not.toHaveBeenCalled();
@@ -378,6 +380,72 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.readHostedUsageCreditProjection).not.toHaveBeenCalled();
   expect(mocks.readHostedSecureApprovalStatus).not.toHaveBeenCalled();
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out Stripe payment return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      action: "start_pulse_now",
+      expires: "4102444800000",
+      signature: "signed",
+    }),
+  }));
+
+  // Someone who just saved a card must be told their money is safe and offered
+  // sign-in, not bounced to the marketing homepage with no explanation.
+  assert.match(markup, /Your card is saved/);
+  assert.match(markup, /One more step/);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage hands a signed-in Stripe payment return back to the continuation route", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:1", sessionId: "hws_session_123" },
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  // Only that route can verify the member-bound signature and set the
+  // session-scoped cookie the completion POST requires.
+  await expect(SettingsPage({
+    searchParams: Promise.resolve({
+      action: "start_pulse_now",
+      expires: "4102444800000",
+      signature: "signed",
+    }),
+  })).rejects.toThrow(
+    "NEXT_REDIRECT:/api/settings/billing/pulse-trial-continuation?action=start_pulse_now&expires=4102444800000&signature=signed",
+  );
+});
+
+test("SettingsPage ignores a partial payment return instead of looping back to the route", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ action: "start_pulse_now" }),
+  }));
+
+  assert.match(markup, /Sign in to open settings/);
 });
 
 test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {
