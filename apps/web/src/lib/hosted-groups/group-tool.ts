@@ -569,15 +569,16 @@ async function handleHostedRuntimeGroupUpdateDisplayName(input: {
     return unavailable("provider_unavailable");
   }
 
-  // The chat title is the rename, authorized by the route and the owner exactly
-  // like set_chat_avatar. The hosted group label is derived metadata that only
+  // The accepted provider request is the rename, authorized by the route and
+  // the owner exactly like set_chat_avatar; the provider owns when the upstream
+  // title actually changes. The hosted group label is derived metadata that only
   // exists once the group has a hosted record, so observe that record after the
   // provider accepted — a group created while the rename was in flight still
-  // gets the label — and keep the write best-effort: a title the chat already
-  // shows must not be reported as a failed rename. A null group therefore says
-  // only that no updated summary came back, whether because there is no record
-  // or because the write failed; another rename is the only thing that stores
-  // the label afterwards.
+  // gets the label — and keep the write best-effort: a request the provider
+  // already took must not be reported as a failed rename. A null group therefore
+  // says only that no updated summary came back, whether because there is no
+  // record or because the write failed; another rename is the only thing that
+  // stores the label afterwards.
   let updated: Awaited<
     ReturnType<typeof updateHostedGroupDisplayNameByRuntimeMemberIdTx>
   > = null;

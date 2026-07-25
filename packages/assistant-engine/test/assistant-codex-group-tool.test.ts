@@ -1585,6 +1585,10 @@ describe("murph.group dynamic tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
     expect(MURPH_GROUP_TOOL.description)
+      .toContain('status="ok" means the provider accepted that request');
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("tell the group the rename is going through rather than that it is done");
+    expect(MURPH_GROUP_TOOL.description)
       .toContain('group=null means only that no updated group summary came back');
     expect(MURPH_GROUP_TOOL.description)
       .toContain("never read it as proof that the group does not exist or that the label was saved");
