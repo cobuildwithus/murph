@@ -79,6 +79,40 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain(">Newer<");
   });
 
+  it("renders the new try-it controls with their exact prompts", async () => {
+    const markup = renderToStaticMarkup(
+      await ChangelogPage({ searchParams: Promise.resolve({}) }),
+    );
+
+    expect(markup).toContain("Ask about X");
+    expect(markup).toContain("Turn it up");
+    expect(markup).toMatch(/Ask what(?:&#x27;|')s new/u);
+    expect(
+      mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          message: {
+            body: "What are people on X saying about zone 2 training this week?",
+            subject: "Try it: Ask Grok what people are saying on X",
+          },
+        },
+        {
+          message: {
+            body: "Turn up my Unhinged setting a little.",
+            subject: "Try it: Ask Murph to loosen up",
+          },
+        },
+        {
+          message: {
+            body: "What changed in Murph this week?",
+            subject: "Try it: Ask Murph what changed",
+          },
+        },
+      ]),
+    );
+  });
+
   it("renders explanatory visuals for the major new features", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
@@ -140,10 +174,21 @@ describe("ChangelogPage", () => {
           .map((item) => item.id),
       ),
     );
-    const metadata = await generateMetadata({
-      searchParams: Promise.resolve({ edition: "2026-07-08" }),
-    });
+    const [pageOneMetadata, metadata] = await Promise.all([
+      generateMetadata({ searchParams: Promise.resolve({}) }),
+      generateMetadata({
+        searchParams: Promise.resolve({ edition: "2026-07-08" }),
+      }),
+    ]);
 
+    expect(pageOneMetadata).toEqual(
+      expect.objectContaining({
+        alternates: { canonical: "/changelog" },
+        openGraph: expect.objectContaining({
+          images: [expect.objectContaining({ url: pageOneCardUrl })],
+        }),
+      }),
+    );
     expect(metadata).toEqual(
       expect.objectContaining({
         alternates: { canonical: "/changelog?edition=2026-07-11" },
