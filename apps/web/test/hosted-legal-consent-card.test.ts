@@ -93,6 +93,53 @@ test("launch consent keeps decline available while status is loading", async () 
   });
 });
 
+test("launch consent keeps decline available while a status retry is unresolved", async () => {
+  const retryRequest = createDeferred<HostedConsentStatus>();
+  const onDecline = vi.fn();
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("Consent status is unavailable."))
+    .mockReturnValueOnce(retryRequest.promise);
+
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedLegalConsentCard, {
+      mode: "compact",
+      onDecline,
+      source: "homepage-signup-dialog",
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = cleanup;
+
+  await vi.waitFor(() => {
+    expect(container.textContent).toContain("Consent status is unavailable.");
+  });
+
+  const tryAgainButton = findButtonByText(container, /^Try again$/);
+  await act(async () => {
+    tryAgainButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  });
+
+  const declineButton = findButtonByText(container, /^Decline$/);
+  expect(declineButton.disabled).toBe(false);
+
+  await act(async () => {
+    declineButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  expect(onDecline).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    retryRequest.resolve(
+      createConsentStatus({ connectedHealthGranted: false, launchGranted: false }),
+    );
+    await retryRequest.promise;
+  });
+});
+
 test("launch consent renders one explicit decision without checkboxes", async () => {
   const initialStatus = createConsentStatus({
     connectedHealthGranted: false,

@@ -85,7 +85,6 @@ export function LandingAuthDialog({
       onCompleted={handleLandingAuthCompleted}
       onOpenChange={onOpenChange}
       requireLaunchConsentOnCompletion
-      showPassiveLegalNotice
     />
   );
 }
@@ -222,7 +221,6 @@ export function LandingAuthActions({
           leadingIcon={leadingIcon}
           requireLaunchConsentOnCompletion
           showArrow={context !== "nav"}
-          showPassiveLegalNotice
         />
       </div>
     );
@@ -237,13 +235,11 @@ export function LandingAuthActions({
         )}
         buttonLabel={loginLabel}
         requireLaunchConsentOnCompletion
-        showPassiveLegalNotice
       />
       <LandingAuthDialogButton
         buttonClassName={cn(styles.signup, "shrink-0")}
         buttonLabel={signupLabel}
         requireLaunchConsentOnCompletion
-        showPassiveLegalNotice
       />
     </div>
   );

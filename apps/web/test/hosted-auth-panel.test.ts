@@ -505,7 +505,7 @@ test("HostedAuthPanel returns to auth without recording consent when launch cons
   });
 });
 
-test("HostedAuthPanel keeps consent retryable when authoritative sign-out fails", async () => {
+test("HostedAuthPanel leaves the gate mounted and Decline usable when sign-out fails", async () => {
   const logout = vi.fn().mockResolvedValue(undefined);
   mocks.usePrivy.mockReturnValue({
     authenticated: false,
@@ -539,10 +539,9 @@ test("HostedAuthPanel keeps consent retryable when authoritative sign-out fails"
   });
 
   await vi.waitFor(() => {
-    expect(container.textContent).toContain("Unable to sign out");
-    expect(container.textContent).toContain("Select Decline to try again.");
     expect(container.textContent).toContain("Hosted legal consent card");
   });
+  expect(container.textContent).not.toContain("Unable to sign out");
   const retryDeclineButton = Array.from(container.querySelectorAll("button")).find(
     (candidate) => candidate.textContent === "Decline",
   ) as HTMLButtonElement | undefined;

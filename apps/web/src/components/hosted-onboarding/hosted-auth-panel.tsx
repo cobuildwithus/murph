@@ -66,7 +66,6 @@ export function HostedAuthPanel({
   const [pendingAuthCompletion, setPendingAuthCompletion] =
     useState<HostedAuthCompletionResult | null>(null);
   const [consentDeclinePending, setConsentDeclinePending] = useState(false);
-  const [consentDeclineError, setConsentDeclineError] = useState<string | null>(null);
   const pendingAuthCompletionRef = useRef<HostedAuthCompletionResult | null>(null);
   const { authenticated, logout } = usePrivy();
   const { user } = useUser();
@@ -133,11 +132,12 @@ export function HostedAuthPanel({
     if (consentDeclinePending) return;
 
     setConsentDeclinePending(true);
-    setConsentDeclineError(null);
     try {
       await logoutHostedAppSession({ logoutPrivy: logout });
     } catch {
-      setConsentDeclineError("Couldn’t confirm sign-out. Select Decline to try again.");
+      // logoutHostedAppSession owns recovery: it revalidates authority by
+      // reloading the document, and the fail-closed gate reappears if the
+      // session survived. Nothing rendered here would outlive that reload.
       setConsentDeclinePending(false);
       return;
     }
@@ -170,15 +170,6 @@ export function HostedAuthPanel({
   if (pendingAuthCompletion) {
     return (
       <div className="space-y-4">
-        {consentDeclineError ? (
-          <Alert
-            className="rounded-lg border-destructive/30 bg-destructive/10 px-3.5 py-3 before:hidden"
-            variant="destructive"
-          >
-            <AlertTitle>Unable to sign out</AlertTitle>
-            <AlertDescription>{consentDeclineError}</AlertDescription>
-          </Alert>
-        ) : null}
         <HostedLegalConsentCard
           declinePending={consentDeclinePending}
           mode="compact"

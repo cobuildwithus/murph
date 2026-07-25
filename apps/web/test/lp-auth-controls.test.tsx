@@ -231,7 +231,7 @@ test("LandingAuthActions opens the unified homepage auth flow", async () => {
   );
   expect(authPanel).toBeTruthy();
   expect(authPanel?.getAttribute("data-hosted-auth-passive-legal-notice")).toBe(
-    "shown",
+    "hidden",
   );
   expect(window.document.body.textContent).toContain("Log in or sign up");
 });
@@ -521,7 +521,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="shown"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 
@@ -533,7 +533,7 @@ test("LandingAuthActions split CTAs open the same unified auth modal", async () 
   expect(container.textContent).toContain("Log in or sign up");
   expect(
     container.querySelector(
-      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="shown"]',
+      '[data-hosted-auth-launch-consent="required"][data-hosted-auth-passive-legal-notice="hidden"]',
     ),
   ).toBeTruthy();
 });

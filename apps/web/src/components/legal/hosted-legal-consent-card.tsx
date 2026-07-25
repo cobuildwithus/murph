@@ -97,7 +97,6 @@ function HostedLegalConsentCardState({
   const [handoffStatus, setHandoffStatus] = useState<HostedConsentStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [acceptedHandoffPending, setAcceptedHandoffPending] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [loading, setLoading] = useState(!initialStatus);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [failedAttempts, setFailedAttempts] = useState(0);
@@ -105,7 +104,6 @@ function HostedLegalConsentCardState({
   const status = statusOverride ?? loadedStatus ?? initialStatus;
 
   const loadStatus = useCallback(async () => {
-    setRetrying(true);
     setLoading(true);
     try {
       const nextStatus = await requestHostedLegalConsentStatus();
@@ -118,7 +116,6 @@ function HostedLegalConsentCardState({
       );
     } finally {
       setLoading(false);
-      setRetrying(false);
     }
   }, []);
 
@@ -241,7 +238,7 @@ function HostedLegalConsentCardState({
     const declineAction = onDecline ? (
       <ConsentDeclineButton
         busy={declinePending}
-        disabled={declinePending || retrying}
+        disabled={declinePending}
         onDecline={onDecline}
       />
     ) : null;
@@ -274,17 +271,17 @@ function HostedLegalConsentCardState({
             {onDecline ? (
               <ConsentDeclineButton
                 busy={declinePending}
-                disabled={declinePending || retrying}
+                disabled={declinePending}
                 onDecline={onDecline}
               />
             ) : null}
             <Button
-              disabled={declinePending || retrying}
+              disabled={declinePending}
               onClick={loadStatus}
               size="lg"
               type="button"
             >
-              {retrying ? "Trying again..." : "Try again"}
+              Try again
             </Button>
           </div>
         </div>
