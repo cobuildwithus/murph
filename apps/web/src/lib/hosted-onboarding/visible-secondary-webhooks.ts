@@ -70,12 +70,15 @@ const HOSTED_SIGNUP_LINK_REMINDER_REPLY =
   "I already sent your setup link above. Open it to finish setting up Murph.";
 const HOSTED_TELEGRAM_BINDING_REPAIR_REPLY =
   "This Telegram account isn't linked cleanly. Reconnect Telegram in Murph Settings or contact support.";
+const HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY =
+  "I can't finish that account setup in a group. Message me privately and I'll help you connect Murph.";
 
 const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
   "family-invite-not-accepted",
   "group-chat",
   "home-line-capacity-exhausted",
   "signup-link-already-sent",
+  "thread-container-inactive",
   "unassignable-home-line",
   "unattested-direct-chat",
   "unknown-home-line",
@@ -201,6 +204,8 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
     case "unattested-direct-chat":
     case "unknown-home-line":
       return input.recognizedSender ? HOSTED_LINQ_CHAT_UNVERIFIED_REPLY : null;
+    case "thread-container-inactive":
+      return HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
     case "group-chat":
       return input.recognizedSender ? HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY : null;
     default:
@@ -217,12 +222,17 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
     case "family-invite-not-accepted":
       return input.isDirect ? HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY : null;
     case "unlinked-telegram":
-      return input.isDirect && input.signupUrl
+      if (!input.isDirect) {
+        return HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
+      }
+      return input.signupUrl
         ? `I can't match this Telegram account to Murph yet. Set it up here: ${input.signupUrl}\n\nThen message me again.`
         : null;
     case "ambiguous-telegram-binding":
     case "telegram-binding-changed":
-      return input.isDirect ? HOSTED_TELEGRAM_BINDING_REPAIR_REPLY : null;
+      return input.isDirect
+        ? HOSTED_TELEGRAM_BINDING_REPAIR_REPLY
+        : HOSTED_TELEGRAM_PRIVATE_SETUP_REPLY;
     case "group-chat-provision-unavailable":
       return input.isDirect ? null : HOSTED_GROUP_CHAT_UNAVAILABLE_REPLY;
     default:
