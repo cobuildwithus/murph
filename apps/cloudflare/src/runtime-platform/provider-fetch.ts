@@ -350,6 +350,7 @@ const CLOUDFLARE_HOSTED_PROVIDER_FETCH_HOSTNAMES = new Set([
   "api.mapbox.com",
   "api.openai.com",
   "api.telegram.org",
+  "api.x.ai",
 ]);
 
 export function readCloudflareHostedProviderFetchBaseUrls(

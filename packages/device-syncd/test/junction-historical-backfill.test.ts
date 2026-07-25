@@ -93,6 +93,7 @@ function createJobContext(importedSnapshots: unknown[]): ProviderJobContext {
       lastErrorCode: input.lastErrorCode ?? null,
       lastErrorMessage: input.lastErrorMessage ?? null,
       firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+      lastDataAt: input.lastDataAt ?? null,
       createdAt: input.lastSeenAt,
       updatedAt: input.lastSeenAt,
     }),

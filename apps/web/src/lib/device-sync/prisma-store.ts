@@ -27,6 +27,7 @@ import {
   PrismaHostedConnectionSourceStore,
   type HostedDeviceConnectionSource,
   type ListHostedRuntimeSnapshotConnectionSourcesInput,
+  type MarkHostedDeviceConnectionSourceDataReceivedInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
@@ -67,6 +68,7 @@ export {
   type HostedConnectionSourceRecord,
   type HostedDeviceConnectionSource,
   type ListHostedRuntimeSnapshotConnectionSourcesInput,
+  type MarkHostedDeviceConnectionSourceDataReceivedInput,
   type MarkHostedDeviceConnectionSourcesDisconnectedInput,
   type UpsertHostedDeviceConnectionSourceInput,
 } from "./prisma-store/sources";
@@ -363,6 +365,12 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertHostedDeviceConnectionSourceInput,
   ): Promise<HostedDeviceConnectionSource> {
     return this.sources.upsertConnectionSource(input);
+  }
+
+  async markConnectionSourceDataReceived(
+    input: MarkHostedDeviceConnectionSourceDataReceivedInput,
+  ): Promise<number> {
+    return this.sources.markConnectionSourceDataReceived(input);
   }
 
   async markConnectionSourcesDisconnected(

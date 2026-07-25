@@ -350,7 +350,7 @@ describe('assistant execution prompt contract', () => {
       'never stock personification, canned meme templates, or forced analogies',
     )
     expect(layers.threadContextPrompt).toContain(
-      'When health stakes or emotional reception are unclear, stay literal',
+      'When health stakes are real or emotional reception is unclear, stay literal',
     )
     expect(layers.threadContextPrompt).toContain(
       'Make Murph or the situation the butt, never the user, their identity, body, symptoms, condition, competence, or effort',

@@ -55,7 +55,11 @@ export function filterHostedRuntimeGroupToolResponseProjectionScopes(
       },
     };
   }
-  if (response.action === "update_display_name" && response.result.status === "ok") {
+  if (
+    response.action === "update_display_name"
+    && response.result.status === "ok"
+    && response.result.group !== null
+  ) {
     return {
       ...response,
       result: {

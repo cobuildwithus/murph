@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
+import type { HostedRuntimeAiAccessNoticeCode } from "./member-access";
+
 import {
   buildHostedInviteUrl,
 } from "./invite-service";
@@ -227,6 +229,49 @@ export function buildActiveMemberDirectPlan(
   plan: HostedWebhookPlan<HostedOnboardingLinqWebhookResponse, HostedLinqMessageSideEffect>,
 ): HostedOnboardingLinqDirectPlan {
   return plan;
+}
+
+export const HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON: Record<
+  HostedRuntimeAiAccessNoticeCode,
+  string
+> = {
+  billing_inactive: "sent-billing-inactive-notice",
+  trial_conversion_pending: "sent-trial-conversion-notice",
+};
+
+/**
+ * Reply-and-stop plan for a recognized member whose access has lapsed. It sends
+ * the access decision's own notice and performs no routing, daily-state, or
+ * mailbox writes, mirroring the home-redirect plan's shape.
+ */
+export function buildInactiveMemberAccessNoticeResponse(input: {
+  chatId: string;
+  memberId: string;
+  message: string;
+  messageId: string;
+  noticeCode: HostedRuntimeAiAccessNoticeCode;
+  occurredAt: string;
+  sourceEventId: string;
+}): HostedOnboardingLinqDirectPlan {
+  return buildActiveMemberDirectPlan({
+    desiredSideEffects: [
+      createHostedWebhookLinqMessageSideEffect({
+        chatId: input.chatId,
+        claimToken: null,
+        memberId: input.memberId,
+        message: input.message,
+        noticeCode: input.noticeCode,
+        occurredAt: input.occurredAt,
+        replyToMessageId: input.messageId,
+        sourceEventId: input.sourceEventId,
+        template: "ai_usage_quota",
+      }),
+    ],
+    response: {
+      ok: true,
+      reason: HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON[input.noticeCode],
+    },
+  });
 }
 
 export function buildConversationHomeRedirectResponse(input: {

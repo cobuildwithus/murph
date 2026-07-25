@@ -277,6 +277,7 @@ function createJunctionJobContext(overrides: Partial<ProviderJobContext> = {}): 
       lastErrorCode: input.lastErrorCode ?? null,
       lastErrorMessage: input.lastErrorMessage ?? null,
       firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+      lastDataAt: input.lastDataAt ?? null,
       createdAt: input.lastSeenAt,
       updatedAt: input.lastSeenAt,
     }),
@@ -306,6 +307,7 @@ function createConnectionSource(
     lastErrorCode: null,
     lastErrorMessage: null,
     lastSeenAt: "2026-04-03T00:00:00.000Z",
+    lastDataAt: null,
     createdAt: "2026-04-03T00:00:00.000Z",
     updatedAt: "2026-04-03T00:00:00.000Z",
     ...sourceOverrides,
@@ -4178,6 +4180,87 @@ test("Junction direct Apple Health canonical delivery records history despite th
   assert.deepEqual(result.scheduledJobs?.map((job) => job.kind), ["backfill"]);
 });
 
+test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    throw new Error(`Unexpected request: ${readUrl(input)}`);
+  }, {
+    providerFilter: ["garmin"],
+    webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+  });
+  const parseWebhook = async (input: {
+    body: Record<string, unknown>;
+    messageId: string;
+  }) => {
+    const webhook = createJunctionSvixWebhook({
+      body: input.body,
+      messageId: input.messageId,
+      timestamp: "1775174400",
+    });
+
+    return requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-03T00:00:00.000Z",
+    });
+  };
+
+  // The arrival stamp is only as good as the real parser naming the source, so
+  // assert it on signed payloads rather than through a fake provider.
+  for (const sourceProviderSlug of ["garmin", "oura"]) {
+    const parsed = await parseWebhook({
+      body: {
+        event_type: "daily.data.activity.created",
+        user_id: "junction-user-1",
+        data: {
+          date: "2026-04-03",
+          id: `activity-${sourceProviderSlug}`,
+          source: {
+            provider: sourceProviderSlug,
+            type: "watch",
+          },
+          steps: 1234,
+        },
+      },
+      messageId: `msg_arrival_${sourceProviderSlug}`,
+    });
+
+    assert.equal(parsed.dataSourceProviderSlug, sourceProviderSlug);
+  }
+
+  // A historical-pull completion is a data-less notification. Accepting its
+  // follow-up fetch job proves nothing arrived, and treating it as delivery
+  // would refresh the arrival signal and mask a genuinely dead carrier.
+  const completionOnly = await parseWebhook({
+    body: {
+      event_type: "historical.data.sleep.created",
+      user_id: "junction-user-1",
+      data: {
+        user_id: "junction-user-1",
+        start_date: "2026-04-01",
+        end_date: "2026-04-02",
+        source_provider_slug: "garmin",
+      },
+    },
+    messageId: "msg_arrival_historical_completion",
+  });
+
+  assert.equal(completionOnly.dataSourceProviderSlug, null);
+
+  // A connection lifecycle event proves nothing about the data carrier.
+  const lifecycle = await parseWebhook({
+    body: {
+      event_type: "provider.connection.created",
+      user_id: "junction-user-1",
+      data: {
+        provider: "garmin",
+      },
+    },
+    messageId: "msg_arrival_lifecycle",
+  });
+
+  assert.equal(lifecycle.dataSourceProviderSlug, null);
+});
+
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
   const provider = createJunctionProvider(async (input) => {
     throw new Error(`Unexpected request: ${readUrl(input)}`);
@@ -7718,6 +7801,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -7912,6 +7996,7 @@ test("Junction source projection uses provider-level keys for slug-only sources"
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -7994,6 +8079,7 @@ test("Junction source projection persists provider error details for errored sou
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -8073,6 +8159,7 @@ test("Junction source projection drops error details when a sibling source entry
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -8158,6 +8245,7 @@ test("Junction source projection tolerates malformed error details and reads cam
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -8246,6 +8334,7 @@ test("Junction source projection fills error details from a later errored siblin
         lastErrorCode: input.lastErrorCode ?? null,
         lastErrorMessage: input.lastErrorMessage ?? null,
         firstSeenAt: input.firstSeenAt ?? input.lastSeenAt,
+        lastDataAt: input.lastDataAt ?? null,
         createdAt: input.lastSeenAt,
         updatedAt: input.lastSeenAt,
       };
@@ -8346,6 +8435,7 @@ test("Junction polling skips optional unavailable resource collections", async (
       lastErrorMessage: null,
       firstSeenAt: "2026-04-03T00:00:00.000Z",
       lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
       createdAt: "2026-04-03T00:00:00.000Z",
       updatedAt: "2026-04-03T00:00:00.000Z",
     }),
@@ -11841,6 +11931,7 @@ test("Junction timeseries optional later chunk preserves earlier chunk records",
       lastErrorMessage: null,
       firstSeenAt: "2026-04-03T00:00:00.000Z",
       lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
       createdAt: "2026-04-03T00:00:00.000Z",
       updatedAt: "2026-04-03T00:00:00.000Z",
     }),
@@ -12039,6 +12130,7 @@ test("Junction resource jobs fetch only the hinted resource window", async () =>
       lastErrorMessage: null,
       firstSeenAt: "2026-04-03T00:00:00.000Z",
       lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
       createdAt: "2026-04-03T00:00:00.000Z",
       updatedAt: "2026-04-03T00:00:00.000Z",
     }),
@@ -12125,6 +12217,7 @@ test("Junction resource jobs skip unsupported glucose when it is not configured"
       lastErrorMessage: null,
       firstSeenAt: "2026-04-03T00:00:00.000Z",
       lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
       createdAt: "2026-04-03T00:00:00.000Z",
       updatedAt: "2026-04-03T00:00:00.000Z",
     }),

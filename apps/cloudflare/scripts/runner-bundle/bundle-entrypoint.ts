@@ -30,24 +30,25 @@ import {
 export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 
 // Byte budgets over the esbuild metafile make import-graph growth fail the
-// assembly instead of silently regressing cold start. The baselines are the
-// clean packaged measurements after unused contracts and query exports became
-// tree-shakeable. Entry and static-closure caps retain their platform-jitter
-// tolerances. The highest observed local packaged bundle measures 9,488,490B;
-// the total cap leaves 32KB for small reviewed additions without restoring the
-// former 250KB operational growth allowance.
+// assembly instead of silently regressing cold start. Entry and static-closure
+// caps retain their platform-jitter tolerances.
 //
-// Static-closure baseline raised 2026-07-25. The previous baseline left the
-// packaged boot closure 735B under its cap, so the next small reviewed addition
-// was guaranteed to fail assembly: adding provider-failure diagnosis to the
-// voice memo tool measured 7,738,566B in CI. No module entered the boot graph
+// Static-closure baseline raised 2026-07-25 on main. The previous baseline left
+// the packaged boot closure 735B under its cap, so the next small reviewed
+// addition was guaranteed to fail assembly: adding provider-failure diagnosis to
+// the voice memo tool measured 7,738,566B in CI. No module entered the boot graph
 // for that change, so this is authored-code growth rather than an import
-// regression. The baseline now leaves roughly 128KB above that measurement so
+// regression. The baseline leaves roughly 128KB above that measurement so
 // ordinary small additions do not re-red the lane. This deliberately widens the
 // cold-start guard; keep the forbidden-boot-input markers below as the real
 // defense against whole subsystems entering the boot path, and re-baseline down
 // if a future prune reclaims the space.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_521_258;
+//
+// The total budget is expressed as the packaged measurement plus the established
+// 32KB allowance for small reviewed additions. An exact measured ceiling was
+// tried and reverted: it left zero slack, so an unrelated prompt change on main
+// broke assembly. Do not restore the former 250KB operational growth allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_526_767 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_591_691;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_774_000;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

@@ -27,6 +27,10 @@ import {
 } from "../hosted-onboarding/pulse-trial-subscription-cleanup";
 import { requireHostedStripeBillingPlanConfig } from "../hosted-onboarding/runtime";
 import {
+  describeHostedStripeError,
+  withHostedStripeFailureLog,
+} from "../hosted-onboarding/stripe-error-log";
+import {
   reconcileHostedAiUsageAllowancePeriodForMemberTx,
 } from "../hosted-execution/usage-allowance";
 import { getPrisma } from "../prisma";
@@ -1293,13 +1297,22 @@ function createHostedPulseTrialExtensionStripeClient(
 ): HostedPulseTrialExtensionStripeClient {
   return {
     retrieveSubscription(subscriptionId, options) {
-      return stripe.subscriptions.retrieve(subscriptionId, {}, options);
+      return withHostedStripeFailureLog(
+        "subscription.retrieve.trial-extension",
+        () => stripe.subscriptions.retrieve(subscriptionId, {}, options),
+      );
     },
     resumeSubscription(subscriptionId, params, options) {
-      return stripe.subscriptions.resume(subscriptionId, params, options);
+      return withHostedStripeFailureLog(
+        "subscription.resume.trial-extension",
+        () => stripe.subscriptions.resume(subscriptionId, params, options),
+      );
     },
     updateSubscription(subscriptionId, params, options) {
-      return stripe.subscriptions.update(subscriptionId, params, options);
+      return withHostedStripeFailureLog(
+        "subscription.update.trial-extension",
+        () => stripe.subscriptions.update(subscriptionId, params, options),
+      );
     },
   };
 }
@@ -1311,6 +1324,12 @@ function buildHostedPulseTrialExtensionStripeRequestOptions(): Stripe.RequestOpt
   };
 }
 
+/**
+ * Ops-surface projection of a Stripe rejection. These details reach the ops
+ * client, so unlike the shared log projection they stay strictly
+ * identifier-free: the real request id is only recorded in server logs by
+ * {@link withHostedStripeFailureLog}.
+ */
 function describeSafeHostedPulseTrialExtensionStripeError(
   error: unknown,
 ): Record<string, unknown> {
@@ -1318,55 +1337,27 @@ function describeSafeHostedPulseTrialExtensionStripeError(
     return { type: typeof error };
   }
 
-  const code = readSafeHostedPulseTrialExtensionStripeErrorToken(
-    readHostedPulseTrialExtensionStripeErrorField(error, "code"),
-  );
-  const type = readSafeHostedPulseTrialExtensionStripeErrorToken(
-    readHostedPulseTrialExtensionStripeErrorField(error, "type"),
-  ) ?? readSafeHostedPulseTrialExtensionStripeErrorToken(
-    readHostedPulseTrialExtensionStripeErrorField(error, "rawType"),
-  );
-  const statusCode = readHostedPulseTrialExtensionStripeErrorField(
-    error,
-    "statusCode",
-  );
-  const requestId = readHostedPulseTrialExtensionStripeErrorField(
-    error,
-    "requestId",
-  );
+  const fields = describeHostedStripeError(error);
+  const code = readIdentifierFreeStripeToken(fields.code);
+  const type = readIdentifierFreeStripeToken(fields.type) ??
+    readIdentifierFreeStripeToken(fields.rawType);
 
   return {
     ...(code ? { code } : {}),
     ...(type ? { type } : {}),
-    ...(typeof statusCode === "number" &&
-        Number.isInteger(statusCode) &&
-        statusCode >= 100 &&
-        statusCode <= 599
-      ? { statusCode }
-      : {}),
-    requestIdPresent: typeof requestId === "string" && requestId.length > 0,
+    ...(fields.statusCode === null ? {} : { statusCode: fields.statusCode }),
+    requestIdPresent: fields.requestId !== null,
   };
 }
 
-function readSafeHostedPulseTrialExtensionStripeErrorToken(
-  value: unknown,
-): string | null {
-  return typeof value === "string" &&
-      /^[A-Za-z0-9_.-]{1,120}$/u.test(value) &&
+function readIdentifierFreeStripeToken(value: string | null): string | null {
+  // A redaction placeholder is not a usable Stripe token, so it is dropped
+  // alongside identifier-shaped values rather than reported as a code or type.
+  return value &&
+      !value.startsWith("<redacted-") &&
       !STRIPE_ERROR_IDENTIFIER_PREFIX.test(value)
     ? value
     : null;
-}
-
-function readHostedPulseTrialExtensionStripeErrorField(
-  error: object,
-  field: "code" | "rawType" | "requestId" | "statusCode" | "type",
-): unknown {
-  try {
-    return Reflect.get(error, field);
-  } catch {
-    return undefined;
-  }
 }
 
 function coerceStripeCustomerId(
