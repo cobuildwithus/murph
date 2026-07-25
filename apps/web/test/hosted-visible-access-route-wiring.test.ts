@@ -3,7 +3,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   handleHostedOnboardingLinqWebhook: vi.fn(),
-  handleHostedOnboardingLinqWebhookWithVisibleAccess: vi.fn(),
   handleHostedOnboardingTelegramWebhook: vi.fn(),
   handleHostedOnboardingTelegramWebhookWithVisibleAccess: vi.fn(),
 }));
@@ -18,8 +17,6 @@ vi.mock("next/server", async () => {
 });
 
 vi.mock("@/src/lib/hosted-onboarding/visible-access-webhooks", () => ({
-  handleHostedOnboardingLinqWebhookWithVisibleAccess:
-    mocks.handleHostedOnboardingLinqWebhookWithVisibleAccess,
   handleHostedOnboardingTelegramWebhookWithVisibleAccess:
     mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess,
 }));
@@ -52,7 +49,7 @@ describe("visible access webhook route wiring", () => {
     vi.clearAllMocks();
     vi.stubEnv("TELEGRAM_WEBHOOK_SECRET", "telegram-secret");
     mocks.after.mockImplementation((callback: () => void) => callback());
-    mocks.handleHostedOnboardingLinqWebhookWithVisibleAccess.mockResolvedValue({
+    mocks.handleHostedOnboardingLinqWebhook.mockResolvedValue({
       ok: true,
     });
     mocks.handleHostedOnboardingTelegramWebhookWithVisibleAccess.mockResolvedValue({
@@ -64,7 +61,7 @@ describe("visible access webhook route wiring", () => {
     vi.unstubAllEnvs();
   });
 
-  it("routes Linq ingress through the visible-access owner", async () => {
+  it("keeps Linq ingress on its single canonical owner", async () => {
     const rawBody = JSON.stringify({ ok: true });
     const response = await linqRoute.POST(
       new Request(
@@ -77,15 +74,12 @@ describe("visible access webhook route wiring", () => {
     );
 
     expect(response.status).toBe(202);
-    expect(
-      mocks.handleHostedOnboardingLinqWebhookWithVisibleAccess,
-    ).toHaveBeenCalledWith({
+    expect(mocks.handleHostedOnboardingLinqWebhook).toHaveBeenCalledWith({
       rawBody,
       scheduleAfterResponse: expect.any(Function),
       signature: null,
       timestamp: null,
     });
-    expect(mocks.handleHostedOnboardingLinqWebhook).not.toHaveBeenCalled();
   });
 
   it("routes Telegram ingress through the visible-access owner", async () => {

@@ -129,6 +129,42 @@ describe("visible runtime access reconciliation", () => {
     });
   });
 
+  it("judges entitlement at reconciliation time, not the admitted message time", async () => {
+    const facts = blockedFacts("ai_usage_denied");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel: "telegram",
+      eventId: "telegram:update:322",
+      kind: "conversation.message",
+      message: {
+        telegramMessage: {
+          messageId: "7",
+          threadId: "456",
+          threadIsDirect: true,
+        },
+      },
+      // Admitted while the trial was still valid; reconciled after it ended.
+      occurredAt: "2020-01-01T00:00:00.000Z",
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
+      kind: "access_notice",
+      message: "Your trial ended.",
+      noticeCode: "trial_conversion_pending",
+      responseReason: "sent-trial-conversion-notice",
+    });
+    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
+
+    await readHostedRuntimeReconciliationFactsWithVisibleAccess({
+      userId: "member_123",
+    });
+
+    const resolvedNow = mocks.resolveHostedRecognizedInboundAccess.mock
+      .calls[0]?.[0]?.now as Date;
+    expect(resolvedNow.toISOString()).not.toBe("2020-01-01T00:00:00.000Z");
+    expect(Date.now() - resolvedNow.getTime()).toBeLessThan(60_000);
+    expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledOnce();
+  });
+
   it("leaves Linq AI-usage notices to the canonical reconciliation owner", async () => {
     const facts = blockedFacts("ai_usage_denied");
     mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);

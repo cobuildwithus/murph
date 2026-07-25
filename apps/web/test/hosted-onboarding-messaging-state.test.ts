@@ -138,7 +138,7 @@ describe("hosted member messaging authority", () => {
     });
   });
 
-  it("tracks a linked Telegram identity separately from a replyable thread", () => {
+  it("treats a linked Telegram identity as setup-complete while delivery still waits for an inbound thread", () => {
     const input = {
       identity: null,
       routing: {

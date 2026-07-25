@@ -34,6 +34,7 @@ type HostedRuntimeReconciliationFacts = Awaited<
 export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
   input: Parameters<typeof readHostedRuntimeReconciliationFacts>[0],
 ): Promise<HostedRuntimeReconciliationFacts> {
+  const reconciledAt = new Date();
   const facts = await readHostedRuntimeReconciliationFacts(input);
   const blockedReason = facts.blocked?.reason;
   if (
@@ -84,12 +85,16 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     return facts;
   }
 
+  // Entitlement must be judged at the same clock the canonical reconciliation
+  // just used. The wake timestamp is message metadata: a trial that was valid
+  // when the message was admitted can have expired by the time runtime
+  // processes it, which is exactly the case this adapter exists to explain.
   const access = await resolveHostedRecognizedInboundAccess({
     allowSignupFallback: true,
     inviteChannel: isHostedLinqConversationMessageWake(wake) ? "linq" : "web",
     member,
     noticeSeed: wake.eventId,
-    now: new Date(wake.occurredAt),
+    now: reconciledAt,
     prisma,
   });
   if (access.kind === "allowed") {
@@ -151,7 +156,7 @@ export async function readHostedRuntimeReconciliationFactsWithVisibleAccess(
     facts,
     delivery.status === "in_flight"
       ? delivery.retryAt
-      : new Date(Date.now() + HOSTED_VISIBLE_ACCESS_RETRY_MS),
+      : new Date(reconciledAt.getTime() + HOSTED_VISIBLE_ACCESS_RETRY_MS),
   );
 }
 

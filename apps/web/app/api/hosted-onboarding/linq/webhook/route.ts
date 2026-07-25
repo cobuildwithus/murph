@@ -2,7 +2,7 @@ import { after } from "next/server";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { handleHostedOnboardingLinqWebhookWithVisibleAccess } from "@/src/lib/hosted-onboarding/visible-access-webhooks";
+import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   deriveHostedOnboardingTimingErrorName,
@@ -38,7 +38,7 @@ export const POST = withJsonError(async (request: Request) => {
       signalAbortedAfterRead: request.signal.aborted,
     });
 
-    const response = await handleHostedOnboardingLinqWebhookWithVisibleAccess({
+    const response = await handleHostedOnboardingLinqWebhook({
       rawBody,
       scheduleAfterResponse: scheduleAfterResponseOrFireAndForget,
       signature,

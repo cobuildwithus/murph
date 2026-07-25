@@ -7426,15 +7426,31 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
-  it("leaves a bound-home member with no billing to recover on the acquisition path", async () => {
+  it("answers a bound-home member with no billing to recover instead of retrying forever", async () => {
     const fixture = await buildPausedHostedMemberHomeRouteFixture();
-    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValueOnce({
+    mocks.readHostedRuntimeAiAccessDecision.mockResolvedValue({
       allowed: false,
       reason: "hosted_access_inactive",
       retryAfter: new Date("2026-07-23T12:15:00.000Z"),
       userNotice: null,
     });
     const prisma = asPrismaTransactionClient({
+      // Recovery runs after the planner transaction rolled back, so it opens
+      // its own transaction on the top-level client.
+      $transaction: vi.fn(
+        async (run: (tx: unknown) => unknown) => run(prisma),
+      ) as never,
+      hostedInvite: {
+        create: vi.fn().mockResolvedValue({
+          expiresAt: new Date("2026-07-24T12:00:00.000Z"),
+          id: "hin_recovery",
+          inviteCode: "recovery_invite_code",
+        }),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue({ inviteCode: "recovery_invite_code" }),
+        update: vi.fn(),
+      },
       hostedLinqProviderEvent: {
         createMany: vi.fn().mockResolvedValue({ count: 1 }),
         findMany: vi.fn().mockResolvedValue([]),
@@ -7444,10 +7460,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       hostedMemberRouting: createSingleHostedMemberRoutingMock(fixture.routing),
     });
 
-    // No notice means there is no billing to recover, so this member must stay on
+    // No notice means there is no billing to recover, so this member belongs on
     // the signup journey rather than being answered as a lapsed member. The
-    // permanent-route guard still owns what happens at the storage layer.
-    await expect(handleHostedOnboardingLinqWebhook({
+    // permanent-route guard still owns the storage layer: it aborts the
+    // transaction, and recovery then answers on the chat the member used.
+    const scheduledTasks: Array<() => Promise<void> | void> = [];
+    const response = await handleHostedOnboardingLinqWebhook({
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         createdAt: "2026-07-23T12:00:00.000Z",
@@ -7466,11 +7484,24 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         eventId: "evt_home_without_notice",
         service: "iMessage",
       }),
+      scheduleAfterResponse: (task) => {
+        scheduledTasks.push(task);
+      },
       signature: null,
       timestamp: null,
-    })).rejects.toMatchObject({ code: "HOSTED_LINQ_HOME_ROUTE_CHANGED" });
+    });
 
-    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    for (const task of scheduledTasks) {
+      await task();
+    }
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-signup-link",
+    });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ chatId: fixture.homeChatId }),
+    );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
