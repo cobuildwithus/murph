@@ -505,24 +505,35 @@ function assertHostedStripePulseTrialSubscriptionBillingShapeCanChange(input: {
 }
 
 function hasHostedStripeSubscriptionPaymentMethod(subscription: Stripe.Subscription): boolean {
+  return Boolean(readHostedStripeSubscriptionPaymentMethodId(subscription));
+}
+
+/**
+ * The payment method that should settle this subscription's next invoice.
+ * A resumed trial cuts a cycle invoice immediately, so the card has to be on the
+ * subscription: a card held only on the customer leaves that invoice in
+ * `requires_payment_method`, which strands the resume in `pending_update` until
+ * Stripe expires and voids it.
+ */
+function readHostedStripeSubscriptionPaymentMethodId(
+  subscription: Stripe.Subscription,
+): string | null {
   const subscriptionPaymentMethodId =
     coerceStripeObjectId(subscription.default_payment_method) ||
     coerceStripeObjectId(subscription.default_source);
 
   if (subscriptionPaymentMethodId) {
-    return true;
+    return subscriptionPaymentMethodId;
   }
 
   const customer = readExpandedStripeCustomer(subscription.customer);
   if (!customer) {
-    return false;
+    return null;
   }
 
-  const customerPaymentMethodId =
-    coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
-    coerceStripeObjectId(customer.default_source);
-
-  return Boolean(customerPaymentMethodId);
+  return coerceStripeObjectId(customer.invoice_settings.default_payment_method) ||
+    coerceStripeObjectId(customer.default_source) ||
+    null;
 }
 
 function readExpandedStripeCustomer(
@@ -987,10 +998,19 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
           return cleanedSubscription;
         }
 
+        const resumePaymentMethodId =
+          readHostedStripeSubscriptionPaymentMethodId(cleanedSubscription) ??
+          readHostedStripeSubscriptionPaymentMethodId(input.subscription);
         const subscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.resume.paused-trial",
           () => input.stripe.subscriptions.resume(input.stripeSubscriptionId, {
             billing_cycle_anchor: "now",
+            // Carry the card onto the subscription. Without it the cycle invoice
+            // this resume creates has nothing to charge, so it stalls the whole
+            // resume in `pending_update` and Stripe voids it minutes later.
+            ...(resumePaymentMethodId
+              ? { default_payment_method: resumePaymentMethodId }
+              : {}),
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
           }, {
             idempotencyKey: buildHostedPulseTrialStartPaidIdempotencyKey({
