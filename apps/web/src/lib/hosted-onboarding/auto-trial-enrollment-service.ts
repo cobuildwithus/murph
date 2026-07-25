@@ -60,7 +60,17 @@ import {
 const HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS = 2_000;
 const HOSTED_AUTO_PULSE_TRIAL_RESERVATION_TRANSACTION_TIMEOUT_MS = 15_000;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS = 5_000;
-const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 120_000;
+// The finalization transaction holds a pooled connection and the member row
+// lock, and it now contains database work only: the bounded lock acquisition,
+// one member snapshot read, at most one customer bind, the billing write, and
+// the activation write. The sibling reservation transaction budgets 15 seconds
+// for the lock plus read plus bind subset, so 30 seconds is double that budget
+// for roughly double the statements.
+const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 30_000;
+// Loser cleanup still retrieves and cancels Stripe subscriptions while it holds
+// the member lock, so it keeps the provider-sized budget until it is converted
+// to the same prepare/commit/cleanup shape.
+const HOSTED_AUTO_PULSE_TRIAL_LOSER_CLEANUP_TRANSACTION_TIMEOUT_MS = 120_000;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS = 3;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_RETRY_BASE_DELAY_MS = 25;
 const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
@@ -579,6 +589,24 @@ export async function runHostedAutoPulseTrialCampaignPostCommitEffects(input: {
   }
 }
 
+/**
+ * Finalizes an auto Pulse Trial in three phases so no pooled connection and no
+ * member row lock is ever held across a Stripe round trip.
+ *
+ * 1. Read the authoritative provider state and judge it, outside every
+ *    transaction and outside the member lock.
+ * 2. Take the member lock in a short database-only transaction, re-read the
+ *    member under that lock, and write only from that revalidated state.
+ * 3. After the transaction commits, cancel the subscription this attempt lost
+ *    with.
+ *
+ * Serialization is preserved because every Stripe mutation of a member's Pulse
+ * Trial subscriptions runs under this same member lock. Phase 2 therefore
+ * cannot interleave with another flow's write, and the locked re-read in
+ * {@link finalizeHostedAutoPulseTrialEnrollmentTx} still decides the outcome
+ * against the member state that exists at write time, not the state that
+ * existed when phase 1 read Stripe.
+ */
 async function finalizeHostedAutoPulseTrialEnrollment(input: {
   memberId: string;
   now: Date;
@@ -588,15 +616,49 @@ async function finalizeHostedAutoPulseTrialEnrollment(input: {
   stripeCustomerId: string;
   subscriptionId: string;
 }): Promise<HostedAutoPulseTrialEnrollmentResult> {
+  const subscription = await retrieveHostedAutoPulseTrialFinalizationSubscription({
+    stripe: input.stripe,
+    subscriptionId: input.subscriptionId,
+  });
+  const decisionNow = new Date();
+  assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
+    memberId: input.memberId,
+    priceId: input.priceId,
+    stripeCustomerId: input.stripeCustomerId,
+    subscription,
+  });
+  const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
+    subscription,
+    decisionNow,
+  );
+
   let outcome: HostedAutoPulseTrialFinalizationOutcome;
   try {
-    outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input);
+    outcome = await runHostedAutoPulseTrialFinalizationWithMemberLockRetry({
+      memberId: input.memberId,
+      now: input.now,
+      prisma: input.prisma,
+      stripeCustomerId: input.stripeCustomerId,
+      subscription,
+      trialSnapshot,
+    });
   } catch (error) {
     if (error instanceof HostedMemberStripeMutationLockBusyError) {
       throw buildHostedAutoPulseTrialFinalizationBusyError();
     }
     throw error;
   }
+
+  // The losing reservation is cancelled after the commit, so a Stripe round
+  // trip can no longer abort a decided enrollment or leave a cancelled trial
+  // behind a rolled-back write. A cleanup failure still surfaces as a retryable
+  // error: that keeps the caller retrying until the subscription is either
+  // cancelled here or picked up by the loser sweep on the next enrollment.
+  await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
+    requestOptions: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
+    stripe: input.stripe,
+    subscriptionId: outcome.cleanupStripeSubscriptionId,
+  });
 
   if (outcome.kind === "failed") {
     throw outcome.error;
@@ -622,11 +684,10 @@ function buildHostedAutoPulseTrialFinalizationBusyError() {
 async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
   memberId: string;
   now: Date;
-  priceId: string;
   prisma: PrismaClient;
-  stripe: Stripe;
   stripeCustomerId: string;
-  subscriptionId: string;
+  subscription: HostedAutoPulseTrialCampaignSubscription;
+  trialSnapshot: ReturnType<typeof readHostedAutoPulseTrialSubscriptionSnapshot>;
 }): Promise<HostedAutoPulseTrialFinalizationOutcome> {
   for (
     let attempt = 1;
@@ -641,44 +702,19 @@ async function runHostedAutoPulseTrialFinalizationWithMemberLockRetry(input: {
         prisma: input.prisma,
         run: (tx): Promise<HostedAutoPulseTrialFinalizationOutcome> =>
           runWithHostedDomainRootUnwrapCache(async () => {
-            const subscription =
-              await retrieveHostedAutoPulseTrialFinalizationSubscription({
-                stripe: input.stripe,
-                subscriptionId: input.subscriptionId,
-              });
-            const decisionNow = new Date();
-            assertHostedAutoPulseTrialFinalizationSubscriptionEligible({
-              memberId: input.memberId,
-              priceId: input.priceId,
-              stripeCustomerId: input.stripeCustomerId,
-              subscription,
-            });
-            const trialSnapshot = readHostedAutoPulseTrialSubscriptionSnapshot(
-              subscription,
-              decisionNow,
-            );
             const currentMember = await readHostedAutoPulseTrialEnrollmentMember({
               memberId: input.memberId,
               prisma: tx,
             });
-            const finalizationOutcome =
-              await finalizeHostedAutoPulseTrialEnrollmentTx({
-                currentMember,
-                memberId: input.memberId,
-                now: input.now,
-                stripeCustomerId: input.stripeCustomerId,
-                subscription,
-                trialSnapshot,
-                tx,
-              });
-            await cancelHostedAutoPulseTrialStripeSubscriptionIfNeeded({
-              requestOptions:
-                HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS,
-              stripe: input.stripe,
-              subscriptionId:
-                finalizationOutcome.cleanupStripeSubscriptionId,
+            return finalizeHostedAutoPulseTrialEnrollmentTx({
+              currentMember,
+              memberId: input.memberId,
+              now: input.now,
+              stripeCustomerId: input.stripeCustomerId,
+              subscription: input.subscription,
+              trialSnapshot: input.trialSnapshot,
+              tx,
             });
-            return finalizationOutcome;
           }),
         transactionTimeoutMs:
           HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
@@ -1115,7 +1151,7 @@ async function cleanupHostedAutoPulseTrialLosersForExistingEnrollment(input: {
         acquisitionTimeoutMs:
           HOSTED_AUTO_PULSE_TRIAL_MEMBER_LOCK_ACQUISITION_TIMEOUT_MS,
         transactionTimeoutMs:
-          HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS,
+          HOSTED_AUTO_PULSE_TRIAL_LOSER_CLEANUP_TRANSACTION_TIMEOUT_MS,
       },
       memberId: input.memberId,
       priceId: input.priceId,
