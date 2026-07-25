@@ -27,11 +27,13 @@ describe("visible secondary webhook outcomes", () => {
     ["unassignable-home-line", "connect this chat"],
     ["unattested-direct-chat", "verify this as your Murph chat"],
     ["unknown-home-line", "verify this as your Murph chat"],
+    ["thread-container-inactive", "group chat"],
   ] as const)("maps Linq %s to a visible reply", (reason, expectedText) => {
     expect(resolveHostedLinqVisibleSecondaryReply({
       reason,
       recognizedSender: reason === "family-invite-not-accepted"
         || reason === "signup-link-already-sent"
+        || reason === "thread-container-inactive"
         ? false
         : true,
     })).toContain(expectedText);
@@ -69,12 +71,17 @@ describe("visible secondary webhook outcomes", () => {
     },
   );
 
-  it("keeps account-specific Telegram repair out of groups", () => {
+  it("keeps Telegram group replies privacy-safe", () => {
     expect(resolveHostedTelegramVisibleSecondaryReply({
       isDirect: false,
       reason: "ambiguous-telegram-binding",
       signupUrl: null,
-    })).toBeNull();
+    })).toContain("Message me privately");
+    expect(resolveHostedTelegramVisibleSecondaryReply({
+      isDirect: false,
+      reason: "unlinked-telegram",
+      signupUrl: null,
+    })).toContain("Message me privately");
     expect(resolveHostedTelegramVisibleSecondaryReply({
       isDirect: true,
       reason: "group-chat-provision-unavailable",
