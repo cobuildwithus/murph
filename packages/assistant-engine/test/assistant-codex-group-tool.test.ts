@@ -770,10 +770,12 @@ describe("murph.group dynamic tool", () => {
         members: [{
           participantId: "participant_timing",
           projections: [{
+            // The constant semantics marker is stated once per projection rather
+            // than repeated on every day record.
+            timeSemantics: "canonical-event-zone-or-vault-zone.v0",
             records: [{
               data: {
                 date: "2026-07-18",
-                timeSemantics: "canonical-event-zone-or-vault-zone.v0",
                 workouts: [{
                   kind: "running",
                   minutes: 45,
@@ -788,6 +790,90 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(payload)).not.toMatch(
       /absoluteTimestamp|heartRate|location|provider|route|timeZone/u,
     );
+
+    // One read returns members x scopes x days, so the shared budget must not be
+    // spent restating each record's own date or a projection-level constant.
+    const serialized = JSON.stringify(payload);
+    expect(serialized).not.toContain("2026-07-18T00:00:00.000Z");
+    expect(serialized).not.toContain('"recordKey"');
+    expect(serialized.match(/canonical-event-zone-or-vault-zone\.v0/gu))
+      .toHaveLength(1);
+  });
+
+  it("keeps per-record distinctions when a data marker varies across records", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_mixed",
+        participantId: "participant_mixed",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: {
+            projectionKind: "activity-days.v0" as const,
+          },
+          projectionScopeKey: "activity-days.v0",
+          records: [
+            {
+              data: {
+                date: "2026-07-18",
+                metricKey: "activity-minutes",
+                metricSemantics: "broad-movement" as const,
+                unit: "minutes",
+                value: 30,
+              },
+              occurredAt: "2026-07-18T00:00:00.000Z",
+              recordKey: "2026-07-18",
+            },
+            {
+              data: {
+                date: "2026-07-17",
+                metricKey: "activity-minutes",
+                unit: "minutes",
+                value: 45,
+              },
+              occurredAt: "2026-07-17T00:00:00.000Z",
+              recordKey: "2026-07-17",
+            },
+          ],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["activity-days.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "activity-days.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const payload = readGroupToolPayload(result);
+    const serialized = JSON.stringify(payload);
+    // Only one record carries the marker, so hoisting it to the projection would
+    // wrongly claim the unmarked record shares it. It must stay per record.
+    expect(serialized).toContain("broad-movement");
+    const projection = readFirstProjection(payload);
+    expect(projection).not.toHaveProperty("metricSemantics");
+    expect(projection.records[0]).toMatchObject({
+      data: { date: "2026-07-18", metricSemantics: "broad-movement" },
+    });
+    expect(projection.records[1]?.data).not.toHaveProperty("metricSemantics");
   });
 
   it("strips global member ids from every group-summary mutation result", async () => {
@@ -3330,6 +3416,20 @@ function readGroupToolPayload(
     throw new Error("Expected text tool payload.");
   }
   return JSON.parse(item.text);
+}
+
+interface ReadSharedProjectionShape {
+  records: { data: Record<string, unknown> }[];
+  timeSemantics?: string;
+}
+
+function readFirstProjection(payload: unknown): ReadSharedProjectionShape {
+  const projection = JSON.parse(JSON.stringify(payload))
+    ?.result?.members?.[0]?.projections?.[0];
+  if (!projection || !Array.isArray(projection.records)) {
+    throw new Error("Expected a read_shared payload with one projection.");
+  }
+  return projection;
 }
 
 function generatedImageRefFromPayload(payload: unknown): string {

@@ -88,8 +88,10 @@ import {
 } from '@murphai/query'
 
 import {
+  type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
+  type AssistantHostedGroupSharedRecord,
   type AssistantGeneratedImageContentType,
   type AssistantHostedGeneratedImageUploader,
   type AssistantWorkspaceArtifactMaterializer,
@@ -3298,6 +3300,80 @@ function groupSharedUnavailableToolResult(
   }))
 }
 
+/**
+ * One read returns every member crossed with every requested scope, so the model
+ * result grows with members x days x records and is rejected whole once it passes
+ * ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS. These two projections
+ * are lossless: a day-keyed record repeats its own date in `recordKey` and
+ * `occurredAt`, and per-record semantics markers are constant for the projection.
+ * Serializing either per record spends the shared budget on repetition instead of
+ * member data.
+ */
+const GROUP_SHARED_RECORD_CONSTANT_DATA_KEYS = [
+  'metricSemantics',
+  'timeSemantics',
+] as const
+
+function groupSharedRecordDataValue(
+  record: AssistantHostedGroupSharedRecord,
+  key: string,
+): unknown {
+  return Object.entries(record.data).find(([entryKey]) => entryKey === key)?.[1]
+}
+
+function groupSharedModelRecord(
+  record: AssistantHostedGroupSharedRecord,
+  hoistedDataKeys: readonly string[],
+) {
+  const dateValue = groupSharedRecordDataValue(record, 'date')
+  const date = typeof dateValue === 'string' ? dateValue : null
+  const compactData = hoistedDataKeys.length === 0
+    ? record.data
+    : Object.fromEntries(
+      Object.entries(record.data)
+        .filter(([key]) => !hoistedDataKeys.includes(key)),
+    )
+  return {
+    data: compactData,
+    // Both are recoverable from `data.date`; omit them only when they add nothing.
+    ...(date !== null && record.occurredAt === `${date}T00:00:00.000Z`
+      ? {}
+      : { occurredAt: record.occurredAt }),
+    ...(date !== null && record.recordKey === date
+      ? {}
+      : { recordKey: record.recordKey }),
+  }
+}
+
+function groupSharedModelProjection(
+  projection: AssistantHostedGroupSharedProjection,
+) {
+  const hoisted: Record<string, unknown> = {}
+  for (const key of GROUP_SHARED_RECORD_CONSTANT_DATA_KEYS) {
+    const values = new Set(
+      projection.records.map((record) => groupSharedRecordDataValue(record, key)),
+    )
+    // Hoist only when every record agrees, so a per-record distinction survives.
+    if (values.size === 1 && projection.records.length > 0) {
+      const [value] = [...values]
+      if (value !== undefined) {
+        hoisted[key] = value
+      }
+    }
+  }
+  const hoistedKeys = Object.keys(hoisted)
+  return {
+    dataStatus: projection.dataStatus,
+    grantStatus: projection.grantStatus,
+    projectionScope: projection.projectionScope,
+    projectionScopeKey: projection.projectionScopeKey,
+    records: projection.records.map((record) =>
+      groupSharedModelRecord(record, hoistedKeys)
+    ),
+    ...hoisted,
+  }
+}
+
 function groupSharedModelResult(
   result: AssistantHostedGroupSharedReadResponse,
 ) {
@@ -3319,7 +3395,7 @@ function groupSharedModelResult(
       currentTurnHandles: member.currentTurnHandles,
       displayName: member.displayName,
       participantId: member.participantId,
-      projections: member.projections,
+      projections: member.projections.map(groupSharedModelProjection),
     })),
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
     status: result.status,
