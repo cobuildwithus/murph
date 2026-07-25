@@ -22,8 +22,9 @@ const PG_CONNECTION_TIMEOUT_MS = 5_000;
 const PG_IDLE_TIMEOUT_MS = 30_000;
 const PRISMA_TRANSACTION_MAX_WAIT_MS = 10_000;
 const PRISMA_TRANSACTION_TIMEOUT_MS = 15_000;
-const DATABASE_RETRY_ATTEMPTS = 3;
-const DATABASE_RETRY_DELAY_MS = 250;
+const DATABASE_RETRY_ATTEMPTS = 2;
+const DATABASE_RETRY_MIN_DELAY_MS = 50;
+const DATABASE_RETRY_MAX_DELAY_MS = 250;
 const POOL_PRESSURE_SAMPLE_INTERVAL_MS = 10_000;
 const SLOW_TRANSACTION_MS = 5_000;
 
@@ -89,14 +90,12 @@ export interface CreatePrismaClientInput {
 }
 
 function createPrismaPool(input: CreatePrismaClientInput): PgPool {
-  const poolMax = input.poolMax;
+  const poolMax = resolveDatabasePoolMax(input.poolMax);
   const pool = new Pool({
     connectionString: normalizePrismaConnectionString(input.databaseUrl),
     connectionTimeoutMillis: PG_CONNECTION_TIMEOUT_MS,
     idleTimeoutMillis: PG_IDLE_TIMEOUT_MS,
-    max: typeof poolMax === "number" && Number.isFinite(poolMax) && poolMax > 0
-      ? poolMax
-      : DEFAULT_DATABASE_POOL_MAX,
+    max: poolMax,
   });
 
   attachDatabasePool(pool);
@@ -120,6 +119,7 @@ function createPrismaAdapter(pool: PgPool): PrismaPg {
 
 export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient {
   const logLevels = resolvePrismaLogLevels();
+  const poolMax = resolveDatabasePoolMax(input.poolMax);
   const pool = createPrismaPool(input);
 
   const client = new PrismaClient({
@@ -153,6 +153,7 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
         // operation can be replayed without duplicating an effect.
         return runWithDatabaseRetry(
           pool,
+          poolMax,
           "pool_checkout_timeout",
           () => query(args),
         ).then(
@@ -169,22 +170,27 @@ export function createPrismaClient(input: CreatePrismaClientInput): PrismaClient
     },
   }) as PrismaClient;
 
-  return withTransactionStartRetry(extended, pool);
+  return withTransactionStartRetry(extended, pool, poolMax);
 }
 
 /**
- * Retries `run` while it keeps failing with `retryableCategory`, which callers
- * pick to name the one failure that provably did no work at their seam. Every
- * pool failure is reported with its live pool counts whether or not it is
- * retried, so an exhausted retry leaves one log line per attempt.
+ * Retries one ambiguous connection-establishment failure when the caller proves
+ * the operation never began. Local pool saturation is already backpressure, so
+ * it is reported and returned immediately instead of rejoining the same queue.
  */
 async function runWithDatabaseRetry<T>(
   pool: PgPool,
+  poolMax: number,
   retryableCategory: DatabasePoolFailureCategory,
   run: () => Promise<T>,
+  canRetry: () => boolean = () => true,
 ): Promise<T> {
   for (let attempt = 1; ; attempt += 1) {
-    reportDatabasePoolPressure(pool);
+    const locallyContendedBeforeAttempt = hasLocalDatabasePoolPressure(
+      pool,
+      poolMax,
+    );
+    reportDatabasePoolPressure(pool, poolMax);
     try {
       return await run();
     } catch (error) {
@@ -192,10 +198,16 @@ async function runWithDatabaseRetry<T>(
       if (category) {
         reportDatabasePoolFailure(pool, category);
       }
-      if (category !== retryableCategory || attempt >= DATABASE_RETRY_ATTEMPTS) {
+      if (
+        category !== retryableCategory
+        || attempt >= DATABASE_RETRY_ATTEMPTS
+        || !canRetry()
+        || locallyContendedBeforeAttempt
+        || hasLocalDatabasePoolPressure(pool, poolMax)
+      ) {
         throw error;
       }
-      await delay(DATABASE_RETRY_DELAY_MS);
+      await delay(resolveDatabaseRetryDelayMs());
     }
   }
 }
@@ -213,6 +225,7 @@ async function runWithDatabaseRetry<T>(
 function withTransactionStartRetry(
   client: PrismaClient,
   pool: PgPool,
+  poolMax: number,
 ): PrismaClient {
   return new Proxy(client, {
     get(target, property) {
@@ -223,16 +236,66 @@ function withTransactionStartRetry(
       }
 
       return async (...args: unknown[]): Promise<unknown> => {
-        const startedAtMs = Date.now();
-        try {
-          return await runWithDatabaseRetry(
-            pool,
-            "transaction_start_timeout",
-            () => Reflect.apply(value, target, args) as Promise<unknown>,
-          );
-        } finally {
-          reportSlowDatabaseTransaction(Date.now() - startedAtMs);
+        const transactionArgument = args[0];
+
+        if (typeof transactionArgument !== "function") {
+          const startedAtMs = Date.now();
+          try {
+            return await runWithDatabaseRetry(
+              pool,
+              poolMax,
+              "transaction_start_timeout",
+              () => Reflect.apply(value, target, args) as Promise<unknown>,
+            );
+          } finally {
+            reportSlowDatabaseBatchTransaction(Date.now() - startedAtMs);
+          }
         }
+
+        let callbackStarted = false;
+        return runWithDatabaseRetry(
+          pool,
+          poolMax,
+          "transaction_start_timeout",
+          async () => {
+            callbackStarted = false;
+            const acquisitionStartedAtMs = Date.now();
+            const wrappedCallback = async (...callbackArgs: unknown[]) => {
+              callbackStarted = true;
+              reportSlowDatabaseTransactionAcquisition(
+                Date.now() - acquisitionStartedAtMs,
+              );
+              const heldStartedAtMs = Date.now();
+              try {
+                return await Reflect.apply(
+                  transactionArgument,
+                  undefined,
+                  callbackArgs,
+                ) as unknown;
+              } finally {
+                reportSlowDatabaseTransactionHold(
+                  Date.now() - heldStartedAtMs,
+                );
+              }
+            };
+            const transactionArgs = [wrappedCallback, ...args.slice(1)];
+
+            try {
+              return await Reflect.apply(
+                value,
+                target,
+                transactionArgs,
+              ) as unknown;
+            } finally {
+              if (!callbackStarted) {
+                reportSlowDatabaseTransactionAcquisition(
+                  Date.now() - acquisitionStartedAtMs,
+                );
+              }
+            }
+          },
+          () => !callbackStarted,
+        );
       };
     },
   });
@@ -242,6 +305,13 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+}
+
+function resolveDatabaseRetryDelayMs(): number {
+  return DATABASE_RETRY_MIN_DELAY_MS + Math.floor(
+    Math.random()
+      * (DATABASE_RETRY_MAX_DELAY_MS - DATABASE_RETRY_MIN_DELAY_MS + 1),
+  );
 }
 
 function createPrisma(): PrismaClient {
@@ -301,6 +371,12 @@ export function normalizePrismaConnectionString(databaseUrl: string): string {
   }
 
   return changed ? parsed.toString() : databaseUrl;
+}
+
+function resolveDatabasePoolMax(poolMax?: number): number {
+  return typeof poolMax === "number" && Number.isFinite(poolMax) && poolMax > 0
+    ? poolMax
+    : DEFAULT_DATABASE_POOL_MAX;
 }
 
 function resolveDatabasePoolFailureCategory(
@@ -366,15 +442,13 @@ function reportDatabasePoolFailure(
 }
 
 /**
- * Reports pool contention before it becomes a failure. `waitingCount` is the
- * pool's own count of callers queued for a client, so a sustained non-zero
- * value is the early warning that a checkout timeout is coming; a healthy pool
- * logs nothing. Rate limited per pool so a contended burst cannot flood the
- * log, and it carries counts only, never a query, URL, or identifier.
+ * Reports pool contention before it becomes a failure. A full pool identifies
+ * the first prospective waiter before pg increments `waitingCount`; later
+ * callers remain visible through that count. A healthy pool logs nothing.
  */
-function reportDatabasePoolPressure(pool: PgPool): void {
+function reportDatabasePoolPressure(pool: PgPool, poolMax: number): void {
   const waitingRequests = normalizePoolCount(pool.waitingCount);
-  if (waitingRequests === 0) {
+  if (!hasLocalDatabasePoolPressure(pool, poolMax)) {
     return;
   }
 
@@ -392,17 +466,41 @@ function reportDatabasePoolPressure(pool: PgPool): void {
   });
 }
 
-/**
- * Reports a transaction that held its connection far longer than the pool can
- * afford. Duration only: naming the caller would mean threading a label through
- * every call site, and the identifier would add exposure for no diagnostic gain.
- */
-function reportSlowDatabaseTransaction(durationMs: number): void {
+function hasLocalDatabasePoolPressure(pool: PgPool, poolMax: number): boolean {
+  return normalizePoolCount(pool.waitingCount) > 0
+    || (
+      normalizePoolCount(pool.idleCount) === 0
+      && normalizePoolCount(pool.totalCount) >= poolMax
+    );
+}
+
+function reportSlowDatabaseTransactionAcquisition(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow transaction acquisition.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseTransactionHold(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow transaction hold.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseBatchTransaction(durationMs: number): void {
+  reportSlowDatabaseDuration(
+    "Hosted web database slow batch transaction.",
+    durationMs,
+  );
+}
+
+function reportSlowDatabaseDuration(message: string, durationMs: number): void {
   if (durationMs < SLOW_TRANSACTION_MS) {
     return;
   }
 
-  console.warn("Hosted web database slow transaction.", {
+  console.warn(message, {
     durationMs: Math.trunc(durationMs),
   });
 }

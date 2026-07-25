@@ -18,15 +18,13 @@ if (
 
 /**
  * The unit suite proves the retry policy against fabricated errors. This proves
- * the policy against the errors Prisma and adapter-pg actually raise, which is
- * the only place the "a retry cannot duplicate an effect" invariant can be
- * checked end to end: that the callback runs exactly once and that exactly one
- * row lands.
+ * that real local saturation is returned as backpressure without re-entering
+ * the pool queue, and that a callback which already ran is never replayed.
  */
 describe.skipIf(!runPostgresRetryProof)(
   "hosted web database retry (real PostgreSQL)",
   () => {
-    it("retries a real transaction-start timeout and runs the callback exactly once", async () => {
+    it("does not retry a real transaction-start timeout under local saturation", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
 
@@ -34,19 +32,19 @@ describe.skipIf(!runPostgresRetryProof)(
         const { holding, release } = await holdTheOnlyConnection(prisma);
         let callbackRuns = 0;
 
-        // Free the pool while the second transaction is between attempts.
-        setTimeout(() => release(), 2_000);
+        try {
+          await expect(prisma.$transaction(async (tx) => {
+            callbackRuns += 1;
+            await tx.$queryRaw`select 1`;
+          }, { maxWait: 900, timeout: 10_000 })).rejects.toMatchObject({
+            code: "P2028",
+          });
+        } finally {
+          release();
+          await holding;
+        }
 
-        const result = await prisma.$transaction(async (tx) => {
-          callbackRuns += 1;
-          await tx.$queryRaw`select 1`;
-          return "committed";
-        }, { maxWait: 900, timeout: 10_000 });
-        await holding;
-
-        expect(result).toBe("committed");
-        // Failed attempts never entered the callback, so no side effect repeated.
-        expect(callbackRuns).toBe(1);
+        expect(callbackRuns).toBe(0);
         expect(loggedCategories(warn)).toContain("transaction_start_timeout");
       } finally {
         await prisma.$disconnect();
@@ -54,7 +52,7 @@ describe.skipIf(!runPostgresRetryProof)(
       }
     }, 60_000);
 
-    it("persists exactly one row when a real write is retried", async () => {
+    it("does not retry a real checkout timeout or persist the write", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       const setup = createPrismaClient({ databaseUrl, poolMax: 2 });
       const table = `murph_retry_proof_${randomUUID().replace(/-/g, "")}`;
@@ -65,59 +63,23 @@ describe.skipIf(!runPostgresRetryProof)(
       const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
       try {
         const { holding, release } = await holdTheOnlyConnection(prisma);
-        setTimeout(() => release(), 2_000);
-
-        const rowId = randomUUID();
-        await prisma.$transaction(async (tx) => {
-          await tx.$executeRawUnsafe(
-            `insert into "${table}" (id) values ($1)`,
-            rowId,
-          );
-        }, { maxWait: 900, timeout: 10_000 });
-        await holding;
-
-        const rows = await setup.$queryRawUnsafe<{ id: string }[]>(
-          `select id from "${table}"`,
-        );
-        expect(rows).toHaveLength(1);
-        expect(rows[0]?.id).toBe(rowId);
-        expect(loggedCategories(warn)).toContain("transaction_start_timeout");
-      } finally {
-        await prisma.$disconnect();
-        await setup.$executeRawUnsafe(`drop table if exists "${table}"`);
-        await setup.$disconnect();
-        warn.mockRestore();
-      }
-    }, 60_000);
-
-    it("retries a real checkout timeout on an ordinary write and persists one row", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-      const setup = createPrismaClient({ databaseUrl, poolMax: 2 });
-      const table = `murph_retry_proof_${randomUUID().replace(/-/g, "")}`;
-      await setup.$executeRawUnsafe(
-        `create table "${table}" (id text primary key)`,
-      );
-
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
-      try {
-        const { holding, release } = await holdTheOnlyConnection(prisma);
-        // The pool's checkout timeout is a fixed five seconds, so the first
-        // attempt must fail before the connection comes back.
-        setTimeout(() => release(), 6_000);
 
         const rowId = randomUUID();
         // Not a transaction: this goes through the $allOperations seam.
-        await prisma.$executeRawUnsafe(
-          `insert into "${table}" (id) values ($1)`,
-          rowId,
-        );
-        await holding;
+        try {
+          await expect(prisma.$executeRawUnsafe(
+            `insert into "${table}" (id) values ($1)`,
+            rowId,
+          )).rejects.toThrow();
+        } finally {
+          release();
+          await holding;
+        }
 
         const rows = await setup.$queryRawUnsafe<{ id: string }[]>(
           `select id from "${table}"`,
         );
-        expect(rows).toHaveLength(1);
-        expect(rows[0]?.id).toBe(rowId);
+        expect(rows).toEqual([]);
         expect(loggedCategories(warn)).toContain("pool_checkout_timeout");
       } finally {
         await prisma.$disconnect();

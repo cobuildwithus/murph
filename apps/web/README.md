@@ -938,41 +938,36 @@ for idle retirement; tune those values only from measured pool and database
 pressure. Connection failure logs expose only a fixed failure category and
 numeric total, idle, and waiting counts.
 
-That module retries only the two failures that prove the database did no work,
-because replaying anything else could duplicate an effect. A `pool_checkout_timeout`
-means the statement never reached Postgres, so the operation is retried; a
-`transaction_start_timeout` is Prisma's `P2028` raised before it invokes the
-transaction callback, so the transaction is retried. Both get three attempts
-spaced 250 ms apart, and every attempt logs its category and pool counts, so an
-exhausted retry leaves one line per attempt. `P2028` also covers transactions
-that opened and later expired, and those are never replayed, so the two cases are
-separated by message rather than by code. Failures that may have reached Postgres,
-such as closed connections, TLS faults, or an unreachable host, are reported and
-rethrown untouched. Retries exist because a primary switchover or a thawed Fluid instance
-with stale pooled sockets produces exactly these two errors; they are not a
-substitute for capacity.
+That module permits one jittered retry only for the two ambiguous transient
+failures that prove the database did no work. A `pool_checkout_timeout` means
+the statement never reached Postgres. A `transaction_start_timeout` is Prisma's
+`P2028` raised before it invokes the transaction callback. When the local pool
+is already full or has waiters, either failure is returned immediately as
+backpressure instead of re-entering the same queue. `P2028` also covers
+transactions that opened and later expired; the wrapper tracks callback entry
+and never replays a transaction that may have run. Failures that may have
+reached Postgres, such as closed connections, TLS faults, or an unreachable
+host, are reported and rethrown untouched.
 
 Pool pressure is reported before it becomes a failure. `Hosted web database pool
-pressure.` logs the same total, idle, and waiting counts whenever a caller is
-queued for a client, rate limited to once per ten seconds per pool; a pool with
-nothing waiting logs nothing. Treat a sustained non-zero `waitingRequests` as the
-signal to act, not the later checkout timeout, because by then requests are
-already failing. `Hosted web database slow transaction.` logs a bare duration
-whenever a transaction holds its connection for five seconds or more; it carries
-no caller name or identifier, so use it to find long connection occupancy rather
-than to attribute it. Checkout timeouts and connection-establishment failures
-stay separable through the existing `category` field.
+pressure.` logs the same total, idle, and waiting counts when the pool is full
+before the prospective first waiter queues, or whenever later callers are
+already waiting. It is rate limited to once per ten seconds per pool; a pool
+with idle capacity logs nothing. `Hosted web database slow transaction
+acquisition.` measures only the wait before an interactive callback begins,
+while `Hosted web database slow transaction hold.` measures only callback time
+with a connection. Batch-array transactions use `Hosted web database slow batch
+transaction.` for total wall time because Prisma does not expose a callback
+boundary there. Each emits only a duration at five seconds or more.
 
 `Hosted web database pool configured.` records the effective limit once per
 module runtime and whether it was `configured` or inherited as the `default`.
 That limit is per module runtime, not a global cap, so the real ceiling is this
-number multiplied by the live Fluid instance count. Set `DATABASE_POOL_MAX`
-explicitly in production and budget every instance together with headroom for
-migrations, scripts, and administrative sessions against the same database;
-leaving it unset means the ceiling is an inherited default rather than a
-capacity decision. Re-baseline it against representative ingress, runtime-log,
-device-sync, signup, and Stripe workloads and choose the smallest value that
-holds the latency target without sustained waiters.
+number multiplied by the live Fluid instance count. Leaving
+`DATABASE_POOL_MAX` unset deliberately keeps the inherited default visible
+without silently changing capacity. Use the new pressure, acquisition, and hold
+measurements to re-baseline representative ingress, runtime-log, device-sync,
+signup, and Stripe workloads before choosing an explicit per-instance value.
 
 Destructive contract cleanup belongs under
 `apps/web/prisma/contract-migrations` and runs through the
