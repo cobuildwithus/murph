@@ -381,7 +381,9 @@ async function isShutdownCheckpointSnapshotCompleteRequest(request: Request): Pr
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return false;
   }
-  const checkpointRequest = "checkpointRequest" in body ? body.checkpointRequest : null;
+  const checkpointRequest = "checkpointRequest" in body
+    ? body.checkpointRequest
+    : null;
   return Boolean(
     checkpointRequest
     && typeof checkpointRequest === "object"
@@ -409,7 +411,7 @@ export function wrapSnapshotPublicationCorruptionForTest(
     if (
       userId.length === 0
       || !snapshotPublicationCorruptionUserIds.has(userId)
-      || !isWorkspaceSnapshotCompleteRequest(request)
+      || !await isTerminalIdleCheckpointSnapshotCompleteRequest(request)
     ) {
       return await handler(request, env, ctx);
     }
@@ -445,6 +447,30 @@ export function wrapSnapshotPublicationCorruptionForTest(
     });
     return response;
   };
+}
+
+async function isTerminalIdleCheckpointSnapshotCompleteRequest(
+  request: Request,
+): Promise<boolean> {
+  if (!isWorkspaceSnapshotCompleteRequest(request)) {
+    return false;
+  }
+  const body: unknown = await request.clone().json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return false;
+  }
+  const checkpointRequest = "checkpointRequest" in body ? body.checkpointRequest : null;
+  if (
+    !checkpointRequest
+    || typeof checkpointRequest !== "object"
+    || Array.isArray(checkpointRequest)
+    || !("idleCheckpointTrigger" in checkpointRequest)
+  ) {
+    return false;
+  }
+  return checkpointRequest.idleCheckpointTrigger === "idle_window"
+    || checkpointRequest.idleCheckpointTrigger === "runtime_wake"
+    || checkpointRequest.idleCheckpointTrigger === "shutdown_signal";
 }
 
 function isWorkspaceSnapshotCompleteRequest(request: Request): boolean {

@@ -22,6 +22,9 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import {
+  createAskGrokToolRuntimeFromEnv,
+} from '../src/assistant-codex/ask-grok-tool.ts'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
@@ -698,6 +701,83 @@ describe('real codex app-server with scripted provider', () => {
       messageRef,
     }])
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('enforces the murph.ask_grok per-turn provider-call ceiling through the real tool loop', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    let xaiProviderCalls = 0
+    const xaiFetch: typeof fetch = async () => {
+      xaiProviderCalls += 1
+      return new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              call_id: 'call_xsearch_1',
+              id: 'xsearch_1',
+              input: '{"query":"creatine"}',
+              name: 'x_keyword_search',
+              status: 'completed',
+              type: 'custom_tool_call',
+            },
+            {
+              type: 'message',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'output_text',
+                  text: 'People mostly say creatine timing does not matter much.',
+                },
+              ],
+            },
+          ],
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      )
+    }
+    const askGrokCall = {
+      functionCall: {
+        arguments: { question: 'what are people saying about creatine?' },
+        name: 'ask_grok',
+        namespace: 'murph',
+      },
+    } as const
+    scenario.stub.queue(
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
+      askGrokCall,
+      { text: 'X_SEARCH_CEILING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        progressUpdatesAvailable: false,
+        askGrokAvailable: true,
+      }),
+      prompt: 'Search X four times, then reply exactly X_SEARCH_CEILING_OK.',
+      askGrokRuntime: createAskGrokToolRuntimeFromEnv({
+        env: { XAI_API_KEY: 'xai-sentinel-key' },
+        fetchImpl: xaiFetch,
+      }),
+    })
+
+    expect(result.finalMessage).toBe('X_SEARCH_CEILING_OK')
+    // Four tool calls flowed through the real turn executor, but the shared
+    // turn-scoped counter allowed exactly three provider requests.
+    expect(xaiProviderCalls).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+    const functionCallOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(functionCallOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('untrusted third-party content'),
+      expect.stringContaining(
+        'X search limit of 3 searches reached for this turn; no search ran',
+      ),
+    ]))
   })
 
   it('steers a live turn while the real app-server is mid-request', {

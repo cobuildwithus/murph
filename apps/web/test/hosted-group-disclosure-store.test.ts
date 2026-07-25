@@ -240,7 +240,7 @@ async function bindPermission(
 ): Promise<DisclosurePermissionState> {
   await recordHostedGroupDisclosurePermissionTx({
     groupId: "group_1",
-    messageId: "provider_message_1",
+    message: { channel: "linq" as const, messageId: "provider_message_1" },
     originAssistantInputId: "assistant_input_1",
     permissionText,
     postedAt: NOW,
@@ -257,6 +257,7 @@ function acceptPermission(
   now = new Date(NOW.getTime() + 60_000),
 ) {
   return acceptHostedGroupDisclosurePermissionReactionTx({
+      channel: "linq",
     memberId: "member_1",
     messageLookupKeyReadCandidates: [
       "message:provider_message_1",
@@ -366,7 +367,7 @@ describe("hosted group disclosure grant lifecycle", () => {
     });
     await expect(recordHostedGroupDisclosurePermissionTx({
       groupId: "group_1",
-      messageId: "provider_message_1",
+      message: { channel: "linq" as const, messageId: "provider_message_1" },
       originAssistantInputId: "assistant_input_1",
       permissionText: "My recent running distance",
       postedAt: NOW,
@@ -403,7 +404,7 @@ describe("hosted group disclosure grant lifecycle", () => {
     expect(permissionLockCallOrder).toBeLessThan(permissionCountCallOrder);
     await expect(recordHostedGroupDisclosurePermissionTx({
       groupId: "group_1",
-      messageId: "provider_message_fresh",
+      message: { channel: "linq" as const, messageId: "provider_message_fresh" },
       originAssistantInputId: "assistant_input_fresh",
       permissionText: "My recent running distance",
       postedAt: NOW,
@@ -417,7 +418,7 @@ describe("hosted group disclosure grant lifecycle", () => {
     await bindPermission(changedMessage);
     await expect(recordHostedGroupDisclosurePermissionTx({
       groupId: "group_1",
-      messageId: "provider_message_2",
+      message: { channel: "linq" as const, messageId: "provider_message_2" },
       originAssistantInputId: "assistant_input_1",
       permissionText: "My recent running distance",
       postedAt: NOW,

@@ -179,6 +179,7 @@ export function expectAdvertisedMurphDynamicTools(
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
+    askGrokAvailable?: boolean;
   } = {},
 ): void {
   const lastResponsesRequest = [...requests]
@@ -234,6 +235,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.phoneCallsAvailable !== true
         && name === "murph.create_phone_call"
+      ) {
+        return false;
+      }
+
+      if (
+        options.askGrokAvailable !== true
+        && name === "murph.ask_grok"
       ) {
         return false;
       }

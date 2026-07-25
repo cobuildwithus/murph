@@ -1034,12 +1034,12 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
-export const HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS = 512;
+export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
 // JSON can escape one code point to six bytes. One KiB covers the fixed
 // request envelope, projection scopes, quotes, and commas.
 export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
   + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
-    * HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS
+    * HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
     * 6;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES = 3;
 export const HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS = 200;
@@ -1053,6 +1053,7 @@ export const HOSTED_RUNTIME_GROUP_SHARED_READ_UNAVAILABLE_REASON_MAX_CODE_POINTS
 
 export interface HostedRuntimeGroupChatParticipant {
   handle: string;
+  /** Durable activation proof, not current access or membership in this group. */
   hasOwnMurph: boolean;
 }
 
@@ -1122,8 +1123,15 @@ export type HostedRuntimeGroupToolRequest =
   | { action: "read_usage" }
   | ({
       action: "read_shared";
-      /** Current-turn Linq sender evidence injected by the hosted runtime. */
+      /**
+       * Current-turn sender evidence injected by the hosted runtime, kept in
+       * one field per channel because each provider's handles are matched
+       * against a different member identity index. A numeric Telegram user id
+       * normalizes into a valid phone lookup key, so it must never reach the
+       * Linq matcher. Exactly one field may be present.
+       */
       linqSenderHandles?: readonly string[];
+      telegramSenderHandles?: readonly string[];
     } & HostedRuntimeGroupSharedReadRequest)
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }

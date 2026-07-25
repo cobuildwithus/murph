@@ -30,8 +30,12 @@ import {
   publishBrowserVaultSessionInvalidation,
 } from "@/src/lib/browser-vault/session-invalidation";
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
-import { HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE } from "@/src/lib/hosted-privacy/account-data-shared";
+import {
+  HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE,
+  type HostedAccountExitReasonCode,
+} from "@/src/lib/hosted-privacy/account-data-shared";
 
+import { AccountExitReasonStep } from "./account-exit-reason-step";
 import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 
 interface HostedAccountVendorDeletionSummary {
@@ -80,6 +84,9 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogStep, setDialogStep] = useState<"reason" | "confirm">("reason");
+  const [exitReason, setExitReason] = useState<HostedAccountExitReasonCode | null>(null);
+  const [exitNote, setExitNote] = useState("");
   const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [dialogError, setDialogError] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
@@ -187,7 +194,11 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
           receivedReplacementHeaders = true;
           publishBrowserVaultSessionInvalidation();
         },
-        payload: { authorization, confirmationPhrase },
+        payload: {
+          authorization,
+          confirmationPhrase,
+          ...(exitReason ? { exitNote, exitReason } : {}),
+        },
         url: "/api/settings/privacy/delete",
       });
       setCleanupPending(hasIncompleteCleanup(response.result));
@@ -227,6 +238,9 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
   function openDialog() {
     setConfirmationPhrase("");
     setDialogError(null);
+    setDialogStep("reason");
+    setExitReason(null);
+    setExitNote("");
     setDialogOpen(true);
   }
 
@@ -238,6 +252,15 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
     setDialogOpen(false);
     setConfirmationPhrase("");
     setDialogError(null);
+    setDialogStep("reason");
+    setExitReason(null);
+    setExitNote("");
+  }
+
+  function skipExitReason() {
+    setExitReason(null);
+    setExitNote("");
+    setDialogStep("confirm");
   }
 
   if (!props.authenticated) {
@@ -345,10 +368,12 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
         >
           <DialogHeader className="pr-10">
             <DialogTitle className="font-serif text-2xl/7 font-semibold tracking-normal text-foreground">
-              Delete account
+              {dialogStep === "reason" ? "Before you go" : "Delete account"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
-              Permanently deletes your account and all your data, including your subscription and login. This cannot be undone.
+              {dialogStep === "reason"
+                ? "Could you let us know why you're leaving? This is optional and it won't hold up your deletion."
+                : "Permanently deletes your account and all your data, including your subscription and login. This cannot be undone."}
             </DialogDescription>
           </DialogHeader>
           {dialogError ? (
@@ -356,34 +381,47 @@ function HostedDataPrivacySettingsAuthorized(props: { authenticated: boolean }) 
               {dialogError}
             </p>
           ) : null}
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="hosted-account-delete-phrase">Type <span className="font-mono">{HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}</span> to confirm</Label>
-            <Input
-              autoComplete="off"
-              className="h-12 text-base"
-              disabled={deletePending}
-              id="hosted-account-delete-phrase"
-              inputMode="text"
-              value={confirmationPhrase}
-              onChange={(event) => setConfirmationPhrase(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void handleDeleteConfirmed();
-                }
-              }}
-              aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
-              placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
+          {dialogStep === "reason" ? (
+            <AccountExitReasonStep
+              note={exitNote}
+              reason={exitReason}
+              onContinue={() => setDialogStep("confirm")}
+              onNoteChange={setExitNote}
+              onReasonChange={setExitReason}
+              onSkip={skipExitReason}
             />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
-              {deletePending ? "Deleting..." : "Delete account"}
-            </Button>
-            <Button type="button" size="xl" variant="ghost" onClick={closeDialog} disabled={deletePending} className="w-full">
-              Cancel
-            </Button>
-          </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="hosted-account-delete-phrase">Type <span className="font-mono">{HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}</span> to confirm</Label>
+                <Input
+                  autoComplete="off"
+                  className="h-12 text-base"
+                  disabled={deletePending}
+                  id="hosted-account-delete-phrase"
+                  inputMode="text"
+                  value={confirmationPhrase}
+                  onChange={(event) => setConfirmationPhrase(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleDeleteConfirmed();
+                    }
+                  }}
+                  aria-invalid={confirmationPhrase.length > 0 && !phraseMatches}
+                  placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button type="button" size="xl" variant="destructive" onClick={() => void handleDeleteConfirmed()} disabled={!deleteReady} className="w-full">
+                  {deletePending ? "Deleting..." : "Delete account"}
+                </Button>
+                <Button type="button" size="xl" variant="ghost" onClick={closeDialog} disabled={deletePending} className="w-full">
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

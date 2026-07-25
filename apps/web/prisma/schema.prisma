@@ -510,6 +510,8 @@ model HostedMember {
   assistantPushCausalSeq         BigInt?                         @map("assistant_push_causal_seq")
   assistantDetail                Int?                            @map("assistant_detail")
   assistantDetailCausalSeq       BigInt?                         @map("assistant_detail_causal_seq")
+  assistantUnhinged              Int?                            @map("assistant_unhinged")
+  assistantUnhingedCausalSeq     BigInt?                         @map("assistant_unhinged_causal_seq")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
@@ -755,6 +757,7 @@ model HostedPhoneCall {
   id             String                @id
   memberId       String                @map("member_id")
   requestKey     String                @map("request_key")
+  originSessionId String?              @map("origin_session_id")
   provider       String                @default("retell")
   providerCallId String?               @unique @map("provider_call_id")
   status         HostedPhoneCallStatus @default(starting)
@@ -1247,6 +1250,33 @@ model HostedStripeEvent {
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
   @@index([claimExpiresAt])
   @@map("hosted_stripe_event")
+}
+
+/// Why a member said they were leaving, captured once on the delete dialog.
+/// Deliberately holds no member relation or member id: the row has to outlive
+/// the cascade that removes every member-keyed record, which is exactly the gap
+/// that made past churn unanswerable. Keeping it unjoinable is also why the
+/// retained context is coarse (plan state and whole days of tenure) rather than
+/// anything that could re-identify the person who left.
+model HostedAccountExitReason {
+  id            String                      @id
+  reason        HostedAccountExitReasonCode
+  note          String?
+  billingStatus HostedBillingStatus         @map("billing_status")
+  tenureDays    Int                         @map("tenure_days")
+  createdAt     DateTime                    @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("hosted_account_exit_reason")
+}
+
+enum HostedAccountExitReasonCode {
+  too_expensive
+  not_useful_enough
+  too_many_texts
+  privacy_concerns
+  setup_trouble
+  just_testing
 }
 
 model HostedUsageCreditPurchase {

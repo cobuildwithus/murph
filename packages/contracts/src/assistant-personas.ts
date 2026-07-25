@@ -63,7 +63,7 @@ export const assistantBasePersonaOptions = [
     description: "Balanced, warm, and adaptable.",
     id: "classic",
     label: "Classic",
-    personality: { humor: 3, push: 3, detail: 5 },
+    personality: { humor: 3, push: 3, detail: 5, unhinged: 0 },
     previewText:
       "You missed the workout you planned. Want to do a shorter version now, or figure out what keeps breaking the plan?",
     recommendedVoiceIds: ["upbeat", "warm", "deep-calm", "classic", "expressive"],
@@ -76,7 +76,7 @@ export const assistantBasePersonaOptions = [
     description: "Direct, disciplined, and accountable.",
     id: "navy-seal",
     label: "Navy SEAL",
-    personality: { humor: 1, push: 10, detail: 2 },
+    personality: { humor: 1, push: 10, detail: 2, unhinged: 0 },
     previewText:
       "You made the commitment. Stop negotiating with the part of you that wants comfort. Shoes on. Ten minutes. Move.",
     recommendedVoiceIds: [
@@ -95,7 +95,7 @@ export const assistantBasePersonaOptions = [
     description: "Calm, grounded, and focused.",
     id: "stoic-philosopher",
     label: "Stoic Philosopher",
-    personality: { humor: 1, push: 6, detail: 4 },
+    personality: { humor: 1, push: 6, detail: 4, unhinged: 0 },
     previewText:
       "The missed workout is already outside your control. The next choice is not. Do the smallest version that restores the habit.",
     recommendedVoiceIds: [
@@ -114,7 +114,7 @@ export const assistantBasePersonaOptions = [
     description: "Curious, rigorous, and evidence-led.",
     id: "scientist",
     label: "Scientist",
-    personality: { humor: 2, push: 4, detail: 9 },
+    personality: { humor: 2, push: 4, detail: 9, unhinged: 0 },
     previewText:
       "One miss is noise. Repeated misses are a pattern worth testing. What changed in timing, recovery, friction, or expectations?",
     recommendedVoiceIds: [
@@ -133,7 +133,7 @@ export const assistantBasePersonaOptions = [
     description: "Energetic, encouraging, and motivating.",
     id: "hype-coach",
     label: "Hype Coach",
-    personality: { humor: 7, push: 8, detail: 3 },
+    personality: { humor: 7, push: 8, detail: 3, unhinged: 0 },
     previewText:
       "there it is: the comeback moment. not tomorrow. ten minutes today. let’s go.",
     recommendedVoiceIds: [
@@ -152,7 +152,7 @@ export const assistantBasePersonaOptions = [
     description: "Honest, practical, and human.",
     id: "straight-talking-friend",
     label: "Straight-Talking Friend",
-    personality: { humor: 6, push: 7, detail: 3 },
+    personality: { humor: 6, push: 7, detail: 3, unhinged: 0 },
     previewText:
       "you do not need another motivational speech. your plan keeps losing to convenience. let’s make the default easier.",
     recommendedVoiceIds: ["classic", "easygoing", "husky", "warm", "country"],

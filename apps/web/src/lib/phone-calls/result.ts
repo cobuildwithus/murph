@@ -6,6 +6,7 @@ import {
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   hostedPhoneCallResultSchema,
+  type HostedExecutionAssistantNotificationRoute,
   type HostedPhoneCallBrief,
   type HostedPhoneCallResult,
 } from "@murphai/hosted-execution";
@@ -278,26 +279,13 @@ async function appendPhoneCallResultNotificationTx(input: {
     prisma: input.prisma,
   });
 
-  const instructions = buildPhoneCallResultNotificationInstructions({
-    brief,
-    result,
-  });
-  const notificationKey = `phone-call-result:${call.id}`;
   const appended = await appendHostedMailboxEnvelopeTx({
-    envelope: buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: `assistant.notification.requested:${notificationKey}`,
+    envelope: buildPhoneCallResultNotificationWake({
+      brief,
+      callId: call.id,
       memberId: call.memberId,
-      notification: {
-        deliveryDedupeToken: notificationKey,
-        deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: notificationKey,
-        instructions,
-        responsePolicy: {
-          kind: "require_send",
-        },
-        route,
-      },
-      occurredAt: new Date().toISOString(),
+      result,
+      route,
     }),
     tx: input.prisma,
   });
@@ -305,6 +293,34 @@ async function appendPhoneCallResultNotificationTx(input: {
     notificationMailboxItemId: appended.item.id,
     notificationUserId: appended.item.userId,
   };
+}
+
+export function buildPhoneCallResultNotificationWake(input: {
+  brief: HostedPhoneCallBrief;
+  callId: string;
+  memberId: string;
+  result: HostedPhoneCallResult;
+  route: HostedExecutionAssistantNotificationRoute;
+}) {
+  const notificationKey = `phone-call-result:${input.callId}`;
+  return buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: `assistant.notification.requested:${notificationKey}`,
+    memberId: input.memberId,
+    notification: {
+      deliveryDedupeToken: notificationKey,
+      deliveryDispatchMode: "queue-only",
+      deliveryIdempotencyKey: notificationKey,
+      instructions: buildPhoneCallResultNotificationInstructions({
+        brief: input.brief,
+        result: input.result,
+      }),
+      responsePolicy: {
+        kind: "allow_send_or_skip",
+      },
+      route: input.route,
+    },
+    occurredAt: new Date().toISOString(),
+  });
 }
 
 function hasStoredHostedPhoneCallResult(call: HostedPhoneCall): boolean {
@@ -416,7 +432,8 @@ export function buildPhoneCallResultNotificationInstructions(input: {
 }): string {
   const target = input.brief.to.label?.trim() || "the requested phone number";
   const lines = [
-    "Notify the user of the final result of the Murph phone call.",
+    "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
+    "If there is nothing meaningful to report, you may skip sending a message.",
     "Use normal Murph wording; do not send a hard-coded template.",
     "Do not claim a new call was made. This is the result of a call Murph already placed.",
     "Only notify the user about this completed call. Do not perform private reads, writes, tool calls, calendar updates, follow-up outreach, or unrelated actions in this notification turn.",
@@ -431,7 +448,7 @@ export function buildPhoneCallResultNotificationInstructions(input: {
     }),
   ];
   if (input.result.outcome === "completed" && !input.result.followUp) {
-    lines.push("Tell the user that no follow-up is needed.");
+    lines.push("If you do notify the user, tell them that no follow-up is needed.");
   }
 
   return lines.join("\n\n");

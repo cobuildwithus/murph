@@ -73,7 +73,8 @@ const LEGACY_HOSTED_ASSISTANT_PROVIDER_SECRET_NAMES = [
   "TOGETHER_API_KEY",
   "VENICE_API_KEY",
   "VLLM_API_KEY",
-  "XAI_API_KEY",
+  // XAI_API_KEY left this list when xAI became a real intercepted provider
+  // (x_search); it is now an optional worker secret.
 ] as const;
 
 const REMOVED_HOSTED_ASSISTANT_VAR_NAMES = [
@@ -781,6 +782,8 @@ describe("hosted deploy automation helpers", () => {
     for (const name of HOSTED_WORKER_OPTIONAL_VAR_NAMES) {
       expect(workflowEnvBindings.get(name)).toBe("vars");
     }
+    expect(workflowEnvBindings.get("XAI_API_BASE_URL")).toBeUndefined();
+    expect(workflow).not.toContain("XAI_API_BASE_URL:");
     expect(workflowEnvBindings.get("JUNCTION_TIMESERIES_RESOURCES")).toBeUndefined();
     expect(workflow).not.toContain("JUNCTION_TIMESERIES_RESOURCES:");
     for (const name of HOSTED_WORKER_OPTIONAL_SECRET_NAMES) {

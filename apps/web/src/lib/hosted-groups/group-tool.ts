@@ -27,6 +27,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -289,6 +290,7 @@ export async function handleHostedRuntimeGroupTool(input: {
         result: await readHostedGroupSharedDataByRuntimeMemberId({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),
       };
@@ -884,7 +886,7 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
       async (tx) => {
         return recordHostedGroupDisclosurePermissionTx({
           groupId: authority.groupId,
-          messageId: sent.messageId,
+          message: { channel: "linq", messageId: sent.messageId },
           originAssistantInputId: input.originAssistantInputId,
           permissionText,
           postedAt,
@@ -1032,7 +1034,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
-        messageId: sent.messageId,
+        message: { channel: "linq", messageId: sent.messageId },
         postedAt: now,
         projectionScopes,
         tx,
@@ -1346,20 +1348,18 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
           participantMemberId,
         });
       }
-      if (participants.length < HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX) {
-        participants.push({
-          handle: handle.handle,
-          hasOwnMurph: participantMemberId !== null
-            && await readActiveHostedMemberAccess({
-              memberId: participantMemberId,
-              prisma,
-            }),
-        });
-      }
+      participants.push({
+        handle: handle.handle,
+        hasOwnMurph: participantMemberId !== null
+          && await hasHostedMemberActivationProof({
+            memberId: participantMemberId,
+            prisma,
+          }),
+      });
     }
   } catch {
-    // A failed identity lookup must not degrade into a guessed hasOwnMurph
-    // value or an unstructured route error.
+    // A failed identity or activation lookup must not degrade into a guessed
+    // hasOwnMurph value or an unstructured route error.
     return unavailable("membership_lookup_unavailable");
   }
 

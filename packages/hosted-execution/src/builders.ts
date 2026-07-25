@@ -348,6 +348,13 @@ function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: 
   userId: string;
 }): void {
   if (input.telegramMessage.threadIsDirect !== false) {
+    // Direct threads have a single known sender, so group attribution fields
+    // carry no meaning and must never reach the runtime from a 1:1 route.
+    if (input.telegramMessage.from || input.telegramMessage.senderUsername) {
+      throw new TypeError(
+        "Hosted direct Telegram conversation wake must not carry group sender identity.",
+      );
+    }
     return;
   }
   if (!input.routeAuthority) {

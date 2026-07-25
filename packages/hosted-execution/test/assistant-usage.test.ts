@@ -11,6 +11,7 @@ import {
   buildAssistantMaintenanceUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedTranscriptionUsageRecord,
+  buildHostedXaiSearchUsageRecord,
   classifyAssistantOpenAiImageUsageBasis,
   createAssistantUsageId,
   createAssistantUsageReportingUserId,
@@ -374,6 +375,100 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
       characterCount: 27,
       memberId: "member_123",
       model: "eleven_multilingual_v2",
+    }).turnId,
+    record.turnId,
+  );
+});
+
+test("hosted xAI search usage records carry the provider-reported cost basis and dedupe like turn usage", () => {
+  const record = buildHostedXaiSearchUsageRecord({
+    memberId: "member_123",
+    model: "grok-4.5",
+    providerRequestId: "resp_abc123",
+    usage: {
+      cost_in_usd_ticks: 123_456_789,
+      input_tokens: 1_024,
+      input_tokens_details: { cached_tokens: 256 },
+      num_sources_used: 4,
+      output_tokens: 128,
+      output_tokens_details: { reasoning_tokens: 64 },
+      total_tokens: 1_152,
+    },
+  });
+
+  // Round-trips through the canonical parser (build already parses; prove a
+  // re-parse is stable, mirroring what the web record route will do).
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_xai_search_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.sessionId, record.turnId);
+  assert.equal(record.apiKeyEnv, "XAI_API_KEY");
+  assert.equal(record.baseUrl, "https://api.x.ai");
+  assert.equal(record.credentialSource, "platform");
+  assert.equal(record.featureKey, "x-search");
+  assert.equal(record.provider, "xai");
+  assert.equal(record.providerName, "xAI");
+  assert.equal(record.providerRequestId, "resp_abc123");
+  assert.equal(record.requestedModel, "grok-4.5");
+  assert.equal(record.surface, "hosted-runner");
+  assert.equal(record.triggerKind, "x-search");
+  assert.equal(record.usageExtractionSourcePath, "xai.responses");
+  assert.equal(record.usageExtractionVersion, "xai-x-search-v1");
+  // The exact billed cost passes through untouched; unknown provider keys
+  // (num_sources_used, total_tokens outside the copied set) are dropped.
+  assert.deepEqual(record.rawUsageJson, {
+    cost_in_usd_ticks: 123_456_789,
+    input_tokens: 1_024,
+    input_tokens_details: { cached_tokens: 256 },
+    output_tokens: 128,
+    output_tokens_details: { reasoning_tokens: 64 },
+  });
+  // Token columns stay null: pricing reads cost_in_usd_ticks, never tokens.
+  assert.equal(record.inputTokens, null);
+  assert.equal(record.outputTokens, null);
+  assert.equal(record.totalTokens, null);
+
+  // Missing or malformed usage still records the call with whatever is
+  // present; the pricing side treats a missing tick count as uncounted.
+  assert.equal(
+    buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      providerRequestId: null,
+      usage: null,
+    }).rawUsageJson,
+    null,
+  );
+  assert.deepEqual(
+    buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      usage: {
+        cost_in_usd_ticks: 12.5,
+        input_tokens: 10,
+        output_tokens: -1,
+      },
+    }).rawUsageJson,
+    { input_tokens: 10 },
+  );
+
+  // The cost key stays under the strict non-negative-integer parse rule.
+  assert.throws(
+    () =>
+      parseAssistantUsageRecord({
+        ...record,
+        rawUsageJson: { cost_in_usd_ticks: -1 },
+      }),
+    /rawUsageJson\.cost_in_usd_ticks must be a non-negative integer/u,
+  );
+
+  // Distinct calls never collide on the turn-keyed unique constraint.
+  assert.notEqual(
+    buildHostedXaiSearchUsageRecord({
+      memberId: "member_123",
+      model: "grok-4.5",
+      providerRequestId: "resp_abc123",
+      usage: { cost_in_usd_ticks: 1 },
     }).turnId,
     record.turnId,
   );

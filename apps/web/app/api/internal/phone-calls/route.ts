@@ -23,6 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
   const response = await createHostedPhoneCall({
     brief: payload.brief,
     memberId,
+    originSessionId: payload.originSessionId,
     requestKey: payload.requestKey,
     signal: request.signal,
   });

@@ -30,11 +30,17 @@ import {
 import {
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
+  listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   readAssistantContextSnapshotState,
   recordHostedMailboxAssistantInputItem,
+  resolveAssistantSession,
+  saveAssistantSession,
   type RunAssistantAutomationPassInput,
 } from "@murphai/assistant-engine";
+import {
+  parseAssistantSessionRecord,
+} from "@murphai/operator-config/assistant-cli-contracts";
 import type {
   AssistantProviderUsageDraft,
 } from "@murphai/assistant-engine/assistant-ask";
@@ -53,6 +59,7 @@ import {
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
+  restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
   snapshotHostedBundleRoots,
@@ -87,6 +94,7 @@ import type {
   HostedExecutionBundleRef,
 } from "@murphai/hosted-execution/contracts";
 import {
+  buildHostedWorkspaceSnapshotV2Aad,
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
@@ -223,6 +231,10 @@ import {
   type HostedWorkspaceRuntimeJobOptions,
   type HostedWorkspaceSnapshotCheckpointRequestBuilderInput,
 } from "../src/hosted-runtime.ts";
+import {
+  createHostedWorkspaceRuntimeBridgeJobOptions,
+  type HostedWorkspaceSnapshotArchiveBuilder,
+} from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
   HostedRuntimeBridgeCheckpointLeaseError,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -12087,12 +12099,7 @@ describe("hosted workspace runtime entrypoint", () => {
         {
           async createCheckpointSnapshot(snapshotInput) {
             events.push(`snapshot:${snapshotInput.reason}`);
-            const hashPrefix =
-              snapshotInput.reason === "assistant_runtime_commit"
-                ? "a"
-                : snapshotInput.reason === "outbox_receipt"
-                  ? "b"
-                  : "c";
+            const hashPrefix = snapshotInput.reason === "outbox_receipt" ? "b" : "c";
             return {
               snapshotRef: createBundleRef({
                 hash: hashPrefix.repeat(64),
@@ -25854,6 +25861,7 @@ function createPlatform(input: {
   logRequests?: HostedRuntimeLogRequest[];
   issueExportPort?: HostedRuntimePlatform["issueExportPort"] | null;
   mailboxPort: HostedRuntimeMailboxPort | null;
+  phoneCalls?: HostedRuntimePlatform["phoneCalls"] | null;
   runtimeLivenessIntervalMs?: number | null;
   runtimeLivenessPort?: RuntimeLivenessPort | null;
   runtimeLivenessRequired?: boolean | null;
@@ -25938,6 +25946,7 @@ function createPlatform(input: {
       : {}),
     ...(input.issueExportPort ? { issueExportPort: input.issueExportPort } : {}),
     ...(input.mailboxPort ? { mailboxPort: input.mailboxPort } : {}),
+    ...(input.phoneCalls ? { phoneCalls: input.phoneCalls } : {}),
     ...(input.runtimeLivenessIntervalMs
       ? { runtimeLivenessIntervalMs: input.runtimeLivenessIntervalMs }
       : {}),

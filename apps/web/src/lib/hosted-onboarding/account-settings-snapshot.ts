@@ -1,9 +1,10 @@
 import "server-only";
 
-import type {
-  AssistantPersonalitySettingId,
-  AssistantTonePreference,
-  AssistantVoiceOptionId,
+import {
+  assistantWebPersonalitySettingIds,
+  type AssistantWebPersonalitySettingId,
+  type AssistantTonePreference,
+  type AssistantVoiceOptionId,
 } from "@murphai/contracts";
 import type { HostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -34,7 +35,7 @@ export interface HostedAccountSettingsSnapshot {
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
-    personality: Record<AssistantPersonalitySettingId, number | null>;
+    personality: Record<AssistantWebPersonalitySettingId, number | null>;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
     voice: AssistantVoiceOptionId | null;
@@ -90,6 +91,7 @@ const hostedAccountSettingsMemberSelect =
     assistantDetail: true,
     assistantHumor: true,
     assistantPush: true,
+    assistantUnhinged: true,
     assistantTone: true,
     assistantVoice: true,
     billingRef: {
@@ -150,8 +152,14 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
     },
   });
   const projectedAssistantPreferences = projectHostedMemberAssistantPreferences(member);
+  // Only the web-visible dials reach the browser Settings payload. `unhinged`
+  // is conversational-only and must never be projected into client state.
+  const webPersonality = {} as Record<AssistantWebPersonalitySettingId, number | null>;
+  for (const id of assistantWebPersonalitySettingIds) {
+    webPersonality[id] = projectedAssistantPreferences.personality[id];
+  }
   const assistantPreferences = {
-    personality: projectedAssistantPreferences.personality,
+    personality: webPersonality,
     tone: projectedAssistantPreferences.tone,
     voice: projectedAssistantPreferences.voice,
   };
