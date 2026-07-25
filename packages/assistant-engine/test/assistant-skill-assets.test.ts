@@ -949,7 +949,7 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/by exact\s+`participantId`, never by display name/u)
     expect(raw).toMatch(/Duplicate or changed names do not\s+change that join\./u)
     expect(raw).toMatch(
-      /When the hosted group exists, after the model turn has begun and before\s+writing the challenge roster, call\s+`murph\.group action="read_shared"` exactly once/u,
+      /When the hosted group exists, after the model turn has begun and before\s+writing the challenge roster, call\s+`murph\.group action="read_shared"` with the exact scoring scope alone/u,
     )
     expect(raw).toMatch(
       /exact current prompt `Sender:` handle appears\s+in that row's `currentTurnHandles`/u,

@@ -32,8 +32,17 @@ Choose the narrowest Vault Share projection scope that matches the agreed
 score. Use fixed day-keyed projection records only; never ask for routes,
 provider traces, or private 1:1 data for a group challenge.
 
-At kickoff, identify the exact scoring scope and include it with
-`device-sync-status.v0` in the shared read. Do not create a hosted group or post
+Read the scoring scope on its own first. One `read_shared` returns every member
+crossed with every requested scope, and the whole result is refused when it is
+too large, so pulling diagnostics for members who already have data can cost the
+group its entire standings. Only when that first result shows granted scoring
+data actually missing for someone, request `device-sync-status.v0` in a second,
+device-only read for diagnosis. If that diagnostic read is unavailable or too
+large, still publish the standings the first read proved and say only that the
+cause of the missing data is unverified. Never discard verified scoring data
+because diagnostics failed.
+
+Do not create a hosted group or post
 a permission offer as a side effect of challenge kickoff. During later
 standings, Murph may proactively open the existing server-authored permission
 offer only after `read_shared` proves an exact required scope is `not_granted`
@@ -120,16 +129,23 @@ score it as qualifying only when
 this comparison is deliberately strict, so a workout starting exactly at the
 threshold does not count as after it.
 
-`workouts.v0` reads as `days`, an object keyed by ISO date whose value is that
-day's list of workouts. Each element discloses only `startLocalMs`, `minutes`,
-and `kind`. The projection states `timeSemantics` once, and its required value
-is `canonical-event-zone-or-vault-zone.v0`: the local clock uses the canonical
-event timezone when available and otherwise the member vault timezone; it does
-not prove physical workout location. A settled date present with an empty list
-is a real observed zero and is scoreable as no qualifying workout. A date
-absent from `days` is unobserved: it is not `false`, zero, or evidence that no
-workout happened, so leave the participant unscored and report missing data.
-That same undisclosed zone dates the day and determines provisional state.
+`workouts.v0` reads as `days`, an object keyed by ISO date whose value is
+always that day's list of workouts. Each element discloses only
+`startLocalMs`, `minutes`, and `kind`. The projection states `timeSemantics`
+once, and its required value is `canonical-event-zone-or-vault-zone.v0`: the
+local clock uses the canonical event timezone when available and otherwise the
+member vault timezone; it does not prove physical workout location. A settled
+date present with an empty list is a real observed zero and is scoreable as no
+qualifying workout. A date absent from `days` is unobserved: it is not
+`false`, zero, or evidence that no workout happened, so leave the participant
+unscored and report missing data. That same undisclosed zone dates the day.
+
+The projection may also carry `provisional`, a list of dates whose
+member-local day has not closed yet. Check `provisional.includes(date)` before
+scoring: a provisional date is pending, not missing and not zero, because a
+later workout can still change it. Report it as settling once that member's own
+local day closes, and never send a pending date into missing-data diagnostics
+or a permission offer.
 
 Running zone-specific challenges are not selector-scoped yet. If the group
 explicitly wants zone minutes for all workouts, use `heart-rate-zones-days.v0`;
@@ -277,10 +293,10 @@ Detail is 10/10 or a member explicitly asks this turn for the full rules.
 
    When the hosted group exists, after the model turn has begun and before
    writing the challenge roster, call
-   `murph.group action="read_shared"` exactly once with the exact scoring scope
-   and `device-sync-status.v0`. This is the only kickoff attribution, scoring,
-   and diagnostic read; it must never become prompt preload or other pre-model
-   work. On an interactive Linq turn, record a returned row's group-scoped
+   `murph.group action="read_shared"` with the exact scoring scope alone. That
+   is the kickoff attribution and scoring read; it must never become prompt
+   preload or other pre-model work. Add the second device-only read described
+   above only when it shows granted scoring data missing for someone. On an interactive Linq turn, record a returned row's group-scoped
    `participantId` only when an exact current prompt `Sender:` handle appears
    in that row's `currentTurnHandles`. Do not persist or render a handle. Do not
    attach an id from a matching display name, array position, projection

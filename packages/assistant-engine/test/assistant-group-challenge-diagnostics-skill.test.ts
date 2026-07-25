@@ -185,7 +185,7 @@ describe('assistant group challenge diagnostics guidance', () => {
       'When the hosted group exists, after the model turn has begun and before writing the challenge roster',
     )
     expect(challenge).toContain(
-      'This is the only kickoff attribution, scoring, and diagnostic read',
+      'That is the kickoff attribution and scoring read',
     )
     expect(challenge).toContain(
       'an exact current prompt `Sender:` handle appears in that row\'s `currentTurnHandles`',
@@ -289,7 +289,7 @@ describe('assistant group challenge diagnostics guidance', () => {
     const groupChat = (await readSkill('group-chat')).replace(/\s+/gu, ' ')
 
     expect(challenge).toContain(
-      'At kickoff, identify the exact scoring scope and include it with `device-sync-status.v0` in the shared read.',
+      'Read the scoring scope on its own first.',
     )
     expect(challenge).toContain(
       'Do not create a hosted group or post a permission offer as a side effect of challenge kickoff.',

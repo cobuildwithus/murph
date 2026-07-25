@@ -3316,13 +3316,19 @@ function groupSharedWorkoutsModelProjection(
   if (projection.projectionScope.projectionKind !== 'workouts.v0') {
     return null
   }
+  // The hosted parser allows exactly date, provisional, timeSemantics and
+  // workouts, so every field is handled explicitly here. Each `days` value is
+  // always the day's workout array: a value that is sometimes an array and
+  // sometimes a wrapper object would break the `days[date].some(...)` the
+  // referee is instructed to run on an open local date.
   const days: Record<string, unknown> = {}
+  const provisional: string[] = []
   let timeSemantics: string | undefined
   for (const record of projection.records) {
     const entries = Object.entries(record.data)
     const date = entries.find(([key]) => key === 'date')?.[1]
     const workouts = entries.find(([key]) => key === 'workouts')?.[1]
-    if (typeof date !== 'string' || workouts === undefined) {
+    if (typeof date !== 'string' || !Array.isArray(workouts)) {
       // An unexpected record shape must not be silently dropped from standings.
       return null
     }
@@ -3330,12 +3336,10 @@ function groupSharedWorkoutsModelProjection(
     if (typeof marker === 'string') {
       timeSemantics = marker
     }
-    const rest = entries.filter(([key]) =>
-      key !== 'date' && key !== 'workouts' && key !== 'timeSemantics'
-    )
-    days[date] = rest.length === 0
-      ? workouts
-      : { workouts, ...Object.fromEntries(rest) }
+    if (entries.find(([key]) => key === 'provisional')?.[1] === true) {
+      provisional.push(date)
+    }
+    days[date] = workouts
   }
   return {
     dataStatus: projection.dataStatus,
@@ -3343,6 +3347,9 @@ function groupSharedWorkoutsModelProjection(
     grantStatus: projection.grantStatus,
     projectionScope: projection.projectionScope,
     projectionScopeKey: projection.projectionScopeKey,
+    // Dates whose member-local day is still open, so scoring them would settle
+    // a result that a later workout can still change.
+    ...(provisional.length === 0 ? {} : { provisional }),
     ...(timeSemantics === undefined ? {} : { timeSemantics }),
   }
 }

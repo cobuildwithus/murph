@@ -799,6 +799,78 @@ describe("murph.group dynamic tool", () => {
       .toHaveLength(1);
   });
 
+  it("keeps every workouts day value an array and lists provisional dates", async () => {
+    const groupSharedReadRequest = vi.fn(async () => ({
+      members: [{
+        currentTurnHandles: [],
+        displayName: null,
+        memberId: "member_internal_provisional",
+        participantId: "participant_provisional",
+        projections: [{
+          dataStatus: "available" as const,
+          grantStatus: "granted" as const,
+          projectionScope: { projectionKind: "workouts.v0" as const },
+          projectionScopeKey: "workouts.v0",
+          records: [
+            {
+              data: {
+                date: "2026-07-24",
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                workouts: [],
+              },
+              occurredAt: "2026-07-24T00:00:00.000Z",
+              recordKey: "2026-07-24",
+            },
+            {
+              data: {
+                date: "2026-07-25",
+                provisional: true as const,
+                timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+                workouts: [{ kind: "running", minutes: 30, startLocalMs: 68_400_000 }],
+              },
+              occurredAt: "2026-07-25T00:00:00.000Z",
+              recordKey: "2026-07-25",
+            },
+          ],
+        }],
+      }],
+      requestedProjectionScopeKeys: ["workouts.v0"],
+      status: "ok" as const,
+    }));
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "read_shared",
+      projectionScopes: [{ projectionKind: "workouts.v0" }],
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        groupSharedReadRequest,
+        groupToolAvailable: false,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    const projection = readFirstProjection(readGroupToolPayload(result));
+    // A settled empty day and an open day must have the SAME value shape, or the
+    // referee's days[date].some(...) breaks on exactly the pending case.
+    const days = projection.days;
+    expect(Object.values(days ?? {}).every(Array.isArray)).toBe(true);
+    expect(days).toEqual({
+      "2026-07-24": [],
+      "2026-07-25": [{ kind: "running", minutes: 30, startLocalMs: 68_400_000 }],
+    });
+    // Pending dates are named once at the projection, not folded into the value.
+    expect(projection.provisional).toEqual(["2026-07-25"]);
+  });
+
   it("leaves an existing daily scope's model shape unchanged", async () => {
     const groupSharedReadRequest = vi.fn(async () => ({
       members: [{
@@ -3441,14 +3513,16 @@ function readGroupToolPayload(
 }
 
 interface ReadSharedProjectionShape {
-  records: { data: Record<string, unknown> }[];
+  days?: Record<string, unknown>;
+  provisional?: string[];
+  records?: { data: Record<string, unknown> }[];
   timeSemantics?: string;
 }
 
 function readFirstProjection(payload: unknown): ReadSharedProjectionShape {
   const projection = JSON.parse(JSON.stringify(payload))
     ?.result?.members?.[0]?.projections?.[0];
-  if (!projection || !Array.isArray(projection.records)) {
+  if (!projection) {
     throw new Error("Expected a read_shared payload with one projection.");
   }
   return projection;
