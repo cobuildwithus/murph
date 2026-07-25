@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { HOSTED_LOCAL_MINIO_MIRROR_IMAGE } from "../../src/dev-hosted-local/minio-image-contract.ts";
+
 const runtimeMocks = vi.hoisted(() => ({
   spawnChildProcess: vi.fn(),
   terminateChildProcessAndWait: vi.fn(async () => {}),
@@ -162,6 +164,7 @@ describe("hosted-local MinIO sidecar", () => {
       env: {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
+      pullImage: async () => true,
       tempDir: ".tmp/hosted-local-minio-test",
     });
 
@@ -214,7 +217,8 @@ describe("hosted-local MinIO sidecar", () => {
     expect(dockerArgs).toContain("murph.hosted-local.build-id=build-test");
     expect(dockerArgs).toContain("murph.hosted-local.e2e=1");
     expect(dockerArgs).toContain("MINIO_REGION_NAME");
-    expect(dockerArgs).toContain("minio/minio:RELEASE.2025-09-07T16-13-09Z");
+    // GHCR first; the upstream ref is only the fallback when that is unreachable.
+    expect(dockerArgs).toContain(HOSTED_LOCAL_MINIO_MIRROR_IMAGE);
     if (typeof process.getuid === "function" && typeof process.getgid === "function") {
       expect(dockerArgs).toEqual(expect.arrayContaining([
         "--user",
@@ -451,6 +455,7 @@ describe("hosted-local MinIO sidecar", () => {
       env: {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
+      pullImage: async () => true,
       tempDir: ".tmp/hosted-local-minio-test",
     });
 
@@ -657,6 +662,7 @@ describe("hosted-local MinIO sidecar", () => {
       env: {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
+      pullImage: async () => true,
       tempDir: ".tmp/hosted-local-minio-test",
     });
     if (!server) {
@@ -694,6 +700,7 @@ describe("hosted-local MinIO sidecar", () => {
       env: {
         MURPH_HOSTED_LOCAL_E2E_ISOLATION_REQUIRED: "1",
       },
+      pullImage: async () => true,
       tempDir: ".tmp/hosted-local-minio-test",
     });
     if (!server) {
