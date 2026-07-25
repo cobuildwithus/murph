@@ -1327,12 +1327,13 @@ describe("device sync companion routes", () => {
       }]);
       mocks.listConnectionSources.mockResolvedValue([
         {
+          lastSeenAt: "2026-07-25T17:00:00.000Z",
           resourceAvailabilitySummary: { sleep: true },
           sourceProviderSlug: "apple_health_kit",
           status: "connected",
-          updatedAt: "2026-07-25T17:00:00.000Z",
         },
         {
+          lastSeenAt: "2026-07-25T19:00:00.000Z",
           resourceAvailabilitySummary: { workouts: true },
           sourceProviderSlug: "health_connect",
           status: "disconnected",
@@ -1366,10 +1367,13 @@ describe("device sync companion routes", () => {
         status: "active",
       }]);
       mocks.listConnectionSources.mockResolvedValue([{
+        lastSeenAt: "2026-07-25T18:00:00.000Z",
         resourceAvailabilitySummary: { workouts: true },
         sourceProviderSlug: "health_connect",
         status: "disconnected",
-        updatedAt: "2026-07-25T18:00:00.000Z",
+        // The ordinary accepted-webhook stamp advances generic updatedAt to
+        // the same instant as the durable receipt without moving lastSeenAt.
+        updatedAt: "2026-07-25T19:00:00.000Z",
       }]);
       mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
         connectionId: "dsc_1",
@@ -1400,10 +1404,10 @@ describe("device sync companion routes", () => {
         status: "active",
       }]);
       mocks.listConnectionSources.mockResolvedValue([{
+        lastSeenAt: "2026-07-25T17:00:00.000Z",
         resourceAvailabilitySummary: { sleep: true },
         sourceProviderSlug: "apple_health_kit",
         status: "connected",
-        updatedAt: "2026-07-25T17:00:00.000Z",
       }]);
       mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
         connectionId: "dsc_1",

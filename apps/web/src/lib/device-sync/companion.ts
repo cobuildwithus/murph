@@ -520,14 +520,15 @@ export async function readCompanionDeviceSyncStatus(input: {
       const negativeStateCutoff = hasConnectedSource
         ? null
         : matchingSources.reduce<string | null>(
-            (latest, source) => maxIsoTimestamp(latest, source.updatedAt),
+            (latest, source) => maxIsoTimestamp(latest, source.lastSeenAt),
             null,
           );
 
-      // A source transition is negative authority over older receipts, while
-      // still allowing a newly accepted webhook to lead a lagging source
-      // projection. No matching row is also valid during the first-webhook
-      // path, before Junction's source projection has arrived.
+      // lastSeenAt belongs to source projection/lifecycle observation, unlike
+      // generic updatedAt, which receipt bookkeeping also advances. A negative
+      // projection therefore invalidates older receipts without letting a
+      // newly accepted webhook invalidate itself while projection lags. No
+      // matching row is valid during the first-webhook path.
       sourceReceiptCutoffs.set(connection.id, negativeStateCutoff);
     }
 
