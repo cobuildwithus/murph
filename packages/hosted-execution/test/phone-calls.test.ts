@@ -5,7 +5,6 @@ import {
   hostedPhoneCallBriefSchema,
   hostedPhoneCallStartRequestSchema,
   hostedPhoneCallStartResponseSchema,
-  isHostedPhoneCallEmergencyNumber,
 } from "../src/phone-calls.js";
 
 const VALID_BRIEF = {
@@ -84,20 +83,48 @@ describe("hosted phone call contracts", () => {
   });
 });
 
-describe("hosted phone call emergency dialing block", () => {
-  it("blocks bare emergency and crisis short codes", () => {
-    for (const number of ["911", "112", "999", "000", "988", "110", "119"]) {
-      expect(isHostedPhoneCallEmergencyNumber(number)).toBe(true);
+// Murph must never dial emergency or crisis dispatch. There is no dedicated
+// emergency policy owner in production: the E.164 shape already makes every
+// two- and three-digit code unrepresentable. These tests are the guarantee.
+// If the accepted phone-number format is ever widened, they fail here rather
+// than letting an automated emergency dial through.
+describe("hosted phone call emergency dialing", () => {
+  const EMERGENCY_AND_CRISIS_CODES = [
+    // Universal / GSM
+    "08", "000", "112", "911", "999",
+    // Europe
+    "15", "17", "18", "113", "115", "117", "118", "144", "155",
+    // Americas, including the US/Canada suicide-and-crisis line
+    "988", "190", "191", "192", "193",
+    // Asia-Pacific
+    "100", "101", "102", "103", "104", "106", "108", "110", "119", "120",
+    "111", "122", "123", "125", "133", "995", "996", "997", "998",
+    // Africa / Middle East
+    "114", "116", "121", "124", "127", "199",
+  ];
+
+  it("cannot represent any emergency or crisis short code", () => {
+    for (const number of EMERGENCY_AND_CRISIS_CODES) {
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(false);
     }
   });
 
-  it("blocks emergency codes written with separators", () => {
-    for (const number of ["9-1-1", "(911)", "9 1 1"]) {
-      expect(isHostedPhoneCallEmergencyNumber(number)).toBe(true);
+  it("cannot represent a country-code-prefixed emergency code", () => {
+    for (const number of ["+1911", "+44999", "+61000", "+1988", "+49112"]) {
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(false);
     }
   });
 
-  it("leaves ordinary subscriber numbers dialable", () => {
+  // The rejection must come from length, not from anything that could be
+  // confused with a subscriber number. These stay dialable, including the
+  // India mobile whose country code begins with an emergency code's digits.
+  it("still accepts ordinary subscriber numbers", () => {
     for (const number of [
       "+12125550123",
       "+15550000001",
@@ -106,38 +133,13 @@ describe("hosted phone call emergency dialing block", () => {
       "+19115550123",
       "+8613800138000",
     ]) {
-      expect(isHostedPhoneCallEmergencyNumber(number)).toBe(false);
+      expect(hostedPhoneCallBriefSchema.safeParse({
+        ...VALID_BRIEF,
+        to: { phoneNumber: number },
+      }).success).toBe(true);
     }
   });
 
-  // The E.164 shape would reject "911" on length alone. What this proves is
-  // that the refusal is *named*: the caller learns it asked for emergency
-  // dispatch rather than that it mistyped a phone number.
-  it("refuses an emergency short code with the emergency reason, not a format error", () => {
-    const parsed = hostedPhoneCallBriefSchema.safeParse({
-      ...VALID_BRIEF,
-      to: { phoneNumber: "911" },
-    });
-    expect(parsed.success).toBe(false);
-    expect(JSON.stringify(parsed.error?.issues)).toContain(
-      "Murph cannot call emergency or crisis numbers.",
-    );
-  });
-
-  it("still rejects a malformed non-emergency number as a format error", () => {
-    const parsed = hostedPhoneCallBriefSchema.safeParse({
-      ...VALID_BRIEF,
-      to: { phoneNumber: "212-555-0123" },
-    });
-    expect(parsed.success).toBe(false);
-    expect(JSON.stringify(parsed.error?.issues)).not.toContain(
-      "Murph cannot call emergency or crisis numbers.",
-    );
-  });
-
-  // The emergency rule is layered after the E.164 regex specifically so the
-  // generated tool schema still carries `pattern`. A refinement alone would
-  // silently strip it and leave the model without the format hint.
   it("keeps the model-facing tool schema pattern for the dialed number", () => {
     const serialized = JSON.stringify(
       z.toJSONSchema(hostedPhoneCallBriefSchema, { io: "input" }),

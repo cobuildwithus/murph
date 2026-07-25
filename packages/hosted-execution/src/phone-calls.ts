@@ -8,56 +8,19 @@ export const HOSTED_PHONE_CALL_START_SERVICE_TIMEOUT_MS = 40_000;
 export const HOSTED_PHONE_CALL_START_TRANSPORT_TIMEOUT_MS = 45_000;
 export const HOSTED_PHONE_CALL_INBOUND_MAILBOX_ITEM_IDS_MAX = 32;
 
-// Murph must never dial emergency or crisis dispatch. This is a hard product
-// safety rule, not a heuristic: Murph is an unattended caller that cannot hold
-// a line, give a location, or stay reachable, so an automated emergency call
-// consumes a dispatcher and can displace a real one. The list is intentionally
-// hardcoded rather than configured so no runtime state can unblock it.
+// Murph must never dial emergency or crisis dispatch: it is an unattended
+// caller that cannot hold a line, give a location, or stay reachable, so an
+// automated emergency call consumes a dispatcher and can displace a real one.
 //
-// Entries are national emergency short codes, not E.164 numbers: the universal
-// GSM codes (112/911/999/000/08), the major national police, fire, ambulance,
-// and gas-leak codes, and the US/Canada 988 suicide-and-crisis line. Dialing a
-// crisis line on someone's behalf is never the right automated action either.
-export const HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS: ReadonlySet<string> =
-  new Set([
-    // Universal / GSM
-    "08", "000", "112", "911", "999",
-    // Europe
-    "15", "17", "18", "113", "115", "117", "118", "144", "155",
-    // Americas
-    "988", "190", "191", "192", "193",
-    // Asia-Pacific
-    "100", "101", "102", "103", "104", "106", "108", "110", "119", "120",
-    "111", "122", "123", "125", "133", "995", "996", "997", "998", "999",
-    // Africa / Middle East
-    "114", "116", "121", "124", "127", "191", "193", "199",
-  ]);
-
-export const HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE =
-  "Murph cannot call emergency or crisis numbers.";
-
-// Accepts any model-supplied dial string, including pre-E.164 forms, because
-// the whole point is to name the refusal. The E.164 shape below already rejects
-// every one of these by length, so this check exists to change the *reason*: a
-// model that emits "911" is told it asked for emergency dispatch, not that it
-// mistyped a format. That distinction is what lets Murph respond usefully.
-export function isHostedPhoneCallEmergencyNumber(value: string): boolean {
-  const digits = value.replace(/\D/gu, "");
-  return digits.length > 0
-    && HOSTED_PHONE_CALL_BLOCKED_EMERGENCY_NUMBERS.has(digits);
-}
-
-// The emergency check runs first and aborts, so an emergency short code fails
-// with the named reason instead of a generic format error. The regex still runs
-// for every other value, so `z.toJSONSchema` continues to emit `pattern` for
-// the model-facing tool schema.
+// This constraint needs no dedicated policy owner. Every emergency and crisis
+// short code worldwide is two or three digits, and the E.164 shape below
+// requires eight to fifteen, so no such code can reach call admission or the
+// provider. The guarantee is pinned by explicit regression tests over this
+// schema rather than by production machinery, so widening the format in future
+// fails those tests instead of silently permitting an emergency dial.
 const hostedPhoneCallE164PhoneNumberSchema = z
   .string()
   .trim()
-  .refine(
-    (value) => !isHostedPhoneCallEmergencyNumber(value),
-    { abort: true, error: HOSTED_PHONE_CALL_EMERGENCY_NUMBER_BLOCKED_MESSAGE },
-  )
   .regex(/^\+[1-9]\d{7,14}$/u);
 
 const hostedPhoneCallBriefFactKeySchema = z
