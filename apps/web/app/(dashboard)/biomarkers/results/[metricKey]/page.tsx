@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import {
   resolveHealthCommonsBiomarkerEntityKey,
 } from "@murphai/health-commons/biomarker-entity-mappings";
+import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
 import { resolveLabResultMetricDefinition } from "@murphai/health-metrics";
 
 import {
@@ -44,6 +45,7 @@ export default async function LabBiomarkerResultPage({
           />
         </Suspense>
       }
+      fallbackRanges={context.fallbackRanges}
       metricKey={metricKey}
       summary={context.summary}
       uploadLabsAction={
@@ -57,6 +59,7 @@ export default async function LabBiomarkerResultPage({
 
 export function resolveLabBiomarkerContext(metricKey: string): {
   displayName: string;
+  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
   summary: string | null;
 } {
   const normalizedMetricKey = metricKey.trim().toLowerCase();
@@ -78,6 +81,7 @@ export function resolveLabBiomarkerContext(metricKey: string): {
       ?? entry?.shortName
       ?? entry?.title
       ?? normalizedMetricKey.replaceAll("-", " "),
+    fallbackRanges: entry?.fallbackRanges ?? [],
     summary: entry?.summary ?? null,
   };
 }

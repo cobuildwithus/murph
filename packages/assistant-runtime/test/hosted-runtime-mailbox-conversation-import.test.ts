@@ -35,6 +35,7 @@ import {
   updateAssistantInputProjection,
 } from "@murphai/assistant-engine";
 import {
+  reconcileManagedAssistantAutoReplyChannelsLocal,
   readAssistantAutomationState,
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
@@ -54,7 +55,9 @@ import {
   createHostedAssistantInputSource,
 } from "../src/hosted-runtime/turn-input.ts";
 import {
+  compactHostedPendingAssistantInputIds,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantInputStatePath,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
   HostedRawEmailMessageMissingError,
@@ -394,6 +397,9 @@ describe("hosted mailbox conversation import adapter", () => {
         order.push("projection-prepared");
       },
       item,
+      onConversationActivityObserved() {
+        order.push("activity-callback");
+      },
       onConversationInputStaged() {
         order.push("staged-callback");
       },
@@ -404,7 +410,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
     try {
       await notificationObserved.promise;
-      assert.deepEqual(order, ["staged-callback", "notify"]);
+      assert.deepEqual(order, ["activity-callback", "staged-callback", "notify"]);
 
       projectionRelease.resolve(undefined);
       const outcome = await importPromise;
@@ -415,6 +421,7 @@ describe("hosted mailbox conversation import adapter", () => {
       const listed = await listAssistantInputEvents({ vault: vaultRoot });
       assert.equal(listed.events.length, 1);
       assert.deepEqual(order, [
+        "activity-callback",
         "staged-callback",
         "notify",
         "projection-prepared",
@@ -486,6 +493,7 @@ describe("hosted mailbox conversation import adapter", () => {
     });
 
     try {
+      let activityCallbackCount = 0;
       let stagedCallbackCount = 0;
       const outcome = await importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -500,6 +508,9 @@ describe("hosted mailbox conversation import adapter", () => {
         },
         async prepareWakeContext() {},
         item,
+        onConversationActivityObserved() {
+          activityCallbackCount += 1;
+        },
         onConversationInputStaged() {
           stagedCallbackCount += 1;
         },
@@ -509,6 +520,7 @@ describe("hosted mailbox conversation import adapter", () => {
 
       assert.equal(outcome.status, "imported");
       assert.equal(notificationCount, 0);
+      assert.equal(activityCallbackCount, 0);
       assert.equal(stagedCallbackCount, 0);
     } finally {
       controller.close();
@@ -850,6 +862,8 @@ describe("hosted mailbox conversation import adapter", () => {
     });
     const latencyTraceRequests: HostedRuntimeLatencyTraceRequest[] = [];
 
+    let conversationActivityCount = 0;
+    let foregroundStagedCount = 0;
     const outcome = await withOperatorHomeRoot(operatorHomeRoot, () =>
       importHostedConversationMailboxItem({
         decodePayload: createDecodedPayloadDecoder(decodedWake),
@@ -872,6 +886,12 @@ describe("hosted mailbox conversation import adapter", () => {
               runtimeWakeNotifiedAtEpochMs: 1_777_000_000_100,
             },
           },
+        },
+        onConversationActivityObserved() {
+          conversationActivityCount += 1;
+        },
+        onConversationInputStaged() {
+          foregroundStagedCount += 1;
         },
         runtime: createRuntime({
           platform: {
@@ -896,6 +916,8 @@ describe("hosted mailbox conversation import adapter", () => {
     );
 
     assert.equal(outcome.status, "imported");
+    assert.equal(conversationActivityCount, 1);
+    assert.equal(foregroundStagedCount, 0);
     assert.equal(latencyTraceRequests.length, 1);
     const event = latencyTraceRequests[0]?.event;
     assert.equal(event?.type, "assistant_input_staged");
@@ -1294,6 +1316,142 @@ describe("hosted mailbox conversation import adapter", () => {
     ]);
   });
 
+  test("does not resurrect either class of ambiguous v1-omitted Telegram input", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-legacy-v1-"));
+    tempRoots.push(parentRoot);
+    const operatorHomeRoot = path.join(parentRoot, "home");
+    const vaultRoot = path.join(parentRoot, "vault");
+    await writeVaultFile(vaultRoot, VAULT_LAYOUT.metadata, Buffer.from("{}\n"));
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "telegram",
+        eligibleAfter: null,
+        enabledAt: TEST_NOW,
+      }],
+      updatedAt: TEST_NOW,
+      version: 1,
+    });
+    const configuredRuntime = createRuntime({
+      resolvedConfig: {
+        channelCapabilities: {
+          emailSendReady: false,
+          telegramBotConfigured: true,
+        },
+        deviceSync: null,
+        managedAutoReplyChannels: [{
+          capabilityReady: true,
+          channel: "telegram",
+          memberChannel: "telegram",
+        }],
+      },
+      userEnv: HOSTED_ASSISTANT_SEED_ENV,
+    });
+    const importConversationWake = async () => ({
+      captureId: null,
+      metrics: {
+        nextWakeAt: null,
+        parserProcessed: 0,
+      },
+    });
+    const admittedWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_legacy_admitted",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "781",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "admitted before the legacy channel became unavailable",
+          threadId: "123456789",
+        },
+      },
+    });
+    const admitted = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(admittedWake),
+        importConversationWake,
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: admittedWake.eventId,
+          id: "mailbox_item_telegram_legacy_admitted",
+          laneSeq: "10",
+        }),
+        runtime: configuredRuntime,
+        vaultRoot,
+      })
+    );
+    assert.equal(admitted.status, "imported");
+    assert.equal("assistantInputId" in admitted, true);
+    const admittedInputId = "assistantInputId" in admitted
+      ? admitted.assistantInputId
+      : null;
+    assert.notEqual(admittedInputId, null);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), [
+      admittedInputId,
+    ]);
+
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [],
+      updatedAt: "2026-04-26T00:01:00.000Z",
+      version: 1,
+    });
+    const contextWake = createConversationWake({
+      eventId: "evt_synthetic_telegram_legacy_context",
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          attachments: [],
+          messageId: "782",
+          schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
+          text: "context retained while Telegram reply was unavailable",
+          threadId: "123456789",
+        },
+      },
+    });
+    const contextOnly = await withOperatorHomeRoot(operatorHomeRoot, () =>
+      importHostedConversationMailboxItem({
+        decodePayload: createDecodedPayloadDecoder(contextWake),
+        importConversationWake,
+        item: createResolvedConversationMailboxItem({
+          dedupeKey: contextWake.eventId,
+          id: "mailbox_item_telegram_legacy_context",
+          laneSeq: "20",
+        }),
+        runtime: createRuntime(),
+        vaultRoot,
+      })
+    );
+    assert.equal(contextOnly.status, "imported");
+    assert.equal("assistantInputId" in contextOnly, false);
+    const retained = await listAssistantInputEvents({ vault: vaultRoot });
+    assert.equal(retained.events.length, 2);
+
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v1",
+      schemaVersion: 1,
+      value: {
+        backfilled: true,
+        inputIds: [],
+      },
+    }, null, 2)}\n`, "utf8");
+    const enabled = await reconcileManagedAssistantAutoReplyChannelsLocal({
+      desiredChannels: ["telegram"],
+      vault: vaultRoot,
+    });
+    assert.deepEqual(enabled.state.autoReply, [{
+      channel: "telegram",
+      eligibleAfter: retained.events.at(-1)!.cursor,
+      enabledAt: retained.events.at(-1)!.cursor.createdAt,
+    }]);
+
+    assert.deepEqual(await compactHostedPendingAssistantInputIds({ vaultRoot }), []);
+    assert.deepEqual(await readHostedPendingAssistantInputIds({ vaultRoot }), []);
+    const migrated = JSON.parse(await readFile(filePath, "utf8"));
+    assert.equal(migrated.schema, "murph.hosted-pending-assistant-inputs.v2");
+    assert.equal(migrated.schemaVersion, 2);
+  });
+
   test("does not enqueue input when the hosted assistant is unconfigured", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "murph-hosted-input-unconfigured-"));
     tempRoots.push(parentRoot);
@@ -1532,7 +1690,7 @@ describe("hosted mailbox conversation import adapter", () => {
           parts: [
             {
               type: "text",
-              value: "Yes.",
+              value: "Reacted with a like reaction.",
             },
           ],
           reactionEligible: false,
@@ -1607,6 +1765,135 @@ describe("hosted mailbox conversation import adapter", () => {
     const candidates = await source.listInputCandidates({ sourceId: "linq" });
     assert.equal(candidates.inputs[0]?.event.groupParticipantAdded, undefined);
     assert.equal(candidates.inputs[0]?.event.groupReactionContext, undefined);
+  });
+
+  test("uses Telegram sender for group actor scoping and prompt attribution", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-input-telegram-group-"),
+    );
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: TEST_USER_ID,
+          threadId: "chat_group_telegram",
+        },
+        telegramMessage: {
+          from: "1234567890",
+          messageId: "tg_group_identity",
+          schema: "murph.hosted-telegram-message.v1",
+          senderUsername: "alice_example",
+          text: "hello group",
+          threadId: "chat_group_telegram",
+          threadIsDirect: false,
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_group_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    const event = listed.events[0];
+    assert.ok(event);
+    const identifierBlind = createHostedAssistantConversationIdentifierBlind({
+      secret: "chat_group_telegram",
+      userId: TEST_USER_ID,
+    });
+    const expectedActorId = hashHostedAssistantConversationIdentifier(
+      identifierBlind,
+      "1234567890",
+    );
+
+    // The blinded actor must derive from the same value stored for the prompt
+    // so batching and admission cannot disagree about who spoke.
+    assert.equal(event.conversation?.actorId, expectedActorId);
+    assert.notEqual(event.conversation?.actorId, null);
+    assert.equal(event.conversation?.source, "telegram");
+    assert.equal(event.conversation?.threadIsDirect, false);
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderHandle
+        : null,
+      "1234567890",
+    );
+    assert.equal(
+      event.sourceMetadata?.kind === "telegram"
+        ? event.sourceMetadata.senderUsername
+        : null,
+      "alice_example",
+    );
+  });
+
+  test("keeps direct Telegram threads free of group sender attribution", async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-hosted-input-telegram-direct-"),
+    );
+    tempRoots.push(parentRoot);
+    const vaultRoot = path.join(parentRoot, "vault");
+    const decodedWake = createConversationWake({
+      message: {
+        channel: "telegram",
+        telegramMessage: {
+          messageId: "tg_direct_identity",
+          replyContextPreview: "Replying to: earlier",
+          schema: "murph.hosted-telegram-message.v1",
+          text: "hello",
+          threadId: "chat_direct_telegram",
+          threadIsDirect: true,
+        },
+      },
+    });
+
+    const outcome = await importHostedConversationMailboxItem({
+      decodePayload: createDecodedPayloadDecoder(decodedWake),
+      async importConversationWake() {
+        throw new HostedConversationInboxProjectionError(
+          "canonical inbox projection unavailable",
+        );
+      },
+      async prepareWakeContext() {},
+      item: createResolvedConversationMailboxItem({
+        dedupeKey: decodedWake.eventId,
+        id: "mailbox_item_telegram_direct_identity_001",
+      }),
+      runtime: createRuntime(),
+      vaultRoot,
+    });
+
+    assert.equal(outcome.status, "imported");
+
+    const listed = await listAssistantInputEvents({ vault: vaultRoot });
+    const event = listed.events[0];
+    assert.ok(event);
+    assert.equal(event.conversation?.actorId, null);
+    assert.equal(event.conversation?.threadIsDirect, true);
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderHandle"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(event.sourceMetadata ?? {}, "senderUsername"),
+      false,
+    );
   });
 
   test("uses Linq route account, sender actor, and group directness for assistant conversation identity", async () => {

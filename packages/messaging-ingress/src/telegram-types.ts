@@ -107,10 +107,35 @@ export interface TelegramMessageLike {
   [key: string]: unknown;
 }
 
+/**
+ * The message an inline-keyboard button was attached to. Telegram may send an
+ * "inaccessible" variant for old messages, which still carries the chat and
+ * message id, so only those two fields are relied on.
+ */
+export interface TelegramCallbackQueryMessageLike {
+  chat: { id: number | string };
+  message_id: number;
+}
+
+/**
+ * Structural on purpose: the Bot API SDK's own `CallbackQuery`/`User` types have
+ * no index signature, so requiring one here would make a real SDK update
+ * unassignable to `TelegramUpdateLike`. Only the fields Murph binds on are named.
+ */
+export interface TelegramCallbackQueryLike {
+  id: string;
+  from: { id: number; is_bot?: boolean };
+  data?: string | null;
+  /** Absent for inline-mode callbacks, which carry `inline_message_id` instead. */
+  message?: TelegramCallbackQueryMessageLike | null;
+  inline_message_id?: string | null;
+}
+
 export interface TelegramUpdateLike {
   update_id: number;
   message?: TelegramMessageLike;
   business_message?: TelegramMessageLike;
+  callback_query?: TelegramCallbackQueryLike;
   [key: string]: unknown;
 }
 

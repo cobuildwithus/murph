@@ -287,7 +287,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(2);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(3);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -705,6 +705,7 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_CODEX_AUTH_PATH",
       "HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH",
       "HOSTED_RUNTIME_CRYPTO_ROOT_PATH",
+      "HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH",
       "HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH",
       "HOSTED_RUNTIME_GROUP_TOOL_PATH",
       "HOSTED_RUNTIME_ISSUE_RECORD_PATH",
@@ -734,6 +735,9 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_USAGE_RECORD_PATH).toBe(
       "/api/internal/hosted-execution/usage/record",
+    );
+    expect(routeModule.HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH).toBe(
+      "/api/internal/hosted-runtime/email-egress/recipient",
     );
     expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/groups/newsletter-tool",

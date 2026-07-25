@@ -56,38 +56,66 @@ vi.mock("@/src/components/ui/button", () => ({
   } = {}) => [className, variant ? `variant-${variant}` : null].filter(Boolean).join(" "),
 }));
 
-vi.mock("@/src/components/ui/dialog", () => ({
-  Dialog: ({
-    children,
-    open,
-  }: {
-    children?: ReactNode;
-    open?: boolean;
-  }) => (open ? createElement("div", { "data-dialog": "open" }, children) : null),
-  DialogContent: (props: HTMLAttributes<HTMLDivElement> & {
-    children?: ReactNode;
-    showCloseButton?: boolean;
-  }) => {
-    const { children, showCloseButton, ...rest } = props;
-    void showCloseButton;
-    return createElement("div", rest, children);
-  },
-  DialogDescription: ({
-    children,
-    ...props
-  }: HTMLAttributes<HTMLParagraphElement> & { children?: ReactNode }) =>
-    createElement("p", props, children),
-  DialogHeader: ({
-    children,
-    ...props
-  }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) =>
-    createElement("div", props, children),
-  DialogTitle: ({
-    children,
-    ...props
-  }: HTMLAttributes<HTMLHeadingElement> & { children?: ReactNode }) =>
-    createElement("h2", props, children),
-}));
+vi.mock("@/src/components/ui/dialog", () => {
+  let activeOnOpenChange: ((open: boolean) => void) | undefined;
+
+  return {
+    Dialog: ({
+      children,
+      onOpenChange,
+      open,
+    }: {
+      children?: ReactNode;
+      onOpenChange?: (open: boolean) => void;
+      open?: boolean;
+    }) => {
+      if (!open) {
+        return null;
+      }
+      activeOnOpenChange = onOpenChange;
+      return createElement("div", { "data-dialog": "open" }, children);
+    },
+    DialogContent: (
+      props: HTMLAttributes<HTMLDivElement> & {
+        children?: ReactNode;
+        showCloseButton?: boolean;
+      },
+    ) => {
+      const { children, showCloseButton, ...rest } = props;
+      return createElement(
+        "div",
+        rest,
+        children,
+        showCloseButton
+          ? createElement(
+              "button",
+              {
+                "aria-label": "Close",
+                onClick: () => activeOnOpenChange?.(false),
+                type: "button",
+              },
+              "Close",
+            )
+          : null,
+      );
+    },
+    DialogDescription: ({
+      children,
+      ...props
+    }: HTMLAttributes<HTMLParagraphElement> & { children?: ReactNode }) =>
+      createElement("p", props, children),
+    DialogHeader: ({
+      children,
+      ...props
+    }: HTMLAttributes<HTMLDivElement> & { children?: ReactNode }) =>
+      createElement("div", props, children),
+    DialogTitle: ({
+      children,
+      ...props
+    }: HTMLAttributes<HTMLHeadingElement> & { children?: ReactNode }) =>
+      createElement("h2", props, children),
+  };
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -180,6 +208,11 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   expect(render.container.innerHTML).toContain("Get your full sync");
   expect(render.container.innerHTML).toContain("Download Murph and sign in");
   expect(render.container.innerHTML).toContain("Turn on Apple Health in WHOOP");
+  const setupDialogContent = render.container.querySelector('[data-dialog="open"] > div');
+  expect(setupDialogContent?.classList.contains("max-h-[calc(100dvh-2rem)]")).toBe(true);
+  expect(setupDialogContent?.classList.contains("max-w-[calc(100%-2rem)]")).toBe(true);
+  expect(setupDialogContent?.classList.contains("overflow-y-auto")).toBe(true);
+  expect(setupDialogContent?.classList.contains("sm:max-w-md")).toBe(true);
   expect(render.container.innerHTML).toContain(
     "https://apps.apple.com/us/app/murph-ai/id6786145859",
   );
@@ -272,13 +305,16 @@ test("DeviceSyncCompletionDialog opens the WHOOP setup guide from the summary vi
   const noContactButton = noContactRender.container.querySelector(
     "button.variant-outline",
   );
-  expect(noContactButton).not.toBeNull();
-  expect(noContactButton?.textContent).toContain("Continue with Murph");
+  expect(noContactButton).toBeNull();
   expect(
     noContactRender.container.querySelector('a[aria-label^="Continue with Murph in"]'),
   ).toBeNull();
+  const noContactCloseButton = noContactRender.container.querySelector(
+    'button[aria-label="Close"]',
+  );
+  expect(noContactCloseButton).not.toBeNull();
   await act(async () => {
-    noContactButton?.dispatchEvent(
+    noContactCloseButton?.dispatchEvent(
       new noContactRender.window.Event("click", { bubbles: true }),
     );
   });

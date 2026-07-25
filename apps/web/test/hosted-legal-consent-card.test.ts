@@ -141,8 +141,8 @@ test("HostedLegalConsentCard gates acceptance on the checkbox and holds the UI d
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "consumer-health-data-notice": "2026-04-29",
-          "privacy-policy": "2026-06-24",
+          "consumer-health-data-notice": "2026-07-23",
+          "privacy-policy": "2026-07-23",
         },
         scope: "feature.connected-health-source",
         source: "test-device-sync",
@@ -192,6 +192,8 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
     expect(container.textContent).toContain("Before you start");
     expect(container.textContent).toContain("Terms of Service");
     expect(container.textContent).toContain("Consumer Health Data Notice");
+    expect(container.textContent).toContain("never sells health data");
+    expect(container.textContent).toContain("I authorize Murph to collect, use, and process");
   });
 
   const checkboxes = [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[];
@@ -229,9 +231,9 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "health-ai-safety-disclosure": "2026-04-29",
-          "privacy-policy": "2026-06-24",
-          "terms-of-service": "2026-04-29",
+          "health-ai-safety-disclosure": "2026-07-23",
+          "privacy-policy": "2026-07-23",
+          "terms-of-service": "2026-07-23",
         },
         scope: "launch.legal",
         source: "homepage-signup-dialog",
@@ -242,7 +244,7 @@ test("HostedLegalConsentCard records launch consent only after both checkboxes a
       method: "POST",
       payload: {
         acceptedDocumentVersions: {
-          "consumer-health-data-notice": "2026-04-29",
+          "consumer-health-data-notice": "2026-07-23",
         },
         scope: "launch.health-data",
         source: "homepage-signup-dialog",
@@ -456,7 +458,13 @@ function createConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes: [
       consentScope("launch.legal", "Terms, privacy, and AI disclosure", false, legalDocuments, launchLegalGranted),
-      consentScope("launch.health-data", "Health data collection consent", false, healthDataDocuments, launchHealthDataGranted),
+      consentScope(
+        "launch.health-data",
+        "Health data notice and processing authorization",
+        false,
+        healthDataDocuments,
+        launchHealthDataGranted,
+      ),
       consentScope(
         "feature.connected-health-source",
         "Connected health source consent",
@@ -474,7 +482,7 @@ function consentDocument(id: string, title: string, href: string) {
     id: id as HostedConsentStatus["documents"][number]["id"],
     pdfHref: `${href}.pdf`,
     title,
-    version: id === "privacy-policy" ? "2026-06-24" : "2026-04-29",
+    version: "2026-07-23",
   };
 }
 

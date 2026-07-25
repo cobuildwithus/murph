@@ -254,6 +254,13 @@ describe("hosted orchestration control contracts", () => {
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "inbox_media_retention",
     });
+    expect(parseHostedRuntimeEnsureProcessingRequest({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+    })).toEqual({
+      orchestrationAttemptId: "orchestration_attempt_test",
+      processingMode: "system_mailbox",
+    });
     expect(() => parseHostedRuntimeEnsureProcessingRequest({
       orchestrationAttemptId: "orchestration_attempt_test",
       processingMode: "assistant",

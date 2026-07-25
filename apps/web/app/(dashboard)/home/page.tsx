@@ -7,6 +7,11 @@ import { HomeInitialVisitPersonaPickerClient } from "./initial-visit-persona-pic
 import { FeatureHighlights } from "@/src/components/home/feature-highlights";
 import { resolveHostedMurphContactOption } from "@/src/components/murph/hosted-murph-contact-action";
 import { BrowserVaultOnboardingStepsContent } from "@/src/components/home/browser-vault-onboarding-steps";
+import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
+import {
+  MessageMurphActionFallback,
+  MessageMurphContactAction,
+} from "@/src/components/home/message-murph-action";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
   resolveHomeTrialBillingBannerVariant,
@@ -27,9 +32,11 @@ import {
 } from "@/src/lib/device-sync/connect-completion";
 import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboarding";
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
-import { resolveHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
+import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
 import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
+import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
+import { resolveHostedMemberMessagingState } from "@/src/lib/hosted-onboarding/messaging-state";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -59,19 +66,13 @@ export default async function HomePage({
 
   const prisma = getPrisma();
   const usageGateCheckedAt = new Date();
-  const [
-    showDeviceStep,
-    usageGate,
-    deviceSyncCompletionDialog,
-    connectedAppCompletionDialog,
-    initialVisitContactAction,
-  ] = await Promise.all([
+  const homeProjectionResults = await Promise.allSettled([
     shouldShowHomeDeviceSyncStep({
       member,
       prisma,
     }),
     member
-      ? resolveHostedAiUsageGate({
+      ? readHostedAiUsageGate({
           memberId: member.id,
           now: usageGateCheckedAt,
           prisma,
@@ -88,7 +89,47 @@ export default async function HomePage({
     showInitialVisitPersonaPicker
       ? resolveHomeInitialVisitContactAction()
       : Promise.resolve(null),
+    member
+      ? readHostedMemberMessagingSetupState({
+          memberId: member.id,
+          prisma,
+        })
+      : Promise.resolve(null),
   ]);
+  const [
+    showDeviceStepResult,
+    usageGateResult,
+    deviceSyncCompletionDialogResult,
+    connectedAppCompletionDialogResult,
+    initialVisitContactActionResult,
+    messagingSetupStateResult,
+  ] = homeProjectionResults;
+  const showDeviceStep = readSettledValue(showDeviceStepResult, false);
+  const usageGate = readSettledValue(usageGateResult, null);
+  const deviceSyncCompletionDialog = readSettledValue(
+    deviceSyncCompletionDialogResult,
+    null,
+  );
+  const connectedAppCompletionDialog = readSettledValue(
+    connectedAppCompletionDialogResult,
+    null,
+  );
+  const initialVisitContactAction = readSettledValue(
+    initialVisitContactActionResult,
+    null,
+  );
+  const shouldRenderInitialVisitPersonaPicker =
+    showInitialVisitPersonaPicker
+    && initialVisitContactActionResult.status === "fulfilled";
+  const messagingSetupState = readSettledValue(messagingSetupStateResult, null);
+  // Telegram bots cannot open a conversation, so a member can finish signup
+  // with a linked account Murph still cannot send to. Keep asking for that
+  // first message until it arrives, since Murph cannot ask for it itself.
+  const awaitingFirstMemberMessage = Boolean(
+    messagingSetupState
+    && !resolveHostedMemberMessagingState(messagingSetupState)
+      .hasDirectMessagingChannel,
+  );
   // Each marker uses its own query key, so only one model is non-null per
   // home load in normal use; device-sync wins the tiebreak if both fire.
   const completionDialog = deviceSyncCompletionDialog ?? connectedAppCompletionDialog;
@@ -103,20 +144,34 @@ export default async function HomePage({
     && usageGate.reason === "ai_usage_limit_exceeded"
     ? usageGate.retryAfter
     : null;
-  const projectedUsageStatus = member && usageGate && usageLimitNotice
-    ? await projectHostedPersonalAiUsageStatus({
-        decision: usageGate,
-        memberId: member.id,
-        now: usageGateCheckedAt,
-        prisma,
-      })
-    : null;
-  const trialBillingState = !usageLimitNotice && member
-    ? await readHostedMemberBillingEligibilityState({
-        memberId: member.id,
-        prisma,
-      })
-    : null;
+  const dependentProjectionResults = await Promise.allSettled([
+    member && usageGate && usageLimitNotice
+      ? projectHostedPersonalAiUsageStatus({
+          decision: usageGate,
+          memberId: member.id,
+          now: usageGateCheckedAt,
+          prisma,
+        })
+      : Promise.resolve(null),
+    !usageLimitNotice
+      && member
+      && usageGateResult.status === "fulfilled"
+      ? readHostedMemberBillingEligibilityState({
+          memberId: member.id,
+          prisma,
+        })
+      : Promise.resolve(null),
+  ]);
+  const [projectedUsageStatusResult, trialBillingStateResult] =
+    dependentProjectionResults;
+  const projectedUsageStatus = readSettledValue(
+    projectedUsageStatusResult,
+    null,
+  );
+  const trialBillingState = readSettledValue(trialBillingStateResult, null);
+  const hasHomeDataLoadError =
+    hasRejectedProjection(homeProjectionResults)
+    || hasRejectedProjection(dependentProjectionResults);
   const trialBillingBannerVariant = usageLimitNotice
     ? null
     : resolveHomeTrialBillingBannerVariant({
@@ -133,11 +188,13 @@ export default async function HomePage({
         description="Connect your health data, pick an experiment, and see what actually works for you."
       />
 
+      {hasHomeDataLoadError ? <HomeDataLoadAlert /> : null}
+
       {completionDialog ? (
         <DeviceSyncCompletionDialog model={completionDialog} />
       ) : null}
 
-      {showInitialVisitPersonaPicker ? (
+      {shouldRenderInitialVisitPersonaPicker ? (
         <HomeInitialVisitPersonaPickerClient
           contactAction={initialVisitContactAction}
         />
@@ -158,6 +215,13 @@ export default async function HomePage({
 
       <BrowserVaultOnboardingStepsContent
         protocols={listHealthCommonsExperimentBrowseProtocols()}
+        messageMurphAction={
+          awaitingFirstMemberMessage ? (
+            <Suspense fallback={<MessageMurphActionFallback />}>
+              <MessageMurphContactAction />
+            </Suspense>
+          ) : null
+        }
         showDeviceStep={showDeviceStep}
         uploadLabsAction={
           <Suspense fallback={<UploadLabsActionFallback />}>
@@ -174,6 +238,19 @@ function readFirstSearchParamValue(
   value: string | string[] | undefined,
 ): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function readSettledValue<T>(
+  result: PromiseSettledResult<T>,
+  fallback: T,
+): T {
+  return result.status === "fulfilled" ? result.value : fallback;
+}
+
+function hasRejectedProjection(
+  results: readonly PromiseSettledResult<unknown>[],
+): boolean {
+  return results.some((result) => result.status === "rejected");
 }
 
 async function resolveHomeInitialVisitContactAction() {

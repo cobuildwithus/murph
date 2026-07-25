@@ -26,7 +26,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = await readJsonObject(request, {
     limitBytes: HOSTED_ACCOUNT_PRIVACY_REQUEST_BODY_LIMIT_BYTES,
   });
-  parseHostedAccountDeletionRequest(body);
+  const deletionRequest = parseHostedAccountDeletionRequest(body);
 
   await verifyAndConsumeSensitiveActionChallenge({
     authorization: body.authorization,
@@ -42,6 +42,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   const result = await deleteHostedAccountData({
+    exitFeedback: deletionRequest.exitFeedback,
     memberId: auth.member.id,
     prisma,
     request,

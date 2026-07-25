@@ -8155,6 +8155,9 @@ test("Junction normalizer maps documented activity and body summary scalar field
           max_bpm: 148,
           resting_bpm: 52,
         },
+        high: 5,
+        low: 60,
+        medium: 13,
         steps: 9400,
       }],
       body: [{
@@ -8177,8 +8180,14 @@ test("Junction normalizer maps documented activity and body summary scalar field
   const observations = payload.events?.filter((event) => event.kind === "observation") ?? [];
   const metricValue = (metric: string) =>
     observations.find((event) => event.fields?.metric === metric)?.fields?.value;
+  const activityMinutes = observations.find(
+    (event) => event.fields?.metric === "activity-minutes",
+  );
   const rawBodyArtifact = payload.evidenceParts?.find((artifact) => artifact.role === "junction-summary-body");
 
+  assert.equal(activityMinutes?.fields?.value, 78);
+  assert.equal(activityMinutes?.fields?.unit, "minutes");
+  assert.equal(activityMinutes?.externalRef?.facet, "activity-minutes");
   assert.equal(metricValue("daily-steps"), 9400);
   assert.equal(metricValue("active-calories"), 640);
   assert.equal(metricValue("total-calories"), 2400);
@@ -8200,6 +8209,33 @@ test("Junction normalizer maps documented activity and body summary scalar field
   assert.equal(metricValue("temperature"), 36.7);
   assert.match(JSON.stringify(rawBodyArtifact?.content), /"lean_body_mass_kilogram":40.1/u);
   assert.ok(observations.every((event) => event.fields?.observationGrain === "summary"));
+});
+
+test("Junction normalizer rejects incomplete or invalid daily activity minute buckets", () => {
+  const invalidBuckets = [
+    {
+      daily_movement: 600,
+      duration_active_second: 600,
+      low: 20,
+      medium: 10,
+    },
+    { low: 20, medium: -1, high: 10 },
+    { low: 20, medium: 10, high: "Infinity" },
+    { low: 1440, medium: 1, high: 0 },
+  ];
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-05-20T12:00:00.000Z",
+    summaries: {
+      activity: invalidBuckets.map((buckets, index) => ({
+        ...buckets,
+        source: { provider: "garmin", type: "watch" },
+        id: `invalid-intensity-buckets-${index}`,
+        date: "2026-05-21T00:00:00+00:00",
+      })),
+    },
+  });
+
+  assert.equal(payload.events?.some((event) => event.fields?.metric === "activity-minutes"), false);
 });
 
 test("Junction recovery readiness score preserves source-specific semantics", () => {

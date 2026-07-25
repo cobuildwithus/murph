@@ -55,15 +55,16 @@ describe("chooseHostedLinqHomeLine", () => {
     ).toBe("+15550100002");
   });
 
-  it("fails closed when every DB line is over an assignment cap", () => {
+  it("uses a daily-eligible line when every active target is full", () => {
+    const activeTargetLine = buildLine("+15550100001", {
+      activeMemberLimit: 3,
+      maxNewConversationsPerDay: 10,
+    });
     expect(
       chooseHostedLinqHomeLine({
         activeMembersByRecipientPhone: new Map([["+15550100001", 3]]),
         lines: [
-          buildLine("+15550100001", {
-            activeMemberLimit: 3,
-            maxNewConversationsPerDay: 10,
-          }),
+          activeTargetLine,
           buildLine("+15550100002", {
             activeMemberLimit: 3,
             maxNewConversationsPerDay: 1,
@@ -72,7 +73,7 @@ describe("chooseHostedLinqHomeLine", () => {
         newAssignmentsByRecipientPhone: new Map([["+15550100002", 1]]),
         preferredRecipientPhone: "+15550100001",
       }),
-    ).toBeNull();
+    ).toBe(activeTargetLine);
   });
 });
 

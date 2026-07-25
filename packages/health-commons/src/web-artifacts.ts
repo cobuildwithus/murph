@@ -1,5 +1,6 @@
 import type {
   HealthCommonsCatalog,
+  HealthCommonsBiomarkerFallbackRange,
   HealthCommonsBiomarkerDesiredDirection,
   HealthCommonsBiomarkerProtocolExpectedDirection,
   HealthCommonsCatalogEntity,
@@ -44,7 +45,7 @@ export const HEALTH_COMMONS_WEB_ROUTE_BUNDLE_SCHEMA_VERSION =
 export const HEALTH_COMMONS_WEB_EXPERIMENT_INDEX_SCHEMA_VERSION =
   "murph.commons.web.experiment-index.v1" as const;
 export const HEALTH_COMMONS_WEB_BIOMARKER_INDEX_SCHEMA_VERSION =
-  "murph.commons.web.biomarker-index.v1" as const;
+  "murph.commons.web.biomarker-index.v3" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_RESEARCH_TAB_SCHEMA_VERSION =
   "murph.commons.web.experiment-research-tab.v1" as const;
 export const HEALTH_COMMONS_WEB_EXPERIMENT_SHELL_SCHEMA_VERSION =
@@ -167,6 +168,7 @@ export interface HealthCommonsWebBiomarkerIndexEntry {
   bundlePath: string;
   categories: string[];
   desiredDirection: HealthCommonsBiomarkerDesiredDirection | null;
+  fallbackRanges: HealthCommonsWebBiomarkerFallbackRange[];
   hidden: boolean;
   key: string;
   published: boolean;
@@ -181,6 +183,16 @@ export interface HealthCommonsWebBiomarkerIndexEntry {
   title: string;
   unit: string | null;
 }
+
+export type HealthCommonsWebBiomarkerFallbackRange = Pick<
+  HealthCommonsBiomarkerFallbackRange,
+  | "applicability"
+  | "eligibleSpecimenKinds"
+  | "label"
+  | "lowerBound"
+  | "unit"
+  | "upperBound"
+>;
 
 export interface HealthCommonsWebBiomarkerIndex {
   biomarkers: HealthCommonsWebBiomarkerIndexEntry[];
@@ -680,6 +692,14 @@ export function buildHealthCommonsWebGeneratedArtifacts(
             bundlePath: bundlePathForEntity(bundle.route.entityType, bundle.route.routeId),
             categories: entity.categories ?? [],
             desiredDirection: entity.biomarker?.direction?.desired ?? null,
+            fallbackRanges: entity.referenceGuidance?.fallbackRanges?.map((range) => ({
+              applicability: range.applicability,
+              eligibleSpecimenKinds: range.eligibleSpecimenKinds,
+              label: range.label,
+              ...(range.lowerBound ? { lowerBound: range.lowerBound } : {}),
+              unit: range.unit,
+              ...(range.upperBound ? { upperBound: range.upperBound } : {}),
+            })) ?? [],
             hidden: entity.hidden === true,
             key: entity.key,
             published: isPublishedBiomarkerIndexEntity(entity, entitiesByKey.values()),

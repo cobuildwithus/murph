@@ -121,8 +121,16 @@ describe("hosted local onboarding follow-up e2e", () => {
     });
     expect(requireLinqStub().readObservedMessageText(completionReply))
       .toBe(onboardingCompleteReplyText);
-    const completionStatus = await requireScenario().waitForHostedCompletion(userId);
+    let completionStatus = await requireScenario().waitForHostedCompletion(userId);
     expect(completionStatus.lastErrorCode ?? null).toBeNull();
+    // The follow-up archive commits in a post-checkpoint managed-automation
+    // pass that may land one checkpoint (or one deferred wake) after the
+    // completion reply, so re-sample completions until the sticky
+    // murphManagedAutomationUpdated counter appears.
+    while (completionStatus.workspace?.redactedStatus?.murphManagedAutomationUpdated !== 1) {
+      completionStatus = await requireScenario().waitForHostedCompletion(userId);
+      expect(completionStatus.lastErrorCode ?? null).toBeNull();
+    }
     expect(completionStatus.workspace?.redactedStatus).toMatchObject({
       murphManagedAutomationUpdated: 1,
     });

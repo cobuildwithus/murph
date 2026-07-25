@@ -9,7 +9,10 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
-function buildPrompt(): string {
+function buildPrompt(input: {
+  currentLocalDate?: string
+  scheduledOccurrenceAt?: string
+} = {}): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
     assistantHostedDeviceConnectAvailable: false,
@@ -20,10 +23,11 @@ function buildPrompt(): string {
       rawCommand: 'vault-cli',
       setupCommand: 'murph',
     },
-    currentLocalDate: '2026-07-18',
+    currentLocalDate: input.currentLocalDate ?? '2026-07-18',
     currentTimeZone: 'America/New_York',
     onboardingGuidance: false,
     modelBehaviorProfile: 'gpt5-agentic',
+    scheduledOccurrenceAt: input.scheduledOccurrenceAt,
     turnTrigger: null,
     assistantContextSnapshotPrompt: null,
   })
@@ -37,6 +41,8 @@ describe('assistant automatic meal capture skill', () => {
     expect(matches).toHaveLength(1)
     expect(matches[0]?.triggerHint).toContain('Full Photos permission')
     expect(matches[0]?.triggerHint).toContain('missing or delayed photo imports')
+    expect(matches[0]?.triggerHint).toContain('automatic 9pm closeout')
+    expect(matches[0]?.triggerHint).toContain('retained-photo privacy cleanup')
     expect(matches[0]?.triggerHint).toContain('without duplicate logging')
     expect(matches[0]?.triggerHint).toContain('Always co-load with food-journal')
 
@@ -45,7 +51,7 @@ describe('assistant automatic meal capture skill', () => {
       'Automatic meal capture: automatic-meal-capture for the iPhone app, Photos permission, background timing, Meals review, import verification, and photo-only meal enrichment.',
     )
     expect(prompt).toContain(
-      'When calorie or macro tracking is explicitly active, always load automatic-meal-capture alongside food-journal on eligible interactive nutrition turns and check recent unresolved device meals; import itself does not start a model turn.',
+      'Always load automatic-meal-capture alongside food-journal on eligible interactive meal turns and check recent unresolved device meals; import itself does not start a model turn.',
     )
   })
 
@@ -70,6 +76,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('age out after 14 days')
     expect(skill).toContain('24-item limit')
     expect(skill).toContain('`source: device`')
+    expect(skill).toContain('managed daily closeout at 9:00pm')
     expect(skill).toContain(
       'The original capture instant—not upload or import time—owns meal timing.',
     )
@@ -88,6 +95,26 @@ describe('assistant automatic meal capture skill', () => {
       'Suggest resending only after later evidence shows the upload failed.',
     )
     expect(skill).toContain('vault-cli meal edit <meal-id>')
+    expect(skill).toContain('## Run the automatic 9pm closeout')
+    expect(skill).toContain(
+      'engine-supplied `Occurrence local date` from the `Scheduled\n   occurrence context` as the action and latest-capture boundary',
+    )
+    expect(skill).toContain(
+      "even when the\n   wall-clock `Today's date` differs",
+    )
+    expect(skill).toContain('vault-cli meal remove-photo <meal-id>')
+    expect(skill).toContain('vault-cli meal closeout-work')
+    expect(skill).toContain('oldest bounded batch')
+    expect(skill).not.toContain('preceding 31 local days')
+    expect(skill).toContain('label partial totals as partial')
+    expect(skill).toContain('each retained photo as pending closeout work')
+    expect(skill).toContain('late import gets one dated catch-up')
+    expect(skill).toContain('latest `recordedAt` is at or after')
+    expect(skill).toContain('partial-cleanup failure loses no meal')
+    expect(skill).toContain(
+      'Include supported\n   calorie and macro totals by default',
+    )
+    expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')
     expect(skill).toContain('likely manual,\n   conversation, provider')
@@ -95,10 +122,25 @@ describe('assistant automatic meal capture skill', () => {
       'Do not run `meal add` for a captured photo that already has a meal id.',
     )
     expect(skill).toContain(
-      "Treat calorie or macro tracking as active only when the member's request,\ncurrent plan, or durable context makes that focus explicit.",
+      'Estimate calories and macros by default when enriching a captured meal.',
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/food-journal/SKILL.md',
+    )
+  })
+
+  it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {
+    const prompt = buildPrompt({
+      currentLocalDate: '2026-07-24',
+      scheduledOccurrenceAt: '2026-07-24T01:00:00.000Z',
+    })
+
+    expect(prompt).toContain("Today's date for the user is July 24, 2026.")
+    expect(prompt).toContain('Occurrence instant: `2026-07-24T01:00:00.000Z`.')
+    expect(prompt).toContain('Occurrence timezone: `America/New_York`.')
+    expect(prompt).toContain('Occurrence local date: `2026-07-23`.')
+    expect(prompt).toContain(
+      "Use the local date as the anchor for this automation's relevant action window.",
     )
   })
 })

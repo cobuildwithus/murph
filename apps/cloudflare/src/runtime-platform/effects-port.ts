@@ -6,6 +6,7 @@ import type {
   HostedEmailDeliverySummary,
 } from "@murphai/assistant-runtime/hosted-email";
 import {
+  HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
   HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
@@ -199,6 +200,39 @@ export function createCloudflareEffectsPort(input: {
                 "Hosted external thread route authority response is invalid.",
               );
             }
+          },
+          async resolveCurrentVerifiedEmailRecipient(context) {
+            const payload = await fetchHostedWebControlPlaneJson({
+              body: {},
+              boundUserId: input.boundUserId,
+              description: "Hosted email recipient authority resolution",
+              fetchImpl: input.fetchImpl,
+              headers: await requireHostedEffectsRuntimeWriteFenceHeaders({
+                description: "Hosted email recipient authority resolution",
+                workspaceCheckpointBridge: input.workspaceCheckpointBridge ?? null,
+              }),
+              path: HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
+              signal: context?.signal ?? null,
+              timeoutMs: input.timeoutMs,
+              transport: webControlTransport,
+            });
+            if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+              throw new TypeError(
+                "Hosted email recipient authority response is invalid.",
+              );
+            }
+            const deliveryTarget = (payload as {
+              deliveryTarget?: unknown;
+            }).deliveryTarget;
+            if (deliveryTarget === null) {
+              return null;
+            }
+            if (typeof deliveryTarget !== "string" || deliveryTarget.trim().length === 0) {
+              throw new TypeError(
+                "Hosted email recipient authority response is invalid.",
+              );
+            }
+            return deliveryTarget;
           },
           async assertLinqRecentInboundEngagement(request, context) {
             const payload = await fetchHostedWebControlPlaneJson({

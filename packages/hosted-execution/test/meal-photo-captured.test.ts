@@ -15,6 +15,10 @@ describe("meal-photo.captured hosted execution wake", () => {
       byteLength: 1024,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
+      directRoute: {
+        channel: "linq",
+        threadId: "linq_home_thread",
+      },
       eventId: "meal-photo:enrollment:capture",
       mealPhotoKey: "meal_photo_opaque_key",
       memberId: "member_synthetic_001",
@@ -33,6 +37,10 @@ describe("meal-photo.captured hosted execution wake", () => {
         byteLength: 1024,
         captureId: CAPTURE_ID,
         capturedAt: CAPTURED_AT,
+        directRoute: {
+          channel: "linq",
+          threadId: "linq_home_thread",
+        },
         eventId: "meal-photo:enrollment:capture",
         mealPhotoKey: "meal_photo_opaque_key",
         memberId: "member_synthetic_001",

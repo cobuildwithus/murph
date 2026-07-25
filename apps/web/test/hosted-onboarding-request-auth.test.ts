@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
-  readHostedMemberCoreState: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
   resolveHostedPrivySessionFromRequest: vi.fn(),
 }));
@@ -12,10 +11,6 @@ vi.mock("server-only", () => ({}));
 
 vi.mock("@/src/lib/hosted-onboarding/member-identity-service", () => ({
   lookupHostedMemberForPrivyPrincipal: mocks.lookupHostedMemberForPrivyPrincipal,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
-  readHostedMemberCoreState: mocks.readHostedMemberCoreState,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-session", () => ({
@@ -87,21 +82,17 @@ describe("hosted Privy request auth", () => {
           type: "email",
         },
       ],
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
     });
-    mocks.readHostedMemberCoreState.mockResolvedValue(null);
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
       expiresAt: new Date("2026-04-26T00:00:00.000Z"),
       member: createHostedMember(),
       privyUserId: "did:privy:user_123",
       sessionId: "hws_123",
     });
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
-      createHostedMemberLookup(),
-    );
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(createHostedMember());
   });
 
   it("returns null when no Privy session cookie is present", async () => {
@@ -137,7 +128,6 @@ describe("hosted Privy request auth", () => {
       identity: {
         userId: "did:privy:user_123",
       },
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -147,11 +137,6 @@ describe("hosted Privy request auth", () => {
 
   it("returns the authenticated hosted member when the cookie-backed session verifies", async () => {
     await expect(requirePrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
-      memberLookup: {
-        matchedBy: [
-          "privyUserId",
-        ],
-      },
       member: {
         id: "member_123",
       },
@@ -165,15 +150,9 @@ describe("hosted Privy request auth", () => {
     }));
   });
 
-  it("uses the member already returned by the Privy principal lookup", async () => {
+  it("uses the canonical member already returned by the Privy principal lookup", async () => {
     const member = createHostedMember();
-    const memberLookup = createHostedMemberLookup({
-      core: member,
-    });
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(memberLookup);
-    mocks.readHostedMemberCoreState.mockRejectedValue(
-      new Error("unexpected duplicate member read"),
-    );
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(member);
 
     await expect(resolvePrivyMemberAuthFromSession({
       identity: {
@@ -184,113 +163,16 @@ describe("hosted Privy request auth", () => {
         telegram: null,
         userId: "did:privy:user_123",
       },
-      memberId: member.id,
       prisma,
-    })).resolves.toMatchObject({
-      member,
-      memberLookup: null,
-    });
+    })).resolves.toBe(member);
 
     expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
-  it("requires identity lookup confirmation before trusting the session Murph member id", async () => {
-    const member = createHostedMember();
-    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      linkedAccounts: [],
-      memberId: member.id,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
-    });
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(createHostedMemberLookup({
-      core: member,
-    }));
-
-    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
-      member: {
-        id: member.id,
-      },
-      memberLookup: null,
-    });
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledWith(expect.objectContaining({
-      identity: expect.objectContaining({
-        userId: "did:privy:user_123",
-      }),
-      prisma,
-    }));
-  });
-
-  it("falls back to the Privy principal lookup when the trusted member id is stale", async () => {
-    const memberLookup = createHostedMemberLookup();
-    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      linkedAccounts: [],
-      memberId: "member_missing",
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
-    });
-    mocks.readHostedMemberCoreState.mockResolvedValue(null);
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(memberLookup);
-
-    await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
-      member: {
-        id: memberLookup.core.id,
-      },
-      memberLookup,
-    });
-    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledWith(expect.objectContaining({
-      identity: expect.objectContaining({
-        userId: "did:privy:user_123",
-      }),
-      prisma,
-    }));
-  });
-
-  it("rejects stale session metadata when the stored Murph member id points at a different member", async () => {
-    const staleMember = createHostedMember({
-      id: "member_stale",
-    });
+  it("resolves only through the canonical Privy-user binding when provider metadata is stale", async () => {
     const resolvedMember = createHostedMember({
       id: "member_resolved",
     });
-    const memberLookup = createHostedMemberLookup({
-      core: resolvedMember,
-      identity: {
-        maskedPhoneNumberHint: "*** 2671",
-        memberId: resolvedMember.id,
-        phoneNumber: "+14155552671",
-        phoneNumberVerifiedAt: new Date("2025-03-27T08:00:00.000Z"),
-        privyUserId: "did:privy:user_123",
-        signupPhoneCodeSendAttemptId: null,
-        signupPhoneCodeSendAttemptStartedAt: null,
-        signupPhoneCodeSentAt: null,
-        signupPhoneNumber: null,
-        walletAddress: null,
-        walletChainType: null,
-        walletCreatedAt: null,
-        walletProvider: null,
-      },
-      matchedBy: ["privyUserId"],
-    });
 
     mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
       identity: {
@@ -302,48 +184,33 @@ describe("hosted Privy request auth", () => {
         wallet: null,
       },
       linkedAccounts: [],
-      memberId: staleMember.id,
       verifiedPrivyUser: {
+        custom_metadata: {
+          murph_member_id: "member_stale",
+        },
         id: "did:privy:user_123",
       },
     });
-    mocks.readHostedMemberCoreState.mockResolvedValue(staleMember);
-    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(memberLookup);
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(resolvedMember);
 
     await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       member: {
         id: resolvedMember.id,
       },
-      memberLookup,
+    });
+    expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledWith({
+      identity: expect.objectContaining({
+        userId: "did:privy:user_123",
+      }),
+      prisma,
     });
   });
 
-  it("does not authenticate a stale session member id when identity probes find no hosted member", async () => {
-    const staleMember = createHostedMember({
-      id: "member_stale",
-    });
-
-    mocks.resolveHostedPrivySessionFromRequest.mockResolvedValue({
-      identity: {
-        phone: {
-          number: "+14155552671",
-          verifiedAt: 1741194420,
-        },
-        userId: "did:privy:user_123",
-        wallet: null,
-      },
-      linkedAccounts: [],
-      memberId: staleMember.id,
-      verifiedPrivyUser: {
-        id: "did:privy:user_123",
-      },
-    });
-    mocks.readHostedMemberCoreState.mockResolvedValue(staleMember);
+  it("does not authenticate when the canonical Privy-user binding is absent", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
 
     await expect(getPrivyMemberAuth(createAuthenticatedRequest(), prisma)).resolves.toMatchObject({
       member: null,
-      memberLookup: null,
     });
   });
 
@@ -395,7 +262,6 @@ describe("hosted Privy request auth", () => {
           type: "phone",
         },
       ],
-      memberId: null,
       verifiedPrivyUser: {
         id: "did:privy:user_123",
       },
@@ -416,10 +282,8 @@ describe("hosted Privy request auth", () => {
 
   it("blocks suspended members from active hosted mutations", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
-      createHostedMemberLookup({
-        core: createHostedMember({
-          suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
-        }),
+      createHostedMember({
+        suspendedAt: new Date("2025-03-27T08:00:00.000Z"),
       }),
     );
     hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
@@ -434,10 +298,8 @@ describe("hosted Privy request auth", () => {
 
   it("blocks unpaid members from active hosted mutations with a billing-specific message", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
-      createHostedMemberLookup({
-        core: createHostedMember({
-          billingStatus: HostedBillingStatus.unpaid,
-        }),
+      createHostedMember({
+        billingStatus: HostedBillingStatus.unpaid,
       }),
     );
     hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
@@ -453,10 +315,8 @@ describe("hosted Privy request auth", () => {
 
   it("blocks canceled members from active hosted mutations with a cancellation-specific message", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
-      createHostedMemberLookup({
-        core: createHostedMember({
-          billingStatus: HostedBillingStatus.canceled,
-        }),
+      createHostedMember({
+        billingStatus: HostedBillingStatus.canceled,
       }),
     );
     hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
@@ -472,10 +332,8 @@ describe("hosted Privy request auth", () => {
 
   it("allows Family-sponsored members without direct billing through active hosted mutations", async () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(
-      createHostedMemberLookup({
-        core: createHostedMember({
-          billingStatus: HostedBillingStatus.not_started,
-        }),
+      createHostedMember({
+        billingStatus: HostedBillingStatus.not_started,
       }),
     );
     hostedMemberAccessFindUnique.mockResolvedValue(createHostedMemberAccessState({
@@ -524,7 +382,6 @@ describe("hosted Privy request auth", () => {
     expect(mocks.requireHostedAppSessionFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.resolveHostedPrivySessionFromRequest).toHaveBeenCalledTimes(1);
     expect(mocks.lookupHostedMemberForPrivyPrincipal).toHaveBeenCalledTimes(1);
-    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
   });
 
   it("rejects fresh Privy proof for a different hosted member than the app session", async () => {
@@ -688,6 +545,8 @@ function createHostedMember(
     assistantReasoningEffortPreference: null,
     assistantPush: null,
     assistantPushCausalSeq: null,
+    assistantUnhinged: null,
+    assistantUnhingedCausalSeq: null,
     assistantTone: null,
     assistantToneCausalSeq: null,
     assistantVoice: null,
@@ -733,49 +592,6 @@ function createHostedMemberAccessState(
     billingStatus: HostedBillingStatus.active,
     suspendedAt: null,
     threadContainer: null,
-    ...overrides,
-  };
-}
-
-function createHostedMemberLookup(overrides: Partial<{
-  core: HostedMember;
-  identity: {
-    maskedPhoneNumberHint: string | null;
-    memberId: string;
-    phoneNumber: string | null;
-    phoneNumberVerifiedAt: Date | null;
-    privyUserId: string | null;
-    signupPhoneCodeSendAttemptId: string | null;
-    signupPhoneCodeSendAttemptStartedAt: Date | null;
-    signupPhoneCodeSentAt: Date | null;
-    signupPhoneNumber: string | null;
-    walletAddress: string | null;
-    walletChainType: string | null;
-    walletCreatedAt: Date | null;
-    walletProvider: string | null;
-  };
-  matchedBy: string[];
-}> = {}) {
-  return {
-    core: createHostedMember(),
-    identity: {
-      maskedPhoneNumberHint: "*** 2671",
-      memberId: "member_123",
-      phoneNumber: "+14155552671",
-      phoneNumberVerifiedAt: new Date("2025-03-27T08:00:00.000Z"),
-      privyUserId: "did:privy:user_123",
-      signupPhoneCodeSendAttemptId: null,
-      signupPhoneCodeSendAttemptStartedAt: null,
-      signupPhoneCodeSentAt: null,
-      signupPhoneNumber: null,
-      walletAddress: "0xD8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
-      walletChainType: "ethereum",
-      walletCreatedAt: new Date("2025-03-27T08:00:00.000Z"),
-      walletProvider: "privy",
-    },
-    matchedBy: [
-      "privyUserId",
-    ],
     ...overrides,
   };
 }

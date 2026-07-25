@@ -391,6 +391,71 @@ describe("HostedDataPrivacySettings", () => {
     ).toBeLessThan(mocks.requestHostedOnboardingJson.mock.invocationCallOrder[0]);
   });
 
+  test("sends the answered exit reason and note alongside the deletion", async () => {
+    mockHostedDataPrivacyDeleteFlowState({
+      exitNote: "Texts were great, price was not.",
+      exitReason: "too_expensive",
+    });
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    expect(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload).toEqual({
+      authorization: {
+        signature: `0x${"11".repeat(65)}`,
+        token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+      },
+      confirmationPhrase: "DELETE MY ACCOUNT",
+      exitNote: "Texts were great, price was not.",
+      exitReason: "too_expensive",
+    });
+  });
+
+  test("omits exit fields entirely when the member skips the question", async () => {
+    mockHostedDataPrivacyDeleteFlowState();
+
+    const { document, window } = loadLinkedom().parseHTML(
+      "<html><body><div id='root'></div></body></html>",
+    );
+    installGlobals(window, document);
+    const container = document.getElementById("root");
+    assert.ok(container);
+
+    const root: Root = createRoot(container);
+    cleanupRender = async () => {
+      await act(async () => {
+        root.unmount();
+      });
+    };
+
+    await act(async () => {
+      root.render(createElement(HostedDataPrivacySettings, { authenticated: true }));
+    });
+
+    await clickButton(container, "Delete account", window);
+
+    const payload = mocks.requestHostedOnboardingJson.mock.calls[0]?.[0]?.payload;
+    expect(payload).not.toHaveProperty("exitReason");
+    expect(payload).not.toHaveProperty("exitNote");
+  });
+
   test("allows account deletion to succeed after the vault receiver lease window", async () => {
     vi.useFakeTimers();
     mockHostedDataPrivacyDeleteFlowState();
@@ -716,8 +781,8 @@ describe("HostedDataPrivacySettings", () => {
 
 // Values follow the component's useState declaration order:
 // exportPending, exportDialogOpen, acknowledgedSensitiveDownload, exportDialogError,
-// exportSuccess, deletePending, dialogOpen, confirmationPhrase, dialogError, deleted,
-// cleanupPending, privyLogoutDone.
+// exportSuccess, deletePending, dialogOpen, dialogStep, exitReason, exitNote,
+// confirmationPhrase, dialogError, deleted, cleanupPending, privyLogoutDone.
 function mockHostedVaultExportFlowState(input: {
   acknowledgedSensitiveDownload?: boolean;
 } = {}) {
@@ -729,6 +794,9 @@ function mockHostedVaultExportFlowState(input: {
     null,
     false,
     false,
+    "reason",
+    null,
+    "",
     "",
     null,
     false,
@@ -740,6 +808,8 @@ function mockHostedVaultExportFlowState(input: {
 function mockHostedDataPrivacyDeleteFlowState(input: {
   confirmationPhrase?: string;
   dialogError?: string | null;
+  exitNote?: string;
+  exitReason?: string | null;
 } = {}) {
   mocks.useStateValues = [
     false,
@@ -749,6 +819,11 @@ function mockHostedDataPrivacyDeleteFlowState(input: {
     null,
     false,
     true,
+    // These tests exercise the confirmation step, so start past the optional
+    // exit-reason step unless a case opts into an answered reason.
+    "confirm",
+    input.exitReason ?? null,
+    input.exitNote ?? "",
     input.confirmationPhrase ?? "DELETE MY ACCOUNT",
     input.dialogError ?? null,
     false,
@@ -766,6 +841,9 @@ function mockHostedDataPrivacyDeletedState() {
     null,
     false,
     false,
+    "reason",
+    null,
+    "",
     "",
     null,
     true,
@@ -820,6 +898,7 @@ function createBrowserVaultReplicaForTest() {
         },
         rowSchema: "murph.browser-vault.lab-result-row.v1",
         sourceLabel: "Clinical records",
+        specimenKind: "serum",
         textValue: null,
         unit: "%",
         value: 5.4,

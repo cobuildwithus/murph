@@ -79,8 +79,8 @@ test("browser vault projects all live lab history without widening the wearable 
     sourceBundleHash: "f".repeat(64),
     vault,
   });
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 2);
-  assert.equal(replica.generation, 2);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 3);
+  assert.equal(replica.generation, 3);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
 
   assert.equal(replica.labResultRows.length, 7);
@@ -94,6 +94,7 @@ test("browser vault projects all live lab history without widening the wearable 
   assert.equal(oldestHba1c.unit, "%");
   assert.equal(oldestHba1c.normalizedValue, 5.4);
   assert.equal(oldestHba1c.normalizedUnit, "percent");
+  assert.equal(oldestHba1c.specimenKind, "serum");
   assert.deepEqual(oldestHba1c.referenceRange, { high: 5.6, low: 4, text: "4.0-5.6" });
   assert.equal(oldestHba1c.labName, "Example Lab");
 
@@ -464,11 +465,56 @@ test("lab detail uses canonical units for conversion-owned and dimensionally uni
       .map(({ unit, value }) => ({ unit, value })),
     [{ unit: "g/dL", value: 7 }, { unit: "g/dL", value: 7 }],
   );
+  assert.equal(
+    selectBrowserVaultLabBiomarkerDetail(client, "total-protein")?.latest.specimenKind,
+    "serum",
+  );
   assert.deepEqual(
     selectBrowserVaultLabBiomarkerDetail(client, "neutrophils-absolute")?.chartSeries
       .map(({ unit, value }) => ({ unit, value })),
     [{ unit: "10^3/uL", value: 4 }, { unit: "10^3/uL", value: 4 }],
   );
+});
+
+test("lab result projection exposes only an allowlisted fallback specimen kind", async () => {
+  const vault = createVaultReadModel({
+    entities: [
+      createLabTest("evt_serum", "2026-01-01T08:00:00.000Z", [{
+        analyte: "Chloride",
+        unit: "mmol/L",
+        value: 101,
+      }], "serum"),
+      createLabTest("evt_plasma", "2026-02-01T08:00:00.000Z", [{
+        analyte: "Chloride",
+        unit: "mmol/L",
+        value: 102,
+      }], "plasma"),
+      createLabTest("evt_urine", "2026-03-01T08:00:00.000Z", [{
+        analyte: "Chloride",
+        unit: "mmol/L",
+        value: 103,
+      }], "urine"),
+      createLabTest("evt_missing", "2026-04-01T08:00:00.000Z", [{
+        analyte: "Chloride",
+        unit: "mmol/L",
+        value: 104,
+      }], null),
+    ],
+    metadata: null,
+    vaultRoot: "browser://vault",
+  });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-07-22T12:00:00.000Z",
+    metricPoints: buildMetricProjection(vault).metricPoints,
+    sourceBundleHash: "7".repeat(64),
+    vault,
+  });
+
+  assert.deepEqual(
+    replica.labResultRows.map((row) => row.specimenKind),
+    ["serum", "plasma", null, null],
+  );
+  assert.doesNotMatch(JSON.stringify(replica.labResultRows), /specimenType|testCategory/u);
 });
 
 test("unitless lab values remain raw and are excluded from normalized presentation", async () => {
@@ -774,7 +820,7 @@ test("lab-only aliases preserve manual metric selection and goal authority", asy
     sourceBundleHash: "a".repeat(64),
     vault,
   });
-  assert.equal(replica.generation, 2);
+  assert.equal(replica.generation, 3);
   const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
   const indexed = selectBrowserVaultMeasuredBiomarkers(client)
     .find((entry) => entry.metricKey === "total-testosterone");
@@ -1144,12 +1190,20 @@ test("browser vault parser defaults a missing additive lab collection and reject
     }),
     /normalizedValue and normalizedUnit must be provided together/u,
   );
+  assert.throws(
+    () => parseBrowserVaultReplica({
+      ...legacyReplica,
+      labResultRows: [{ ...row, specimenKind: "urine" }],
+    }),
+    /specimenKind must be plasma, serum, or null/u,
+  );
 });
 
 function createLabTest(
   entityId: string,
   collectedAt: string,
   results: readonly Record<string, unknown>[],
+  specimenType: string | null = "serum",
 ): CanonicalEntity {
   return createEvent(entityId, "test", collectedAt, {
     collectedAt,
@@ -1162,7 +1216,7 @@ function createLabTest(
     reportedAt: addOneDay(collectedAt),
     results,
     source: "import",
-    specimenType: "serum",
+    ...(specimenType === null ? {} : { specimenType }),
     testCategory: "blood",
     testName: "blood_panel",
   });

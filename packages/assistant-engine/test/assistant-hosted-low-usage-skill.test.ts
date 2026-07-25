@@ -68,10 +68,17 @@ describe('assistant hosted low-usage skill', () => {
     expect(skill).toContain('`owner: true`, `billingActive: true`')
     expect(skill).toContain('matches exactly one `members` row')
     expect(skill).toContain('navigation to Settings > Family')
-    expect(skill).toContain('Call `murph.group action="read_usage"` only after')
+    expect(skill).toContain('call `murph.group action="read_usage"` once before writing the')
+    expect(skill).toContain('include it in the same segment as a plain first-party link')
+    expect(skill).toContain("Match the room's energy")
+    expect(skill).toContain('nominating someone to cover it')
+    expect(skill).toContain('skip the heads-up entirely')
+    expect(skill).toContain('standing no-re-offer rule wins')
     expect(skill).toContain('Never switch it automatically')
     expect(skill).toContain('If no funding URL is returned')
     expect(skill).toContain('period end when relevant')
+    expect(skill).toContain('remaining percentage when the result includes remainingPercent')
+    expect(skill).not.toContain('Share only its')
   })
 
   it('preserves explicit billing confirmation and payment truth', async () => {
@@ -86,7 +93,10 @@ describe('assistant hosted low-usage skill', () => {
       'Never choose an amount, start Checkout, or claim usage was added',
     )
     expect(skill).toContain(
-      'Never plead, guilt, dramatize, invent urgency',
+      'never reveal who paid, amounts, or',
     )
+    expect(skill).toContain('never claim usage was added when it was not')
+    expect(skill).toContain('standing objective')
+    expect(skill).toContain('deferral rules below still outrank this objective')
   })
 })

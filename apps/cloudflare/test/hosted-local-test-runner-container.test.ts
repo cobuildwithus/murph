@@ -76,6 +76,7 @@ function createSnapshotCompleteRequest(
   userId: string,
   encryptedObjectSha256 = "a".repeat(64),
   reason?: "canonical_runtime_commit" | "idle_shutdown",
+  idleCheckpointTrigger?: "idle_window" | "runtime_wake" | "shutdown_signal",
 ): Request {
   return new Request(
     `http://${HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore}`
@@ -85,7 +86,12 @@ function createSnapshotCompleteRequest(
         archive: {
           encryptedObjectSha256,
         },
-        checkpointRequest: reason ? { reason } : {},
+        checkpointRequest: reason
+          ? {
+              ...(idleCheckpointTrigger ? { idleCheckpointTrigger } : {}),
+              reason,
+            }
+          : {},
         objectKey: `users/${userId}/workspace-snapshots/snapshot-test.enc`,
         snapshotId: "snapshot-test",
       }),
@@ -526,7 +532,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     armSnapshotPublicationCorruption(userId);
 
     const rejectedResponse = await handler(
-      createSnapshotCompleteRequest(userId, originalSha256),
+      createSnapshotCompleteRequest(
+        userId,
+        originalSha256,
+        "idle_shutdown",
+        "idle_window",
+      ),
       createOutboundEnv(),
       { containerId: "opaque-container-id" },
     );
@@ -545,7 +556,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     );
 
     const cleanResponse = await handler(
-      createSnapshotCompleteRequest(userId, originalSha256),
+      createSnapshotCompleteRequest(
+        userId,
+        originalSha256,
+        "idle_shutdown",
+        "idle_window",
+      ),
       createOutboundEnv(),
       { containerId: "opaque-container-id" },
     );
@@ -553,6 +569,39 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(observedSha256).toEqual([
       `0${originalSha256.slice(1)}`,
       originalSha256,
+    ]);
+  });
+
+  it("does not consume snapshot publication corruption on a pre-provider checkpoint", async () => {
+    const userId = "member_snapshot_publication_pre_provider";
+    const originalSha256 = "a".repeat(64);
+    const observedSha256: Array<string | null> = [];
+    const realHandler = vi.fn(async (request: Request) => {
+      observedSha256.push(await readSnapshotCompleteSha256(request));
+      return new Response("snapshot metadata rejected", { status: 409 });
+    });
+    const handler = wrapSnapshotPublicationCorruptionForTest(realHandler);
+    armSnapshotPublicationCorruption(userId);
+
+    await handler(
+      createSnapshotCompleteRequest(userId, originalSha256, "idle_shutdown"),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+    await handler(
+      createSnapshotCompleteRequest(
+        userId,
+        originalSha256,
+        "idle_shutdown",
+        "runtime_wake",
+      ),
+      createOutboundEnv(),
+      { containerId: "opaque-container-id" },
+    );
+
+    expect(observedSha256).toEqual([
+      originalSha256,
+      `0${originalSha256.slice(1)}`,
     ]);
   });
 
@@ -572,7 +621,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       { containerId: "opaque-container-id" },
     );
     await handler(
-      createSnapshotCompleteRequest(userId),
+      createSnapshotCompleteRequest(
+        userId,
+        "a".repeat(64),
+        "idle_shutdown",
+        "idle_window",
+      ),
       createOutboundEnv(),
       { containerId: "opaque-container-id" },
     );
@@ -637,6 +691,42 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       );
       expect(realHandler).toHaveBeenCalledTimes(4);
       expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(false);
+    } finally {
+      releaseShutdownCheckpointPublicationBarrier(userId);
+    }
+  });
+
+  it("does not publish a held shutdown checkpoint after its request is aborted", async () => {
+    const userId = "member_shutdown_checkpoint_barrier_aborted";
+    const realHandler = vi.fn(async () => new Response("checkpoint committed", { status: 200 }));
+    const handler = wrapShutdownCheckpointPublicationBarrierForTest(realHandler);
+    const abortController = new AbortController();
+    const abortReason = new Error("Synthetic live-invocation wake interrupted the checkpoint.");
+    const checkpointRequest = createSnapshotCompleteRequest(
+      userId,
+      "a".repeat(64),
+      "idle_shutdown",
+    );
+    const abortableCheckpointRequest = new Request(checkpointRequest, {
+      signal: abortController.signal,
+    });
+    armShutdownCheckpointPublicationBarrier(userId);
+
+    try {
+      const heldPublication = handler(
+        abortableCheckpointRequest,
+        createOutboundEnv(),
+        { containerId: "opaque-container-id" },
+      );
+      await vi.waitFor(() => {
+        expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("entered");
+      });
+
+      abortController.abort(abortReason);
+      expect(releaseShutdownCheckpointPublicationBarrier(userId)).toBe(true);
+      await expect(heldPublication).rejects.toBe(abortReason);
+      expect(realHandler).not.toHaveBeenCalled();
+      expect(readShutdownCheckpointPublicationBarrierState(userId)).toBe("unarmed");
     } finally {
       releaseShutdownCheckpointPublicationBarrier(userId);
     }

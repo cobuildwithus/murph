@@ -1,5 +1,5 @@
 import {
-  buildOverviewWeeklyStatsFromDailySampleSummaries,
+  buildOverviewWeeklyStatDetailsFromDailySampleSummaries,
   type OverviewWeeklySampleSummary,
 } from "./overview-weekly-stats.ts";
 
@@ -51,7 +51,10 @@ interface SharedGroupHeartRateZoneDayData {
 
 export interface SharedGroupWeeklyStat {
   currentWeekAvg: number;
+  observedDayCount: number;
+  observedDates: string[];
   stream: string;
+  throughDate: string;
   unit: string | null;
 }
 
@@ -74,17 +77,28 @@ export function buildSharedGroupWeeklyMembers(input: {
   return input.members.map((member) => ({
     displayName: member.displayName,
     memberId: member.memberId,
-    weeklyStats: buildOverviewWeeklyStatsFromDailySampleSummaries(
+    weeklyStats: buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
       readDailySampleSummaries(member),
       input.timeZone,
       input.referenceAt,
-    ).flatMap((stat) => stat.currentWeekAvg === null
-      ? []
-      : [{
-          currentWeekAvg: stat.currentWeekAvg,
-          stream: stat.stream,
-          unit: stat.unit,
-        }]),
+      { includeCurrentDay: false },
+    ).flatMap((stat) => {
+      if (stat.currentWeekAvg === null) {
+        return [];
+      }
+      const observedDates = stat.currentWeekObservedDates;
+      const throughDate = observedDates.at(-1);
+      return throughDate
+        ? [{
+            currentWeekAvg: stat.currentWeekAvg,
+            observedDayCount: observedDates.length,
+            observedDates,
+            stream: stat.stream,
+            throughDate,
+            unit: stat.unit,
+          }]
+        : [];
+    }),
   }));
 }
 
@@ -120,6 +134,9 @@ function appendDailySampleSummaries(input: {
     return;
   }
   if (isWorkoutDayData(data)) {
+    if (input.projectionScopeKey !== "workout-days.v0") {
+      return;
+    }
     input.summaries.push(
       dailySummary({
         date: data.date,

@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 
-import { cloneElement, createElement, isValidElement, type ReactNode } from "react";
+import {
+  act,
+  cloneElement,
+  createElement,
+  isValidElement,
+  type ReactNode,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
+
+import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   readHostedMemberBillingEligibilityState: vi.fn(),
+  readHostedAiUsageGate: vi.fn(),
+  readHostedMemberMessagingSetupState: vi.fn(),
   projectHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
-  resolveHostedAiUsageGate: vi.fn(),
   routerRefresh: vi.fn(),
   shouldShowHomeDeviceSyncStep: vi.fn(),
 }));
@@ -135,8 +144,12 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
   readHostedMemberBillingEligibilityState: mocks.readHostedMemberBillingEligibilityState,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
+  readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
+}));
+
 vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
-  resolveHostedAiUsageGate: mocks.resolveHostedAiUsageGate,
+  readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
@@ -170,6 +183,12 @@ beforeEach(() => {
   });
   mocks.shouldShowHomeDeviceSyncStep.mockResolvedValue(true);
   mocks.readHostedMemberBillingEligibilityState.mockResolvedValue(null);
+  // Default to a member Murph can already reach, so the "Message Murph" step
+  // stays hidden unless a test opts into the awaiting-first-message state.
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: "hbidx:phone:v1:member" },
+    routing: null,
+  });
   mocks.resolveHostedMurphContactOption.mockResolvedValue({
     href: "sms:+15555550123",
     kind: "text",
@@ -177,7 +196,7 @@ beforeEach(() => {
     rel: undefined,
     target: undefined,
   });
-  mocks.resolveHostedAiUsageGate.mockResolvedValue({
+  mocks.readHostedAiUsageGate.mockResolvedValue({
     allowed: true,
     allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
@@ -212,7 +231,157 @@ test("HomePage stops before page loaders when dashboard auth redirects", async (
   }, /NEXT_REDIRECT:\/join/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls.length, 0);
   assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
-  assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 0);
+  assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 0);
+});
+
+test("HomePage keeps its core content when an independent projection fails", async () => {
+  mocks.shouldShowHomeDeviceSyncStep.mockRejectedValueOnce(
+    new Error("device projection unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(markup, /Connect devices/);
+  assert.match(markup, /Sync labs/);
+  assert.match(markup, /Start an experiment/);
+  assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
+});
+
+test("HomePage degrades a failed read-only usage projection without mutating allowance state", async () => {
+  mocks.readHostedAiUsageGate.mockRejectedValueOnce(
+    new Error("usage projection unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Welcome to Murph/);
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(markup, /Account notice/);
+  assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
+  assert.equal(mocks.readHostedMemberBillingEligibilityState.mock.calls.length, 0);
+});
+
+test("HomePage retains an authoritative usage notice when its action projection fails", async () => {
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
+    allowed: false,
+    allowanceSource: "direct_paid_member_plan",
+    billingPlanCode: "launch_monthly",
+    limitUsdMicros: 10_000_000n,
+    memberId: MEMBER.id,
+    periodEnd: new Date("2026-06-01T00:00:00.000Z"),
+    periodStart: new Date("2026-05-01T00:00:00.000Z"),
+    reason: "ai_usage_limit_exceeded",
+    remainingUsdMicros: 0n,
+    retryAfter: new Date("2026-06-01T00:00:00.000Z"),
+    spentUsdMicros: 10_000_000n,
+    usageCreditBalanceUsdMicros: 0n,
+    usageCreditLedgerVersion: 0n,
+    userNotice: {
+      code: "pulse_upgrade_edge",
+      message:
+        "You've used 100% of this month's included Pulse usage. New usage is blocked.",
+    },
+  });
+  mocks.projectHostedPersonalAiUsageStatus.mockRejectedValueOnce(
+    new Error("usage action unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Some dashboard details are unavailable/);
+  assert.match(markup, /used 100% of this month(?:&#x27;|')s included Pulse usage/u);
+  assert.match(markup, /until your included usage resets/);
+  assert.doesNotMatch(markup, />Add usage</);
+});
+
+test("HomeDataLoadAlert retries the current dashboard route", async () => {
+  const { HomeDataLoadAlert } = await import(
+    "../src/components/home/home-data-load-alert"
+  );
+  const rendered = await renderClientComponent(createElement(HomeDataLoadAlert));
+
+  try {
+    const retryButton = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Try again");
+    assert.ok(retryButton);
+
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("DashboardCriticalLoadError refreshes the unavailable dashboard layout", async () => {
+  const { DashboardCriticalLoadError } = await import(
+    "../src/components/dashboard/dashboard-critical-load-error"
+  );
+  const rendered = await renderClientComponent(
+    createElement(DashboardCriticalLoadError),
+  );
+
+  try {
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("DashboardError gives non-home dashboard child failures a route-group reset", async () => {
+  const reset = vi.fn();
+  const { default: DashboardError } = await import(
+    "../app/(dashboard)/error"
+  );
+  const rendered = await renderClientComponent(createElement(DashboardError, {
+    error: new Error("records data unavailable"),
+    reset,
+  }));
+
+  try {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Your dashboard could not be loaded/,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /could not load this dashboard right now/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Log in or sign up/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /records data unavailable/,
+    );
+
+    await act(async () => {
+      rendered.button.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    assert.equal(reset.mock.calls.length, 1);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("HomePage hides the connect devices card when device sync is already active", async () => {
@@ -227,9 +396,9 @@ test("HomePage hides the connect devices card when device sync is already active
   assert.match(markup, /Sync labs/);
   assert.match(markup, /Start an experiment/);
   assert.equal(mocks.shouldShowHomeDeviceSyncStep.mock.calls[0]?.[0]?.member, MEMBER);
-  assert.equal(mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.memberId, MEMBER.id);
+  assert.equal(mocks.readHostedAiUsageGate.mock.calls[0]?.[0]?.memberId, MEMBER.id);
   assert.equal(
-    mocks.resolveHostedAiUsageGate.mock.calls[0]?.[0]?.now.toISOString(),
+    mocks.readHostedAiUsageGate.mock.calls[0]?.[0]?.now.toISOString(),
     "2026-05-26T12:00:00.000Z",
   );
 });
@@ -270,7 +439,7 @@ test("HomePage shows the resume billing banner for paused Pulse Trial users", as
 });
 
 test("HomePage does not show a blocked banner while purchased usage remains", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: true,
     allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
@@ -294,7 +463,7 @@ test("HomePage does not show a blocked banner while purchased usage remains", as
 });
 
 test("HomePage shows blocked Pulse usage with an add-usage action", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
@@ -334,7 +503,7 @@ test("HomePage shows blocked Pulse usage with an add-usage action", async () => 
   assert.match(markup, /You can add more usage now/);
   assert.match(markup, />Add usage</);
   assert.match(markup, /href="\/settings\?addUsage=true#subscription"/);
-  assert.equal(mocks.resolveHostedAiUsageGate.mock.calls.length, 1);
+  assert.equal(mocks.readHostedAiUsageGate.mock.calls.length, 1);
   assert.equal(mocks.projectHostedPersonalAiUsageStatus.mock.calls.length, 1);
   assert.equal(
     mocks.projectHostedPersonalAiUsageStatus.mock.calls[0]?.[0]?.decision.userNotice.code,
@@ -346,7 +515,7 @@ test("HomePage keeps the exhausted Pulse block notice when action resolution fai
   mocks.readHostedMemberBillingEligibilityState.mockRejectedValue(
     new Error("billing eligibility unavailable"),
   );
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_monthly",
@@ -406,7 +575,7 @@ test("UsageLimitBanner omits thread-container notices from the personal dashboar
 });
 
 test("HomePage shows blocked Edge usage with an add-usage action", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "direct_paid_member_plan",
     billingPlanCode: "launch_edge_monthly",
@@ -448,7 +617,7 @@ test("HomePage shows blocked Edge usage with an add-usage action", async () => {
 });
 
 test("HomePage shows a blocked Family usage notice without a personal action", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "family_sponsored_plan",
     billingPlanCode: "launch_monthly",
@@ -481,7 +650,7 @@ test("HomePage shows a blocked Family usage notice without a personal action", a
 });
 
 test("HomePage shows blocked trial usage with the existing Start Pulse action", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     allowanceSource: "direct_trial",
     billingPlanCode: "launch_monthly",
@@ -524,7 +693,7 @@ test("HomePage shows blocked trial usage with the existing Start Pulse action", 
 });
 
 test("HomePage shows non-limit denied usage notices without a reset countdown", async () => {
-  mocks.resolveHostedAiUsageGate.mockResolvedValueOnce({
+  mocks.readHostedAiUsageGate.mockResolvedValueOnce({
     allowed: false,
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 4_500_000n,
@@ -549,6 +718,47 @@ test("HomePage shows non-limit denied usage notices without a reset countdown", 
   assert.doesNotMatch(markup, /Start Pulse|Upgrade to Edge/);
   assert.doesNotMatch(markup, /href="\/settings/);
   assert.doesNotMatch(markup, /Resets in/u);
+});
+
+test("HomePage preserves the initial-visit marker when contact projection retry is needed", async () => {
+  mocks.resolveHostedMurphContactOption.mockRejectedValueOnce(
+    new Error("contact context unavailable"),
+  );
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const searchParams = {
+    initialVisit: "true",
+  };
+  const failedMarkup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve(searchParams),
+    }),
+  );
+
+  assert.match(failedMarkup, /Welcome to Murph/);
+  assert.match(failedMarkup, /Some dashboard details are unavailable/);
+  assert.doesNotMatch(
+    failedMarkup,
+    /data-home-initial-visit-persona-picker/,
+  );
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 1);
+
+  const recoveredMarkup = renderToStaticMarkup(
+    await HomePage({
+      searchParams: Promise.resolve(searchParams),
+    }),
+  );
+
+  assert.doesNotMatch(
+    recoveredMarkup,
+    /Some dashboard details are unavailable/,
+  );
+  assert.match(
+    recoveredMarkup,
+    /data-home-initial-visit-persona-picker="shown"/,
+  );
+  assert.match(recoveredMarkup, /data-contact-action-href="sms:\+15555550123"/);
+  assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 2);
 });
 
 test("HomePage opens persona onboarding for initial visits", async () => {
@@ -633,4 +843,45 @@ test("HomePage keeps persona onboarding gated behind the exact initial-visit mar
 
   assert.doesNotMatch(markup, /data-home-initial-visit-persona-picker/);
   assert.equal(mocks.resolveHostedMurphContactOption.mock.calls.length, 0);
+});
+
+test("HomePage asks for the first message when Murph has no way to send one", async () => {
+  // Telegram is linked but no inbound thread exists yet, so Murph cannot open
+  // the conversation and has to ask for it on the dashboard instead.
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: null,
+      telegramUserId: "456",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.match(markup, /Message Murph/);
+  assert.match(markup, /Murph can&#x27;t message you first/);
+  assert.ok(markup.indexOf("Message Murph") < markup.indexOf("Connect devices"));
+});
+
+test("HomePage hides the message step once Murph has a way to reach the member", async () => {
+  mocks.readHostedMemberMessagingSetupState.mockResolvedValue({
+    identity: { phoneLookupKey: null },
+    routing: {
+      linqChatId: null,
+      pendingLinqChatId: null,
+      pendingLinqParticipantContact: null,
+      telegramThreadId: "456",
+      telegramUserId: "456",
+    },
+  });
+
+  const { default: HomePage } = await import("../app/(dashboard)/home/page");
+  const markup = renderToStaticMarkup(await HomePage());
+
+  assert.doesNotMatch(markup, /Murph can&#x27;t message you first/);
+  assert.match(markup, /Connect devices/);
 });

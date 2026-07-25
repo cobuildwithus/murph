@@ -4,9 +4,6 @@ import {
   resolveHostedAiUsageGate,
   type HostedAiUsageGateDecisionWithSource,
 } from "../hosted-execution/usage-allowance";
-import {
-  hostedMailboxSystemItemKindNeedsAiUsageGate,
-} from "../hosted-mailbox/ai-usage-gate";
 
 export type HostedRuntimeUsageGateCheck =
   | {
@@ -60,18 +57,6 @@ function isHostedRuntimeUsageRunningLow(
   const lowThresholdUsdMicros = (decision.limitUsdMicros + 4n) / 5n;
   return decision.remainingUsdMicros > 0n
     && decision.remainingUsdMicros <= lowThresholdUsdMicros;
-}
-
-// AI-gated mailbox work: conversation-lane items and shared gated system kinds.
-export function hostedRuntimeMailboxEntryNeedsAiUsageGate(entry: {
-  kind: string;
-  lane: string;
-}): boolean {
-  return entry.lane === "conversation" ||
-    (
-      entry.lane === "system" &&
-      hostedMailboxSystemItemKindNeedsAiUsageGate(entry.kind)
-    );
 }
 
 function normalizeHostedRuntimeUsageDecisionDate(value: Date | string | undefined): Date {

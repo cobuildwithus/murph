@@ -59,6 +59,86 @@ describe('assistant group-chat comedy skill', () => {
     expect(comedy).not.toContain('eat 74 hot dogs')
   })
 
+  it('keeps the AI-voice self-parody format occasional, not the house voice', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'AI-voice self-parody: because Murph is an AI, this is the teller taking the hit first.',
+    )
+    expect(normalized).toContain(
+      'needless transparency framing, load-bearing caveats',
+    )
+    expect(normalized).toContain(
+      'for this one message the register overrides the usual brevity',
+    )
+    expect(normalized).toContain(
+      "not the room's length ceiling: stay inside one compact message",
+    )
+    expect(normalized).toContain('never the house voice or default register')
+    expect(normalized).toContain('the parody collapses into the thing it mocks')
+  })
+
+  it('answers a demand made of the referee with an unprompted song', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalized = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalized).toContain(
+      'When the room demands a real apology, that bit can be a whole sung apology — nobody has to ask for the song',
+    )
+    expect(normalized).toContain(
+      'the group extracts something from you — an apology, a concession, a confession, a defense of a ruling they hated',
+    )
+    expect(normalized).toContain(
+      'Reach for it yourself.** Nobody has to ask for a song and nobody has to name a genre.',
+    )
+    expect(normalized).toContain(
+      'Choosing it unprompted is the whole move; waiting to be commissioned wastes it.',
+    )
+    expect(normalized).toContain(
+      'It extends past apologies to anything the room puts you on the hook for',
+    )
+    expect(normalized).toContain(
+      'a song for someone having a rough week is warmth, never a roast in a nicer key',
+    )
+    expect(normalized).toContain(
+      'a demand made of you keeps, a passing quip does not',
+    )
+    expect(normalized).toContain('Scarcity is the format.')
+    expect(normalized).toContain('The hard limits do not bend for a melody.')
+    expect(normalized).toContain(
+      'text bit → comic → voice memo → song → sportsbook odds → ruling',
+    )
+    expect(normalized).toContain(
+      'short voice memos; a sung apology nobody asked for.',
+    )
+  })
+
+  it('defaults comedy songs to country without freezing the genre', async () => {
+    const comedy = await readSkill('groupchat-comedy')
+    const normalizedComedy = comedy.replace(/\s+/gu, ' ')
+
+    expect(normalizedComedy).toContain('Default to country.')
+    expect(normalizedComedy).toContain(
+      'the more heartfelt the delivery, the funnier the trivial offense',
+    )
+    expect(normalizedComedy).toContain(
+      "Go somewhere else when the room's own vibe clearly points there",
+    )
+    expect(normalizedComedy).toContain(
+      'when someone does name a genre, honor it exactly',
+    )
+
+    // The reggae house default must not silently outrank the comedy lane.
+    const music = await readSkill('music-generation')
+    const normalizedMusic = music.replace(/\s+/gu, ' ')
+
+    expect(normalizedMusic).toContain(
+      'a group-chat apology or on-the-hook song defaults to country',
+    )
+    expect(normalizedMusic).toContain('`groupchat-comedy` owns that call')
+  })
+
   it('keeps challenge kickoff guidance aligned with the comedy owner', async () => {
     const challenge = await readSkill('group-challenge')
     const normalized = challenge.replace(/\s+/gu, ' ')

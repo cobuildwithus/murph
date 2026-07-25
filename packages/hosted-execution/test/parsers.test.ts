@@ -5,11 +5,12 @@ import {
 } from "../src/contracts.ts";
 import {
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
-  HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES,
 } from "../src/runtime-control.ts";
 
 import {
+  parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
   parseHostedExecutionWake,
@@ -20,6 +21,23 @@ import {
   parseHostedRuntimeNewsletterToolRequest,
   parseHostedRuntimeNewsletterToolResponse,
 } from "../src/parsers.ts";
+
+describe("parseHostedExecutionDirectRoute", () => {
+  it("accepts only exact private route fields", () => {
+    expect(parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+    })).toEqual({
+      channel: "linq",
+      threadId: "chat_123",
+    });
+    expect(() => parseHostedExecutionDirectRoute({
+      channel: "linq",
+      threadId: "chat_123",
+      threadIsDirect: true,
+    })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
 
 describe("parseHostedExecutionEvent", () => {
   it("parses runtime control events", () => {
@@ -194,7 +212,7 @@ describe("parseHostedExecutionEvent", () => {
             from: "+15550001111",
             isFromMe: false,
             messageId: "reaction_event_123",
-            parts: [{ type: "text", value: "Yes." }],
+            parts: [{ type: "text", value: "Reacted with a like reaction." }],
             replyToMessageId: "msg_murph_123",
             threadIsDirect: true,
           },
@@ -608,6 +626,34 @@ describe("parseHostedExecutionEvent", () => {
     });
   });
 
+  it("parses an email direct route for automatic meal capture", () => {
+    const wake = {
+      directRoute: {
+        channel: "email",
+        deliveryTarget: "member@example.test",
+      },
+      eventId: "meal-photo:enrollment:capture",
+      kind: "meal-photo.captured",
+      mealPhoto: {
+        byteLength: 4,
+        captureId: "a".repeat(64),
+        capturedAt: "2026-04-26T00:00:00.000Z",
+        mealPhotoKey: "meal-photo-key",
+        sha256: "b".repeat(64),
+      },
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      userId: "member_123",
+    };
+    expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(() => parseHostedExecutionWake({
+      ...wake,
+      directRoute: {
+        channel: "email",
+        threadId: "member@example.test",
+      },
+    })).toThrow("directRoute");
+  });
+
   it("parses device-sync reconcile_due wakes", () => {
     expect(
       parseHostedExecutionEvent({
@@ -657,6 +703,43 @@ describe("parseHostedExecutionEvent", () => {
         userId: "user-1",
       }),
     ).toThrow(/channel is invalid/i);
+  });
+
+  it("preserves telegram group sender identity through the wake parser", () => {
+    const wake = {
+      eventId: "evt_telegram_group",
+      kind: "conversation.message",
+      message: {
+        channel: "telegram",
+        routeAuthority: {
+          channel: "telegram",
+          containerMemberId: "member_container",
+          threadId: "chat_group",
+        },
+        telegramMessage: {
+          from: "1234567890",
+          messageId: "message-1",
+          schema: "murph.hosted-telegram-message.v1",
+          senderUsername: "alice_example",
+          text: "hello group",
+          threadId: "chat_group",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-07-24T00:00:00.000Z",
+      userId: "member_container",
+    };
+
+    const parsed = parseHostedExecutionWake(wake);
+    expect(parsed.kind).toBe("conversation.message");
+    if (parsed.kind !== "conversation.message") {
+      throw new Error("Expected a conversation message wake.");
+    }
+    if (parsed.message.channel !== "telegram") {
+      throw new Error("Expected a telegram conversation message wake.");
+    }
+    expect(parsed.message.telegramMessage.from).toBe("1234567890");
+    expect(parsed.message.telegramMessage.senderUsername).toBe("alice_example");
   });
 
   it("rejects legacy provider message event kinds", () => {
@@ -1524,17 +1607,43 @@ describe("parseHostedRuntimeGroupTool", () => {
       linqSenderHandles: ["+15551110001", "member@example.test"],
       projectionScopes,
     });
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes,
+      telegramSenderHandles: [" 1234567890 "],
+    })).toEqual({
+      action: "read_shared",
+      projectionScopes,
+      telegramSenderHandles: ["1234567890"],
+    });
 
-    for (const linqSenderHandles of [
-      [],
-      ["+15551110001", "+15551110001"],
-      [" "],
-      ["a".repeat(513)],
-      Array.from({ length: 33 }, (_, index) => `sender-${index}`),
+    // One group runtime is bound to a single provider thread, so evidence for
+    // two channels is a contradiction Web must never resolve by guessing.
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      linqSenderHandles: ["+15551110001"],
+      projectionScopes,
+      telegramSenderHandles: ["1234567890"],
+    })).toThrow(/more than one channel/u);
+
+    for (const senderHandles of [
+      { linqSenderHandles: [] },
+      { linqSenderHandles: ["+15551110001", "+15551110001"] },
+      { linqSenderHandles: [" "] },
+      { linqSenderHandles: ["a".repeat(513)] },
+      {
+        linqSenderHandles: Array.from(
+          { length: 33 },
+          (_, index) => `sender-${index}`,
+        ),
+      },
+      { telegramSenderHandles: [] },
+      { telegramSenderHandles: ["1234567890", "1234567890"] },
+      { telegramSenderHandles: ["a".repeat(513)] },
     ]) {
       expect(() => parseHostedRuntimeGroupToolRequest({
         action: "read_shared",
-        linqSenderHandles,
+        ...senderHandles,
         projectionScopes,
       })).toThrow();
     }
@@ -1547,11 +1656,11 @@ describe("parseHostedRuntimeGroupTool", () => {
 
     const maximallyEscapedRequest = {
       action: "read_shared",
-      linqSenderHandles: Array.from(
+      telegramSenderHandles: Array.from(
         { length: HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX },
         (_, index) => `${index}`.padStart(2, "0")
           + "\0".repeat(
-            HOSTED_RUNTIME_GROUP_LINQ_SENDER_HANDLE_MAX_CODE_POINTS - 2,
+            HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS - 2,
           ),
       ),
       projectionScopes,
@@ -2117,8 +2226,8 @@ describe("parseHostedRuntimeGroupTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("parses coarse group usage responses without accepting accounting fields", () => {
-    const response = {
+  it("parses quantified group usage responses without accepting accounting fields", () => {
+    const legacyResponse = {
       action: "read_usage" as const,
       result: {
         status: "ok" as const,
@@ -2129,7 +2238,31 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     };
+    expect(parseHostedRuntimeGroupToolResponse(legacyResponse))
+      .toEqual(legacyResponse);
+    const response = {
+      ...legacyResponse,
+      result: {
+        ...legacyResponse.result,
+        usage: {
+          ...legacyResponse.result.usage,
+          remainingPercent: 20,
+        },
+      },
+    };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    for (const invalidRemainingPercent of [-1, 20.5, 101]) {
+      expect(() => parseHostedRuntimeGroupToolResponse({
+        ...response,
+        result: {
+          ...response.result,
+          usage: {
+            ...response.result.usage,
+            remainingPercent: invalidRemainingPercent,
+          },
+        },
+      })).toThrow(/remainingPercent/u);
+    }
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {

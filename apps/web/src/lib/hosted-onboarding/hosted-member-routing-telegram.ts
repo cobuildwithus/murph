@@ -5,6 +5,7 @@ import {
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 
 import { getPrisma } from "../prisma";
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   createHostedTelegramUserLookupKey,
   createHostedTelegramUserLookupKeyReadCandidates,
@@ -16,6 +17,7 @@ import {
 } from "./member-private-codecs";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+  lockHostedMemberRow,
 } from "./shared";
 
 export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
@@ -30,6 +32,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
     throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
+  await lockHostedMemberRow(input.prisma, input.memberId);
   await assertHostedMemberTelegramRoutingBindingAvailableTx({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -104,12 +107,14 @@ export async function syncHostedMemberTelegramRoutingBinding(input: {
   const prisma = input.prisma ?? getPrisma();
 
   await prisma.$transaction(
-    (tx) => upsertHostedMemberTelegramRoutingBindingTx({
-      memberId: input.memberId,
-      prisma: tx,
-      telegramThreadId: input.telegramThreadId,
-      telegramUserId: input.telegramUserId,
-    }),
+    (tx) => runWithHostedDomainRootUnwrapCache(() =>
+      upsertHostedMemberTelegramRoutingBindingTx({
+        memberId: input.memberId,
+        prisma: tx,
+        telegramThreadId: input.telegramThreadId,
+        telegramUserId: input.telegramUserId,
+      })
+    ),
     HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   );
 }

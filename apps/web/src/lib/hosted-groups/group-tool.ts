@@ -27,6 +27,7 @@ import { hasHostedRuntimeActiveAccess } from "../hosted-mailbox/runtime-access";
 import {
   assertHostedMemberNotSuspended,
 } from "../hosted-onboarding/entitlement";
+import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
 import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
@@ -289,6 +290,7 @@ export async function handleHostedRuntimeGroupTool(input: {
         result: await readHostedGroupSharedDataByRuntimeMemberId({
           linqSenderHandles: input.request.linqSenderHandles ?? [],
           projectionScopes: input.request.projectionScopes,
+          telegramSenderHandles: input.request.telegramSenderHandles ?? [],
           runtimeMemberId: input.memberId,
         }),
       };
@@ -884,7 +886,7 @@ async function handleHostedRuntimeGroupPostDisclosureRequest(input: {
       async (tx) => {
         return recordHostedGroupDisclosurePermissionTx({
           groupId: authority.groupId,
-          messageId: sent.messageId,
+          message: { channel: "linq", messageId: sent.messageId },
           originAssistantInputId: input.originAssistantInputId,
           permissionText,
           postedAt,
@@ -1032,7 +1034,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
         groupId: created.group.id,
-        messageId: sent.messageId,
+        message: { channel: "linq", messageId: sent.messageId },
         postedAt: now,
         projectionScopes,
         tx,
@@ -1251,10 +1253,7 @@ function renderHostedGroupJoinOfferScopeSentence(
   projectionScopes: readonly HostedVaultShareProjectionScope[],
 ): string {
   const labels = projectHostedVaultShareProjectionDisplays(projectionScopes)
-    .map((display) =>
-      display.offerDisclosure
-      ?? formatHostedGroupJoinOfferShareScopeLabel(display.label)
-    );
+    .map((display) => formatHostedGroupJoinOfferShareScopeLabel(display.label));
   return `your ${formatHumanList(["Murph profile name", ...labels])}`;
 }
 
@@ -1349,20 +1348,18 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
           participantMemberId,
         });
       }
-      if (participants.length < HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX) {
-        participants.push({
-          handle: handle.handle,
-          hasOwnMurph: participantMemberId !== null
-            && await readActiveHostedMemberAccess({
-              memberId: participantMemberId,
-              prisma,
-            }),
-        });
-      }
+      participants.push({
+        handle: handle.handle,
+        hasOwnMurph: participantMemberId !== null
+          && await hasHostedMemberActivationProof({
+            memberId: participantMemberId,
+            prisma,
+          }),
+      });
     }
   } catch {
-    // A failed identity lookup must not degrade into a guessed hasOwnMurph
-    // value or an unstructured route error.
+    // A failed identity or activation lookup must not degrade into a guessed
+    // hasOwnMurph value or an unstructured route error.
     return unavailable("membership_lookup_unavailable");
   }
 
@@ -1682,15 +1679,15 @@ async function handleHostedRuntimeGroupShareContactCard(input: {
       chatId: authorized.chatId,
       contentType: MURPH_CONTACT_CARD_VCF_CONTENT_TYPE,
       fileName: MURPH_CONTACT_CARD_VCF_FILE_NAME,
-      // Chat id + day: dedupes duplicate provider submissions of this share
-      // without suppressing an intentional re-share after the 48h throttle.
+      // Chat id + reservation instant: retries of this reservation dedupe at
+      // the provider while a later requested re-share stays a distinct send.
       // The chat id is Linq's own identifier, so no new exposure.
-      idempotencyKey: `group-contact-card:${authorized.chatId}:${new Date().toISOString().slice(0, 10)}`,
+      idempotencyKey: `group-contact-card:${authorized.chatId}:${reservation.attemptedAt.getTime()}`,
     });
   } catch (error) {
     if (isHostedLinqAttachmentSendPrepareFailure(error)) {
-      // Nothing reached the chat; free the 48h reservation so a later retry
-      // is not locked out. Ambiguous message-send failures keep it.
+      // Nothing reached the chat; free the throttle reservation so a later
+      // retry is not locked out. Ambiguous message-send failures keep it.
       try {
         await releaseHostedLinqContactCardShareAttempt({
           attemptedAt: reservation.attemptedAt,

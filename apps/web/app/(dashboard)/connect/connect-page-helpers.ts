@@ -37,10 +37,6 @@ export function filterConnectSourcesForSearch(
   );
 }
 
-export function isHostedConsentRequiredError(error: unknown): boolean {
-  return readHostedOnboardingErrorCode(error) === "HOSTED_CONSENT_REQUIRED";
-}
-
 export function isHostedDeviceConnectIntentUnavailableError(
   error: unknown,
 ): error is HostedOnboardingApiError {

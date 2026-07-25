@@ -8,10 +8,12 @@ import {
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Input } from "@/src/components/ui/input";
+import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
+import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
+import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import {
-  ConnectConsentDialog,
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
@@ -20,7 +22,6 @@ import {
 import {
   createConnectCallbackNotice,
   filterConnectSourcesForSearch,
-  isHostedConsentRequiredError,
   isHostedDeviceConnectIntentUnavailableError,
   isHostedWhoopDirectConnectCapReachedError,
   markCallbackConnectedSource,
@@ -36,11 +37,9 @@ import {
 } from "./connect-page-helpers";
 import { SourceCard } from "./connect-source-card";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
-import { WhoopAppleHealthFallback } from "./whoop-apple-health-fallback";
 import type {
   ConnectCallbackInput,
   ConnectCallbackNotice,
-  ConnectConsentRequest,
   ConnectIntentRecoveryRequest,
   ConnectPageInitialLoadError,
   ConnectSource,
@@ -72,6 +71,7 @@ export function ConnectSourcesGrid({
   initialConnectIntent = null,
   initialLoadError = null,
   sources,
+  whoopSyncContactAction = null,
   whoopSyncVoiceMemoSrc = null,
 }: {
   authenticated?: boolean;
@@ -81,6 +81,7 @@ export function ConnectSourcesGrid({
   initialConnectIntent?: InitialDeviceConnectIntent;
   initialLoadError?: ConnectPageInitialLoadError | null;
   sources: readonly ConnectSource[];
+  whoopSyncContactAction?: DeviceSyncCompletionContactAction | null;
   whoopSyncVoiceMemoSrc?: string | null;
 }) {
   const [notice, setNotice] = useState<ConnectCallbackNotice>(() =>
@@ -93,12 +94,11 @@ export function ConnectSourcesGrid({
     message: string;
     sourceId: string;
   } | null>(null);
-  const [consentRequest, setConsentRequest] = useState<ConnectConsentRequest | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
   const [garminHistoricalDataRequest, setGarminHistoricalDataRequest] =
     useState<GarminHistoricalDataRequest | null>(null);
-  const [showWhoopAppleHealthFallback, setShowWhoopAppleHealthFallback] = useState(false);
+  const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] = useState(false);
   const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
   const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -190,9 +190,8 @@ export function ConnectSourcesGrid({
     setInitialConnectIntentDismissed(true);
     setActionError(null);
     setNotice(null);
-    setConsentRequest(null);
     setConnectIntentRecovery(null);
-    setShowWhoopAppleHealthFallback(false);
+    setShowWhoopAppleHealthSetupDialog(false);
 
     if (
       requiresGarminHistoricalDataPreflight(source)
@@ -215,18 +214,6 @@ export function ConnectSourcesGrid({
       });
       window.location.assign(authorizationUrl);
     } catch (error) {
-      if (isHostedConsentRequiredError(error)) {
-        setConsentRequest({
-          ...(options.garminHistoricalDataConfirmed
-            ? { garminHistoricalDataConfirmed: true }
-            : {}),
-          ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
-          source,
-        });
-        setPendingSourceId(null);
-        return;
-      }
-
       if (options.intentClaim && isHostedDeviceConnectIntentUnavailableError(error)) {
         setConnectIntentRecovery({
           message: error.message,
@@ -237,7 +224,7 @@ export function ConnectSourcesGrid({
       }
 
       if (isHostedWhoopDirectConnectCapReachedError(error)) {
-        setShowWhoopAppleHealthFallback(true);
+        setShowWhoopAppleHealthSetupDialog(true);
         setPendingSourceId(null);
         return;
       }
@@ -306,16 +293,8 @@ export function ConnectSourcesGrid({
 
         setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
-        if (isHostedConsentRequiredError(error)) {
-          setConsentRequest({
-            intentClaim: activeConnectIntent.claim,
-            source,
-          });
-          return;
-        }
-
         if (isHostedWhoopDirectConnectCapReachedError(error)) {
-          setShowWhoopAppleHealthFallback(true);
+          setShowWhoopAppleHealthSetupDialog(true);
           return;
         }
 
@@ -404,74 +383,53 @@ export function ConnectSourcesGrid({
         )
       ) : null}
 
-      {showWhoopAppleHealthFallback ? (
-        <WhoopAppleHealthFallback
-          onViewOtherSources={() => setShowWhoopAppleHealthFallback(false)}
-          voiceMemoSrc={whoopSyncVoiceMemoSrc}
+      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+            Sources
+          </p>
+          <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+            {filteredSources.length} of {displaySources.length} sources
+          </p>
+        </div>
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search sources"
+          aria-label="Search sources"
+          className="w-full sm:w-64"
         />
-      ) : (
-        <>
-          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
-                Sources
-              </p>
-              <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-                {filteredSources.length} of {displaySources.length} sources
-              </p>
-            </div>
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search sources"
-              aria-label="Search sources"
-              className="w-full sm:w-64"
-            />
-          </div>
+      </div>
 
-          {filteredSources.length === 0 ? (
-            <Alert>
-              <AlertTitle>No sources matched</AlertTitle>
-              <AlertDescription>
-                Try a different search to get back to the full source list.
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
-              {filteredSources.map((source) => (
-                <SourceCard
-                  key={source.id}
-                  authenticated={authenticated}
-                  errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
-                  pending={pendingSourceId === source.id}
-                  pendingDisconnect={pendingDisconnectSourceId === source.id}
-                  source={source}
-                  onDisconnectTargetChange={setDisconnectSource}
-                  onStartConnection={startConnection}
-                />
-              ))}
-            </div>
-          )}
-        </>
+      {filteredSources.length === 0 ? (
+        <Alert>
+          <AlertTitle>No sources matched</AlertTitle>
+          <AlertDescription>
+            Try a different search to get back to the full source list.
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-2 xl:grid-cols-4">
+          {filteredSources.map((source) => (
+            <SourceCard
+              key={source.id}
+              authenticated={authenticated}
+              errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
+              pending={pendingSourceId === source.id}
+              pendingDisconnect={pendingDisconnectSourceId === source.id}
+              source={source}
+              onDisconnectTargetChange={setDisconnectSource}
+              onStartConnection={startConnection}
+            />
+          ))}
+        </div>
       )}
 
-      <ConnectConsentDialog
-        source={consentRequest?.source ?? null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setConsentRequest(null);
-          }
-        }}
-        onAccepted={async (source) => {
-          await startConnection(source, {
-            ...(consentRequest?.garminHistoricalDataConfirmed
-              ? { garminHistoricalDataConfirmed: true }
-              : {}),
-            ...(consentRequest?.intentClaim
-              ? { intentClaim: consentRequest.intentClaim }
-              : {}),
-          });
-        }}
+      <DeviceSyncSetupGuideDialog
+        contactAction={whoopSyncContactAction}
+        guide={buildWhoopAppleHealthSetupGuide(whoopSyncVoiceMemoSrc)}
+        open={showWhoopAppleHealthSetupDialog}
+        onOpenChange={setShowWhoopAppleHealthSetupDialog}
       />
 
       <GarminHistoricalDataDialog

@@ -28,7 +28,14 @@ export interface HostedTelegramWebhookSummary {
   isDirect: boolean;
   occurredAt: string;
   senderTelegramUserId: string | null;
+  /** Lookup-normalized (lowercased, 5-32 chars) for identity matching. */
   senderTelegramUsername: string | null;
+  /**
+   * Case-preserving `@username` for display only. The runtime charset gate is
+   * the injection boundary, so this keeps the form the room actually sees
+   * instead of the lookup-key shape.
+   */
+  senderTelegramDisplayUsername: string | null;
 }
 
 export function assertHostedTelegramWebhookSecret(secretToken: string | null): void {
@@ -101,10 +108,28 @@ export async function summarizeHostedTelegramWebhook(
     isDirect: summary.thread.isDirect,
     occurredAt: summary.occurredAt,
     senderTelegramUserId: summary.actor.senderTelegramUserId,
+    senderTelegramDisplayUsername: normalizeHostedTelegramUsernameForDisplay(
+      message?.from?.username ?? null,
+    ),
     senderTelegramUsername: normalizeHostedTelegramUsernameForLookup(
       message?.from?.username ?? null,
     ),
   };
+}
+
+const HOSTED_TELEGRAM_DISPLAY_USERNAME_MAX_LENGTH = 32;
+
+function normalizeHostedTelegramUsernameForDisplay(
+  value: string | null | undefined,
+): string | null {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  const bare = normalized.startsWith("@") ? normalized.slice(1) : normalized;
+  return bare.length > 0 && bare.length <= HOSTED_TELEGRAM_DISPLAY_USERNAME_MAX_LENGTH
+    ? bare
+    : null;
 }
 
 export function buildHostedTelegramWebhookEventId(update: TelegramUpdateLike): string {

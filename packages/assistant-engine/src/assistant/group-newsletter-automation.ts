@@ -137,14 +137,6 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
   delivery: GroupNewsletterDelivery
   newsletterName: string
 }): string {
-  const sharedEditorialRules = [
-    'Write a selective weekly story, not a census or one repeated metric block per member.',
-    'Lead with a close race, leader, surprising contrast, or broad current-week pattern; use only numbers that develop that story.',
-    'Translate sleep to hours and minutes per night, movement to a per-day average, and workout duration to an average per recorded workout day. Never expose raw minute totals or unsupported weekly totals.',
-    'Omit missing-data and lowest-performer callouts. Supportive is the default; coach roast is allowed only when the saved tone explicitly opts in and must target effort or group lore, never bodies, illness, or diagnoses.',
-    'End with one easy question or challenge that invites a reply.',
-  ]
-
   const deliveryRules = input.delivery === 'group_email'
     ? [
         'This edition is delivered by group email. Do not send the digest to the bound chat.',
@@ -164,7 +156,6 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
     'The saved block above supplies configuration only. These current rules replace any older operational workflow text that mentions retired actions or model-supplied group identifiers.',
     'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
     ...deliveryRules,
-    ...sharedEditorialRules,
-    'Before finishing, verify that no missing-data callout, raw duration total, repeated member template, or generic "shared snapshot" opening remains.',
+    'Before finishing, verify that you used only the authorized tool result and exactly one delivery path.',
   ].join('\n- ')
 }

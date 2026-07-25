@@ -85,7 +85,10 @@ export async function buildHostedLinqAffirmativeReactionMessageEvent(input: {
         parts: [
           {
             type: "text",
-            value: "Yes.",
+            value: `Reacted with ${
+              input.event.reactionCustomEmoji
+              ?? readHostedLinqReactionLabel(input.event)
+            }.`,
           },
         ],
         reply_to: {

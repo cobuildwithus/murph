@@ -22,6 +22,7 @@ import {
   isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
+import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
 import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/stage";
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
@@ -136,6 +137,9 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
           launchLegalConsentSatisfied={model.launchConsent.status === "granted" || model.preview}
           murphPhoneNumber={status.murphPhoneNumber ?? null}
           stage={status.stage}
+          telegramStartLink={
+            status.telegramStartRequired ? buildHostedTelegramBotLink() : null
+          }
         />
       ) : null}
     </>
@@ -476,10 +480,12 @@ function JoinInviteActivePanel({
   launchLegalConsentSatisfied,
   murphPhoneNumber,
   stage,
+  telegramStartLink,
 }: {
   launchLegalConsentSatisfied: boolean;
   murphPhoneNumber: string | null;
   stage: HostedAccessibleOnboardingStage;
+  telegramStartLink: string | null;
 }) {
   const activationPending = stage === "activating";
 
@@ -494,6 +500,15 @@ function JoinInviteActivePanel({
             {JOIN_INVITE_ACTIVATION_PENDING_COPY.activePanelDescription}
           </p>
         </div>
+      ) : telegramStartLink ? (
+        <div className="space-y-1 text-sm text-olive">
+          <p className="font-semibold">One last step</p>
+          <p className="leading-relaxed text-olive/85">
+            Your Telegram is linked. Open Murph in Telegram and send a message
+            so Murph can reply. Telegram only lets Murph message you after you
+            go first.
+          </p>
+        </div>
       ) : (
         <div className="flex items-center gap-2.5 text-sm text-olive">
           <CheckCircleIcon className="size-4 shrink-0" />
@@ -504,7 +519,10 @@ function JoinInviteActivePanel({
       )}
 
       {launchLegalConsentSatisfied ? (
-        <JoinInviteMurphContactActions murphPhoneNumber={murphPhoneNumber} />
+        <JoinInviteMurphContactActions
+          murphPhoneNumber={murphPhoneNumber}
+          telegramStartLink={telegramStartLink}
+        />
       ) : null}
 
       <div className="border-t border-amber/25 pt-6">
@@ -543,9 +561,27 @@ function JoinInviteActivePanel({
 
 function JoinInviteMurphContactActions({
   murphPhoneNumber,
+  telegramStartLink,
 }: {
   murphPhoneNumber: string | null;
+  telegramStartLink: string | null;
 }) {
+  if (telegramStartLink) {
+    return (
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:flex-wrap">
+        <Button
+          render={
+            <a href={telegramStartLink} rel="noreferrer" target="_blank" />
+          }
+          nativeButton={false}
+          size="lg"
+        >
+          Message Murph on Telegram
+        </Button>
+      </div>
+    );
+  }
+
   if (!murphPhoneNumber) {
     return null;
   }

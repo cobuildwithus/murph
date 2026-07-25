@@ -194,10 +194,6 @@ test("HomePage renders the canonical landing page at the root route", async () =
     markup,
     /<h1 class="sr-only">Health is hard\. Don’t do it alone\.<\/h1>/,
   );
-  assert.match(
-    markup,
-    /Wearables, bloodwork, doctor visits, supplements, blood pressure, sleep\. Murph reads it all/,
-  );
   assert.match(markup, /Start a health challenge with your friends/);
   assert.match(markup, /referees the week/);
   assert.match(markup, /Better together/);
@@ -231,6 +227,18 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(markup, /What does the group actually see\?/);
   assert.match(markup, /Everything else stays private by default\./);
+  assert.match(
+    markup,
+    /See how we protect your data.*href="\/consumer-health-data-privacy-policy"[^>]*>Consumer Health Data Privacy Notice<span aria-hidden="true">→<\/span><\/a>/s,
+  );
+  assert.equal(
+    (
+      markup.match(
+        /Illustrative examples\. Changes in personal data can have many causes and do not establish that an intervention produced the result\./g,
+      ) ?? []
+    ).length,
+    2,
+  );
   assert.match(markup, /Murph uses AI-assisted review of published studies/);
   assert.match(markup, /Research may be incomplete, mixed, or not applicable to your situation/);
   assert.doesNotMatch(markup, /GPT-5\.5 Pro/);

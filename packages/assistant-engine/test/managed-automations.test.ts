@@ -120,6 +120,8 @@ vi.mock('../src/assistant/channel-adapters.ts', () => ({
 }))
 
 import {
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+  MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -129,6 +131,7 @@ import {
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
   applyMurphManagedAutomations,
+  ensureAutomaticMealCloseoutAutomation,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
@@ -1028,6 +1031,116 @@ describe('applyMurphManagedAutomations', () => {
       seed.schedule,
       new Date('2026-06-22T12:00:00.000Z'),
     )).toBe('2026-07-06T12:00:00.000Z')
+  })
+
+  it('installs the automatic meal closeout idempotently at 9pm local time', async () => {
+    const onDiagnosticStage = vi.fn()
+    const onboardingFollowup: StoredAutomationRecord = {
+      automationId: 'automation_onboarding_followup',
+      continuityPolicy: 'preserve',
+      instructions: 'Existing onboarding follow-up instructions.',
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '08:00',
+      },
+      slug: 'finish-onboarding-followup',
+      status: 'active',
+      summary: 'Existing onboarding follow-up summary.',
+      tags: ['assistant', 'scheduled', 'murph-managed', 'murph-managed:onboarding-followup'],
+      title: 'Existing onboarding follow-up',
+    }
+    managedAutomationMocks.records.set(
+      onboardingFollowup.automationId,
+      onboardingFollowup,
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION).toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      excludeFromGroupChatRoutes: true,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+      },
+      slug: 'automatic-meal-daily-closeout',
+    })
+    expect(MURPH_MANAGED_AUTOMATIONS).not.toContainEqual(
+      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION,
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'single owner of the closeout workflow',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'engine-supplied `Occurrence local date` from the Scheduled occurrence context',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'even when the wall-clock `Today\'s date` differs',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'If the skill selects neither a retained photo nor a same-occurrence removal revision',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      '`externalRef.system: meal-photo-capture`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      '`vault-cli meal list`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      '`vault-cli meal remove-photo <meal-id>`',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).not.toContain(
+      'preceding 31 local days',
+    )
+    expect(MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION.instructions).toContain(
+      'A removal failure or any selected photo remaining fails the run',
+    )
+
+    await expect(ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T15:00:00.000Z'),
+      onDiagnosticStage,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      route: defaultRoute,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+      },
+      status: 'active',
+    })
+    await expect(ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T15:01:00.000Z'),
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+    })
+
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+    expect(onDiagnosticStage).not.toHaveBeenCalledWith({
+      stage: 'onboarding_followup',
+    })
+    expect(managedAutomationMocks.patchAutomation).not.toHaveBeenCalled()
+    expect(
+      managedAutomationMocks.records.get(onboardingFollowup.automationId),
+    ).toEqual(onboardingFollowup)
+
+    const stored = managedAutomationMocks.records.get(
+      MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+    )
+    if (!stored) {
+      throw new Error('Expected the automatic meal closeout to be stored.')
+    }
+    stored.status = 'archived'
+    await expect(ensureAutomaticMealCloseoutAutomation({
+      defaultRoute,
+      now: new Date('2026-07-22T15:02:00.000Z'),
+      vaultRoot,
+    })).resolves.toMatchObject({
+      automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+      status: 'archived',
+    })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
   })
 
   it('keeps overnight memory consolidation as a hosted-only every-other-night maintenance seed', () => {

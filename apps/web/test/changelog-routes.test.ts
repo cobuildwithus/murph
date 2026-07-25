@@ -35,18 +35,17 @@ describe("changelog routes", () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(items).toHaveLength(4);
+    expect(items).toHaveLength(13);
     expect(items.map((item) => item.publishedOn)).toEqual([
-      "2026-07-20",
-      "2026-07-20",
-      "2026-07-20",
+      ...Array.from({ length: 12 }, () => "2026-07-20"),
       "2026-07-19",
     ]);
     expect(items.map((item) => item.id)).toEqual(
       expect.arrayContaining([
         "challenge-standings-explain-missing-data",
-        "phone-link-settings-recovery",
-        "weekly-insights-skip-obvious-weekend",
+        "contaminant-tests-on-product-pages",
+        "pulse-finishes-after-payment-setup",
+        "strava-connections-paused",
         "medical-records-plain-language",
       ]),
     );

@@ -356,10 +356,22 @@ export interface HostedExecutionTelegramAttachment {
 
 export interface HostedExecutionTelegramMessage {
   attachments?: HostedExecutionTelegramAttachment[];
+  /**
+   * Sending Telegram user id. Group attribution authority, mirroring the Linq
+   * `from` handle. Present only on route-authorized non-direct inbound whose
+   * sender already resolved to exactly one active linked member.
+   */
+  from?: string | null;
   mediaGroupId?: string | null;
   messageId: string;
   replyContextPreview?: string | null;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
+  /**
+   * Sending Telegram `@username`, carried only so the assistant can address
+   * participants by name. Never identity authority: usernames are optional,
+   * user-mutable, and re-registerable once released.
+   */
+  senderUsername?: string | null;
   text?: string | null;
   threadId: string;
   threadIsDirect?: boolean;
@@ -385,17 +397,28 @@ export interface HostedExecutionClinicalRecordsSyncRequestedEvent
   runId: string;
 }
 
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  | "linq"
-  | "telegram";
+export type HostedExecutionDirectRoute =
+  | {
+      channel: "linq" | "telegram";
+      threadId: string;
+    }
+  | {
+      channel: "email";
+      deliveryTarget: string;
+    };
 
-export interface HostedExecutionGroupNewsletterEmailNeededDirectRoute {
-  channel: HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel;
-  threadId: string;
-}
+export type HostedExecutionDirectRouteChannel =
+  HostedExecutionDirectRoute["channel"];
+
+/** @deprecated Use HostedExecutionDirectRouteChannel. */
+export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
+  HostedExecutionDirectRouteChannel;
+/** @deprecated Use HostedExecutionDirectRoute. */
+export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
+  HostedExecutionDirectRoute;
 
 export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -660,7 +683,7 @@ export interface HostedExecutionClinicalRecordsSyncRequestedWake
 }
 
 export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionGroupNewsletterEmailNeededDirectRoute | null;
+  directRoute?: HostedExecutionDirectRoute | null;
   groupDisplayName: string | null;
   groupId: string;
   kind: "group-newsletter.email-needed";
@@ -677,6 +700,7 @@ export interface HostedExecutionMealPhotoCapturedPayload {
 }
 
 export interface HostedExecutionMealPhotoCapturedWake extends HostedExecutionBaseWake {
+  directRoute: HostedExecutionDirectRoute;
   kind: "meal-photo.captured";
   mealPhoto: HostedExecutionMealPhotoCapturedPayload;
 }

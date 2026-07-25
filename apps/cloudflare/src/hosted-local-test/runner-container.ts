@@ -10,6 +10,9 @@ import {
   CLOUDFLARE_HOSTED_TRANSCRIBE_HOST,
 } from "../internal-hosts.ts";
 import {
+  readHostedExecutionEnvironment,
+} from "../env.ts";
+import {
   RunnerContainer as BaseRunnerContainer,
 } from "../runner-container.ts";
 import {
@@ -31,6 +34,9 @@ import type {
 import type {
   WorkerAiBindingLike,
 } from "../worker-contracts.ts";
+import {
+  asWorkerStringEnvironment,
+} from "../worker-contracts.ts";
 
 export interface HostedLocalTestRunnerOutboundContext {
   containerId?: string;
@@ -44,6 +50,13 @@ export type HostedLocalTestRunnerOutboundHandler = (
 ) => Promise<Response>;
 
 export class RunnerContainer extends BaseRunnerContainer {
+  async armGeneratedImageUploadTypeErrorForTest(
+    input: { userId: string },
+  ): Promise<{ ok: true }> {
+    armGeneratedImageUploadTypeError(input.userId);
+    return { ok: true };
+  }
+
   async armCanonicalCheckpointLostAckForTest(
     input: { userId: string },
   ): Promise<{ ok: true }> {
@@ -348,6 +361,14 @@ export function wrapShutdownCheckpointPublicationBarrierForTest(
       userId,
     });
     await barrier.released;
+    if (request.signal.aborted) {
+      throw request.signal.reason instanceof Error
+        ? request.signal.reason
+        : new DOMException(
+            "Hosted-local shutdown checkpoint publication was interrupted.",
+            "AbortError",
+          );
+    }
     return await handler(request, env, ctx);
   };
 }
@@ -360,7 +381,9 @@ async function isShutdownCheckpointSnapshotCompleteRequest(request: Request): Pr
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return false;
   }
-  const checkpointRequest = "checkpointRequest" in body ? body.checkpointRequest : null;
+  const checkpointRequest = "checkpointRequest" in body
+    ? body.checkpointRequest
+    : null;
   return Boolean(
     checkpointRequest
     && typeof checkpointRequest === "object"
@@ -388,7 +411,7 @@ export function wrapSnapshotPublicationCorruptionForTest(
     if (
       userId.length === 0
       || !snapshotPublicationCorruptionUserIds.has(userId)
-      || !isWorkspaceSnapshotCompleteRequest(request)
+      || !await isTerminalIdleCheckpointSnapshotCompleteRequest(request)
     ) {
       return await handler(request, env, ctx);
     }
@@ -424,6 +447,30 @@ export function wrapSnapshotPublicationCorruptionForTest(
     });
     return response;
   };
+}
+
+async function isTerminalIdleCheckpointSnapshotCompleteRequest(
+  request: Request,
+): Promise<boolean> {
+  if (!isWorkspaceSnapshotCompleteRequest(request)) {
+    return false;
+  }
+  const body: unknown = await request.clone().json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return false;
+  }
+  const checkpointRequest = "checkpointRequest" in body ? body.checkpointRequest : null;
+  if (
+    !checkpointRequest
+    || typeof checkpointRequest !== "object"
+    || Array.isArray(checkpointRequest)
+    || !("idleCheckpointTrigger" in checkpointRequest)
+  ) {
+    return false;
+  }
+  return checkpointRequest.idleCheckpointTrigger === "idle_window"
+    || checkpointRequest.idleCheckpointTrigger === "runtime_wake"
+    || checkpointRequest.idleCheckpointTrigger === "shutdown_signal";
 }
 
 function isWorkspaceSnapshotCompleteRequest(request: Request): boolean {
@@ -473,6 +520,23 @@ async function corruptWorkspaceSnapshotCompleteRequest(
 const hostedLocalGeneratedImageUrl =
   "https://imagedelivery.net/hosted-local/generated-image/public";
 export const HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST = "uploads.example.test";
+const generatedImageUploadTypeErrorUsers = new Set<string>();
+
+export function armGeneratedImageUploadTypeError(userId: string): void {
+  const normalized = userId.trim();
+  if (!normalized) {
+    throw new TypeError("Hosted-local generated image upload TypeError control requires a user id.");
+  }
+  generatedImageUploadTypeErrorUsers.add(normalized);
+}
+
+function consumeGeneratedImageUploadTypeError(userId: string): boolean {
+  if (!generatedImageUploadTypeErrorUsers.has(userId)) {
+    return false;
+  }
+  generatedImageUploadTypeErrorUsers.delete(userId);
+  return true;
+}
 
 const hostedLocalOpenAiImagesFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
@@ -554,12 +618,19 @@ const wrapGeneratedImageUploadForTest: HostedLocalTestRunnerOutboundHandler = (
   if (!userId) {
     return Promise.resolve(new Response("Unauthorized", { status: 401 }));
   }
+  const fetchImpl = consumeGeneratedImageUploadTypeError(userId)
+    ? hostedLocalCloudflareImagesTypeErrorFetch
+    : hostedLocalCloudflareImagesFetch;
   return handleRunnerGeneratedImageUploadRequest({
     env,
-    fetchImpl: hostedLocalCloudflareImagesFetch,
+    fetchImpl,
     request,
     userId,
   });
+};
+
+const hostedLocalCloudflareImagesTypeErrorFetch: typeof fetch = async () => {
+  throw new TypeError("Hosted-local Cloudflare Images upload TypeError.");
 };
 
 const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandler = async (

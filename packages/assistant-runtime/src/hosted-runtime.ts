@@ -10,6 +10,7 @@ import {
   type HostedRuntimeLatencyTraceStagedMilestones,
   type HostedRuntimeOrchestrationLatencyDiagnostics,
   type HostedRuntimeRedactedJson,
+  type HostedMailboxLane,
   type HostedWorkspaceCheckpointResponse,
   type HostedWorkspaceInvocationResult,
   type HostedWorkspaceState,
@@ -43,8 +44,10 @@ import {
 import {
   flushPendingAssistantRuntimeIssueWrites,
   findAssistantSessionIdByCodexThreadId,
+  getAssistantCronStatus,
 } from "@murphai/assistant-engine";
 import {
+  createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
   projectHostedRuntimeTrustStoreEnv,
 } from "./hosted-runtime/environment.ts";
@@ -72,6 +75,7 @@ import {
 } from "./hosted-runtime/channel-activity.ts";
 import {
   resolveHostedCurrentInputIdForAcceptedInputs,
+  type HostedConversationActivityObservation,
 } from "./hosted-runtime/turn-input.ts";
 import type {
   HostedAssistantWorkspaceRuntimeJobResult,
@@ -163,6 +167,7 @@ import {
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
+  compactHostedConversationMailboxHandledItemIds,
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
@@ -444,6 +449,8 @@ async function readHostedVaultStoredFormatVersion(vaultRoot: string): Promise<nu
 
 async function importHostedInitialMailboxForWorkspaceRunner(input: {
   importItemContext?: HostedWorkspaceRunnerMailboxImportContext | null;
+  lanes: readonly HostedMailboxLane[];
+  prefetchLanes: readonly HostedMailboxLane[];
   runnerInput: HostedWorkspaceRunnerInput;
   requestId: string;
 }): Promise<HostedInitialMailboxImportResult> {
@@ -453,6 +460,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
   const prefetch = plan.bootstrapRequired
     ? null
     : await createHostedForegroundMailboxPrefetch({
+        lanes: input.prefetchLanes,
         limitPerLane: input.runnerInput.limitPerLane,
         requestId: input.requestId,
         runnerInput: input.runnerInput,
@@ -467,7 +475,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
         }
       : null,
     initialMailboxImportContext: input.importItemContext ?? null,
-    initialMailboxImportLanes: plan.lanes,
+    initialMailboxImportLanes: input.lanes,
     initialMailboxPrefetch: prefetch,
     requestId: input.requestId,
   });
@@ -486,6 +494,7 @@ async function importHostedInitialMailboxForWorkspaceRunner(input: {
 }
 
 async function createHostedForegroundMailboxPrefetch(input: {
+  lanes: readonly HostedMailboxLane[];
   limitPerLane: number;
   requestId: string;
   runnerInput: HostedWorkspaceRunnerInput;
@@ -494,7 +503,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
     vaultRoot: input.runnerInput.vaultRoot,
   });
   return prefetchHostedMailboxPrefix({
-    lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+    lanes: input.lanes,
     limitPerLane: input.limitPerLane,
     mailboxPort: input.runnerInput.platform.mailboxPort,
     requestId: input.requestId,
@@ -537,6 +546,9 @@ export interface HostedWorkspaceRuntimeJobOptions {
   ): Promise<HostedMailboxItemImportOutcome>;
   platform: HostedRuntimePlatform;
   latencyMilestones?: HostedRuntimeLatencyTraceStagedMilestones | null;
+  onConversationActivityObserved?: (
+    observation: Exclude<HostedConversationActivityObservation, "not_observed">,
+  ) => void;
   runAssistantPhase?: HostedWorkspaceRuntimeAssistantPhase;
   runtimeWakeSignal?: RuntimeWakeSignal | null;
   /**
@@ -553,6 +565,7 @@ export interface HostedWorkspaceRuntimeJobOptions {
 
 export interface HostedWorkspaceRuntimeJobImportContext {
   assistantAskRequestTargetKind?: "joined_group";
+  onConversationActivityObserved?: (() => void) | null;
   onConversationInputStaged?: (() => void) | null;
   recordMessagingReturnTarget?(
     target: HostedRuntimeDeviceSyncMessagingReturnTarget | null,
@@ -566,6 +579,17 @@ interface HostedRuntimeWakeLatencySeed {
   foregroundWaitResolvedAtEpochMs?: number;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
   runtimeWakeNotifiedAtEpochMs?: number | null;
+}
+
+function notifyHostedConversationActivityObservedBestEffort(
+  callback: HostedWorkspaceRuntimeJobOptions["onConversationActivityObserved"],
+  observation: Exclude<HostedConversationActivityObservation, "not_observed">,
+): void {
+  try {
+    callback?.(observation);
+  } catch (error) {
+    console.warn("Hosted conversation activity callback failed.", error);
+  }
 }
 
 function mergeHostedRuntimeLatencyTraceStagedMilestones(
@@ -1032,6 +1056,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialAssistantInputLatencyMilestones,
         context?.latencyMilestones ?? null,
       ),
+      onConversationActivityObserved: () => {
+        options.onConversationActivityObserved?.("observed");
+      },
       onConversationInputStaged: context?.onConversationInputStaged ?? null,
       runtimeAttemptId: input.request.attemptId,
       signal: context?.signal ?? runtimeAbortController.signal,
@@ -1420,6 +1447,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const initialMailboxImportPlan = resolveHostedInitialMailboxImportPlan({
       vaultRoot: restored.vaultRoot,
     });
+    const initialMailboxImportLanes =
+      input.request.processingMode === "system_mailbox"
+        ? (["system"] as const)
+        : initialMailboxImportPlan.lanes;
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
         consumePendingHostedRuntimeWake(
@@ -1431,7 +1462,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     );
     emitPhaseLog({
       details: {
-        initialMailboxImportLanes: [...initialMailboxImportPlan.lanes],
+        initialMailboxImportLanes: [...initialMailboxImportLanes],
         mailboxLimitPerLane: mailboxBudget.fetchLimitPerLane,
       },
       input,
@@ -1444,6 +1475,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     // an aborted invocation cannot write into a newer restore at the same path.
     const initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
       importItemContext: initialMailboxImportContext,
+      lanes: initialMailboxImportLanes,
+      prefetchLanes: input.request.processingMode === "system_mailbox"
+        ? initialMailboxImportLanes
+        : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
       runnerInput: baseRunnerInput,
       requestId,
     });
@@ -1480,12 +1515,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport.importResult,
         restored.vaultRoot,
       );
-      const nextWake = resolveHostedWorkspaceRunNextWake({
-        assistantPhaseResult: null,
-        committedWorkspace: activeWorkspace,
-        mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
-        nowMs: Date.now(),
-      });
+      const assistantCronWake =
+        input.request.processingMode === "system_mailbox"
+          ? await resolveHostedAssistantCronWakeAfterInitialImport({
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtimeEnv: hostedCodexRuntime.runtimeEnv,
+              vaultRoot: restored.vaultRoot,
+            })
+          : null;
+      const nextWake = input.request.processingMode === "system_mailbox"
+        ? selectEarliestHostedRuntimeWake([
+            {
+              at: activeWorkspace?.nextWakeAt ?? null,
+              reason: activeWorkspace?.nextWakeReason ?? null,
+            },
+            {
+              at: initialMailboxImport.importResult.nextRetryAt ?? null,
+              reason: initialMailboxImport.importResult.nextRetryAt ? "mailbox" : null,
+            },
+          ])
+        : resolveHostedWorkspaceRunNextWake({
+            assistantPhaseResult: null,
+            committedWorkspace: activeWorkspace,
+            mailboxImportRetryAt: initialMailboxImport.importResult.nextRetryAt ?? null,
+            nowMs: Date.now(),
+          });
       const stagedAssistantInput =
         hostedMailboxImportStagedConversationInput(initialMailboxImport);
       const checkpointNextWake = selectEarliestHostedRuntimeWake([
@@ -1496,6 +1550,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         {
           at: systemMailboxWake.at,
           reason: systemMailboxWake.reason,
+        },
+        {
+          at: assistantCronWake?.at ?? null,
+          reason: assistantCronWake?.reason ?? null,
         },
         {
           at: stagedAssistantInput ? new Date().toISOString() : null,
@@ -1557,6 +1615,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           requestId,
           stage: "workspace.checkpoint.idle_shutdown",
           status: "done",
+        });
+        await finishHostedMailboxImportPostCheckpointEffects({
+          importResult: initialMailboxImport,
+          runnerInput: baseRunnerInput,
+          signal: runtimeAbortController.signal,
         });
         const checkpointReturnedNextWake = selectEarliestHostedRuntimeWake([
           {
@@ -1641,6 +1704,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       return invocationResult;
     };
     if (initialMailboxImportResult.bootstrapPending) {
+      return await returnInitialMailboxImportBeforeForeground();
+    }
+    if (input.request.processingMode === "system_mailbox") {
       return await returnInitialMailboxImportBeforeForeground();
     }
     if (
@@ -1779,18 +1845,29 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   ...runtimeEnv,
                   ...(confirmedAssistantTargetEnv ?? {}),
                 },
-                beforeProviderAcceptedInputs: async ({ acceptedInputs }) => {
-                  const assistantInputIds = acceptedInputs.every(
+                beforeProviderAcceptedInputs: async ({
+                  acceptedInputs,
+                }) => {
+                  const acceptedInputsOnlyAssistant = acceptedInputs.every(
                     (acceptedInput) => acceptedInput.source === "assistant-input",
-                  )
-                    ? acceptedInputs.map((acceptedInput) => acceptedInput.id)
-                    : [];
-                  const assistantInputId =
+                  );
+                  const assistantInputIds = acceptedInputs
+                    .filter((acceptedInput) => acceptedInput.source === "assistant-input")
+                    .map((acceptedInput) => acceptedInput.id);
+                  const acceptedInputContext =
                     await resolveHostedCurrentInputIdForAcceptedInputs({
                       assistantInputIds,
                       vaultRoot: restored.vaultRoot,
                     });
-                  currentAssistantInputId = assistantInputId;
+                  currentAssistantInputId = acceptedInputsOnlyAssistant
+                    ? acceptedInputContext.currentInputId
+                    : null;
+                  if (acceptedInputContext.conversationActivity !== "not_observed") {
+                    notifyHostedConversationActivityObservedBestEffort(
+                      options.onConversationActivityObserved,
+                      acceptedInputContext.conversationActivity,
+                    );
+                  }
                   return () => {
                     currentAssistantInputId = null;
                   };
@@ -2663,6 +2740,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               }
             : wakeInitialMailboxImportContext;
         const initialMailboxPrefetch = await createHostedForegroundMailboxPrefetch({
+          lanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
           limitPerLane: mailboxBudget.fetchLimitPerLane,
           requestId:
             `${requestId}:${input.requestIdKind}-foreground-prefetch:${idleWakeOrdinal + 1}`,
@@ -4517,6 +4595,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
   }
 
   input.assertRuntimeNotAborted();
+  const handledConversationMailboxItemIds =
+    await compactHostedConversationMailboxHandledItemIds({
+      consumedThroughSeq: readHostedConversationConsumedSeqFromStatus(
+        input.redactedStatus,
+      ),
+      signal: input.checkpointSignal ?? input.runtimeAbortSignal,
+      vaultRoot: input.vaultRoot,
+    });
+  input.assertRuntimeNotAborted();
   const redactedStatus = await withHostedSystemMailboxHandledThroughStatus({
     redactedStatus: input.retainCanonicalWriteReceiptLogStatus
       ? input.redactedStatus
@@ -4524,6 +4611,7 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   const checkpointInput = {
+    handledConversationMailboxItemIds,
     ...(input.idleCheckpointTrigger
       ? { idleCheckpointTrigger: input.idleCheckpointTrigger }
       : {}),
@@ -4563,6 +4651,15 @@ async function checkpointHostedRuntimeDirtyWorkspace(input: {
     vaultRoot: input.vaultRoot,
   });
   return checkpoint;
+}
+
+function readHostedConversationConsumedSeqFromStatus(
+  status: HostedWorkspaceInvocationResult["redactedStatus"] | null,
+): string | null {
+  const value = status?.["hostedMailboxConversationConsumedSeq"];
+  return typeof value === "string" && /^(?:0|[1-9][0-9]*)$/u.test(value)
+    ? value
+    : null;
 }
 
 async function withHostedSystemMailboxHandledThroughStatus(input: {
@@ -5136,6 +5233,23 @@ function selectEarliestHostedRuntimeWake(
   return {
     nextWakeAt: selected.at,
     nextWakeReason: selected.reason,
+  };
+}
+
+async function resolveHostedAssistantCronWakeAfterInitialImport(input: {
+  operatorHomeRoot: string;
+  runtimeEnv: Readonly<Record<string, string>>;
+  vaultRoot: string;
+}): Promise<{ at: string | null; reason: string | null }> {
+  const status = await getAssistantCronStatus(input.vaultRoot, {
+    turnEnvironment: createHostedAssistantTurnEnvironment(input),
+  });
+  const at = status.dueJobs > 0
+    ? new Date().toISOString()
+    : status.nextRunAt;
+  return {
+    at,
+    reason: at ? HOSTED_ASSISTANT_WAKE_REASON : null,
   };
 }
 

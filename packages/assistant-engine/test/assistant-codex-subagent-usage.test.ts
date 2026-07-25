@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASSISTANT_USAGE_SCHEMA,
+  createAssistantUsageId,
+  parseAssistantUsageRecord,
+} from '@murphai/hosted-execution/assistant-usage'
+
+import {
   type CodexSubagentTokenUsageSample,
   extractCodexSubagentUsageDrafts,
+  hashAssistantProviderStableJson,
 } from '../src/assistant/providers/helpers.ts'
 
 function tokenUsageEvent(input: {
@@ -55,7 +62,6 @@ function sampleFromEvents(
   events: readonly Record<string, unknown>[],
 ): CodexSubagentTokenUsageSample {
   return {
-    eventCount: events.length,
     firstEvent: events[0],
     lastEvent: events[events.length - 1],
   }
@@ -65,7 +71,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
   it('returns no drafts without subagent samples', () => {
     expect(
       extractCodexSubagentUsageDrafts({
-        droppedThreadCount: 0,
         modelProvider: 'openai',
         ordinalStart: 1,
         parentRawEvents: [],
@@ -156,7 +161,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     ]
 
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 3,
       parentRawEvents: [
@@ -197,11 +201,16 @@ describe('extractCodexSubagentUsageDrafts', () => {
         usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
       },
     })
-    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-child-a',
-      tokenUsageEventCount: 2,
-      unattributedSubagentUsageThreadCount: 1,
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 2_000,
+      inputTokens: 4_000,
+      outputTokens: 1_000,
+      reasoningOutputTokens: 120,
+      totalTokens: 5_000,
     })
+    expect(drafts[0]?.usage.rawUsageJsonHash).toBe(
+      hashAssistantProviderStableJson(drafts[0]?.usage.rawUsageJson),
+    )
     expect(drafts[1]).toMatchObject({
       providerRequestOrdinal: 4,
       usage: {
@@ -214,16 +223,47 @@ describe('extractCodexSubagentUsageDrafts', () => {
         totalTokens: 700,
       },
     })
-    expect(drafts[1]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-child-b',
+    expect(drafts[1]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 100,
+      inputTokens: 600,
+      outputTokens: 100,
+      reasoningOutputTokens: 0,
+      totalTokens: 700,
     })
+
+    const draft = drafts[0]!
+    const turnId = 'turn-subagent-usage'
+    const usageId = createAssistantUsageId({
+      attemptCount: 1,
+      providerRequestOrdinal: draft.providerRequestOrdinal,
+      turnId,
+    })
+    const parsed = parseAssistantUsageRecord({
+      ...draft.usage,
+      attemptCount: 1,
+      credentialSource: 'platform',
+      occurredAt: '2026-07-23T12:00:00.000Z',
+      provider: draft.provider,
+      providerRequestOrdinal: draft.providerRequestOrdinal,
+      providerRequestOutcome: draft.providerRequestOutcome,
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'assistant-session-subagent-usage',
+      turnId,
+      usageId,
+    })
+    expect(parsed.providerRequestOrdinal).toBe(3)
+    expect(parsed.usageId).toBe(
+      'turn-subagent-usage.request-3.attempt-1',
+    )
+    expect(parsed.rawUsageJson).toEqual(draft.usage.rawUsageJson)
+    expect(parsed.rawUsageJsonHash).toBe(draft.usage.rawUsageJsonHash)
+
     // The ghost thread never bills.
     expect(JSON.stringify(drafts)).not.toContain('thread-child-ghost')
   })
 
   it('tracks Codex v2 app-server spawn items and token usage notifications', () => {
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 2,
       parentRawEvents: [
@@ -293,9 +333,12 @@ describe('extractCodexSubagentUsageDrafts', () => {
         usageExtractionSourcePath: 'subagent.thread.tokenUsage.total.delta',
       },
     })
-    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-child-v2',
-      tokenUsageEventCount: 1,
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 300,
+      inputTokens: 900,
+      outputTokens: 300,
+      reasoningOutputTokens: 40,
+      totalTokens: 1_200,
     })
     expect(JSON.stringify(drafts)).not.toContain('summarize private context')
   })
@@ -324,7 +367,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ])
 
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [
@@ -369,8 +411,12 @@ describe('extractCodexSubagentUsageDrafts', () => {
         totalTokens: 100,
       },
     })
-    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-reused-child',
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 0,
+      inputTokens: 80,
+      outputTokens: 20,
+      reasoningOutputTokens: 0,
+      totalTokens: 100,
     })
     expect(drafts[1]).toMatchObject({
       usage: {
@@ -384,7 +430,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     // Warm processes are reused across threads; a stale tokenUsage flush from
     // a previous thread carries a foreign thread id but is not a subagent.
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [],
@@ -441,7 +486,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     ])
 
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 2,
       modelProvider: null,
       ordinalStart: 1,
       parentRawEvents: [
@@ -472,14 +516,16 @@ describe('extractCodexSubagentUsageDrafts', () => {
         totalTokens: 50,
       },
     })
-    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
-      droppedSubagentUsageThreadCount: 2,
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 0,
+      inputTokens: 40,
+      outputTokens: 10,
+      totalTokens: 50,
     })
   })
 
-  it('never leaks spawn prompt content into drafts and keeps rawUsageJson metadata-only', () => {
+  it('persists only the flat token delta and never leaks spawn prompt content', () => {
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [
@@ -517,21 +563,21 @@ describe('extractCodexSubagentUsageDrafts', () => {
 
     expect(drafts).toHaveLength(1)
     // The spawn item carries member content ('prompt'); drafts must stay
-    // metadata-only so hosted_ai_usage never persists raw member content.
+    // token-only so hosted_ai_usage never persists raw member content.
     expect(JSON.stringify(drafts)).not.toContain('do the heavy part')
     expect(JSON.stringify(drafts)).not.toContain('prompt')
-    expect(
-      Object.keys(drafts[0]?.usage.rawUsageJson as Record<string, unknown>).sort(),
-    ).toEqual([
-      'codexSubagentThreadId',
-      'tokenUsage',
-      'tokenUsageEventCount',
-    ])
+    expect(JSON.stringify(drafts)).not.toContain('thread-child-a')
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 0,
+      inputTokens: 250,
+      outputTokens: 50,
+      reasoningOutputTokens: 0,
+      totalTokens: 300,
+    })
   })
 
   it('skips spawned threads whose buffered events carry no usable token usage', () => {
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [
@@ -544,7 +590,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
         [
           'thread-child-empty',
           {
-            eventCount: 1,
             firstEvent: { method: 'thread/tokenUsage/updated', params: {} },
             lastEvent: { method: 'thread/tokenUsage/updated', params: {} },
           },
@@ -623,7 +668,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     ]
 
     const drafts = extractCodexSubagentUsageDrafts({
-      droppedThreadCount: 0,
       modelProvider: 'openai',
       ordinalStart: 3,
       parentModel: 'gpt-5.6-terra',
@@ -670,20 +714,26 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(drafts[0]?.providerRequestOrdinal).toBe(3)
     expect(drafts[0]?.usage.inputTokens).toBe(700)
     expect(drafts[0]?.usage.outputTokens).toBe(200)
-    expect(drafts[0]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-child-v2',
-      unattributedSubagentUsageThreadCount: 1,
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 300,
+      inputTokens: 700,
+      outputTokens: 200,
+      reasoningOutputTokens: 40,
+      totalTokens: 900,
     })
     expect(drafts[1]?.usage.servedModel).toBe('gpt-5.6-terra')
-    expect(drafts[1]?.usage.rawUsageJson).toMatchObject({
-      codexSubagentThreadId: 'thread-child-v2-snake',
+    expect(drafts[1]?.usage.rawUsageJson).toEqual({
+      cachedInputTokens: 0,
+      inputTokens: 250,
+      outputTokens: 50,
+      reasoningOutputTokens: 0,
+      totalTokens: 300,
     })
     expect(
-      drafts.some(
-        (draft) =>
-          (draft.usage.rawUsageJson as Record<string, unknown>)
-            .codexSubagentThreadId === 'thread-child-ghost',
+      drafts.reduce(
+        (total, draft) => total + (draft.usage.totalTokens ?? 0),
+        0,
       ),
-    ).toBe(false)
+    ).toBe(1_200)
   })
 })

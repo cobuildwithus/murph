@@ -16,7 +16,7 @@ import {
 } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
-const HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT = 50;
+const HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT = 50;
 const MURPH_CONTACT_CARD_FIRST_NAME = "Murph";
 const MURPH_CONTACT_CARD_DEFAULT_ORIGIN = "https://www.withmurph.ai";
 const MURPH_CONTACT_CARD_DEFAULT_IMAGE_URL =
@@ -140,16 +140,12 @@ export async function getHostedLinqContactCard(input: {
 
 export async function setupHostedLinqContactCard(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
   const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
     body: buildHostedLinqContactCardBody({
       firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
-      lastName: input.lastName,
       phoneNumber: input.phoneNumber,
     }),
     method: "POST",
@@ -164,8 +160,6 @@ export async function setupHostedLinqContactCard(input: {
 
 export async function updateHostedLinqContactCard(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber: string;
   signal?: AbortSignal;
 }): Promise<HostedLinqContactCard> {
@@ -173,8 +167,6 @@ export async function updateHostedLinqContactCard(input: {
   const payload = await fetchHostedLinqJson<LinqContactCardResponse>({
     body: buildHostedLinqContactCardBody({
       firstName: input.firstName ?? MURPH_CONTACT_CARD_FIRST_NAME,
-      imageUrl: input.imageUrl,
-      lastName: input.lastName,
     }),
     method: "PATCH",
     operation: "contact card update",
@@ -240,7 +232,6 @@ async function reconcileHostedLinqContactCardForLine(input: {
 
   const updated = await updateHostedLinqContactCard({
     firstName: MURPH_CONTACT_CARD_FIRST_NAME,
-    imageUrl: null,
     phoneNumber: input.phoneNumber,
     signal: input.signal,
   });
@@ -248,11 +239,7 @@ async function reconcileHostedLinqContactCardForLine(input: {
 }
 
 function isCurrentMurphContactCard(card: HostedLinqContactCard): boolean {
-  if (card.firstName !== MURPH_CONTACT_CARD_FIRST_NAME || (card.lastName ?? "") !== "") {
-    return false;
-  }
-
-  return card.imageUrl === null;
+  return card.firstName === MURPH_CONTACT_CARD_FIRST_NAME;
 }
 
 /**
@@ -342,19 +329,13 @@ async function fetchHostedLinqResponse(input: {
 
 function buildHostedLinqContactCardBody(input: {
   firstName?: string | null;
-  imageUrl?: string | null;
-  lastName?: string | null;
   phoneNumber?: string | null;
-}): Record<string, string | null> {
+}): Record<string, string> {
   const firstName = normalizeNullableString(input.firstName);
-  const imageUrl = input.imageUrl === null ? null : normalizeNullableString(input.imageUrl);
-  const lastName = normalizeNullableString(input.lastName);
   const phoneNumber = normalizeNullableString(input.phoneNumber);
 
   return {
     ...(firstName ? { first_name: firstName } : {}),
-    ...(input.imageUrl === null ? { image_url: null } : imageUrl ? { image_url: imageUrl } : {}),
-    ...(lastName ? { last_name: lastName } : {}),
     ...(phoneNumber ? { phone_number: phoneNumber } : {}),
   };
 }
@@ -409,10 +390,10 @@ function requireNonEmptyText(value: unknown, label: string): string {
 
 function normalizeLineLimit(value: number | null | undefined): number {
   if (!Number.isInteger(value) || value === undefined || value === null || value < 1) {
-    return HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT;
+    return HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT;
   }
 
-  return Math.min(value, HOSTED_LINQ_CONTACT_CARD_CRON_LINE_LIMIT);
+  return Math.min(value, HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT);
 }
 
 const MURPH_CONTACT_CARD_VCF_PHOTO_MAX_BYTES = 2 * 1024 * 1024;
@@ -468,9 +449,9 @@ export function buildMurphHostedLinqContactCardVcf(input: {
 
 /**
  * Second healthy configured conversation line (excluding the chat's own) for
- * the vCard's `backup` slot. Reuses the contact-card cron's line listing so
- * health comes from the synced `hostedLinqLine` provider status; lines the
- * provider marks AT_RISK/CRITICAL are skipped. Fails soft to null.
+ * the vCard's `backup` slot. Reads the existing `HostedLinqLine` projection
+ * maintained by the scheduled reconciler; lines last marked AT_RISK/CRITICAL
+ * are skipped. Fails soft to null.
  */
 export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: {
   excludePhoneNumber: string;
@@ -478,8 +459,8 @@ export async function resolveMurphHostedLinqContactCardBackupPhoneNumber(input: 
 }): Promise<string | null> {
   const excludePhoneNumber = normalizePhoneNumber(input.excludePhoneNumber);
   try {
-    const lines = await listHostedLinqConfiguredContactCardLines({
-      observedAt: new Date(),
+    const lines = await listHostedLinqContactCardLines({
+      limit: HOSTED_LINQ_CONTACT_CARD_LINE_LIMIT,
       prisma: input.prisma,
     });
     return lines.find((line) =>

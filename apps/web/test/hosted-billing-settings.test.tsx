@@ -54,6 +54,12 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/personal-usage-credit-eligibility", () => ({
+  readHostedPersonalUsageCreditOfferCodes: vi.fn(async () => [
+    "usage_5_usd",
+  ]),
+}));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     refresh: mocks.routerRefresh,
@@ -207,36 +213,40 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
-  test("shows an exhausted state without inventing a forecast", async () => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+  test.each([undefined, "0", "invalid"])(
+    "shows an exhausted state without inventing a forecast for credit value %s",
+    async (usageCreditBalanceUsdMicros) => {
+      const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      usageStatus: buildUsageStatus({
-        remainingPercent: 0,
-        status: "exhausted",
-        usedPercent: 100,
-      }),
-    }));
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        usageCreditBalanceUsdMicros,
+        usageStatus: buildUsageStatus({
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+      }));
 
-    assert.match(markup, /100% used/);
-    assert.match(markup, /0% remaining/);
-    assert.match(markup, /You&#x27;ve used this period&#x27;s available usage\. Murph pauses new usage until more capacity is available/);
-    assert.doesNotMatch(markup, /recent pace/);
-  });
+      assert.match(markup, /100% used/);
+      assert.match(markup, /0% remaining/);
+      assert.match(markup, /You&#x27;ve used this period&#x27;s available usage\. Murph pauses new usage until more capacity is available/);
+      assert.doesNotMatch(markup, /recent pace/);
+    },
+  );
 
   test.each([
     {
       balanceUsdMicros: "8429999",
-      visibleBalance: /\$8\.42/,
+      hiddenBalance: /\$8\.42/,
     },
     {
       balanceUsdMicros: "9999",
-      visibleBalance: /&lt;\$0\.01/,
+      hiddenBalance: /&lt;\$0\.01/,
     },
   ])("does not call all capacity exhausted while positive usage credit remains", async ({
     balanceUsdMicros,
-    visibleBalance,
+    hiddenBalance,
   }) => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -248,7 +258,7 @@ describe("HostedBillingSettings", () => {
       usageCreditBalanceUsdMicros: balanceUsdMicros,
       usageStatus: buildUsageStatus({
         remainingPercent: 0,
-        status: "exhausted",
+        status: "active",
         usedPercent: 100,
       }),
       usageTopUpOffers: [{
@@ -257,14 +267,70 @@ describe("HostedBillingSettings", () => {
       }],
     }));
 
-    assert.match(markup, visibleBalance);
+    assert.doesNotMatch(markup, hiddenBalance);
+    assert.doesNotMatch(markup, /usage credit remaining/);
     assert.match(markup, /Murph will use your remaining usage credit/);
     assert.doesNotMatch(markup, /included usage and any usage credit/);
     assert.doesNotMatch(markup, /Add usage to continue/);
     assert.doesNotMatch(markup, /pauses new usage/);
   });
 
-  test("shows purchased usage separately and offers a top-up at any utilization", async () => {
+  test("renders credit-backed continuation from the production usage projection", async () => {
+    const {
+      projectHostedPersonalAiUsageStatus,
+    } = await import("@/src/lib/hosted-execution/usage-status");
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+    const periodStart = new Date("2026-07-01T00:00:00.000Z");
+    const periodEnd = new Date("2026-08-01T00:00:00.000Z");
+    const memberId = "member_credit_backed";
+    const usageStatus = await projectHostedPersonalAiUsageStatus({
+      decision: {
+        allowed: true,
+        allowanceSource: "direct_paid_member_plan",
+        billingPlanCode: "launch_monthly",
+        limitUsdMicros: 10_000_000n,
+        memberId,
+        periodEnd,
+        periodStart,
+        remainingUsdMicros: 3_000_000n,
+        spentUsdMicros: 10_000_000n,
+        usageCreditBalanceUsdMicros: 3_000_000n,
+        usageCreditLedgerVersion: 4n,
+      },
+      memberId,
+      now: "2026-07-10T12:00:00.000Z",
+      prisma: {
+        hostedAiUsage: {
+          findFirst: vi.fn(async () => null),
+        },
+      } as never,
+      publicBaseUrl: null,
+    });
+
+    assert.equal(usageStatus.status, "active");
+    assert.equal(usageStatus.usedPercent, 100);
+    assert.equal(usageStatus.remainingPercent, 0);
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      usageCreditBalanceUsdMicros: "3000000",
+      usageStatus,
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+    }));
+
+    assert.match(markup, /Murph will use your remaining usage credit/);
+    assert.doesNotMatch(markup, /\$3\.00/);
+    assert.doesNotMatch(markup, /usage credit remaining/);
+    assert.match(markup, /Add usage/);
+  });
+
+  test("keeps included usage and top-up actions clear without showing an exact credit balance", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
@@ -295,8 +361,8 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /1% used/);
     assert.match(markup, /99% remaining/);
-    assert.match(markup, /\$8\.42/);
-    assert.match(markup, /usage credit remaining/);
+    assert.doesNotMatch(markup, /\$8\.42/);
+    assert.doesNotMatch(markup, /usage credit remaining/);
     assert.match(markup, /Add usage/);
     const addUsageButton = markup.match(/<button[^>]*>Add usage<\/button>/u)?.[0];
     assert.ok(addUsageButton);
@@ -343,6 +409,48 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
+  test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const fulfilledPurchase = {
+      offerCode: "usage_10_usd",
+      purchaseId: "hucp_fulfilled_added",
+      retryAllowed: false,
+      status: "fulfilled" as const,
+    };
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      usageStatus: buildUsageStatus(),
+      usageTopUpActivePurchase: fulfilledPurchase,
+      usageTopUpContactOptions: [{
+        href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
+        kind: "text" as const,
+        label: "Messages",
+      }],
+      usageTopUpInitialOpen: true,
+    }));
+
+    assert.match(markup, /Usage added/);
+    assert.match(markup, /Text Murph/);
+    assert.match(
+      markup,
+      /sms:\+15555550100\?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage\./,
+    );
+    assert.match(markup, /aria-label="Text Murph in Messages"/);
+
+    const withoutContactMarkup = renderToStaticMarkup(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        usageStatus: buildUsageStatus(),
+        usageTopUpActivePurchase: fulfilledPurchase,
+        usageTopUpInitialOpen: true,
+      }),
+    );
+
+    assert.match(withoutContactMarkup, /Usage added/);
+    assert.doesNotMatch(withoutContactMarkup, /Text Murph/);
+  });
+
   test("offers the same top-up primitive to a direct paid Edge member", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
@@ -363,23 +471,6 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /aria-label="Edge included AI usage"/);
     assert.match(markup, /Add usage/);
-  });
-
-  test("shows a positive sub-cent credit without rounding it to zero", async () => {
-    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
-
-    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
-      authenticated: true,
-      billingStatus: "active",
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      usageCreditBalanceUsdMicros: "9999",
-      usageStatus: buildUsageStatus(),
-    }));
-
-    assert.match(markup, /&lt;\$0\.01/);
-    assert.match(markup, /usage credit remaining/);
-    assert.doesNotMatch(markup, /\$0\.00 usage credit remaining/);
   });
 
   test("keeps unavailable and forecast-free usage states honest", async () => {

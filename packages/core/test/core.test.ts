@@ -42,6 +42,7 @@ import {
   createExperiment,
   deleteEvent,
   ensureJournalDay,
+  findEventByExternalRef,
   importDocument,
   importAssessmentResponse,
   importSamples,
@@ -53,6 +54,7 @@ import {
   listHistoryEvents,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  removeAutomaticMealPhoto,
   parseFrontmatterDocument,
   projectAssessmentResponse,
   readJsonlRecords,
@@ -1048,6 +1050,256 @@ test("photo-only meals keep canonical attachments without legacy audio path proj
   assert.equal(mealEvent.attachments?.[0]?.kind, "photo");
   assert.equal("audioPaths" in mealEvent, false);
   assert.equal(meal.audio, null);
+});
+
+test("automatic meal photo removal preserves the meal and tombstones retained bytes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+
+  const originalPhoto = "synthetic automatic meal image bytes";
+  const photoPath = await writeExternalFile(
+    sourceRoot,
+    "automatic-meal.jpg",
+    originalPhoto,
+  );
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-07-22T17:30:00.000Z",
+    photoPath,
+    ingredients: ["rice", "salmon"],
+    nutrition: {
+      totals: {
+        calories: 640,
+        proteinGrams: 42,
+        carbsGrams: 68,
+        fatGrams: 22,
+      },
+      provenance: {
+        source: "estimated",
+        confidence: "medium",
+        sourceDetail: "Estimated from the automatic meal photo.",
+      },
+    },
+    source: "device",
+    externalRef: {
+      system: "meal-photo-capture",
+      resourceType: "photo",
+      resourceId: "capture_synthetic_core_retention",
+      version: "a".repeat(64),
+    },
+  });
+  if (!meal.photo) {
+    throw new Error("Expected the automatic meal to retain a photo before closeout.");
+  }
+
+  const result = await removeAutomaticMealPhoto({
+    eventId: meal.event.id,
+    now: new Date("2026-07-22T21:00:00.000Z"),
+    vaultRoot,
+  });
+
+  assert.equal(result.removedPhotoCount, 1);
+  const latest = await findEventByExternalRef({
+    resourceId: "capture_synthetic_core_retention",
+    resourceType: "photo",
+    system: "meal-photo-capture",
+    vaultRoot,
+  });
+  assert.equal(latest?.kind, "meal");
+  if (latest?.kind !== "meal") {
+    throw new Error("Expected the automatic meal to remain canonical.");
+  }
+  assert.deepEqual(latest.attachments ?? [], []);
+  assert.deepEqual(latest.rawRefs ?? [], []);
+  assert.deepEqual(latest.ingredients, ["rice", "salmon"]);
+  assert.equal(latest.nutrition?.totals?.calories, 640);
+  assert.equal(latest.lifecycle?.revision, 2);
+
+  const tombstoneText = await fs.readFile(
+    path.join(vaultRoot, meal.photo.relativePath),
+    "utf8",
+  );
+  assert.notEqual(tombstoneText, originalPhoto);
+  assert.deepEqual(JSON.parse(tombstoneText), {
+    schemaVersion: "murph.automatic-meal-photo-tombstone.v1",
+    reason: "automatic_meal_closeout",
+    purgedAt: "2026-07-22T21:00:00.000Z",
+  });
+  const manifest = JSON.parse(
+    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
+  ) as {
+    artifacts: Array<{
+      byteSize: number;
+      mediaType: string;
+      originalFileName: string;
+      relativePath: string;
+      role: string;
+      sha256: string;
+    }>;
+  };
+  assert.deepEqual(manifest.artifacts[0], {
+    ...manifest.artifacts[0],
+    byteSize: Buffer.byteLength(tombstoneText),
+    mediaType: "application/json",
+    originalFileName: "meal-photo-retention-tombstone.json",
+    relativePath: meal.photo.relativePath,
+    role: "privacy_tombstone",
+    sha256: createHash("sha256").update(tombstoneText).digest("hex"),
+  });
+
+  const beforeReplay = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  const replay = await removeAutomaticMealPhoto({
+    eventId: meal.event.id,
+    now: new Date("2026-07-22T21:01:00.000Z"),
+    vaultRoot,
+  });
+  assert.equal(replay.removedPhotoCount, 0);
+  const afterReplay = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+  assert.equal(afterReplay.length, beforeReplay.length);
+  assert.equal((await validateVault({ vaultRoot })).valid, true);
+});
+
+test("automatic meal photo removal rejects ordinary meal photos", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+  const photoPath = await writeExternalFile(
+    sourceRoot,
+    "manual-meal.jpg",
+    "manual meal image bytes",
+  );
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-07-22T18:00:00.000Z",
+    photoPath,
+    note: "manual dinner",
+  });
+
+  await assert.rejects(
+    () => removeAutomaticMealPhoto({
+      eventId: meal.event.id,
+      vaultRoot,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "MEAL_PHOTO_RETENTION_SOURCE_INVALID",
+  );
+});
+
+test("automatic meal photo removal fails closed when retained bytes changed", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+  const photoPath = await writeExternalFile(
+    sourceRoot,
+    "automatic-meal.jpg",
+    "original automatic meal image bytes",
+  );
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-07-22T18:00:00.000Z",
+    photoPath,
+    source: "device",
+    externalRef: {
+      system: "meal-photo-capture",
+      resourceType: "photo",
+      resourceId: "capture_synthetic_core_retention_tamper",
+      version: "c".repeat(64),
+    },
+  });
+  if (!meal.photo) {
+    throw new Error("Expected the automatic meal to retain a photo before closeout.");
+  }
+  const retainedPhotoPath = path.join(vaultRoot, meal.photo.relativePath);
+  const changedBytes = "changed automatic meal image bytes";
+  await fs.writeFile(retainedPhotoPath, changedBytes, "utf8");
+  const manifestBefore = await fs.readFile(
+    path.join(vaultRoot, meal.manifestPath),
+    "utf8",
+  );
+  const ledgerBefore = await readJsonlRecords({
+    vaultRoot,
+    relativePath: meal.eventPath,
+  });
+
+  await assert.rejects(
+    () => removeAutomaticMealPhoto({
+      eventId: meal.event.id,
+      now: new Date("2026-07-22T21:00:00.000Z"),
+      vaultRoot,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "MEAL_PHOTO_RETENTION_PRECONDITION_FAILED",
+  );
+
+  assert.equal(await fs.readFile(retainedPhotoPath, "utf8"), changedBytes);
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, meal.manifestPath), "utf8"),
+    manifestBefore,
+  );
+  assert.deepEqual(
+    await readJsonlRecords({ vaultRoot, relativePath: meal.eventPath }),
+    ledgerBefore,
+  );
+});
+
+test("automatic meal photo removal rejects a manifest owned by another meal", async () => {
+  const vaultRoot = await makeTempDirectory("murph-vault");
+  const sourceRoot = await makeTempDirectory("murph-source");
+  await initializeVault({ vaultRoot });
+  const originalPhoto = "automatic meal image bytes with manifest proof";
+  const photoPath = await writeExternalFile(
+    sourceRoot,
+    "automatic-meal.jpg",
+    originalPhoto,
+  );
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-07-22T18:15:00.000Z",
+    photoPath,
+    source: "device",
+    externalRef: {
+      system: "meal-photo-capture",
+      resourceType: "photo",
+      resourceId: "capture_synthetic_core_retention_manifest",
+      version: "d".repeat(64),
+    },
+  });
+  if (!meal.photo) {
+    throw new Error("Expected the automatic meal to retain a photo before closeout.");
+  }
+  const manifestPath = path.join(vaultRoot, meal.manifestPath);
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as {
+    importId: string;
+    owner: { id: string };
+  };
+  manifest.importId = "meal_01KZZM3A9C7P4R6T8V2W5X0YQ";
+  manifest.owner.id = "meal_01KZZM3A9C7P4R6T8V2W5X0YQ";
+  const mismatchedManifest = `${JSON.stringify(manifest, null, 2)}\n`;
+  await fs.writeFile(manifestPath, mismatchedManifest, "utf8");
+
+  await assert.rejects(
+    () => removeAutomaticMealPhoto({
+      eventId: meal.event.id,
+      now: new Date("2026-07-22T21:00:00.000Z"),
+      vaultRoot,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "MEAL_PHOTO_RETENTION_MANIFEST_INVALID",
+  );
+  assert.equal(
+    await fs.readFile(path.join(vaultRoot, meal.photo.relativePath), "utf8"),
+    originalPhoto,
+  );
 });
 
 test("note-only meals stay first-class meal events without raw artifacts", async () => {

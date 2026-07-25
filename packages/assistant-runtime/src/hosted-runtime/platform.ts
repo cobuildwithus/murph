@@ -353,6 +353,9 @@ type HostedRuntimeEffectsPortBase = {
     authority: HostedExecutionExternalThreadRouteAuthority,
     context?: { signal?: AbortSignal | null },
   ): Promise<void>;
+  resolveCurrentVerifiedEmailRecipient?(
+    context?: { signal?: AbortSignal | null },
+  ): Promise<string | null>;
   recordLinqDeliveryOutcome?(
     request: HostedRuntimeLinqDeliveryOutcomeRequest,
     context?: { signal?: AbortSignal | null },

@@ -80,7 +80,6 @@ beforeEach(() => {
     authenticated: false,
     authenticatedMember: null,
     linkedAccounts: [],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -127,7 +126,6 @@ test("UploadLabsMurphContactAction opens assigned SMS with the lab-report messag
         type: "email",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -169,7 +167,6 @@ test("UploadLabsMurphContactAction falls back to a prefilled email when SMS is n
         type: "email",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -211,7 +208,6 @@ test("UploadLabsMurphContactAction skips verified email without a reply alias", 
         type: "email",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -254,7 +250,6 @@ test("UploadLabsMurphContactAction prefers Telegram over email with the lab-repo
         username: "member_handle",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({
@@ -300,7 +295,6 @@ test("UploadLabsMurphContactAction opens Telegram with the lab-report draft when
         username: "member_handle",
       },
     ],
-    memberLookup: null,
     session: null,
   });
   mocks.getHostedMurphContactContext.mockResolvedValue({

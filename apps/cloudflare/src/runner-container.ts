@@ -8,6 +8,9 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import type {
+  HostedWorkspaceInvocationProcessingMode,
+} from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
@@ -82,6 +85,7 @@ const HOSTED_RUNNER_CONTAINER_SAFE_ERROR_MESSAGES = new Set([
 ]);
 const DEFAULT_RUNNER_IDLE_TTL_MS = 300_000;
 const MIN_RUNNER_IDLE_TTL_MS = 1_000;
+const MIN_RUNNER_LIFECYCLE_REEVALUATION_MS = 1_000;
 const RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 30_000;
 const MIN_RUNNER_ACTIVITY_RENEW_INTERVAL_MS = 250;
 const WORKSPACE_INVOCATION_PREEMPTED_ABORT_MESSAGE = "workspace invocation preempted";
@@ -324,6 +328,11 @@ interface RunnerActivityTimeoutRenewable {
   renewActivityTimeout(): void;
 }
 
+interface RunnerContainerHealth {
+  activeJobCount: number;
+  conversationWarmActivityCompletedAtEpochMs: number | null | undefined;
+}
+
 interface RunnerActiveOperationRecord {
   attemptId: string;
   leaseGeneration: string;
@@ -331,7 +340,7 @@ interface RunnerActiveOperationRecord {
   userId: string;
 }
 
-type RunnerRuntimeProcessingMode = "default" | "inbox_media_retention";
+type RunnerRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export interface RunnerRuntimeWakeInput {
   attemptId: string;
@@ -405,17 +414,21 @@ export class RunnerContainer extends Container {
   private workspaceInvocationActiveOperation: RunnerActiveOperationRecord | null = null;
   private workspaceInvocationActiveOperationPreservedAfterTransportFailure = false;
   private workspaceInvocationAbortEndpointReady = false;
+  private containerInteractionGeneration = 0;
 
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
     this.envVars = buildRunnerContainerEnvVars();
-    this.sleepAfter = formatRunnerSleepAfter(readRunnerContainerIdleTtlMs(env));
+    this.sleepAfter = formatRunnerSleepAfter(
+      readRunnerContainerLifecycleReevaluationMs(env),
+    );
   }
 
   async invoke(
     payload: HostedExecutionContainerInvokeRequest,
   ): Promise<HostedExecutionRunnerJobResult> {
+    this.noteContainerInteraction();
     const input = parseHostedExecutionContainerInvokeInput(payload);
     return this.withLifecycleLock(async () =>
       this.invokeHostedExecution(input)
@@ -423,15 +436,17 @@ export class RunnerContainer extends Container {
   }
 
   async destroyInstance(): Promise<void> {
+    this.noteContainerInteraction();
     this.workspaceInvocationAbortController?.abort(new Error("workspace invocation container destroyed"));
-    await this.withLifecycleLock(async () => {
-      await this.stopWarmContainer({
+    await this.withLifecycleLock(async () =>
+      this.stopWarmContainer({
         reason: "destroy-instance",
-      });
-    });
+      })
+    );
   }
 
   async readActiveRuntimeUserFence(): Promise<WorkerActiveRuntimeUserFenceResult> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     if (!active) {
       const status = await readRunnerContainerStatus(this);
@@ -464,6 +479,7 @@ export class RunnerContainer extends Container {
   async ensureReadyForProcessing(
     payload: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
+    this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
@@ -489,6 +505,7 @@ export class RunnerContainer extends Container {
     leaseGeneration: string;
     userId: string;
   }): Promise<RunnerWorkspaceInvocationAbortStatus> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     const abortController = this.workspaceInvocationAbortController;
     if (!active || !abortController) {
@@ -529,6 +546,7 @@ export class RunnerContainer extends Container {
   }
 
   async ensureProcessing(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult> {
+    this.noteContainerInteraction();
     assertRunnerContainerEnsureProcessingUserIds(input);
     let startAction: Extract<RunnerContainerEnsureProcessingResult, { kind: "accepted" }>["action"] = "started";
     if (input.activeRuntime) {
@@ -581,6 +599,7 @@ export class RunnerContainer extends Container {
   }
 
   async wakeRuntime(input: RunnerRuntimeWakeInput): Promise<RunnerRuntimeWakeResult> {
+    this.noteContainerInteraction();
     const active = this.workspaceInvocationActiveOperation;
     if (
       active
@@ -708,6 +727,7 @@ export class RunnerContainer extends Container {
   }
 
   async smokeHealth(input: HostedExecutionContainerSmokeHealthInput = {}): Promise<HostedExecutionContainerSmokeHealthResult> {
+    this.noteContainerInteraction();
     return await this.withLifecycleLock(async () => {
       const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
       let smokeStartAttempted = false;
@@ -896,11 +916,19 @@ export class RunnerContainer extends Container {
   }
 
   override async onActivityExpired(): Promise<void> {
+    const interactionGenerationAtExpiry = this.containerInteractionGeneration;
     await this.withLifecycleLock(async () => {
+      if (
+        this.lifecycleLockPendingCount > 1
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        this.renewPlatformActivityTimeout("activity-expired-interaction-race");
+        return;
+      }
       const activeOperation = this.workspaceInvocationActiveOperation;
       if (activeOperation) {
         this.lastActivityExpiryAtMs = Date.now();
-        this.noteRunnerActivity("activity-expired-active-operation");
+        this.renewPlatformActivityTimeout("activity-expired-active-operation");
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -920,7 +948,7 @@ export class RunnerContainer extends Container {
       if (
         lastActivityObservedAtMs !== null
         && Date.now() - lastActivityObservedAtMs
-          < readRunnerContainerIdleTtlMs(this.environment)
+          < readRunnerContainerLifecycleReevaluationMs(this.environment)
       ) {
         this.lastActivityExpiryAtMs = Date.now();
         if (this.renewPlatformActivityTimeout()) {
@@ -939,7 +967,60 @@ export class RunnerContainer extends Container {
         }
       }
 
-      this.lastActivityExpiryAtMs = Date.now();
+      const activityExpiryAtMs = Date.now();
+      this.lastActivityExpiryAtMs = activityExpiryAtMs;
+      let status: string | null;
+      try {
+        status = await readRunnerContainerStatusWithTimeout(
+          this,
+          RUNNER_DESTROY_SETTLE_TIMEOUT_MS,
+        );
+      } catch (error) {
+        this.logLifecycleCleanupFailure(
+          "Hosted execution container could not verify lifecycle state during activity expiry.",
+          error,
+        );
+        this.renewPlatformActivityTimeout("activity-expired-status-unavailable");
+        return;
+      }
+      if (isRunnerContainerStopped(status)) {
+        return;
+      }
+
+      let health: RunnerContainerHealth;
+      try {
+        health = await this.readWorkspaceInvocationHealth();
+      } catch (error) {
+        this.logLifecycleCleanupFailure(
+          "Hosted execution container could not verify runner health during activity expiry.",
+          error,
+        );
+        this.renewPlatformActivityTimeout("activity-expired-health-unavailable");
+        return;
+      }
+      if (health.activeJobCount > 0) {
+        this.renewPlatformActivityTimeout("activity-expired-active-child");
+        return;
+      }
+      if (
+        this.lifecycleLockPendingCount > 1
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        this.renewPlatformActivityTimeout("activity-expired-interaction-race");
+        return;
+      }
+      const conversationWarmActivityCompletedAtEpochMs =
+        health.conversationWarmActivityCompletedAtEpochMs;
+      if (
+        conversationWarmActivityCompletedAtEpochMs !== null
+        && conversationWarmActivityCompletedAtEpochMs !== undefined
+        && conversationWarmActivityCompletedAtEpochMs
+          > activityExpiryAtMs - readRunnerContainerIdleTtlMs(this.environment)
+      ) {
+        this.renewPlatformActivityTimeout("activity-expired-conversation-warm");
+        return;
+      }
+
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -950,10 +1031,17 @@ export class RunnerContainer extends Container {
         phase: "container.ready",
         userId: this.currentLogContext?.userId,
       });
-      await this.stopWarmContainer({
+      const destroyed = await this.stopWarmContainer({
+        expectedInteractionGeneration: interactionGenerationAtExpiry,
         failClosed: false,
         reason: "activity-expired",
       });
+      if (
+        !destroyed
+        || this.containerInteractionGeneration !== interactionGenerationAtExpiry
+      ) {
+        this.renewPlatformActivityTimeout("activity-expired-cleanup-retained");
+      }
     });
   }
 
@@ -1256,6 +1344,10 @@ export class RunnerContainer extends Container {
   }
 
   private async readWorkspaceInvocationActiveFromHealth(): Promise<boolean> {
+    return (await this.readWorkspaceInvocationHealth()).activeJobCount > 0;
+  }
+
+  private async readWorkspaceInvocationHealth(): Promise<RunnerContainerHealth> {
     const signal = AbortSignal.timeout(DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS);
     const response = await this.containerFetch(RUNNER_HEALTH_URL, {
       method: "GET",
@@ -1272,7 +1364,25 @@ export class RunnerContainer extends Container {
     ) {
       throw new Error("Hosted runner container health did not include a valid active job count.");
     }
-    return payload.activeJobCount > 0;
+    const conversationWarmActivityCompletedAtEpochMs =
+      payload.conversationWarmActivityCompletedAtEpochMs;
+    if (
+      conversationWarmActivityCompletedAtEpochMs !== undefined
+      && conversationWarmActivityCompletedAtEpochMs !== null
+      && (
+        typeof conversationWarmActivityCompletedAtEpochMs !== "number"
+        || !Number.isSafeInteger(conversationWarmActivityCompletedAtEpochMs)
+        || conversationWarmActivityCompletedAtEpochMs < 0
+      )
+    ) {
+      throw new Error(
+        "Hosted runner container health did not include a valid conversation warm activity watermark.",
+      );
+    }
+    return {
+      activeJobCount: payload.activeJobCount,
+      conversationWarmActivityCompletedAtEpochMs,
+    };
   }
 
   private async readPreservedWorkspaceInvocationActiveFromContainer(): Promise<boolean> {
@@ -1589,6 +1699,7 @@ export class RunnerContainer extends Container {
   }
 
   private async destroyIfRunning(input: {
+    expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason: RunnerContainerDestroyReason;
   }): Promise<boolean> {
@@ -1620,6 +1731,13 @@ export class RunnerContainer extends Container {
       return false;
     }
 
+    if (
+      input.expectedInteractionGeneration !== undefined
+      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
+    ) {
+      return true;
+    }
+
     const destroyStartedAt = Date.now();
     const stopGenerationBeforeDestroy = this.stopGeneration;
     this.lastDestroyRequest = {
@@ -1641,6 +1759,12 @@ export class RunnerContainer extends Container {
       userId: context?.userId,
     });
 
+    if (
+      input.expectedInteractionGeneration !== undefined
+      && this.containerInteractionGeneration !== input.expectedInteractionGeneration
+    ) {
+      return true;
+    }
     const destroyRequest = this.destroy().then(
       () => ({ kind: "destroy-resolved" as const }),
       (error: unknown) => ({ error, kind: "destroy-rejected" as const }),
@@ -1813,6 +1937,7 @@ export class RunnerContainer extends Container {
   }
 
   private async stopWarmContainer(input?: {
+    expectedInteractionGeneration?: number;
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
@@ -1821,7 +1946,13 @@ export class RunnerContainer extends Container {
     const reason = input?.reason ?? "destroy-instance";
     let destroyed: boolean;
     try {
-      destroyed = await this.destroyIfRunning({ failClosed, reason });
+      destroyed = await this.destroyIfRunning({
+        ...(input?.expectedInteractionGeneration === undefined
+          ? {}
+          : { expectedInteractionGeneration: input.expectedInteractionGeneration }),
+        failClosed,
+        reason,
+      });
     } catch (error) {
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
@@ -1873,8 +2004,11 @@ export class RunnerContainer extends Container {
   }
 
   private startRunnerActivityRenewal(): () => void {
-    const idleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
-    const intervalMs = computeRunnerActivityRenewIntervalMs(idleTtlMs);
+    const lifecycleReevaluationMs =
+      readRunnerContainerLifecycleReevaluationMs(this.environment);
+    const intervalMs = computeRunnerActivityRenewIntervalMs(
+      lifecycleReevaluationMs,
+    );
     const interval = setInterval(() => {
       this.noteRunnerActivity("invoke-heartbeat");
     }, intervalMs);
@@ -1933,6 +2067,21 @@ export class RunnerContainer extends Container {
   private recordContainerActivityObserved(stage: string): void {
     this.lastActivityObservedAtMs = Date.now();
     this.lastActivityObservedStage = stage;
+  }
+
+  private noteContainerInteraction(): void {
+    this.containerInteractionGeneration += 1;
+  }
+
+  private logLifecycleCleanupFailure(message: string, error: unknown): void {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      error,
+      level: "warn",
+      message,
+      phase: "container.ready",
+      userId: this.currentLogContext?.userId,
+    });
   }
 
   private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
@@ -2797,7 +2946,9 @@ function assertRunnerContainerEnsureProcessingUserIds(
 function normalizeRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" ? "inbox_media_retention" : "default";
+  return value === "inbox_media_retention" || value === "system_mailbox"
+    ? value
+    : "default";
 }
 
 function parseRunnerContainerEnsureReadyForProcessingInput(
@@ -3203,6 +3354,31 @@ function readRunnerContainerIdleTtlMs(source: RunnerContainerEnvironmentSource):
     );
   }
 
+  return parsed;
+}
+
+function readRunnerContainerLifecycleReevaluationMs(
+  source: RunnerContainerEnvironmentSource,
+): number {
+  const raw = source.HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS;
+  if (raw === undefined || raw === null || raw === "") {
+    return readRunnerContainerIdleTtlMs(source);
+  }
+  if (typeof raw !== "string") {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS must be a string when configured.",
+    );
+  }
+  const parsed = readStrictPositiveIntegerEnv(raw);
+  if (
+    !Number.isSafeInteger(parsed)
+    || parsed < MIN_RUNNER_LIFECYCLE_REEVALUATION_MS
+  ) {
+    throw new TypeError(
+      "HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS must be an integer "
+      + `greater than or equal to ${MIN_RUNNER_LIFECYCLE_REEVALUATION_MS}.`,
+    );
+  }
   return parsed;
 }
 

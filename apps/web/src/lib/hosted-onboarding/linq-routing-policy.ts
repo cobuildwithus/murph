@@ -26,14 +26,23 @@ export function chooseHostedLinqHomeLine(input: {
   preferredRecipientPhone: string | null;
 }): HostedLinqAssignableHomeLine | null {
   const preferredRecipientPhone = normalizePhoneNumber(input.preferredRecipientPhone);
-  const candidates = input.lines.filter((line) =>
-    isHostedLinqHomeLineUnderLimits({
-      activeMembersByRecipientPhone: input.activeMembersByRecipientPhone,
+  const dailyCandidates = input.lines.filter((line) =>
+    isHostedLinqHomeLineUnderDailyLimit({
       ignoreDailyNewConversationLimit: input.ignoreDailyNewConversationLimit ?? false,
       line,
       newAssignmentsByRecipientPhone: input.newAssignmentsByRecipientPhone,
     }),
   );
+  const candidatesUnderActiveTarget = dailyCandidates.filter((line) =>
+    isHostedLinqHomeLineUnderActiveTarget({
+      activeMembersByRecipientPhone: input.activeMembersByRecipientPhone,
+      line,
+    }),
+  );
+  const candidates =
+    candidatesUnderActiveTarget.length > 0
+      ? candidatesUnderActiveTarget
+      : dailyCandidates;
 
   if (preferredRecipientPhone) {
     const preferred = candidates.find((line) => line.phoneNumber === preferredRecipientPhone);
@@ -169,28 +178,26 @@ export function resolveHostedLinqActiveRouteDecision(input: {
   };
 }
 
-function isHostedLinqHomeLineUnderLimits(input: {
+function isHostedLinqHomeLineUnderActiveTarget(input: {
   activeMembersByRecipientPhone: ReadonlyMap<string, number>;
+  line: HostedLinqAssignableHomeLine;
+}): boolean {
+  return !(
+    input.line.activeMemberLimit !== null
+    && (input.activeMembersByRecipientPhone.get(input.line.phoneNumber) ?? 0)
+      >= input.line.activeMemberLimit
+  );
+}
+
+function isHostedLinqHomeLineUnderDailyLimit(input: {
   ignoreDailyNewConversationLimit: boolean;
   line: HostedLinqAssignableHomeLine;
   newAssignmentsByRecipientPhone: ReadonlyMap<string, number>;
 }): boolean {
-  if (
-    input.line.activeMemberLimit !== null
-    && (input.activeMembersByRecipientPhone.get(input.line.phoneNumber) ?? 0)
-      >= input.line.activeMemberLimit
-  ) {
-    return false;
-  }
-
-  if (
+  return !(
     !input.ignoreDailyNewConversationLimit
     && input.line.maxNewConversationsPerDay !== null
     && (input.newAssignmentsByRecipientPhone.get(input.line.phoneNumber) ?? 0)
       >= input.line.maxNewConversationsPerDay
-  ) {
-    return false;
-  }
-
-  return true;
+  );
 }

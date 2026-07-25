@@ -147,12 +147,18 @@ Defaulted worker vars:
 - `HOSTED_EXECUTION_IDLE_CHECKPOINT_DELAY_MS=180000` for the runtime-owned idle
   window before a dirty invocation checkpoints and returns; production rejects
   lower values so routine checkpoints cannot bypass the three-minute quiet floor
-- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the native container shell
-  activity-expiry cleanup lifecycle (code default is `300000` when unset)
+- `HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS=1200000` for the post-completion
+  conversation warm lease (code default is `300000` when unset)
 - `HOSTED_EXECUTION_RETRY_DELAY_MS=30000`
 - `HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS=45000` (must exceed the web-control timeout by at least 5 seconds)
 - `HOSTED_EXECUTION_WEB_CONTROL_TIMEOUT_MS=30000`
 - `HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT=production`
+
+After the additive runner-retention deploy has completed its observation and
+container-drain window, set optional
+`HOSTED_EXECUTION_RUNNER_LIFECYCLE_REEVALUATION_MS=60000` to reconsider
+maintenance-only idle shells every minute. When unset it falls back to the
+conversation lease for safe rollback.
 
 `HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS` bounds consecutive failed hosted runner
 invocations for a Durable Object. Temporal decides when durable work is due by
@@ -192,6 +198,11 @@ publishing a snapshot; inherited or committed wakes and durability barriers
 remain checkpoint-first. If state remains dirty, the direct invocation
 checkpoints with reason `idle_shutdown` at the floor or during shutdown before
 returning success. A restored due wake in a clean workspace runs ordinarily.
+Before a direct user-action provider turn, a session absent from the restored
+published snapshot receives that same full `idle_shutdown` checkpoint while the
+foreground watcher and detached work are quiescent. This includes a session
+created earlier in the live invocation by deterministic welcome output; a
+session already restored from the published snapshot adds no extra checkpoint.
 Foreground conversation staging also aborts runner-owned background maintenance,
 including an in-flight provider-cleanup request, without aborting the foreground
 invocation itself.

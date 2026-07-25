@@ -289,7 +289,13 @@ test("JoinInviteAutoTrialIsland preserves the enrollment redirect after unmount"
 });
 
 test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment fails", async () => {
-  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(new Error("Trial unavailable"));
+  mocks.requestHostedAutoPulseTrialEnrollment.mockRejectedValue(
+    new HostedOnboardingApiError({
+      code: "HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_BUSY",
+      message: "Murph is still finishing this trial setup. Try again.",
+      retryable: true,
+    }),
+  );
 
   const { container, cleanup } = await renderClientComponent(
     createElement(JoinInviteAutoTrialIsland, {
@@ -304,7 +310,9 @@ test("JoinInviteAutoTrialIsland renders a distinct retry state after enrollment 
 
   expect(container.textContent).toContain("Trial setup paused");
   expect(container.textContent).toContain("Unable to start your trial");
-  expect(container.textContent).toContain("Trial unavailable");
+  expect(container.textContent).toContain(
+    "Murph is still finishing this trial setup. Try again.",
+  );
   expect(container.textContent).toContain("Try again");
   expect(container.textContent).not.toContain("Setting up your Murph");
   expect(container.querySelector("[role='status']")).toBeNull();
@@ -597,8 +605,8 @@ test("JoinInvitePhoneVerificationIsland uses email auth for invite email verific
   expect(container.querySelector('[data-hosted-phone-auth="true"]')).toBeNull();
   expect(mocks.hostedEmailAuthProps).toMatchObject({
     active: true,
-    initialEmailAddress: "buddy@example.com",
     inline: true,
+    lockedEmailAddress: "buddy@example.com",
     onAuthenticated: expect.any(Function),
   });
   expect(mocks.hostedPhoneAuthProps).toBeNull();
@@ -687,6 +695,7 @@ function createStatus(
       matchesInvite: false,
     },
     stage: "verify",
+    telegramStartRequired: false,
     ...overrides,
   };
 }
@@ -729,7 +738,12 @@ function createConsentStatus(input: {
     schema: "murph.hosted-consent-status.v1",
     scopes: [
       consentScope("launch.legal", "Terms, privacy, and AI disclosure", legalDocuments, launchLegalGranted),
-      consentScope("launch.health-data", "Health data collection consent", healthDataDocuments, launchHealthDataGranted),
+      consentScope(
+        "launch.health-data",
+        "Health data notice and processing authorization",
+        healthDataDocuments,
+        launchHealthDataGranted,
+      ),
     ],
   };
 }
@@ -740,7 +754,7 @@ function consentDocument(id: string, title: string, href: string) {
     id: id as HostedConsentStatus["documents"][number]["id"],
     pdfHref: `${href}.pdf`,
     title,
-    version: "2026-04-29",
+    version: "2026-07-23",
   };
 }
 
