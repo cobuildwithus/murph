@@ -2057,6 +2057,7 @@ describe('assistant Codex turn planning', () => {
         'newsletter',
         'assistant_style',
         'personalization',
+        'create_phone_call',
       ]),
     )
     for (const personalTool of [
@@ -2064,7 +2065,6 @@ describe('assistant Codex turn planning', () => {
       'assistant_configuration',
       'connected_apps_manage',
       'create_clinical_records_connect_link',
-      'create_phone_call',
       'family_plan',
       'labs',
       'plan_usage',

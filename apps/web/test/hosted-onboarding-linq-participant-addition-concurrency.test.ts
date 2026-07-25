@@ -82,6 +82,10 @@ async function createRouteFixture(): Promise<RouteFixture> {
       { id: containerMemberId },
     ],
   });
+  // The hosted secure-box test codec in test/setup-env.ts short-circuits seal
+  // and open before any domain-root lookup, so this fixture must not provision
+  // real crypto roots: doing so would require the GCP authority key that the
+  // PostgreSQL-ordering CI lane deliberately does not configure.
   await observer.hostedThreadContainer.create({
     data: {
       memberId: containerMemberId,

@@ -193,6 +193,7 @@ import {
 import {
   createPhoneCallRequestKey,
   MURPH_CREATE_PHONE_CALL_TOOL,
+  normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
@@ -2799,18 +2800,29 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       try {
-        const result = await phoneCalls.start({
+        const brief = normalizePhoneCallBriefForConversationScope({
           brief: input.request.brief,
+          conversationScope: requestKeyScope.conversationScope,
+        })
+        const result = await phoneCalls.start({
+          brief,
+          ...(requestKeyScope.conversationScope === 'group'
+            ? {
+                inboundMailboxItemIds: [
+                  ...requestKeyScope.inboundMailboxItemIds,
+                ],
+              }
+            : {}),
           originSessionId: requestKeyScope.originSessionId,
           requestKey: createPhoneCallRequestKey({
-            brief: input.request.brief,
+            brief,
             scope: requestKeyScope,
           }),
         }, {
           signal: input.abortSignal ?? null,
         })
         const resultContextGuidance =
-          'When the call finishes, Murph messages the member with the result if it is worth sharing; you may tell them you will follow up once you hear back.'
+          'When the call finishes, Murph reports the result back in this conversation if it is worth sharing; you may tell them you will follow up once you hear back.'
         if (result.status === "calling") {
           return toolTextResult(
             true,
@@ -2823,8 +2835,17 @@ export async function executeMurphDynamicToolRequest(input: {
             ? `phone call start is still being reconciled: ${result.phoneCallId}. ${resultContextGuidance}`
             : `phone call attempt was unsuccessful: ${result.phoneCallId}`,
         )
-      } catch {
-        return toolTextResult(false, 'phone call could not be started')
+      } catch (error) {
+        // Only one denial is worth relaying: the requester has no Murph of
+        // their own, which the participant can actually fix. Everything else
+        // stays generic so provider, transport, and internal failures cannot
+        // leak server text into the conversation.
+        return isHostedGroupPhoneCallRequesterActivationRequiredError(error)
+          ? toolTextResult(
+              false,
+              'phone call was declined because the person asking does not have their own Murph yet; tell them to set one up before trying again',
+            )
+          : toolTextResult(false, 'phone call could not be started')
       }
     }
     case 'create-clinical-records-connect-link': {
@@ -4662,6 +4683,22 @@ function safeToolPayloadText(payload: unknown): string {
     return text
   }
   return `${text.slice(0, 60_000)}...`
+}
+
+// The hosted transport preserves the Web-owned structured error code without
+// this package depending on the transport class, so read it defensively rather
+// than importing across the boundary.
+const HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE =
+  'HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED'
+
+function isHostedGroupPhoneCallRequesterActivationRequiredError(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const code = (error as { code?: unknown }).code
+  return code === HOSTED_GROUP_PHONE_CALL_REQUESTER_ACTIVATION_REQUIRED_CODE
 }
 
 function toolTextResult(

@@ -751,7 +751,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           productFeedbackAcceptedInputIds.length > 0 &&
           typeof input.executionContext?.hosted?.productFeedbackRecorder?.recordProductFeedback === 'function',
         phoneCallsAvailable:
-          privateInteractiveAudience &&
+          (privateInteractiveAudience || hostedGroupRuntime) &&
           userActionAcceptedInputIds.length > 0 &&
           input.hostedToolContext?.phoneCalls != null,
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,

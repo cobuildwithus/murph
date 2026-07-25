@@ -29,8 +29,6 @@ import {
 } from "../hosted-onboarding/entitlement";
 import { hasHostedMemberActivationProof } from "../hosted-onboarding/member-activation";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { lookupHostedMemberIdentityByPhoneNumber } from "../hosted-onboarding/hosted-member-identity-store";
-import { lookupHostedMemberByVerifiedEmailAddress } from "../hosted-onboarding/hosted-member-store";
 import {
   getHostedLinqChatHandles,
   type HostedLinqChatHandleSummary,
@@ -102,6 +100,9 @@ import {
   projectHostedVaultShareProjectionDisplays,
 } from "./join-policy";
 import { sha256Hex } from "../primitives";
+import {
+  lookupHostedGroupParticipantMemberByHandle,
+} from "./participant-member";
 
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
@@ -710,7 +711,7 @@ async function lookupSelfOptOutParticipantMember(input: {
     return null;
   }
 
-  return await lookupParticipantMemberByHandle({
+  return await lookupHostedGroupParticipantMemberByHandle({
     handle: input.context.senderHandle,
     prisma: input.prisma,
   });
@@ -1342,7 +1343,7 @@ async function handleHostedRuntimeGroupReadChatParticipants(input: {
   const resolvedParticipants: HostedThreadContainerResolvedParticipant[] = [];
   try {
     for (const handle of participantHandles) {
-      const lookup = await lookupParticipantMemberByHandle({
+      const lookup = await lookupHostedGroupParticipantMemberByHandle({
         handle: handle.handle,
         prisma,
       });
@@ -1502,7 +1503,7 @@ async function resolveHostedThreadContainerParticipants(input: {
     if (!isCurrentHostedLinqParticipantHandle(handle)) {
       continue;
     }
-    const lookup = await lookupParticipantMemberByHandle({
+    const lookup = await lookupHostedGroupParticipantMemberByHandle({
       handle: handle.handle,
       prisma: input.prisma,
     });
@@ -1515,26 +1516,6 @@ async function resolveHostedThreadContainerParticipants(input: {
     }
   }
   return resolvedParticipants;
-}
-
-async function lookupParticipantMemberByHandle(input: {
-  handle: string;
-  prisma: HostedOnboardingReadClient;
-}) {
-  if (input.handle.includes("@")) {
-    return await lookupHostedMemberByVerifiedEmailAddress({
-      address: input.handle,
-      prisma: input.prisma,
-    });
-  }
-  const phoneNumber = normalizePhoneNumber(input.handle);
-  if (!phoneNumber) {
-    return null;
-  }
-  return await lookupHostedMemberIdentityByPhoneNumber({
-    phoneNumber,
-    prisma: input.prisma,
-  });
 }
 
 function isCurrentHostedLinqParticipantHandle(handle: HostedLinqChatHandleSummary): boolean {
