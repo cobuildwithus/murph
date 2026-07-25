@@ -55,28 +55,35 @@ export async function applyStripePulseTrialPaymentMethodAttached(input: {
 
   const memberId = lookup.core.id;
 
-  // Clear before acting. A cleared intent that fails to apply leaves the member
-  // exactly where today's code already leaves them, and they still have the
-  // signed link and the settings button; an uncleared one that half-applied
-  // could bill them twice on the webhook's next delivery.
+  // Let a throw propagate with the intent still recorded. The webhook receipt
+  // retries, and the retry needs the intent to still exist or the paused member
+  // this path exists for stays locked out for good. Re-running a transition
+  // that already landed cannot bill twice: the plan services reuse a
+  // deterministic Stripe idempotency key and return the existing invoice
+  // result instead of charging again.
+  const result = action === "start_pulse_now"
+    ? await startHostedPulseTrialPaidPlan({
+      memberId,
+      now,
+      prisma: input.prisma,
+    })
+    : await continueHostedPulseTrialPaidPlan({
+      memberId,
+      now,
+      prisma: input.prisma,
+    });
+
+  // Stripe still has no usable card, so nothing moved. Keep the intent live for
+  // whatever attach comes next rather than reporting a recovery that did not
+  // happen. The recorded expiry bounds how long that can repeat.
+  if (result.status === "payment_required") {
+    return null;
+  }
+
   await clearHostedPulseTrialPaymentIntent({
     memberId,
     prisma: input.prisma,
   });
-
-  if (action === "start_pulse_now") {
-    await startHostedPulseTrialPaidPlan({
-      memberId,
-      now,
-      prisma: input.prisma,
-    });
-  } else {
-    await continueHostedPulseTrialPaidPlan({
-      memberId,
-      now,
-      prisma: input.prisma,
-    });
-  }
 
   return { memberId };
 }

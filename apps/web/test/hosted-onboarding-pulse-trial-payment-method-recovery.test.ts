@@ -88,7 +88,7 @@ test("finishes the start-now switch the browser round trip never completed", asy
   expect(mocks.continuePulse).not.toHaveBeenCalled();
 });
 
-test("clears the recorded intent before charging so a redelivery cannot double-bill", async () => {
+test("consumes the recorded intent only after the transition lands", async () => {
   stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
 
   await recovery.applyStripePulseTrialPaymentMethodAttached({
@@ -104,8 +104,83 @@ test("clears the recorded intent before charging so a redelivery cannot double-b
       pulseTrialPaymentIntentExpiresAt: null,
     },
   });
-  expect(mocks.billingRefUpdate.mock.invocationCallOrder[0])
-    .toBeLessThan(mocks.startPulse.mock.invocationCallOrder[0]);
+  expect(mocks.startPulse.mock.invocationCallOrder[0])
+    .toBeLessThan(mocks.billingRefUpdate.mock.invocationCallOrder[0]);
+});
+
+test("keeps the intent alive when the transition throws so the webhook retry can still recover", async () => {
+  // Erasing the intent on a transient failure would strand the paused member
+  // this fallback exists for: the retry would find nothing and quietly complete.
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockRejectedValueOnce(new Error("Stripe is unavailable."));
+
+  await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  })).rejects.toThrow("Stripe is unavailable.");
+
+  expect(mocks.billingRefUpdate).not.toHaveBeenCalled();
+});
+
+test("recovers on redelivery after a failed attempt, then consumes the intent once", async () => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockRejectedValueOnce(new Error("Stripe is unavailable."));
+
+  await expect(recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  })).rejects.toThrow();
+
+  // The intent row is untouched, so the next delivery still sees it.
+  const retry = await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  expect(retry).toEqual({ memberId: "hbm_test_1" });
+  expect(mocks.startPulse).toHaveBeenCalledTimes(2);
+  expect(mocks.billingRefUpdate).toHaveBeenCalledTimes(1);
+});
+
+test("treats payment_required as no recovery and leaves the intent for the next attach", async () => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    paymentUrl: "https://billing.example.test/session",
+    status: "payment_required",
+  });
+
+  const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  expect(result).toBeNull();
+  expect(mocks.billingRefUpdate).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["billing_pending"],
+  ["started"],
+] as const)("consumes the intent on a terminal %s result", async (status) => {
+  stubIntent({ action: "start_pulse_now", expiresAt: LIVE_EXPIRY });
+  mocks.startPulse.mockResolvedValueOnce({
+    billingPlanCode: "launch_monthly",
+    status,
+  });
+
+  const result = await recovery.applyStripePulseTrialPaymentMethodAttached({
+    now: NOW,
+    paymentMethod: buildPaymentMethod(),
+    prisma,
+  });
+
+  expect(result).toEqual({ memberId: "hbm_test_1" });
+  expect(mocks.billingRefUpdate).toHaveBeenCalledTimes(1);
 });
 
 test("routes a continue intent to the trial-end path rather than billing now", async () => {
