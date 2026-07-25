@@ -214,7 +214,7 @@ export async function runSmokeHostedDeploy(input: {
     : null;
 
   if (shouldSmokeRunnerContainer) {
-    await assertRunnerContainerSmoke({
+    const convergedAttempt = await assertRunnerContainerSmoke({
       fetchImpl,
       log,
       source,
@@ -234,6 +234,10 @@ export async function runSmokeHostedDeploy(input: {
         fetchImpl,
         log,
         source,
+        // Stay on the container the bundle phase proved current. Live model turn
+        // failures are non-retryable, so restarting the attempt counter here would
+        // send this phase back to a pre-rollout container.
+        pinnedAttempt: convergedAttempt,
         url: buildRunnerContainerSmokeUrl({
           directR2PresignedPut: false,
           liveModelTurn: true,
@@ -267,23 +271,28 @@ export async function runSmokeHostedDeploy(input: {
   log("Cloudflare hosted execution smoke checks passed.");
 }
 
+// Returns the attempt whose container satisfied the assertion, so a later phase can
+// address that same proven container instead of restarting the attempt counter.
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   log: (message: string) => void;
+  pinnedAttempt?: number;
   source: EnvSource;
   url: string;
   versionOverrideHeaders: Record<string, string> | undefined;
-}): Promise<void> {
+}): Promise<number> {
   // Validate retry configuration before touching the filesystem so a bad knob
   // reports itself rather than surfacing as a missing-manifest error.
   const retryPolicy = readRunnerContainerSmokeRetryPolicy(input.source);
   const expectedManifest = await readExpectedRunnerBundleManifest(input.source);
   const retryableFailures = input.expectLiveModelTurnModel === null;
   const startedAtMs = Date.now();
+  const firstAttempt = input.pinnedAttempt ?? 1;
+  const lastAttempt = input.pinnedAttempt ?? retryPolicy.maxAttempts;
 
-  for (let attempt = 1; attempt <= retryPolicy.maxAttempts; attempt += 1) {
+  for (let attempt = firstAttempt; attempt <= lastAttempt; attempt += 1) {
     try {
       assertSmokeRunnerBundleManifest(
         // Each attempt addresses its own smoke Durable Object, so a retry gets a
@@ -298,12 +307,12 @@ async function assertRunnerContainerSmoke(input: {
           retryable: retryableFailures,
         },
       );
-      return;
+      return attempt;
     } catch (error) {
       const elapsedMs = Date.now() - startedAtMs;
       if (
         !retryableFailures ||
-        attempt >= retryPolicy.maxAttempts ||
+        attempt >= lastAttempt ||
         !(error instanceof RunnerContainerSmokeRetryableError)
       ) {
         throw error;
@@ -323,6 +332,8 @@ async function assertRunnerContainerSmoke(input: {
       await sleep(retryPolicy.retryDelayMs);
     }
   }
+
+  throw new Error("runner container smoke exhausted its attempts without a verdict.");
 }
 
 async function readRunnerContainerSmoke(input: {

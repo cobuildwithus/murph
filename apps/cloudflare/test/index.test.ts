@@ -768,6 +768,78 @@ describe("cloudflare worker routes", () => {
     expect(runnerGetByName).not.toHaveBeenCalled();
   });
 
+  it("routes a signed attempt-scoped deploy smoke request to its own container", async () => {
+    const baseEnv = createWorkerEnv();
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=2");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      // Signing over the attempt-bearing search proves the smoke's attempt is
+      // covered by the signature rather than an unauthenticated tack-on.
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(200);
+    expect(smokeGetByName).toHaveBeenCalledWith("__deploy-smoke-version-123-attempt-2");
+  });
+
+  it("rejects a signed deploy smoke request with a malformed attempt before starting a container", async () => {
+    const baseEnv = createWorkerEnv();
+    const smokeGetByName = vi.fn(createRunnerContainerNamespace().getByName);
+    const env = {
+      ...baseEnv,
+      CF_VERSION_METADATA: {
+        id: "version-123",
+        tag: "test",
+        timestamp: "2026-04-24T00:00:00.000Z",
+      },
+      RUNNER_CONTAINER_SMOKE: {
+        getByName: smokeGetByName,
+      },
+    };
+    const url = new URL("https://runner.example.test/internal/deploy/container-smoke?attempt=0");
+    const callbackSigning = readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning;
+    const request = new Request(url, {
+      headers: await createHostedWebCallbackSignatureHeaders({
+        environment: callbackSigning,
+        method: "POST",
+        path: url.pathname,
+        payload: "",
+        search: url.search,
+      }),
+      method: "POST",
+    });
+
+    const response = await worker.fetch(request, env);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "Unsupported deploy container smoke attempt.",
+      ok: false,
+    });
+    expect(smokeGetByName).not.toHaveBeenCalled();
+  });
+
   it("uses the local build deploy smoke Durable Object name before version metadata", () => {
     expect(resolveDeployContainerSmokeObjectName({
       CF_VERSION_METADATA: {

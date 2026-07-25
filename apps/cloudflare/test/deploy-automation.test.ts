@@ -569,6 +569,7 @@ describe("hosted deploy automation helpers", () => {
       "description: Run one real gpt-5.6-terra turn in the deployed container smoke",
       'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "300"',
       'HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "3000"',
+      'HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS: "1200000"',
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: ${{ vars.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID }}",
       "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: ${{ secrets.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK }}",
       "HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}",
@@ -649,6 +650,21 @@ describe("hosted deploy automation helpers", () => {
     ]) {
       expect(workflow).toContain(expectedLine);
     }
+
+    // The smoke's wall-clock budget only makes a stalled rollout attributable if it
+    // expires before the deploy job is cancelled. Guard the relationship, not just
+    // the literal values: a job-timeout reduction is exactly the drift that would
+    // silently restore an unattributed cancelled-job failure.
+    const deployJob = readWorkflowJobBlock(workflow, "deploy");
+    const deployTimeoutMinutes = Number(
+      /^\s*timeout-minutes:\s*(\d+)\s*$/mu.exec(deployJob)?.[1] ?? "",
+    );
+    const smokeMaxWaitMs = Number(
+      /^\s*HOSTED_EXECUTION_SMOKE_RUNNER_MAX_WAIT_MS:\s*"(\d+)"\s*$/mu.exec(deployJob)?.[1] ?? "",
+    );
+    expect(Number.isInteger(deployTimeoutMinutes)).toBe(true);
+    expect(Number.isInteger(smokeMaxWaitMs)).toBe(true);
+    expect(smokeMaxWaitMs).toBeLessThan(deployTimeoutMinutes * 60 * 1000);
 
     expect(readWorkflowJobBlock(workflow, "codex-cache-prefix-gate")).toContain(
       'MURPH_HOSTED_LOCAL_E2E_FAST_GATE: "1"',
