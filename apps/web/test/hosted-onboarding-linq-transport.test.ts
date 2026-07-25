@@ -4,7 +4,7 @@ import { HostedBillingStatus } from "@prisma/client";
 const transportBoundaryMocks = vi.hoisted(() => ({
   acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   readHostedThreadRouteByThreadIdentity: vi.fn(),
-  shareMurphHostedLinqContactCardVcfToChat: vi.fn().mockResolvedValue({
+  shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
     status: "sent",
   }),
 }));
@@ -19,8 +19,8 @@ vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   isHostedLinqContactCardAutoShareEligible: (input: { service: string | null }) =>
     input.service?.trim().toLowerCase() === "imessage",
-  shareMurphHostedLinqContactCardVcfToChat:
-    transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+  shareMurphHostedLinqNativeContactCardToChat:
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", async () => {
@@ -270,7 +270,7 @@ describe("hosted Linq webhook transport", () => {
       message: "invite-reply",
     }));
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).not.toHaveBeenCalled();
   });
 
@@ -288,7 +288,7 @@ describe("hosted Linq webhook transport", () => {
     const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
       shareControl.resolve = () => resolve({ status: "sent" });
     });
-    transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat
       .mockReturnValueOnce(pendingShare);
     const scheduledTasks: Array<() => Promise<void>> = [];
     const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
@@ -322,7 +322,7 @@ describe("hosted Linq webhook transport", () => {
     );
     expect(scheduledTasks).toHaveLength(1);
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).not.toHaveBeenCalled();
 
     const [scheduledTask] = scheduledTasks;
@@ -336,7 +336,7 @@ describe("hosted Linq webhook transport", () => {
 
     await vi.waitFor(() => {
       expect(
-        transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
       ).toHaveBeenCalledTimes(1);
     });
     expect(milestoneSettled).toBe(false);
@@ -348,15 +348,14 @@ describe("hosted Linq webhook transport", () => {
     await expect(milestoneTask).resolves.toBeUndefined();
     expect(milestoneSettled).toBe(true);
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat-1",
-      idempotencyKeyPrefix: "signup-contact-card",
       memberId: "member-1",
       prisma,
     }));
     const [shareInput] =
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat.mock.calls[0] ?? [];
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat.mock.calls[0] ?? [];
     expect(shareInput).not.toHaveProperty("signal");
   });
 
@@ -390,12 +389,12 @@ describe("hosted Linq webhook transport", () => {
 
     await vi.waitFor(() => {
       expect(
-        transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
       ).toHaveBeenCalledTimes(1);
     });
     expect(createHostedLinqChat).toHaveBeenCalledTimes(1);
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat-created",
       memberId: "member-1",
@@ -434,7 +433,7 @@ describe("hosted Linq webhook transport", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).not.toHaveBeenCalled();
   });
 
@@ -473,7 +472,7 @@ describe("hosted Linq webhook transport", () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(
-        transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
       ).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         "Hosted Linq contact-card share skipped inside a transaction.",
@@ -498,7 +497,7 @@ describe("hosted Linq webhook transport", () => {
     const pendingShare = new Promise<never>((_resolve, reject) => {
       shareControl.reject = reject;
     });
-    transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat.mockReturnValueOnce(
+    transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat.mockReturnValueOnce(
       pendingShare,
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -525,7 +524,7 @@ describe("hosted Linq webhook transport", () => {
       expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
       await vi.waitFor(() => {
         expect(
-          transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+          transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
         ).toHaveBeenCalledTimes(1);
       });
       const rejectShare = shareControl.reject;
@@ -537,11 +536,11 @@ describe("hosted Linq webhook transport", () => {
       await vi.waitFor(() => {
         expect(warn).toHaveBeenCalledWith(
           "Hosted Linq contact-card share failed.",
-          expect.objectContaining({ operation: "share_contact_card_vcf" }),
+          expect.objectContaining({ operation: "share_contact_card" }),
         );
       });
       expect(
-        transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+        transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
       ).toHaveBeenCalledTimes(1);
       expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     } finally {
@@ -993,7 +992,7 @@ describe("hosted Linq webhook transport", () => {
     });
     expect(claimHostedLinqQuotaReplyNotice).not.toHaveBeenCalled();
     expect(
-      transportBoundaryMocks.shareMurphHostedLinqContactCardVcfToChat,
+      transportBoundaryMocks.shareMurphHostedLinqNativeContactCardToChat,
     ).not.toHaveBeenCalled();
   });
 

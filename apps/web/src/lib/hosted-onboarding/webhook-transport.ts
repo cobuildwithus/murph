@@ -42,8 +42,8 @@ import {
 } from "./linq-client";
 import {
   isHostedLinqContactCardAutoShareEligible,
-  type MurphHostedLinqContactCardVcfShareOutcome,
-  shareMurphHostedLinqContactCardVcfToChat,
+  type MurphHostedLinqNativeContactCardShareOutcome,
+  shareMurphHostedLinqNativeContactCardToChat,
 } from "./linq-contact-card-share";
 import {
   assertHostedThreadRouteEgressAuthority,
@@ -634,15 +634,15 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
 
 /**
  * After the delivery lifecycle confirms an invite-signup reply reached the
- * handset, share Murph's first-party `.vcf` into that thread so text-first
- * members can save the contact without visiting the web app. Direct, group,
- * and fallback-created threads are eligible; the share module owns the
- * iMessage-only gate and the per-chat throttle reservation. Best effort:
- * a share failure never fails or delays the reply delivery, and the request
- * signal is deliberately not forwarded because the share may run after the
- * response completes. With a post-response scheduler this returns after
- * registering the task; otherwise the returned promise settles after the
- * provider attachment attempt reaches its terminal best-effort outcome.
+ * handset, share the sending line's native provider contact card into that
+ * thread so text-first members can save the contact without visiting the web
+ * app. Direct, group, and fallback-created threads are eligible; the share
+ * module owns the iMessage-only gate and the per-chat throttle reservation.
+ * Best effort: a share failure never fails or delays the reply delivery, and
+ * the request signal is deliberately not forwarded because the share may run
+ * after the response completes. With a post-response scheduler this returns
+ * after registering the task; otherwise the returned promise settles after
+ * the native provider attempt reaches its terminal best-effort outcome.
  */
 export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input: {
   chatId: string | null;
@@ -669,9 +669,8 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
   const prisma = input.prisma;
   const task = async () => {
     try {
-      const outcome = await shareMurphHostedLinqContactCardVcfToChat({
+      const outcome = await shareMurphHostedLinqNativeContactCardToChat({
         chatId,
-        idempotencyKeyPrefix: "signup-contact-card",
         memberId,
         prisma,
       });
@@ -703,7 +702,7 @@ export function queueHostedLinqContactCardShareAfterDeliveredInviteSignup(input:
 function buildHostedLinqContactCardShareLogDetails(
   chatId: string,
   outcome: Extract<
-    MurphHostedLinqContactCardVcfShareOutcome,
+    MurphHostedLinqNativeContactCardShareOutcome,
     { status: "failed" | "skipped" }
   >,
 ): Record<string, boolean | number | string | null> {
@@ -716,7 +715,7 @@ function buildHostedLinqContactCardShareLogDetails(
     chatIdSuffix: toHostedOnboardingLogIdSuffix(chatId),
     errorCode: typeof errorRecord?.code === "string" ? errorRecord.code : null,
     errorName: error instanceof Error ? error.name : null,
-    operation: "share_contact_card_vcf",
+    operation: "share_contact_card",
     provider: "linq",
     reason: outcome.reason,
     status: outcome.status,

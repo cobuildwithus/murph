@@ -5,6 +5,7 @@ import {
   getHostedLinqChatHandles,
   isHostedLinqAttachmentSendPrepareFailure,
   sendHostedLinqAttachmentMessage,
+  shareHostedLinqContactCard,
 } from "./linq-client";
 import {
   buildMurphHostedLinqContactCardVcf,
@@ -61,7 +62,7 @@ type HostedLinqContactCardShareFindManyInput = {
 
 // Sized to the runtime turn-retry horizon, not a user-visible cooldown. The
 // hosted turn retries up to 6 times and this send is not journaled, so a
-// duplicate `share_contact_card` firing (a retried/replayed turn, or a
+// duplicate contact-card share firing (a retried/replayed turn, or a
 // coalesced wake burst) must collapse to one card. A genuine human re-request
 // arrives minutes later, after the card is already in the chat, so 90s is
 // imperceptible to it while still covering the retry backoff.
@@ -87,8 +88,8 @@ type HostedLinqContactCardShareReserveDecision =
 /**
  * Shared per-chat share throttle. Callers own their eligibility/authority
  * checks; this only dedupes duplicate attempts within one turn/wake (one per
- * chat per 90 seconds). Every share is an intentional assistant decision, so
- * a requested re-share outside that window must go through.
+ * chat per 90 seconds). A requested re-share outside that window must go
+ * through.
  */
 export async function reserveHostedLinqContactCardShareAttempt(input: {
   chatId: string;
@@ -258,10 +259,9 @@ function isPrismaUniqueViolation(
 }
 
 /**
- * Automatic shares stay iMessage-only: the `.vcf` renders there as a native
- * tappable contact bubble, while SMS/MMS delivery of a vCard attachment is
- * unproven for pooled lines. Group and direct threads are both eligible; the
- * per-chat reservation in this module is the volume guard.
+ * Automatic first-contact shares stay iMessage-only. Group and direct threads
+ * are both eligible; the per-chat reservation in this module is the volume
+ * guard.
  */
 export function isHostedLinqContactCardAutoShareEligible(eligibility: {
   service: string | null;
@@ -278,12 +278,54 @@ export type MurphHostedLinqContactCardVcfShareOutcome =
     }
   | { status: "failed"; reason: "send_failed"; error: unknown };
 
+export type MurphHostedLinqNativeContactCardShareOutcome =
+  | { status: "already_shared" }
+  | { status: "sent" }
+  | { status: "skipped"; reason: "missing_chat_id" }
+  | { status: "failed"; reason: "send_failed"; error: unknown };
+
+/**
+ * Share the sending line's provider contact card into a Linq chat. Callers own
+ * eligibility and thread authority; this owns the shared per-chat reservation
+ * and the single native provider POST. Any provider failure is ambiguous, so
+ * the reservation stays in place to avoid a blind duplicate.
+ */
+export async function shareMurphHostedLinqNativeContactCardToChat(input: {
+  chatId: string;
+  memberId: string;
+  now?: Date;
+  prisma: HostedLinqContactCardSharePersistenceClient;
+  signal?: AbortSignal;
+}): Promise<MurphHostedLinqNativeContactCardShareOutcome> {
+  const reservation = await reserveHostedLinqContactCardShareAttempt({
+    chatId: input.chatId,
+    memberId: input.memberId,
+    ...(input.now ? { now: input.now } : {}),
+    prisma: input.prisma,
+  });
+  if (reservation.action !== "share") {
+    return reservation.reason === "recent_attempt"
+      ? { status: "already_shared" }
+      : { status: "skipped", reason: reservation.reason };
+  }
+
+  try {
+    await shareHostedLinqContactCard({
+      chatId: input.chatId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+  } catch (error) {
+    return { status: "failed", reason: "send_failed", error };
+  }
+
+  return { status: "sent" };
+}
+
 /**
  * Share Murph's first-party vCard into a Linq chat as an attachment. This is
- * the only provider-side contact-card share mechanism: it never calls Linq's
- * native contact-card share, so a member-chosen avatar photo can not be
- * overwritten. Callers own eligibility and thread authority; this owns line
- * resolution, the per-chat throttle reservation, the build and send, and
+ * the discretionary group-tool mechanism and never calls Linq's native
+ * contact-card share. Callers own eligibility and thread authority; this owns
+ * line resolution, the per-chat throttle reservation, the build and send, and
  * releasing the reservation when a failure provably never reached the chat.
  * Send failures are returned, not thrown.
  */

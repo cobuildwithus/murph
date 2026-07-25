@@ -133,7 +133,7 @@ const mocks = vi.hoisted(() => {
     sendHostedLinqChatMessage: vi.fn(),
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
-    shareMurphHostedLinqContactCardVcfToChat: vi.fn().mockResolvedValue({
+    shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
     }),
     signalHostedMailboxAppendRuntime: vi.fn(async () => ({
@@ -246,8 +246,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", async () => {
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
   isHostedLinqContactCardAutoShareEligible: (input: { service: string | null }) =>
     input.service?.trim().toLowerCase() === "imessage",
-  shareMurphHostedLinqContactCardVcfToChat:
-    mocks.shareMurphHostedLinqContactCardVcfToChat,
+  shareMurphHostedLinqNativeContactCardToChat:
+    mocks.shareMurphHostedLinqNativeContactCardToChat,
 }));
 
 vi.mock("@/src/lib/hosted-runner/control", () => ({
@@ -619,7 +619,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       ok: true,
       status: 204,
     });
-    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+    mocks.shareMurphHostedLinqNativeContactCardToChat.mockResolvedValue({
       status: "sent",
     });
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue({
@@ -673,7 +673,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       const pendingShare = new Promise<{ status: "sent" }>((resolve) => {
         shareControl.resolve = () => resolve({ status: "sent" });
       });
-      mocks.shareMurphHostedLinqContactCardVcfToChat.mockReturnValueOnce(pendingShare);
+      mocks.shareMurphHostedLinqNativeContactCardToChat.mockReturnValueOnce(pendingShare);
       const scheduledTasks: Array<() => Promise<void>> = [];
       const scheduleAfterResponse = vi.fn((task: () => Promise<void>) => {
         scheduledTasks.push(task);
@@ -709,7 +709,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "duplicate-linq-provider-event",
       });
 
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
       expect(scheduledTasks).toHaveLength(1);
       const [scheduledTask] = scheduledTasks;
       if (!scheduledTask) {
@@ -721,7 +721,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
 
       await vi.waitFor(() => {
-        expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+        expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledTimes(1);
       });
       expect(scheduledTaskSettled).toBe(false);
       const resolveShare = shareControl.resolve;
@@ -732,10 +732,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       await expect(scheduledTaskPromise).resolves.toBeUndefined();
       expect(scheduledTaskSettled).toBe(true);
 
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith({
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledTimes(1);
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledWith({
         chatId,
-        idempotencyKeyPrefix: "signup-contact-card",
         memberId: "member_123",
         prisma,
       });
@@ -789,8 +788,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       throw new Error("Expected a delivered-fallback contact-card task.");
     }
     await scheduledTask();
-    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
-    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledTimes(1);
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_fallback",
         memberId: "member_123",
@@ -901,7 +900,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       for (const scheduledTask of scheduledTasks) {
         await scheduledTask();
       }
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
     },
   );
 
@@ -930,11 +929,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(scheduleAfterResponse).not.toHaveBeenCalled();
-    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
   });
 
   it("keeps delivered signup receipt handling successful when the card share fails", async () => {
-    mocks.shareMurphHostedLinqContactCardVcfToChat.mockRejectedValueOnce(
+    mocks.shareMurphHostedLinqNativeContactCardToChat.mockRejectedValueOnce(
       new Error("share failed"),
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -965,19 +964,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         reason: "recorded-linq-provider-event:message.delivered",
       });
 
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).not.toHaveBeenCalled();
       expect(scheduledTasks).toHaveLength(1);
       const [scheduledTask] = scheduledTasks;
       if (!scheduledTask) {
         throw new Error("Expected a delivered-signup contact-card task.");
       }
       await expect(scheduledTask()).resolves.toBeUndefined();
-      expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledTimes(1);
+      expect(mocks.shareMurphHostedLinqNativeContactCardToChat).toHaveBeenCalledTimes(1);
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
       expect(scheduleAfterResponse).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
         "Hosted Linq contact-card share failed.",
-        expect.objectContaining({ operation: "share_contact_card_vcf" }),
+        expect.objectContaining({ operation: "share_contact_card" }),
       );
     } finally {
       warn.mockRestore();
