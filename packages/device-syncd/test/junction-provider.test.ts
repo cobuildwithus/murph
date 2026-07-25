@@ -5754,7 +5754,10 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
 
   const result = await executeJunctionJob(
     provider,
-    createJunctionJobContext({ account: createAccount(), now: "2026-07-20T00:00:00.000Z" }),
+    createJunctionJobContext({
+      account: createAccount({ sources: stalledAccount.sources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
     createJob("push_source_recovery", recoveryJob.payload ?? {}),
   );
 
@@ -5806,6 +5809,17 @@ test("a stalled Garmin source automatically triggers a bounded historical pull",
 });
 
 test("a failed recovery trigger still burns its attempt instead of retrying forever", async () => {
+  const staleGarminSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
   let triggerCalls = 0;
   const provider = createJunctionProvider(async () => {
     triggerCalls += 1;
@@ -5818,7 +5832,10 @@ test("a failed recovery trigger still burns its attempt instead of retrying fore
 
   const result = await executeJunctionJob(
     provider,
-    createJunctionJobContext({ account: createAccount(), now: "2026-07-20T00:00:00.000Z" }),
+    createJunctionJobContext({
+      account: createAccount({ sources: staleGarminSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
     createJob("push_source_recovery", {
       silentSinceAt: "2026-07-18T00:00:00.000Z",
       sourceProviderSlug: "garmin",
@@ -5865,6 +5882,98 @@ test("a failed recovery trigger still burns its attempt instead of retrying fore
   assert.ok(
     executor.createScheduledJobs?.(afterFailure, "2026-07-20T06:00:00.000Z")
       ?.jobs.find((job) => job.kind === "push_source_recovery"),
+  );
+});
+
+test("a recovery job whose episode already ended makes no provider call", async () => {
+  let triggerCalls = 0;
+  const provider = createJunctionProvider(async () => {
+    triggerCalls += 1;
+    return createJsonResponse({ success: true }, 202);
+  });
+  const recoveredSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    // A webhook landed between scheduling and execution.
+    lastDataAt: "2026-07-20T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: recoveredSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  // Triggering for an ended episode is an avoidable provider mutation, and
+  // recording it would let the scheduler immediately fire again for the newer
+  // episode.
+  assert.equal(triggerCalls, 0);
+  assert.deepEqual(result, {});
+});
+
+test("a gated recovery trigger terminalizes the episode end to end", async () => {
+  const provider = createJunctionProvider(async () =>
+    createJsonResponse({ detail: "not enabled" }, 403)
+  );
+  const executor = requireValue(
+    provider.jobExecutor,
+    "Junction provider should expose a job executor.",
+  );
+  const staleSources = [{
+    displayName: "Garmin",
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-07-18T00:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-07-20T00:00:00.000Z",
+    resourceCount: 20,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  }];
+
+  const result = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({ sources: staleSources }),
+      now: "2026-07-20T00:00:00.000Z",
+    }),
+    createJob("push_source_recovery", {
+      silentSinceAt: "2026-07-18T00:00:00.000Z",
+      sourceProviderSlug: "garmin",
+    }),
+  );
+
+  assert.deepEqual(result.metadataPatch, {
+    junctionPushSourceRecoveryAttempts: 1,
+    junctionPushSourceRecoveryLastAttemptAt: "2026-07-20T00:00:00.000Z",
+    junctionPushSourceRecoveryLastFailureCode: null,
+    junctionPushSourceRecoverySilentSinceAt: "2026-07-18T00:00:00.000Z",
+    junctionPushSourceRecoverySourceProviderSlug: "garmin",
+    junctionPushSourceRecoveryStatus: "unavailable",
+  });
+
+  // Nothing local can enable a gated endpoint, so the ladder must stop here
+  // rather than keep issuing gated provider requests.
+  const gatedAccount = createStoredAccount({
+    metadata: result.metadataPatch as Record<string, unknown>,
+    sources: staleSources,
+  });
+  assert.equal(
+    executor.createScheduledJobs?.(gatedAccount, "2026-07-30T00:00:00.000Z")
+      ?.jobs.find((job) => job.kind === "push_source_recovery"),
+    undefined,
   );
 });
 

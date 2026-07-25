@@ -702,6 +702,28 @@ export function createJunctionDeviceSyncProvider(
       return {};
     }
 
+    // Scheduling and execution are separate phases. Between them a webhook can
+    // land, the source can disconnect, or a newer stall episode can replace this
+    // one. Triggering anyway would be an avoidable provider mutation against an
+    // episode that already ended, and would let the scheduler immediately fire
+    // again for the newer episode, so an obsolete job completes untouched.
+    const stillStale = evaluatePushPrimarySourceStaleness({
+      now: context.now,
+      sources: (context.account.sources ?? []).map((source) => ({
+        firstSeenAt: source.firstSeenAt,
+        lastDataAt: source.lastDataAt,
+        sourceProviderSlug: source.sourceProviderSlug,
+        status: source.status,
+      })),
+    }).some((entry) =>
+      entry.sourceProviderSlug === sourceProviderSlug
+      && entry.silentSinceAt === silentSinceAt
+    );
+
+    if (!stillStale) {
+      return {};
+    }
+
     const state = readJunctionPushSourceRecoveryState(context.account.metadata);
     const isRecordedEpisode = state.silentSinceAt === silentSinceAt
       && state.sourceProviderSlug === sourceProviderSlug;
