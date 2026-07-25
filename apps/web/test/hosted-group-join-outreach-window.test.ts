@@ -31,6 +31,9 @@ const CALLING_CODE_UTC_OFFSETS: Record<string, readonly number[]> = {
   "+91": [5.5],
 };
 
+// Measured by the coverage test below, then pinned so drift is deliberate.
+const HOSTED_GROUP_JOIN_OUTREACH_SUPPORTED_PICKER_ROWS = 41;
+
 describe("hosted group join outreach recipient window", () => {
   it("never permits a send inside recipient quiet hours for any supported code", () => {
     const violations: string[] = [];
@@ -83,6 +86,52 @@ describe("hosted group join outreach recipient window", () => {
       now: new Date("2026-07-24T12:00:00.000Z"),
       participantPhoneNumber: "+445550123456",
     })).toEqual({ kind: "send_now" });
+  });
+
+  it("reaches a decided outcome for every country the phone picker advertises", () => {
+    // The picker is the product's admitted region contract, so every row must
+    // resolve to a decided outcome and none may loop. This also reports how much
+    // of that contract the window table actually covers, which is the number the
+    // eligibility promise has to match.
+    const undecided: string[] = [];
+    const supported = new Set<string>();
+    const refused = new Set<string>();
+
+    for (const option of HOSTED_PHONE_COUNTRY_OPTIONS) {
+      const nationalDigits = option.placeholder.replace(/\D+/gu, "").replace(/^0+/u, "");
+      const phoneNumber = `${option.dialCode}${nationalDigits}`;
+      const decisions = [0, 5, 10, 15, 20].map((hourUtc) =>
+        decideHostedGroupJoinOutreachSendWindow({
+          now: new Date(Date.UTC(2026, 6, 24, hourUtc)),
+          participantPhoneNumber: phoneNumber,
+        }),
+      );
+
+      if (decisions.every((decision) => decision.kind === "unsupported_region")) {
+        refused.add(option.code);
+        continue;
+      }
+      if (decisions.some((decision) => decision.kind === "unsupported_region")) {
+        undecided.push(`${option.code} mixes support and refusal`);
+        continue;
+      }
+      supported.add(option.code);
+      for (const decision of decisions) {
+        if (decision.kind !== "defer") {
+          continue;
+        }
+        const waitMs = decision.nextAttemptAt.getTime() - Date.UTC(2026, 6, 24);
+        if (!(waitMs > 0 && waitMs <= 48 * 60 * 60_000)) {
+          undecided.push(`${option.code} deferred outside a bounded window`);
+        }
+      }
+    }
+
+    expect(undecided).toEqual([]);
+    // Pin the split so a change to either the table or the picker has to be a
+    // deliberate decision about the eligibility promise, not a silent drift.
+    expect(supported.size + refused.size).toBe(HOSTED_PHONE_COUNTRY_OPTIONS.length);
+    expect(supported.size).toBe(HOSTED_GROUP_JOIN_OUTREACH_SUPPORTED_PICKER_ROWS);
   });
 
   it("terminalizes an unsupported region instead of retrying identical inputs", () => {

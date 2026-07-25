@@ -23,6 +23,19 @@ export type HostedGroupJoinOutreachSendWindowDecision =
  * so a deferral would re-evaluate identical inputs forever and never send or
  * resolve. Widening the supported set is a data change to the table below.
  */
+/**
+ * Whether a safe send window exists for this number at all.
+ *
+ * The reaction path checks this before accepting work, so a region the table
+ * cannot serve is refused at the entry point instead of becoming a durable row
+ * that can never send. The drain still re-checks as defence in depth.
+ */
+export function isHostedGroupJoinOutreachSupportedRegion(
+  participantPhoneNumber: string,
+): boolean {
+  return resolveHostedGroupJoinOutreachUtcWindow(participantPhoneNumber) !== null;
+}
+
 export function decideHostedGroupJoinOutreachSendWindow(input: {
   now: Date;
   participantPhoneNumber: string;

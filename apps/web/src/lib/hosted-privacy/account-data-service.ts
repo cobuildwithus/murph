@@ -263,13 +263,13 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     slug: "prisma.hosted_group_join_outreach",
     label: "Pre-member group-join outreach intent",
     deletion: "live-delete",
-    note: "Deletes outreach rows matching the member's phone blind index, including the encrypted participant phone, group and offer association, selected sending line, and replying chat identity. Rows are resolved by phone because the participant may never have become a member. Group deletion removes them by cascade. Export omits them: they are pre-member delivery state, not member-authored content.",
+    note: "Deletes outreach rows this account can reach: those matching the member's phone blind index, and those belonging to groups the account owns or runs. Rows are resolved by phone because the participant may never have become a member. Covers the encrypted participant phone, group and offer association, selected sending line, and replying chat identity. The Prisma group cascade remains a safety net only; deletion runs first so the provider correlation, which is reachable solely through the outreach id, is never orphaned. Export omits these rows: they are pre-member delivery state, not member-authored content.",
   },
   {
     slug: "prisma.hosted_group_join_outreach_delivery",
     label: "Group-join outreach provider correlation",
     deletion: "live-delete",
-    note: "Deletes the hosted_group_join_outreach Linq delivery rows correlated to those outreach ids, so provider attempt and receipt history does not outlive the account.",
+    note: "Deletes the hosted_group_join_outreach Linq delivery rows correlated to those outreach ids, so provider attempt and receipt history does not outlive the account. These rows carry no participant or group key of their own, so they must be deleted while their outreach row still supplies the sourceRef.",
   },
   {
     slug: "prisma.hosted_linq_daily_state",
@@ -1058,6 +1058,12 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
   prisma: Prisma.TransactionClient,
   memberIdFilter: string | { in: string[] },
 ): Promise<{ deliveryCount: number; outreachCount: number }> {
+  // The outreach row and its provider correlation are one privacy record, and
+  // `sourceRef` is the only link between them. Deleting the outreach row first,
+  // or letting the group cascade remove it, would leave the correlation
+  // undiscoverable forever. So this resolves every outreach this account can
+  // reach -- as the texted participant, and as the owner of groups that are
+  // about to be deleted -- then removes correlations before rows.
   const identities = await prisma.hostedMemberIdentity.findMany({
     where: { memberId: memberIdFilter },
     select: { phoneLookupKey: true },
@@ -1067,25 +1073,45 @@ async function deleteHostedGroupJoinOutreachRowsForMembers(
       .map((identity) => identity.phoneLookupKey)
       .filter((lookupKey): lookupKey is string => Boolean(lookupKey)),
   );
-  if (phoneLookupKeys.length === 0) {
+  const ownedGroups = await prisma.hostedGroup.findMany({
+    where: {
+      OR: [
+        { ownerMemberId: memberIdFilter },
+        { runtimeMemberId: memberIdFilter },
+      ],
+    },
+    select: { id: true },
+  });
+  const ownedGroupIds = ownedGroups.map((group) => group.id);
+  if (phoneLookupKeys.length === 0 && ownedGroupIds.length === 0) {
     return { deliveryCount: 0, outreachCount: 0 };
   }
 
+  const reachable: Prisma.HostedGroupJoinOutreachWhereInput = {
+    OR: [
+      ...(phoneLookupKeys.length > 0
+        ? [{ participantPhoneLookupKey: { in: phoneLookupKeys } }]
+        : []),
+      ...(ownedGroupIds.length > 0 ? [{ groupId: { in: ownedGroupIds } }] : []),
+    ],
+  };
   const outreaches = await prisma.hostedGroupJoinOutreach.findMany({
-    where: { participantPhoneLookupKey: { in: phoneLookupKeys } },
+    where: reachable,
     select: { id: true },
   });
   const outreachIds = outreaches.map((outreach) => outreach.id);
-  const deliveries = outreachIds.length > 0
-    ? await prisma.hostedLinqDelivery.deleteMany({
-        where: {
-          source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
-          sourceRef: { in: outreachIds },
-        },
-      })
-    : { count: 0 };
+  if (outreachIds.length === 0) {
+    return { deliveryCount: 0, outreachCount: 0 };
+  }
+
+  const deliveries = await prisma.hostedLinqDelivery.deleteMany({
+    where: {
+      source: HOSTED_GROUP_JOIN_OUTREACH_DELIVERY_SOURCE,
+      sourceRef: { in: outreachIds },
+    },
+  });
   const removed = await prisma.hostedGroupJoinOutreach.deleteMany({
-    where: { participantPhoneLookupKey: { in: phoneLookupKeys } },
+    where: { id: { in: outreachIds } },
   });
 
   return { deliveryCount: deliveries.count, outreachCount: removed.count };
@@ -1358,10 +1384,11 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.hosted_linq_invite_delivery", await input.prisma.hostedLinqDelivery.deleteMany({
     where: buildHostedLinqInviteSignupDeliveryWhere(input.memberIds),
   }));
-  // Pre-member group-join outreach is keyed by the participant's phone, not by a
-  // member id, so it has to be resolved from the identity rows before they are
-  // deleted below. Without this the encrypted phone and its group association
-  // would outlive the account that the Settings copy promises to erase.
+  // Pre-member group-join outreach is keyed by the participant's phone and by
+  // the group, not by a member id, so it is resolved before the identity rows
+  // and the owned groups are deleted below. Running after either one would strand
+  // the encrypted phone, its group association, or the provider correlation that
+  // only the outreach id can find.
   const groupJoinOutreachDeletion =
     await deleteHostedGroupJoinOutreachRowsForMembers(
       input.prisma,

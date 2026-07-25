@@ -21,6 +21,7 @@ import {
   revokeHostedGroupJoinOutreachForRemovedReactionTx,
 } from "./group-join-outreach-store";
 import { readHostedGroupJoinOfferTargetTx } from "./group-store";
+import { isHostedGroupJoinOutreachSupportedRegion } from "./group-join-outreach-window";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 
@@ -29,6 +30,7 @@ type HostedGroupJoinOfferReactionSkipReason =
   | "member_inactive"
   | "missing_reaction_context"
   | "non_phone_handle"
+  | "recipient_region_unsupported"
   | "reaction_removed"
   | "unsupported_reaction";
 
@@ -143,6 +145,14 @@ export async function handleHostedGroupJoinOfferReaction(input: {
     );
     if (!participantPhoneNumber) {
       return skipHostedGroupJoinOfferReaction({ reason: "non_phone_handle" });
+    }
+    // Refuse here rather than enqueue work the drain can only terminalize: a
+    // region with no derivable safe window will never be sendable, so recording
+    // pending intent would promise a text that cannot arrive.
+    if (!isHostedGroupJoinOutreachSupportedRegion(participantPhoneNumber)) {
+      return skipHostedGroupJoinOfferReaction({
+        reason: "recipient_region_unsupported",
+      });
     }
 
     try {

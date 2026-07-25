@@ -433,6 +433,45 @@ describe("deleteHostedAccountData", () => {
     });
   });
 
+  it("deletes an owned group's outreach correlation before the group cascade hides it", async () => {
+    // The delivery correlation is reachable only through the outreach id. If the
+    // group cascade removed the outreach row first, the correlation would survive
+    // both the group's deletion and the participant's later account deletion.
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      groupJoinOutreachOwnedGroupIds: ["hgrp_owned"],
+      groupJoinOutreachRows: [{ id: "hgrpjoa_owned" }],
+      onTransaction: () => undefined,
+    });
+
+    await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedLinqDelivery",
+        where: {
+          source: "hosted_group_join_outreach",
+          sourceRef: { in: ["hgrpjoa_owned"] },
+        },
+      },
+      {
+        model: "hostedGroupJoinOutreach",
+        where: { id: { in: ["hgrpjoa_owned"] } },
+      },
+    ]));
+
+    const models = deleteCalls.map((call) => call.model);
+    expect(models.indexOf("hostedLinqDelivery"))
+      .toBeLessThan(models.indexOf("hostedGroupJoinOutreach"));
+    expect(models.indexOf("hostedGroupJoinOutreach"))
+      .toBeLessThan(models.indexOf("hostedGroup"));
+  });
+
   it("deletes pre-member group-join outreach and its provider correlation", async () => {
     // The account is keyed by member id but this outreach is keyed by the
     // participant's phone blind index, so the deletion promise is only true if it
@@ -454,9 +493,7 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls).toEqual(expect.arrayContaining([
       {
         model: "hostedGroupJoinOutreach",
-        where: {
-          participantPhoneLookupKey: { in: ["hbidx:phone:v1:participant"] },
-        },
+        where: { id: { in: ["hgrpjoa_opaque"] } },
       },
       {
         model: "hostedLinqDelivery",
@@ -2034,6 +2071,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
   familyGroups?: Array<{ id: string }>;
   ownedThreadContainerMemberIds?: string[];
   identityRecord?: Record<string, unknown> | null;
+  groupJoinOutreachOwnedGroupIds?: readonly string[];
   groupJoinOutreachPhoneLookupKeys?: readonly string[];
   groupJoinOutreachRows?: readonly { id: string }[];
   onTransaction: () => void;
@@ -2061,9 +2099,11 @@ function createHostedAccountDeletionPrismaForTest(input: {
         ? (input.groupJoinOutreachPhoneLookupKeys ?? []).map((phoneLookupKey) => ({
             phoneLookupKey,
           }))
-        : model === "hostedGroupJoinOutreach"
-          ? input.groupJoinOutreachRows ?? []
-          : []
+        : model === "hostedGroup"
+          ? (input.groupJoinOutreachOwnedGroupIds ?? []).map((id) => ({ id }))
+          : model === "hostedGroupJoinOutreach"
+            ? input.groupJoinOutreachRows ?? []
+            : []
     ),
   });
   const transactionPrisma = new Proxy<HostedAccountDeletionPrismaTransactionFake>({
@@ -2152,6 +2192,11 @@ function createHostedAccountDeletionPrismaForTest(input: {
     },
     hostedGroupJoinOutreach: {
       findMany: async () => input.groupJoinOutreachRows ?? [],
+    },
+    hostedGroup: {
+      findMany: async () => input.groupJoinOutreachOwnedGroupIds
+        ? input.groupJoinOutreachOwnedGroupIds.map((id) => ({ id }))
+        : [],
     },
     hostedConnectedAppsSession: {
       findUnique: async () => input.connectedAppsSession
