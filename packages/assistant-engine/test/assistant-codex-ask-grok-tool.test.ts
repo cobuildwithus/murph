@@ -26,10 +26,10 @@ function createRuntime(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch) {
   return createAskGrokToolRuntimeFromEnv({ env, fetchImpl })
 }
 
-function answerPayload(text: string): Response {
+function answerPayload(text: string, status = 'completed'): Response {
   return new Response(
     JSON.stringify({
-      status: 'completed',
+      status,
       output: [
         { id: 'call_1', name: 'x_keyword_search', status: 'completed', type: 'custom_tool_call' },
         {
@@ -115,7 +115,7 @@ describe('executeAskGrokTool', () => {
       const body = JSON.parse(String(init?.body))
       expect(body).toMatchObject({
         model: 'grok-4.5',
-        max_output_tokens: 1500,
+        max_output_tokens: 2500,
         store: false,
         tools: [{ type: 'x_search' }],
       })
@@ -157,7 +157,7 @@ describe('executeAskGrokTool', () => {
 
   it('bounds a long answer so one call cannot flood thread context', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
-      answerPayload('x'.repeat(9000)),
+      answerPayload('x'.repeat(20000)),
     )
 
     const result = await executeAskGrokTool({
@@ -166,7 +166,51 @@ describe('executeAskGrokTool', () => {
     })
 
     expect(result.rpcSuccess).toBe(true)
-    expect(result.rpcText.length).toBeLessThan(4300)
+    expect(result.rpcText).not.toContain('x'.repeat(8001))
+    expect(result.rpcText.length).toBeLessThan(8600)
+  })
+
+  it('says the answer was cut off when the length bound drops text', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload('x'.repeat(20000)),
+    )
+
+    const result = await executeAskGrokTool({
+      args: { question: 'anything' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcText).toContain('was cut off before Grok finished it')
+    expect(result.rpcText).toContain('anything it lists is partial')
+  })
+
+  it('says the answer was cut off when the provider stopped early', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload('They posted about', 'incomplete'),
+    )
+
+    const result = await executeAskGrokTool({
+      args: { question: 'anything' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).toContain('They posted about')
+    expect(result.rpcText).toContain('was cut off before Grok finished it')
+  })
+
+  it('adds no cut-off notice to an answer that finished within the bound', async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerPayload('x'.repeat(7999)),
+    )
+
+    const result = await executeAskGrokTool({
+      args: { question: 'anything' },
+      runtime: createRuntime({ XAI_API_KEY: 'xai-sentinel-key' }, fetchImpl),
+    })
+
+    expect(result.rpcSuccess).toBe(true)
+    expect(result.rpcText).not.toContain('cut off')
   })
 
   it('reports every failure explicitly and never as success', async () => {
