@@ -1052,7 +1052,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
-        proration_behavior: "none",
       },
       {
         idempotencyKey: expect.stringMatching(
@@ -1415,7 +1414,6 @@ describe("startHostedPulseTrialPaidPlan", () => {
       {
         expand: ["items.data.price", "latest_invoice", "latest_invoice.payment_intent"],
         metadata: { murphTrialExtensionTargetTrialEnd: "" },
-        proration_behavior: "none",
       },
       {
         idempotencyKey: expect.stringMatching(

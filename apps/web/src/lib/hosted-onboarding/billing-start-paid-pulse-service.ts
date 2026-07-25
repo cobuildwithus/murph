@@ -954,15 +954,22 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription(input: {
       run: async () => {
         const cleanedSubscription = await callHostedStripeStartPaidPulseOperation(
           "subscription.update.paused-pre-resume-cleanup",
+          // Stripe rejects `proration_behavior` outright while a subscription is
+          // paused ("Resume the subscription first"), so it may only ride along
+          // with the item deletes it exists for. Without those, this degenerates
+          // to the metadata-only shape the trial-extension path already relies on
+          // against a paused subscription.
           () => input.stripe.subscriptions.update(input.stripeSubscriptionId, {
             expand: [...START_PAID_PULSE_STRIPE_UPDATE_EXPANSIONS],
             ...(input.legacyMeteredItems.length > 0
-              ? { items: input.legacyMeteredItems }
+              ? {
+                items: input.legacyMeteredItems,
+                proration_behavior: "none" as const,
+              }
               : {}),
             metadata: {
               [PULSE_TRIAL_EXTENSION_TARGET_METADATA_KEY]: "",
             },
-            proration_behavior: "none",
           }, {
             idempotencyKey:
               buildHostedPulseTrialStartPaidCleanupIdempotencyKey(),
